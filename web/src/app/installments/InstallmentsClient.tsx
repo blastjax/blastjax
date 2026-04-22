@@ -371,7 +371,7 @@ export default function InstallmentsClient() {
   }, [rows]);
 
   return (
-    <div className="relative mx-auto flex max-w-4xl flex-col gap-8 px-4 pb-28 py-8 sm:px-6">
+    <div className="relative mx-auto flex w-full min-w-0 max-w-6xl flex-col gap-8 px-4 pb-28 py-8 sm:px-6">
       <header className="border-b border-zinc-200 pb-6 dark:border-zinc-800">
         <h1 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
           Installments
@@ -525,7 +525,7 @@ export default function InstallmentsClient() {
         <h2 className="text-lg font-medium text-zinc-900 dark:text-zinc-50">
           Plans
         </h2>
-        <ul className="mt-4 flex flex-col gap-4">
+        <ul className="mt-4 grid grid-cols-3 gap-2 sm:gap-4">
           {!loading &&
             rows.map((r) => {
               const canPay =
@@ -547,18 +547,18 @@ export default function InstallmentsClient() {
                       void openDetail(r.id);
                     }
                   }}
-                  className={`rounded-xl border p-4 shadow-sm transition hover:ring-2 hover:ring-indigo-300/60 dark:hover:ring-indigo-700/50 ${
+                  className={`min-w-0 rounded-xl border p-3 shadow-sm transition hover:ring-2 hover:ring-indigo-300/60 sm:p-4 dark:hover:ring-indigo-700/50 ${
                     due
                       ? "border-emerald-300 bg-emerald-50/50 dark:border-emerald-800 dark:bg-emerald-950/20"
                       : "border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950"
                   } cursor-pointer`}
                 >
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <h3 className="font-semibold text-zinc-900 dark:text-zinc-50">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between sm:gap-3">
+                    <div className="min-w-0">
+                      <h3 className="truncate text-sm font-semibold text-zinc-900 sm:text-base dark:text-zinc-50">
                         {r.name}
                       </h3>
-                      <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
+                      <p className="mt-1 text-xs text-zinc-600 sm:text-sm dark:text-zinc-400">
                         Installment{" "}
                         <span className="font-mono font-medium tabular-nums">
                           {nn}
@@ -570,12 +570,12 @@ export default function InstallmentsClient() {
                         )}
                       </p>
                     </div>
-                    <div className="flex flex-wrap gap-2">
+                    <div className="flex min-w-0 flex-wrap gap-1.5 sm:gap-2">
                       {canPay && (
                         <button
                           type="button"
                           disabled={saving}
-                          className="rounded-md bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
+                          className="rounded-md bg-emerald-600 px-2 py-1.5 text-xs font-medium text-white hover:bg-emerald-500 disabled:opacity-50 sm:px-3 sm:text-sm"
                           onClick={(e) => {
                             e.stopPropagation();
                             void onPay(r.id);
@@ -587,7 +587,7 @@ export default function InstallmentsClient() {
                       <button
                         type="button"
                         disabled={saving}
-                        className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm dark:border-zinc-600"
+                        className="rounded-md border border-zinc-300 px-2 py-1.5 text-xs dark:border-zinc-600 sm:px-3 sm:text-sm"
                         onClick={(e) => {
                           e.stopPropagation();
                           startEdit(r);
@@ -598,7 +598,7 @@ export default function InstallmentsClient() {
                       <button
                         type="button"
                         disabled={saving}
-                        className="rounded-md border border-red-200 px-3 py-1.5 text-sm text-red-700 dark:border-red-900 dark:text-red-300"
+                        className="rounded-md border border-red-200 px-2 py-1.5 text-xs text-red-700 dark:border-red-900 dark:text-red-300 sm:px-3 sm:text-sm"
                         onClick={(e) => {
                           e.stopPropagation();
                           void onDelete(r.id);
@@ -608,7 +608,7 @@ export default function InstallmentsClient() {
                       </button>
                     </div>
                   </div>
-                  <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
+                  <dl className="mt-3 grid gap-2 text-xs sm:mt-4 sm:gap-3 sm:text-sm sm:grid-cols-2 lg:grid-cols-4">
                     <div>
                       <dt className="text-xs text-zinc-500">Principal</dt>
                       <dd className="tabular-nums font-medium">{fmtMoney(r.principal)}</dd>
@@ -665,7 +665,7 @@ export default function InstallmentsClient() {
               );
             })}
           {!loading && rows.length === 0 && (
-            <li className="rounded-lg border border-dashed border-zinc-300 px-4 py-8 text-center text-sm text-zinc-800 dark:text-zinc-200 dark:border-zinc-700">
+            <li className="col-span-3 rounded-lg border border-dashed border-zinc-300 px-4 py-8 text-center text-sm text-zinc-800 dark:text-zinc-200 dark:border-zinc-700">
               No installment plans yet.
             </li>
           )}
@@ -711,6 +711,7 @@ export default function InstallmentsClient() {
                 </p>
               )}
               {!detailLoading && detail && detail.lines.length > 0 && (
+                <div className="overflow-x-auto">
                 <table className="w-full min-w-[36rem] text-left text-sm">
                   <thead>
                     <tr className="border-b border-zinc-200 text-xs uppercase text-zinc-500 dark:border-zinc-800">
@@ -823,6 +824,7 @@ export default function InstallmentsClient() {
                     })}
                   </tbody>
                 </table>
+                </div>
               )}
             </div>
           </div>

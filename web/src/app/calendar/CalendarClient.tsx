@@ -1,8 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  getCalendarBounds,
   getCalendarDay,
   getCalendarMonth,
   getCalendarMonthTransactions,
@@ -14,24 +13,21 @@ import {
   type CalendarMonthTotals,
 } from "@/lib/api";
 import { FloatingAddButton } from "@/components/FloatingAddButton";
-import {
-  TRANSACTIONS_CHANGED_EVENT,
-  useTransactionModal,
-} from "@/components/TransactionModalProvider";
-import { getTransactionRowId } from "@/lib/transactionRowId";
-import {
-  isColumnExcludedFromDataPreview,
-  useDashboardColumnVisible,
-} from "@/lib/columnVisibility";
+import { useTransactionModal } from "@/components/TransactionModalProvider";
+import { subscribeTransactionsChangedDebounced } from "@/lib/transactionsChanged";
 import { CalendarMonthTransactionsGrouped } from "@/components/CalendarMonthTransactionsGrouped";
 import { filterDataPreviewRows } from "@/lib/transferRowAccounts";
-import { renderTransferFlowAwareCell } from "@/lib/transferPreviewCells";
 import { isReservedCategoryLabel } from "@/lib/reservedCategory";
-import { fieldLabelText, inputClass } from "@/lib/ui";
 import {
-  transactionCellToneClass,
-  transferMoneyTextClass,
-} from "@/lib/transactionRowTone";
+  calendarDayHover,
+  calendarDayHoverSpill,
+  calendarYearMonthCardHover,
+  inputClass,
+  interactiveHoverSurface,
+  modalBackdrop,
+  modalPanel,
+} from "@/lib/ui";
+import { transferMoneyTextClass } from "@/lib/transactionRowTone";
 import { useDebouncedSearch } from "@/lib/useDebouncedSearch";
 import {
   buildCurrencyConversionPayload,
@@ -40,9 +36,36 @@ import {
   useCurrencySettings,
 } from "@/lib/currencySettings";
 import { incomeHeadlineTextClass } from "@/lib/incomeExpenseTheme";
+import { useCategoryCatalogDataPreviewFilters } from "@/lib/useCategoryCatalogDataPreviewFilters";
 import { useValueVisibilityFilters } from "@/lib/valueInstanceVisibility";
+import { comparePeriodLatestFirst } from "@/lib/formatPeriod";
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+const MONTH_SHORT_LABELS = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+] as const;
+
+function calendarMonthTotalsHasTransactions(t: CalendarMonthTotals): boolean {
+  const e = 1e-9;
+  return (
+    Math.abs(t.total_income) > e ||
+    Math.abs(t.total_expense) > e ||
+    Math.abs(t.total_transfer_in) > e ||
+    Math.abs(t.total_transfer_out) > e
+  );
+}
 
 function pad2(n: number) {
   return String(n).padStart(2, "0");
@@ -52,34 +75,6 @@ function pad2(n: number) {
 function dayOfWeekFromIso(iso: string): number {
   const [y, mo, d] = iso.split("-").map(Number);
   return new Date(y, mo - 1, d).getDay();
-}
-
-/** Compare/sort months using `year * 12 + month - 1` (from YYYY-MM-DD ISO). */
-function ymIndexFromIso(iso: string): number {
-  const y = Number(iso.slice(0, 4));
-  const mo = Number(iso.slice(5, 7));
-  return y * 12 + mo - 1;
-}
-
-function yearMonthFromYmIndex(idx: number): { y: number; m: number } {
-  const y = Math.floor(idx / 12);
-  const m = (idx % 12) + 1;
-  return { y, m };
-}
-
-type TxBoundsMeta = {
-  minY: number;
-  minM: number;
-  maxY: number;
-  maxM: number;
-};
-
-function clampMonthForYear(y: number, m: number, b: TxBoundsMeta): number {
-  let low = 1;
-  let high = 12;
-  if (y === b.minY) low = b.minM;
-  if (y === b.maxY) high = b.maxM;
-  return Math.min(Math.max(m, low), high);
 }
 
 function toIsoDate(d: Date): string {
@@ -210,16 +205,14 @@ function MonthMiniCalendar({
                 onSelectDay(cell.iso);
               }}
               className={[
-                "flex min-h-[2.5rem] flex-col items-stretch rounded border p-0.5 text-left text-[10px] transition",
+                "flex min-h-[2.5rem] min-w-0 flex-col items-stretch rounded border p-0.5 text-left text-[10px] transition",
                 isSel
                   ? "border-indigo-500 bg-indigo-50 ring-1 ring-indigo-500 dark:border-indigo-500 dark:bg-indigo-950/40"
                   : spill
                     ? "border-zinc-200/70 bg-zinc-50/90 opacity-[0.72] dark:border-zinc-800/70 dark:bg-zinc-950/60"
                     : "border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950",
-                !isSel && !spill && "hover:bg-zinc-50 dark:hover:bg-zinc-900/50",
-                !isSel &&
-                  spill &&
-                  "hover:bg-zinc-100/90 hover:opacity-90 dark:hover:bg-zinc-900/55",
+                !isSel && !spill && calendarDayHover,
+                !isSel && spill && calendarDayHoverSpill,
               ].filter(Boolean).join(" ")}
             >
               {cell.spillMdLabel != null && (
@@ -231,12 +224,20 @@ function MonthMiniCalendar({
                 {cell.day}
               </span>
               {info && (info.income > 0 || info.expense > 0) && (
-                <span className="mt-0.5 flex flex-col gap-px text-[9px] font-medium tabular-nums leading-tight">
+                <span className="mt-0.5 flex min-w-0 flex-col items-stretch gap-px text-[7px] font-medium tabular-nums leading-none sm:text-[9px]">
                   {info.income > 0 && (
-                    <span className={incomeHeadlineTextClass}>{money(info.income)}</span>
+                    <span
+                      className={`min-w-0 truncate text-left ${incomeHeadlineTextClass}`}
+                      title={money(info.income)}
+                    >
+                      {money(info.income)}
+                    </span>
                   )}
                   {info.expense > 0 && (
-                    <span className="text-rose-600 dark:text-rose-400">
+                    <span
+                      className="min-w-0 truncate text-left text-rose-600 dark:text-rose-400"
+                      title={money(info.expense)}
+                    >
                       {money(info.expense)}
                     </span>
                   )}
@@ -332,8 +333,12 @@ function CalendarPeriodTotals({
 
 export default function CalendarClient() {
   const { openTxCreate, openTxEdit, txModalOpen } = useTransactionModal();
-  const isColVisible = useDashboardColumnVisible();
   const valueVisibilityFilters = useValueVisibilityFilters();
+  const categoryCatalogPreviewFilters = useCategoryCatalogDataPreviewFilters();
+  const calendarExtraFilters = useMemo(
+    () => [...(valueVisibilityFilters ?? []), ...categoryCatalogPreviewFilters],
+    [valueVisibilityFilters, categoryCatalogPreviewFilters],
+  );
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [path, setPath] = useState("");
@@ -353,11 +358,13 @@ export default function CalendarClient() {
     income_expense_column: string | null;
   } | null>(null);
   const [selected, setSelected] = useState<string>(() => toIsoDate(now));
-  /** Min/max calendar days from Period (same rules as calendar API); drives month dropdown range. */
-  const [txDateBounds, setTxDateBounds] = useState<{
-    first_date: string | null;
-    last_date: string | null;
-  } | null>(null);
+  const [monthYearPickerOpen, setMonthYearPickerOpen] = useState(false);
+  const [pickerYear, setPickerYear] = useState(now.getFullYear());
+  /** Per-month (1–12 index → boolean) whether that month in `pickerYear` has any calendar activity. */
+  const [pickerYearMonthsWithTx, setPickerYearMonthsWithTx] = useState<
+    boolean[] | null
+  >(null);
+  const [pickerMonthActivityNonce, setPickerMonthActivityNonce] = useState(0);
   const [dayModalOpen, setDayModalOpen] = useState(false);
   const [dayDetail, setDayDetail] = useState<CalendarDayResponse | null>(null);
   const [dayLoading, setDayLoading] = useState(false);
@@ -423,7 +430,7 @@ export default function CalendarClient() {
         year,
         month,
         undefined,
-        valueVisibilityFilters,
+        calendarExtraFilters,
         currencyConversion ?? undefined,
       );
       setMonthData(res.days);
@@ -439,7 +446,7 @@ export default function CalendarClient() {
       setMonthTotals(null);
       setMeta(null);
     }
-  }, [year, month, valueVisibilityFilters, currencyConversion]);
+  }, [year, month, calendarExtraFilters, currencyConversion]);
 
   useEffect(() => {
     if (calendarView === "year") return;
@@ -455,7 +462,7 @@ export default function CalendarClient() {
             year,
             i + 1,
             undefined,
-            valueVisibilityFilters,
+            calendarExtraFilters,
             currencyConversion ?? undefined,
           ),
         ),
@@ -478,46 +485,26 @@ export default function CalendarClient() {
     } finally {
       setYearGridLoading(false);
     }
-  }, [year, valueVisibilityFilters, currencyConversion]);
+  }, [year, calendarExtraFilters, currencyConversion]);
 
   useEffect(() => {
     if (calendarView !== "year") return;
     void fetchYearMonthBlocks();
   }, [calendarView, fetchYearMonthBlocks]);
 
-  const loadBounds = useCallback(async () => {
-    try {
-      const r = await getCalendarBounds(
-        undefined,
-        valueVisibilityFilters,
-        currencyConversion ?? undefined,
-      );
-      setTxDateBounds({
-        first_date: r.first_date,
-        last_date: r.last_date,
-      });
-    } catch {
-      setTxDateBounds(null);
-    }
-  }, [valueVisibilityFilters, currencyConversion]);
-
-  useEffect(() => {
-    void loadBounds();
-  }, [loadBounds]);
-
   const loadYear = useCallback(async () => {
     try {
       const res = await getCalendarYear(
         year,
         undefined,
-        valueVisibilityFilters,
+        calendarExtraFilters,
         currencyConversion ?? undefined,
       );
       setYearTotals(res.year_totals);
     } catch {
       setYearTotals(null);
     }
-  }, [year, valueVisibilityFilters, currencyConversion]);
+  }, [year, calendarExtraFilters, currencyConversion]);
 
   useEffect(() => {
     void loadYear();
@@ -529,7 +516,7 @@ export default function CalendarClient() {
       const q = monthTxSearchDebounced.trim();
       if (calendarView === "month") {
         const res = await getCalendarMonthTransactions(year, month, {
-          extraFilters: valueVisibilityFilters,
+          extraFilters: calendarExtraFilters,
           searchAll: q.length > 0 ? q : undefined,
           currencyConversion: currencyConversion ?? undefined,
         });
@@ -538,7 +525,7 @@ export default function CalendarClient() {
         setTxPeriodColumn(res.period_column);
       } else {
         const res = await getCalendarYearTransactions(year, {
-          extraFilters: valueVisibilityFilters,
+          extraFilters: calendarExtraFilters,
           searchAll: q.length > 0 ? q : undefined,
           currencyConversion: currencyConversion ?? undefined,
         });
@@ -556,7 +543,7 @@ export default function CalendarClient() {
     calendarView,
     year,
     month,
-    valueVisibilityFilters,
+    calendarExtraFilters,
     monthTxSearchDebounced,
     currencyConversion,
   ]);
@@ -565,23 +552,19 @@ export default function CalendarClient() {
     void loadPeriodTransactions();
   }, [loadPeriodTransactions]);
 
-  const visibleDayColumns = useMemo(
-    () =>
-      (dayDetail?.columns ?? []).filter(
-        (c) => isColVisible(c) && !isColumnExcludedFromDataPreview(c),
-      ),
-    [dayDetail?.columns, isColVisible],
-  );
-
   const displayMonthTxRows = useMemo(
     () => filterDataPreviewRows(monthTxRows),
     [monthTxRows],
   );
 
-  const displayDayRows = useMemo(
-    () => filterDataPreviewRows(dayDetail?.rows ?? []),
-    [dayDetail?.rows],
-  );
+  const displayDayRows = useMemo(() => {
+    const raw = filterDataPreviewRows(dayDetail?.rows ?? []);
+    const pc = dayDetail?.period_column;
+    if (!pc || raw.length <= 1) return raw;
+    return [...raw].sort((a, b) =>
+      comparePeriodLatestFirst(a[pc], b[pc]),
+    );
+  }, [dayDetail?.rows, dayDetail?.period_column]);
 
   useEffect(() => {
     const t = new Date();
@@ -601,7 +584,7 @@ export default function CalendarClient() {
       const d = await getCalendarDay(
         selected,
         undefined,
-        valueVisibilityFilters,
+        calendarExtraFilters,
         currencyConversion ?? undefined,
       );
       setDayDetail(d);
@@ -611,30 +594,61 @@ export default function CalendarClient() {
     } finally {
       setDayLoading(false);
     }
-  }, [selected, dayModalOpen, valueVisibilityFilters, currencyConversion]);
+  }, [selected, dayModalOpen, calendarExtraFilters, currencyConversion]);
+
+  const transactionsChangedRefreshRef = useRef<() => void>(() => {});
+  transactionsChangedRefreshRef.current = () => {
+    void loadMonth();
+    void loadYear();
+    void loadPeriodTransactions();
+    if (calendarView === "year") void fetchYearMonthBlocks();
+    if (dayModalOpen && selected) void loadDay();
+    if (monthYearPickerOpen) setPickerMonthActivityNonce((n) => n + 1);
+  };
 
   useEffect(() => {
-    const onTxChanged = () => {
-      void loadMonth();
-      void loadYear();
-      void loadPeriodTransactions();
-      void loadBounds();
-      if (calendarView === "year") void fetchYearMonthBlocks();
-      if (dayModalOpen && selected) void loadDay();
+    return subscribeTransactionsChangedDebounced(() => {
+      transactionsChangedRefreshRef.current();
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!monthYearPickerOpen) {
+      setPickerYearMonthsWithTx(null);
+      return;
+    }
+    let cancelled = false;
+    setPickerYearMonthsWithTx(null);
+    (async () => {
+      try {
+        const results = await Promise.all(
+          Array.from({ length: 12 }, (_, i) =>
+            getCalendarMonth(
+              pickerYear,
+              i + 1,
+              undefined,
+              calendarExtraFilters,
+              currencyConversion ?? undefined,
+            ),
+          ),
+        );
+        if (cancelled) return;
+        setPickerYearMonthsWithTx(
+          results.map((r) => calendarMonthTotalsHasTransactions(r.month_totals)),
+        );
+      } catch {
+        if (!cancelled) setPickerYearMonthsWithTx(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
     };
-    window.addEventListener(TRANSACTIONS_CHANGED_EVENT, onTxChanged);
-    return () =>
-      window.removeEventListener(TRANSACTIONS_CHANGED_EVENT, onTxChanged);
   }, [
-    loadMonth,
-    loadYear,
-    loadPeriodTransactions,
-    loadBounds,
-    fetchYearMonthBlocks,
-    calendarView,
-    loadDay,
-    dayModalOpen,
-    selected,
+    monthYearPickerOpen,
+    pickerYear,
+    pickerMonthActivityNonce,
+    calendarExtraFilters,
+    currencyConversion,
   ]);
 
   useEffect(() => {
@@ -675,72 +689,49 @@ export default function CalendarClient() {
   const transactionsPeriodLabel =
     calendarView === "year" ? String(year) : monthLabel;
 
-  const txBoundsMeta = useMemo((): TxBoundsMeta | null => {
-    if (!txDateBounds?.first_date || !txDateBounds?.last_date) return null;
-    return {
-      minY: Number(txDateBounds.first_date.slice(0, 4)),
-      minM: Number(txDateBounds.first_date.slice(5, 7)),
-      maxY: Number(txDateBounds.last_date.slice(0, 4)),
-      maxM: Number(txDateBounds.last_date.slice(5, 7)),
-    };
-  }, [txDateBounds]);
+  const closeMonthYearPicker = useCallback(() => {
+    setYear(pickerYear);
+    setMonthYearPickerOpen(false);
+  }, [pickerYear]);
 
-  const yearDropdownOptions = useMemo(() => {
-    if (txBoundsMeta) {
-      const ys: number[] = [];
-      for (let y = txBoundsMeta.minY; y <= txBoundsMeta.maxY; y += 1) {
-        ys.push(y);
-      }
-      return ys;
-    }
-    return [year];
-  }, [txBoundsMeta, year]);
+  const openMonthYearPicker = useCallback(() => {
+    setPickerYear(year);
+    setMonthYearPickerOpen(true);
+  }, [year]);
 
-  const monthDropdownOptions = useMemo(() => {
-    if (txBoundsMeta) {
-      let low = 1;
-      let high = 12;
-      if (year === txBoundsMeta.minY) low = txBoundsMeta.minM;
-      if (year === txBoundsMeta.maxY) high = txBoundsMeta.maxM;
-      const ms: number[] = [];
-      for (let m = low; m <= high; m += 1) ms.push(m);
-      return ms;
-    }
-    return Array.from({ length: 12 }, (_, i) => i + 1);
-  }, [txBoundsMeta, year]);
+  const pickMonthFromPicker = useCallback(
+    (m: number) => {
+      setYear(pickerYear);
+      setMonth(m);
+      setMonthYearPickerOpen(false);
+      if (calendarView === "year") setCalendarView("month");
+    },
+    [pickerYear, calendarView],
+  );
+
+  const goToTodayFromPicker = useCallback(() => {
+    const t = new Date();
+    const y = t.getFullYear();
+    const m = t.getMonth() + 1;
+    setYear(y);
+    setMonth(m);
+    setPickerYear(y);
+    setSelected(toIsoDate(t));
+    setMonthYearPickerOpen(false);
+    if (calendarView === "year") setCalendarView("month");
+  }, [calendarView]);
 
   useEffect(() => {
-    if (!txDateBounds?.first_date || !txDateBounds?.last_date) return;
-    const cur = year * 12 + month - 1;
-    const lo = ymIndexFromIso(txDateBounds.first_date);
-    const hi = ymIndexFromIso(txDateBounds.last_date);
-    if (cur >= lo && cur <= hi) return;
-    const target = cur < lo ? lo : hi;
-    const { y, m } = yearMonthFromYmIndex(target);
-    setYear(y);
-    setMonth(m);
-  }, [txDateBounds, year, month]);
-
-  const onMonthSelect = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const m = Number(e.target.value);
-    if (m < 1 || m > 12) return;
-    setMonth(m);
-  };
-
-  const onYearSelect = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const y = Number(e.target.value);
-    setYear(y);
-    if (txBoundsMeta) {
-      setMonth((prev) => clampMonthForYear(y, prev, txBoundsMeta));
-    }
-  };
+    if (!monthYearPickerOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      closeMonthYearPicker();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [monthYearPickerOpen, closeMonthYearPicker]);
 
   const prevMonth = () => {
-    const cur = year * 12 + month - 1;
-    if (txDateBounds?.first_date) {
-      const lo = ymIndexFromIso(txDateBounds.first_date);
-      if (cur <= lo) return;
-    }
     if (month <= 1) {
       setMonth(12);
       setYear((y) => y - 1);
@@ -748,11 +739,6 @@ export default function CalendarClient() {
   };
 
   const nextMonth = () => {
-    const cur = year * 12 + month - 1;
-    if (txDateBounds?.last_date) {
-      const hi = ymIndexFromIso(txDateBounds.last_date);
-      if (cur >= hi) return;
-    }
     if (month >= 12) {
       setMonth(1);
       setYear((y) => y + 1);
@@ -767,18 +753,10 @@ export default function CalendarClient() {
   };
 
   const prevYear = () => {
-    if (txDateBounds?.first_date) {
-      const minY = Number(txDateBounds.first_date.slice(0, 4));
-      if (year <= minY) return;
-    }
     setYear((y) => y - 1);
   };
 
   const nextYear = () => {
-    if (txDateBounds?.last_date) {
-      const maxY = Number(txDateBounds.last_date.slice(0, 4));
-      if (year >= maxY) return;
-    }
     setYear((y) => y + 1);
   };
 
@@ -791,9 +769,9 @@ export default function CalendarClient() {
   }
 
   return (
-    <div className="mx-auto flex w-full min-w-0 max-w-full flex-col gap-8 px-4 pb-28 py-8 sm:px-6">
-      <header className="flex flex-col gap-2 border-b border-zinc-200 pb-6 dark:border-zinc-800">
-        <h1 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
+    <div className="mx-auto flex w-full min-w-0 max-w-full flex-col gap-6 px-3 pb-28 py-6 sm:gap-8 sm:px-6 sm:py-8">
+      <header className="flex flex-col gap-2 border-b border-zinc-200 pb-4 dark:border-zinc-800 sm:pb-6">
+        <h1 className="text-xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50 sm:text-2xl">
           Calendar
         </h1>
       </header>
@@ -847,61 +825,28 @@ export default function CalendarClient() {
               <button
                 type="button"
                 onClick={prevMonth}
-                disabled={
-                  txDateBounds?.first_date != null &&
-                  year * 12 + month - 1 <=
-                    ymIndexFromIso(txDateBounds.first_date)
-                }
-                className="shrink-0 rounded-md border border-zinc-300 px-2.5 py-1.5 text-sm hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-zinc-700 dark:hover:bg-zinc-900 sm:px-3"
+                aria-label="Previous month"
+                className="shrink-0 rounded-md border border-zinc-300 px-2.5 py-1.5 text-sm tabular-nums hover:bg-zinc-50 dark:border-zinc-700 dark:hover:bg-zinc-900 sm:px-3"
               >
-                ← Prev
+                &lt;
               </button>
-              <div
-                className="inline-flex min-w-0 max-w-full items-stretch gap-px rounded-lg border border-zinc-200/90 bg-zinc-50 shadow-sm dark:border-zinc-700 dark:bg-zinc-900/70"
-                title="Month and year"
+              <button
+                type="button"
+                onClick={openMonthYearPicker}
+                aria-haspopup="dialog"
+                aria-expanded={monthYearPickerOpen}
+                aria-label="Choose month and year"
+                className="inline-flex min-w-0 max-w-[min(100%,16rem)] shrink items-center justify-center rounded-lg border border-zinc-200/90 bg-zinc-50 px-4 py-1.5 text-center text-sm font-semibold text-zinc-900 shadow-sm transition hover:bg-zinc-100/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/40 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-50 dark:hover:bg-zinc-800/80 sm:min-w-[12rem] sm:text-base"
               >
-                <select
-                  aria-label="Month"
-                  value={month}
-                  onChange={onMonthSelect}
-                  className="min-w-0 w-[min(100%,11.5rem)] cursor-pointer appearance-none rounded-l-[calc(0.5rem-1px)] border-0 bg-transparent px-3 py-1.5 text-center text-sm font-semibold text-zinc-900 hover:bg-zinc-100/80 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-indigo-500/35 dark:text-zinc-50 dark:hover:bg-zinc-800/80 dark:focus:ring-indigo-400/30 sm:w-[12.5rem] sm:text-base"
-                >
-                  {monthDropdownOptions.map((m) => (
-                    <option key={m} value={m}>
-                      {new Date(2000, m - 1, 1).toLocaleString(undefined, {
-                        month: "long",
-                      })}
-                    </option>
-                  ))}
-                </select>
-                <div
-                  className="w-px shrink-0 self-stretch bg-zinc-200 dark:bg-zinc-600"
-                  aria-hidden
-                />
-                <select
-                  aria-label="Year"
-                  value={year}
-                  onChange={onYearSelect}
-                  className="w-[4.5rem] shrink-0 cursor-pointer appearance-none rounded-r-[calc(0.5rem-1px)] border-0 bg-transparent px-2 py-1.5 text-center text-sm font-semibold tabular-nums tracking-tight text-zinc-900 hover:bg-zinc-100/80 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-indigo-500/35 dark:text-zinc-50 dark:hover:bg-zinc-800/80 dark:focus:ring-indigo-400/30 sm:w-[5.25rem] sm:text-base"
-                >
-                  {yearDropdownOptions.map((y) => (
-                    <option key={y} value={y}>
-                      {y}
-                    </option>
-                  ))}
-                </select>
-              </div>
+                {monthLabel}
+              </button>
               <button
                 type="button"
                 onClick={nextMonth}
-                disabled={
-                  txDateBounds?.last_date != null &&
-                  year * 12 + month - 1 >=
-                    ymIndexFromIso(txDateBounds.last_date)
-                }
-                className="shrink-0 rounded-md border border-zinc-300 px-2.5 py-1.5 text-sm hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-zinc-700 dark:hover:bg-zinc-900 sm:px-3"
+                aria-label="Next month"
+                className="shrink-0 rounded-md border border-zinc-300 px-2.5 py-1.5 text-sm tabular-nums hover:bg-zinc-50 dark:border-zinc-700 dark:hover:bg-zinc-900 sm:px-3"
               >
-                Next →
+                &gt;
               </button>
             </div>
             <button
@@ -918,41 +863,28 @@ export default function CalendarClient() {
               <button
                 type="button"
                 onClick={prevYear}
-                disabled={
-                  txDateBounds?.first_date != null &&
-                  year <= Number(txDateBounds.first_date.slice(0, 4))
-                }
-                className="shrink-0 rounded-md border border-zinc-300 px-2.5 py-1.5 text-sm hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-zinc-700 dark:hover:bg-zinc-900 sm:px-3"
+                aria-label="Previous year"
+                className="shrink-0 rounded-md border border-zinc-300 px-2.5 py-1.5 text-sm tabular-nums hover:bg-zinc-50 dark:border-zinc-700 dark:hover:bg-zinc-900 sm:px-3"
               >
-                ← Prev
+                &lt;
               </button>
-              <div
-                className="inline-flex min-w-0 max-w-full items-stretch rounded-lg border border-zinc-200/90 bg-zinc-50 px-2 shadow-sm dark:border-zinc-700 dark:bg-zinc-900/70"
-                title="Year"
+              <button
+                type="button"
+                onClick={openMonthYearPicker}
+                aria-haspopup="dialog"
+                aria-expanded={monthYearPickerOpen}
+                aria-label="Choose year or month"
+                className="inline-flex min-w-[5.5rem] shrink items-center justify-center rounded-lg border border-zinc-200/90 bg-zinc-50 px-4 py-1.5 text-center text-sm font-semibold tabular-nums tracking-tight text-zinc-900 shadow-sm transition hover:bg-zinc-100/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/40 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-50 dark:hover:bg-zinc-800/80 sm:text-base"
               >
-                <select
-                  aria-label="Year"
-                  value={year}
-                  onChange={onYearSelect}
-                  className="min-w-0 cursor-pointer appearance-none border-0 bg-transparent px-4 py-1.5 text-center text-sm font-semibold tabular-nums tracking-tight text-zinc-900 hover:bg-zinc-100/80 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-indigo-500/35 dark:text-zinc-50 dark:hover:bg-zinc-800/80 dark:focus:ring-indigo-400/30 sm:text-base"
-                >
-                  {yearDropdownOptions.map((y) => (
-                    <option key={y} value={y}>
-                      {y}
-                    </option>
-                  ))}
-                </select>
-              </div>
+                {year}
+              </button>
               <button
                 type="button"
                 onClick={nextYear}
-                disabled={
-                  txDateBounds?.last_date != null &&
-                  year >= Number(txDateBounds.last_date.slice(0, 4))
-                }
-                className="shrink-0 rounded-md border border-zinc-300 px-2.5 py-1.5 text-sm hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-zinc-700 dark:hover:bg-zinc-900 sm:px-3"
+                aria-label="Next year"
+                className="shrink-0 rounded-md border border-zinc-300 px-2.5 py-1.5 text-sm tabular-nums hover:bg-zinc-50 dark:border-zinc-700 dark:hover:bg-zinc-900 sm:px-3"
               >
-                Next →
+                &gt;
               </button>
             </div>
             <button
@@ -1019,16 +951,14 @@ export default function CalendarClient() {
                       setDayModalOpen(true);
                     }}
                     className={[
-                      "flex min-h-[6.25rem] flex-col items-stretch rounded-lg border p-1.5 text-left text-sm transition",
+                      "flex min-h-[6.25rem] min-w-0 flex-col items-stretch rounded-lg border p-1 text-left text-sm transition sm:p-1.5",
                       isSel
                         ? "border-indigo-500 bg-indigo-50 ring-1 ring-indigo-500 dark:border-indigo-500 dark:bg-indigo-950/40"
                         : spill
                           ? "border-zinc-200/70 bg-zinc-50/90 opacity-[0.72] dark:border-zinc-800/70 dark:bg-zinc-950/60 dark:opacity-[0.78]"
                           : "border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950",
-                      !isSel && !spill && "hover:bg-zinc-50 dark:hover:bg-zinc-900/50",
-                      !isSel &&
-                        spill &&
-                        "hover:bg-zinc-100/90 hover:opacity-90 dark:hover:bg-zinc-900/55 dark:hover:opacity-90",
+                      !isSel && !spill && calendarDayHover,
+                      !isSel && spill && calendarDayHoverSpill,
                     ].filter(Boolean).join(" ")}
                   >
                     {cell.spillMdLabel != null && (
@@ -1038,14 +968,20 @@ export default function CalendarClient() {
                     )}
                     <span className={dayNumClass}>{cell.day}</span>
                     {info && (info.income > 0 || info.expense > 0) && (
-                      <span className="mt-1 flex flex-col gap-0.5 text-sm font-medium tabular-nums leading-snug">
+                      <span className="mt-1 flex min-w-0 flex-col items-stretch gap-0.5 text-[10px] font-medium tabular-nums leading-tight sm:text-sm sm:leading-snug">
                         {info.income > 0 && (
-                          <span className={incomeHeadlineTextClass}>
+                          <span
+                            className={`min-w-0 truncate ${incomeHeadlineTextClass}`}
+                            title={money(info.income)}
+                          >
                             {money(info.income)}
                           </span>
                         )}
                         {info.expense > 0 && (
-                          <span className="text-rose-600 dark:text-rose-400">
+                          <span
+                            className="min-w-0 truncate text-rose-600 dark:text-rose-400"
+                            title={money(info.expense)}
+                          >
                             {money(info.expense)}
                           </span>
                         )}
@@ -1064,7 +1000,7 @@ export default function CalendarClient() {
               </p>
             )}
             {!yearGridLoading && yearMonthBlocks && (
-              <div className="grid w-full min-w-0 grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              <div className="grid w-full min-w-0 grid-cols-3 gap-2 sm:gap-4">
                 {yearMonthBlocks.map((block) => {
                   const labelShort = new Date(
                     2000,
@@ -1074,11 +1010,7 @@ export default function CalendarClient() {
                   const mt = block.monthTotals;
                   const openMonthLabel = `Open ${labelShort} ${year} in month view`;
                   const goToThisMonth = () => {
-                    setMonth(
-                      txBoundsMeta
-                        ? clampMonthForYear(year, block.month, txBoundsMeta)
-                        : block.month,
-                    );
+                    setMonth(block.month);
                     setCalendarView("month");
                   };
                   return (
@@ -1086,19 +1018,29 @@ export default function CalendarClient() {
                       key={block.month}
                       title={openMonthLabel}
                       onClick={goToThisMonth}
-                      className="flex min-w-0 cursor-pointer flex-col gap-2 rounded-lg border border-zinc-200 bg-zinc-50/50 p-2.5 transition hover:border-zinc-300 hover:bg-zinc-100/60 dark:border-zinc-600 dark:bg-zinc-950/50 dark:hover:border-zinc-500 dark:hover:bg-zinc-900/55"
+                      className={`flex min-w-0 cursor-pointer flex-col gap-2 rounded-lg border border-zinc-200 bg-zinc-50/50 p-2.5 dark:border-zinc-600 dark:bg-zinc-950/50 ${calendarYearMonthCardHover}`}
                     >
-                      <div className="flex min-w-0 items-baseline justify-between gap-2 border-b border-zinc-100 pb-1.5 dark:border-zinc-800">
+                      <div className="flex min-w-0 items-start justify-between gap-2 border-b border-zinc-100 pb-1.5 dark:border-zinc-800">
                         <span className="shrink-0 whitespace-nowrap text-xs font-semibold text-zinc-800 dark:text-zinc-200">
                           {labelShort}
                         </span>
-                        <div className="min-w-0 flex flex-col items-end gap-0.5 text-[10px] font-medium tabular-nums leading-tight">
-                          <span className={incomeHeadlineTextClass}>
-                            {money(mt.total_income)}
-                          </span>
-                          <span className="text-rose-600 dark:text-rose-400">
-                            {money(mt.total_expense)}
-                          </span>
+                        <div className="flex min-w-0 max-w-[55%] flex-col items-end gap-px text-[8px] font-medium tabular-nums leading-tight sm:max-w-none sm:text-[10px]">
+                          {mt.total_income > 1e-9 && (
+                            <span
+                              className={`max-w-full truncate ${incomeHeadlineTextClass}`}
+                              title={money(mt.total_income)}
+                            >
+                              {money(mt.total_income)}
+                            </span>
+                          )}
+                          {mt.total_expense > 1e-9 && (
+                            <span
+                              className="max-w-full truncate text-rose-600 dark:text-rose-400"
+                              title={money(mt.total_expense)}
+                            >
+                              {money(mt.total_expense)}
+                            </span>
+                          )}
                         </div>
                       </div>
                       <MonthMiniCalendar
@@ -1164,7 +1106,7 @@ export default function CalendarClient() {
           </p>
         )}
         {!monthTxLoading && displayMonthTxRows.length > 0 && (
-          <div className="max-h-[min(60vh,560px)] w-full min-w-0 overflow-y-auto overflow-x-hidden px-3 pb-3">
+          <div className="max-h-[min(60vh,560px)] w-full min-w-0 overflow-y-auto overflow-x-auto px-3 pb-3 sm:overflow-x-hidden">
             <CalendarMonthTransactionsGrouped
               rows={displayMonthTxRows}
               columns={monthTxColumns}
@@ -1175,6 +1117,8 @@ export default function CalendarClient() {
                   : { year, month }
               }
               dateLabelStyle={calendarView === "year" ? "withMonth" : "day"}
+              defaultDayRowsExpanded
+              showDateGroupControls
               onRowClick={openTxEdit}
             />
           </div>
@@ -1210,27 +1154,6 @@ export default function CalendarClient() {
                       })
                     : "Day"}
                 </h2>
-                {dayDetail && !dayLoading && (
-                  <div
-                    className="mt-2 flex flex-wrap items-baseline gap-x-6 gap-y-1 text-sm text-zinc-700 dark:text-zinc-300"
-                    aria-label="Day totals"
-                  >
-                    <span>
-                      Income{" "}
-                      <span
-                        className={`font-semibold tabular-nums ${incomeHeadlineTextClass}`}
-                      >
-                        {money(dayDetail.total_income)}
-                      </span>
-                    </span>
-                    <span>
-                      Expenses{" "}
-                      <span className="font-semibold tabular-nums text-rose-600 dark:text-rose-400">
-                        {money(dayDetail.total_expense)}
-                      </span>
-                    </span>
-                  </div>
-                )}
               </div>
               <div className="flex shrink-0 items-center gap-2">
                 <button
@@ -1271,61 +1194,22 @@ export default function CalendarClient() {
                       No transactions this day.
                     </p>
                   ) : (
-                    <div className="overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-800">
-                      <table className="min-w-full text-left text-xs">
-                        <thead className="bg-zinc-50 text-zinc-600 dark:bg-zinc-900 dark:text-zinc-400">
-                          <tr>
-                            {visibleDayColumns.map((c) => (
-                              <th
-                                key={c}
-                                className="whitespace-nowrap px-2 py-2 font-medium"
-                              >
-                                {c}
-                              </th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {displayDayRows.map((row, i) => {
-                            const rawId = row.id;
-                            const rowIdNum =
-                              typeof rawId === "number"
-                                ? rawId
-                                : typeof rawId === "string"
-                                  ? parseInt(rawId, 10)
-                                  : NaN;
-                            const canEdit = Number.isFinite(rowIdNum);
-                            return (
-                            <tr
-                              key={row.id != null ? String(row.id) : i}
-                              className={`border-t border-zinc-100 dark:border-zinc-800 ${
-                                canEdit
-                                  ? "cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-900/60"
-                                  : ""
-                              }`}
-                              onClick={
-                                canEdit
-                                  ? () => {
-                                      setDayModalOpen(false);
-                                      openTxEdit(row);
-                                    }
-                                  : undefined
-                              }
-                              title={canEdit ? "Edit transaction" : undefined}
-                            >
-                              {visibleDayColumns.map((c) => (
-                                <td
-                                  key={c}
-                                  className={`max-w-[12rem] min-w-0 break-words px-2 py-1.5 align-top [overflow-wrap:anywhere] ${transactionCellToneClass(row, c)}`}
-                                >
-                                  {renderTransferFlowAwareCell(row, c)}
-                                </td>
-                              ))}
-                            </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
+                    <div className="min-w-0">
+                      <CalendarMonthTransactionsGrouped
+                        key={dayDetail.date}
+                        rows={displayDayRows}
+                        columns={dayDetail.columns}
+                        periodColumn={dayDetail.period_column}
+                        monthScope={null}
+                        dateLabelStyle="day"
+                        defaultDayRowsExpanded
+                        showDateGroupControls={false}
+                        initialExpandedDayIso={selected}
+                        onRowClick={(row) => {
+                          setDayModalOpen(false);
+                          openTxEdit(row);
+                        }}
+                      />
                     </div>
                   )}
                 </>
@@ -1335,8 +1219,125 @@ export default function CalendarClient() {
         </div>
       )}
 
+      {monthYearPickerOpen && (
+        <div
+          className={modalBackdrop}
+          role="presentation"
+          onClick={closeMonthYearPicker}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="calendar-month-year-picker-title"
+            className={`${modalPanel} !max-w-sm sm:p-5`}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2
+              id="calendar-month-year-picker-title"
+              className="sr-only"
+            >
+              Choose month and year
+            </h2>
+            <div className="flex flex-col gap-4">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-sm font-medium text-zinc-600 dark:text-zinc-400">
+                  Date
+                </span>
+                <span
+                  role="button"
+                  tabIndex={0}
+                  className="cursor-pointer select-none text-sm font-medium text-indigo-600 underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 dark:text-indigo-400 dark:focus-visible:ring-offset-zinc-950"
+                  onClick={goToTodayFromPicker}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      goToTodayFromPicker();
+                    }
+                  }}
+                >
+                  This Month
+                </span>
+              </div>
+              <div className="flex items-center justify-center gap-3">
+                <span
+                  role="button"
+                  tabIndex={0}
+                  aria-label="Previous year"
+                  className={`cursor-pointer select-none rounded-md px-2.5 py-1.5 text-sm tabular-nums text-zinc-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:text-zinc-300 ${interactiveHoverSurface}`}
+                  onClick={() => setPickerYear((y) => y - 1)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      setPickerYear((y) => y - 1);
+                    }
+                  }}
+                >
+                  &lt;
+                </span>
+                <span className="min-w-[4.5rem] text-center text-lg font-semibold tabular-nums text-zinc-900 dark:text-zinc-50">
+                  {pickerYear}
+                </span>
+                <span
+                  role="button"
+                  tabIndex={0}
+                  aria-label="Next year"
+                  className={`cursor-pointer select-none rounded-md px-2.5 py-1.5 text-sm tabular-nums text-zinc-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:text-zinc-300 ${interactiveHoverSurface}`}
+                  onClick={() => setPickerYear((y) => y + 1)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      setPickerYear((y) => y + 1);
+                    }
+                  }}
+                >
+                  &gt;
+                </span>
+              </div>
+              <div className="grid w-full grid-cols-[repeat(4,minmax(0,1fr))] gap-2">
+                {MONTH_SHORT_LABELS.map((label, i) => {
+                  const m = i + 1;
+                  const isActive = m === month && pickerYear === year;
+                  const hasTx = pickerYearMonthsWithTx?.[i] === true;
+                  return (
+                    <span
+                      key={label}
+                      role="button"
+                      tabIndex={0}
+                      aria-label={
+                        hasTx ? `${label}, has transactions` : `${label}`
+                      }
+                      className={[
+                        "relative min-w-0 cursor-pointer select-none rounded-lg px-1 py-2.5 text-center text-sm font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-zinc-950",
+                        isActive
+                          ? "bg-indigo-100 text-indigo-900 dark:bg-indigo-950/55 dark:text-indigo-100"
+                          : `text-zinc-800 dark:text-zinc-100 ${interactiveHoverSurface}`,
+                      ].join(" ")}
+                      onClick={() => pickMonthFromPicker(m)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          pickMonthFromPicker(m);
+                        }
+                      }}
+                    >
+                      {label}
+                      {hasTx && (
+                        <span
+                          className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-emerald-500 ring-2 ring-white dark:bg-emerald-400 dark:ring-zinc-950"
+                          aria-hidden
+                        />
+                      )}
+                    </span>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       <FloatingAddButton
-        hidden={txModalOpen}
+        hidden={txModalOpen || monthYearPickerOpen}
         onClick={() => openTxCreate({ date: selected })}
         ariaLabel="Add transaction"
       />

@@ -7,7 +7,9 @@ import {
   useEffect,
   useMemo,
   useState,
+  type Dispatch,
   type ReactNode,
+  type SetStateAction,
 } from "react";
 
 const LS_LEFT_COLLAPSED = "budgetapp:shell:leftCollapsed";
@@ -58,6 +60,14 @@ type ShellLayoutValue = {
   toggleRight: () => void;
   maximizeLeft: () => void;
   maximizeRight: () => void;
+  /** Slide-over navigation (viewports below `lg` only). */
+  mobileNavOpen: boolean;
+  setMobileNavOpen: Dispatch<SetStateAction<boolean>>;
+  closeMobileNav: () => void;
+  /** Slide-over account balances (viewports below `lg` only). */
+  mobileBalancesOpen: boolean;
+  setMobileBalancesOpen: Dispatch<SetStateAction<boolean>>;
+  closeMobileBalances: () => void;
 };
 
 const ShellLayoutContext = createContext<ShellLayoutValue | null>(null);
@@ -68,6 +78,8 @@ export function ShellLayoutProvider({ children }: { children: ReactNode }) {
   const [leftWidth, setLeftWidthState] = useState(LEFT_DEFAULT);
   const [rightCollapsed, setRightCollapsedState] = useState(false);
   const [rightWidth, setRightWidthState] = useState(RIGHT_DEFAULT);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [mobileBalancesOpen, setMobileBalancesOpen] = useState(false);
 
   useEffect(() => {
     setLeftCollapsed(readBool(LS_LEFT_COLLAPSED, false));
@@ -131,6 +143,42 @@ export function ShellLayoutProvider({ children }: { children: ReactNode }) {
     setRightWidthState(RIGHT_MAX);
   }, []);
 
+  const closeMobileNav = useCallback(() => {
+    setMobileNavOpen(false);
+  }, []);
+
+  const closeMobileBalances = useCallback(() => {
+    setMobileBalancesOpen(false);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const mq = window.matchMedia("(min-width: 1024px)");
+    const onChange = () => {
+      if (mq.matches) {
+        setMobileNavOpen(false);
+        setMobileBalancesOpen(false);
+      }
+    };
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
+
+  useEffect(() => {
+    if (
+      (!mobileNavOpen && !mobileBalancesOpen) ||
+      typeof document === "undefined"
+    )
+      return;
+    const mq = window.matchMedia("(min-width: 1024px)");
+    if (mq.matches) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [mobileNavOpen, mobileBalancesOpen]);
+
   const value = useMemo(
     (): ShellLayoutValue => ({
       leftCollapsed,
@@ -145,6 +193,12 @@ export function ShellLayoutProvider({ children }: { children: ReactNode }) {
       toggleRight,
       maximizeLeft,
       maximizeRight,
+      mobileNavOpen,
+      setMobileNavOpen,
+      closeMobileNav,
+      mobileBalancesOpen,
+      setMobileBalancesOpen,
+      closeMobileBalances,
     }),
     [
       leftCollapsed,
@@ -159,6 +213,12 @@ export function ShellLayoutProvider({ children }: { children: ReactNode }) {
       toggleRight,
       maximizeLeft,
       maximizeRight,
+      mobileNavOpen,
+      setMobileNavOpen,
+      closeMobileNav,
+      mobileBalancesOpen,
+      setMobileBalancesOpen,
+      closeMobileBalances,
     ],
   );
 

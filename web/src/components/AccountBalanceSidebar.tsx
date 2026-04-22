@@ -29,7 +29,9 @@ import {
 } from "@/lib/accountBalanceTotalExclusion";
 import { useDeletedAccounts } from "@/lib/deletedAccounts";
 import { useManualAccounts } from "@/lib/manualAccounts";
+import { accountBalanceRowHover } from "@/lib/ui";
 import { RAIL_WIDTH, useShellLayout } from "@/lib/shellLayoutContext";
+import { useLgUp } from "@/lib/useLgUp";
 import { useWorkbookActiveSheetOptional } from "@/lib/workbookActiveSheetContext";
 
 function labelAccount(name: string) {
@@ -50,7 +52,14 @@ export function AccountBalanceSidebar() {
   const accountOrder = useAccountOrder();
   const manualAccounts = useManualAccounts();
   const deletedAccounts = useDeletedAccounts();
-  const { rightCollapsed, rightWidth, toggleRight } = useShellLayout();
+  const {
+    rightCollapsed,
+    rightWidth,
+    toggleRight,
+    mobileBalancesOpen,
+    closeMobileBalances,
+  } = useShellLayout();
+  const isLg = useLgUp();
   const sheetCtx = useWorkbookActiveSheetOptional();
   const sidebarOnlyHidden = useBalanceSidebarHidden();
   const totalExcluded = useBalanceSidebarTotalExcluded();
@@ -210,15 +219,45 @@ export function AccountBalanceSidebar() {
   const showEmptyState =
     bootDone && !resolvedSheet && !loading && !error;
 
+  /** Mobile: slide-over from the top bar; desktop: sticky rail or panel. */
+  if (!isLg && !mobileBalancesOpen) {
+    return (
+      <>
+        {drillModal != null && resolvedSheet && (
+          <AccountDrillModal
+            open
+            onClose={() => setDrillModal(null)}
+            sheet={resolvedSheet}
+            accountName={drillModal.name}
+            balance={drillModal.balance}
+            onRenamed={(newName) =>
+              setDrillModal((d) => (d ? { ...d, name: newName } : null))
+            }
+          />
+        )}
+      </>
+    );
+  }
+
+  const showCollapsedRail = isLg && rightCollapsed;
+
   return (
+    <>
     <aside
-      style={{
-        width: rightCollapsed ? RAIL_WIDTH : rightWidth,
-        flexShrink: 0,
-      }}
-      className="sticky top-0 hidden h-screen max-h-[100dvh] overflow-hidden border-l border-zinc-200 bg-zinc-50/80 lg:flex lg:flex-col dark:border-zinc-800 dark:bg-zinc-950/80"
+      id={!isLg ? "mobile-account-balances" : undefined}
+      suppressHydrationWarning
+      style={
+        isLg
+          ? { width: rightCollapsed ? RAIL_WIDTH : rightWidth, flexShrink: 0 }
+          : { flexShrink: 0 }
+      }
+      className={`overflow-hidden border-zinc-200 bg-zinc-50/80 dark:border-zinc-800 dark:bg-zinc-950/80 ${
+        isLg
+          ? "sticky top-0 flex h-screen max-h-[100dvh] flex-col border-l"
+          : "fixed right-0 top-14 z-[52] flex h-[calc(100dvh-3.5rem)] max-h-[calc(100dvh-3.5rem)] w-[min(20rem,88vw)] max-w-[88vw] flex-col border-l shadow-xl transition-transform duration-200 ease-out"
+      }`}
     >
-      {rightCollapsed ? (
+      {showCollapsedRail ? (
         <div className="flex h-full min-h-0 flex-1 flex-col items-center gap-2 py-3">
           <button
             type="button"
@@ -247,12 +286,20 @@ export function AccountBalanceSidebar() {
             <button
               type="button"
               className="shrink-0 rounded-md border border-zinc-200 bg-white px-2 py-1.5 text-sm text-zinc-700 shadow-sm hover:bg-zinc-100 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
-              aria-label="Collapse account balances to slim bar"
-              title="Collapse panel (drag the edge to resize width)"
-              onClick={toggleRight}
+              aria-label={
+                isLg
+                  ? "Collapse account balances to slim bar"
+                  : "Close account balances"
+              }
+              title={
+                isLg
+                  ? "Collapse panel (drag the edge to resize width)"
+                  : undefined
+              }
+              onClick={isLg ? toggleRight : closeMobileBalances}
             >
               <span className="leading-none" aria-hidden>
-                »
+                {isLg ? "»" : "✕"}
               </span>
             </button>
           </div>
@@ -346,7 +393,7 @@ export function AccountBalanceSidebar() {
                       onClick={() =>
                         setDrillModal({ name: a.name, balance: a.balance })
                       }
-                      className="w-full min-w-0 cursor-grab rounded-lg px-2.5 py-1.5 text-left active:cursor-grabbing"
+                      className={`w-full min-w-0 cursor-grab rounded-lg px-2.5 py-1.5 text-left active:cursor-grabbing ${accountBalanceRowHover}`}
                     >
                       <p
                         className={`truncate text-xs font-medium ${
@@ -375,20 +422,21 @@ export function AccountBalanceSidebar() {
             </ul>
             </>
           )}
-          {drillModal != null && resolvedSheet && (
-            <AccountDrillModal
-              open
-              onClose={() => setDrillModal(null)}
-              sheet={resolvedSheet}
-              accountName={drillModal.name}
-              balance={drillModal.balance}
-              onRenamed={(newName) =>
-                setDrillModal((d) => (d ? { ...d, name: newName } : null))
-              }
-            />
-          )}
         </div>
       )}
     </aside>
+    {drillModal != null && resolvedSheet && (
+      <AccountDrillModal
+        open
+        onClose={() => setDrillModal(null)}
+        sheet={resolvedSheet}
+        accountName={drillModal.name}
+        balance={drillModal.balance}
+        onRenamed={(newName) =>
+          setDrillModal((d) => (d ? { ...d, name: newName } : null))
+        }
+      />
+    )}
+  </>
   );
 }

@@ -1,25 +1,31 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   formatMainCurrencyTotal,
-  formatPreviewAmountDisplay,
   useCurrencySettings,
 } from "@/lib/currencySettings";
-import { getTransactionRowId } from "@/lib/transactionRowId";
+import { sortTransactionRowsLatestPeriodFirst } from "@/lib/sortTransactionRows";
+import { incomeHeadlineTextClass } from "@/lib/incomeExpenseTheme";
 import {
-  incomeFlowTextClass,
-  incomeHeadlineTextClass,
-} from "@/lib/incomeExpenseTheme";
+  amountColumnName,
+  rowIncomeExpenseAmounts,
+} from "@/lib/calendarTransactionAmounts";
+import { btnSmallSecondary } from "@/lib/ui";
 import {
-  isRedundantTransferCategoryLabel,
-  transactionRowKind,
-  transferMoneyTextClass,
-} from "@/lib/transactionRowTone";
-import {
-  parseTransferAccountsFromRow,
-  transferLegFromRow,
-} from "@/lib/transferRowAccounts";
+  CALENDAR_DAY_TX_VIRTUALIZE_THRESHOLD,
+  CalendarDayTxRow,
+  VirtualizedDayTxList,
+} from "@/components/calendarDayTxList";
+
+export { amountColumnName, rowIncomeExpenseAmounts };
 
 export function periodToIsoDate(periodVal: unknown): string | null {
   if (periodVal == null) return null;
@@ -34,38 +40,27 @@ export function periodToIsoDate(periodVal: unknown): string | null {
   return `${y}-${mo}-${day}`;
 }
 
-export function amountColumnName(columns: string[]): string {
-  if (columns.includes("Amount")) return "Amount";
-  const x = columns.find((c) => c.toLowerCase() === "amount");
-  return x ?? "Amount";
+/**
+ * Calendar day key for grouping: prefer `calendar_date` from calendar transaction APIs
+ * (same bucketing as server `_d` + `tz_offset_minutes`); otherwise parse `Period`.
+ */
+export function rowCalendarIsoKey(
+  row: Record<string, unknown>,
+  periodColumn: string,
+): string | null {
+  const raw = row.calendar_date ?? row["calendar_date"];
+  if (raw != null && String(raw).trim() !== "") {
+    const s = String(raw).trim();
+    const m = s.match(/^(\d{4}-\d{2}-\d{2})/);
+    if (m) return m[1];
+  }
+  return periodToIsoDate(row[periodColumn]);
 }
 
 function isoInCalendarMonth(iso: string, year: number, month: number): boolean {
   const y = Number(iso.slice(0, 4));
   const m = Number(iso.slice(5, 7));
   return y === year && m === month;
-}
-
-/**
- * Split row amount into income vs expense columns using Flow (and Income/Expense fallback).
- */
-export function rowIncomeExpenseAmounts(
-  row: Record<string, unknown>,
-  amountCol: string,
-): { income: number | null; expense: number | null } {
-  const raw = row[amountCol];
-  const amt0 = typeof raw === "number" ? raw : Number(raw);
-  if (!Number.isFinite(amt0)) return { income: null, expense: null };
-  const amt = Math.abs(amt0);
-  const flow = String(row["Flow"] ?? "").trim();
-  if (flow === "Income") return { income: amt, expense: null };
-  if (flow === "Expense") return { income: null, expense: amt };
-  if (flow === "Transfer-In") return { income: amt, expense: null };
-  if (flow === "Transfer-Out") return { income: null, expense: amt };
-  const k = transactionRowKind(row);
-  if (k === "income") return { income: amt, expense: null };
-  if (k === "expense") return { income: null, expense: amt };
-  return { income: null, expense: null };
 }
 
 type DayGroup = {
@@ -75,13 +70,24 @@ type DayGroup = {
   dayExpense: number;
 };
 
-/** Fixed width so day totals and row amounts line up (no column headers). */
-const amountColClass =
-  "w-[7rem] min-w-[7rem] shrink-0 text-right sm:w-[7.5rem] sm:min-w-[7.5rem]";
+/** Day header: flexible on narrow screens so totals don’t clip; fixed from `sm` up. */
+const dayHeaderAmountColClass =
+  "min-w-0 text-right text-xs tabular-nums sm:w-[7.5rem] sm:min-w-[7.5rem] sm:shrink-0 sm:text-sm";
 
-/** Category | Notes (with accounts below) | amounts — separate columns from sm up. */
+/** Transaction row: income / expense — compact on mobile so 4-column layout fits. */
+const txRowAmountColClass =
+  "min-w-0 w-full text-right tabular-nums text-[11px] leading-tight break-all sm:w-[7.5rem] sm:min-w-[7.5rem] sm:text-sm sm:leading-normal";
+
+/** Local time-of-day (Period); left of category / subcategory. */
+const txRowTimeColClass =
+  "w-[3.25rem] min-w-[3.25rem] max-w-[4.25rem] shrink-0 tabular-nums text-[11px] leading-tight text-zinc-600 dark:text-zinc-400 sm:w-[4.25rem] sm:min-w-[4.25rem] sm:max-w-[4.5rem] sm:text-xs sm:leading-snug";
+
+/**
+ * Time | Category | Note | Description | Income | Expense — subcategory and account on the
+ * second line under Category and Note; description is a single muted column.
+ */
 const txRowGridClass =
-  "grid w-full max-w-full grid-cols-1 gap-x-3 gap-y-2 sm:grid-cols-[minmax(0,1.25fr)_minmax(0,1.5fr)_7rem_7rem] sm:items-start";
+  "grid w-full max-w-full grid-cols-[minmax(2.75rem,3.35rem)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,0.95fr)_minmax(2.85rem,4.25rem)_minmax(2.85rem,4.25rem)] items-start gap-x-1.5 gap-y-1 sm:grid-cols-[4.25rem_minmax(0,1.05fr)_minmax(0,0.95fr)_minmax(0,1.1fr)_7rem_7rem] sm:gap-x-2 sm:gap-y-2";
 
 export type CalendarMonthTransactionsGroupedProps = {
   rows: Record<string, unknown>[];
@@ -104,6 +110,20 @@ export type CalendarMonthTransactionsGroupedProps = {
   resetDayExpansionWhenGroupIsosChange?: boolean;
   /** Expand this calendar day once when it appears in `groups` (e.g. account drill → latest tx). */
   initialExpandedDayIso?: string | null;
+  /**
+   * Show Expand/Collapse all toolbar (e.g. off for inline dashboard / calendar pages).
+   * @default true
+   */
+  showDateGroupControls?: boolean;
+  /**
+   * When true, each day’s transaction list is shown until the user collapses it (or “Collapse all dates”).
+   * When false (default), days start collapsed; use “Expand all dates” or the day header to open.
+   */
+  defaultDayRowsExpanded?: boolean;
+  /**
+   * Parent increments this (e.g. account drill “expand everything”) to open every day group.
+   */
+  expandAllNonce?: number;
 };
 
 export function CalendarMonthTransactionsGrouped({
@@ -115,16 +135,34 @@ export function CalendarMonthTransactionsGrouped({
   dateLabelStyle = "day",
   resetDayExpansionWhenGroupIsosChange = false,
   initialExpandedDayIso = null,
+  showDateGroupControls = true,
+  defaultDayRowsExpanded = false,
+  expandAllNonce,
 }: CalendarMonthTransactionsGroupedProps) {
   const currencySettings = useCurrencySettings();
   const amountCol = useMemo(() => amountColumnName(columns), [columns]);
-  /** `true` = expanded (transactions visible); `undefined` / `false` = collapsed (date row only) */
+  const descriptionColumnKey = useMemo(
+    () =>
+      columns.find((c) => c.trim().toLowerCase() === "description") ?? null,
+    [columns],
+  );
+  /**
+   * When `defaultDayRowsExpanded` is false: `true` = expanded; missing / `false` = collapsed.
+   * When true: missing / `true` = expanded; explicit `false` = collapsed.
+   */
   const [dayExpanded, setDayExpanded] = useState<Record<string, boolean>>({});
 
-  const isDayOpen = (iso: string) => dayExpanded[iso] === true;
+  const isDayOpen = (iso: string) =>
+    defaultDayRowsExpanded
+      ? dayExpanded[iso] !== false
+      : dayExpanded[iso] === true;
 
   const toggleDay = (iso: string) => {
     setDayExpanded((prev) => {
+      if (defaultDayRowsExpanded) {
+        const open = prev[iso] !== false;
+        return { ...prev, [iso]: !open };
+      }
       const wasOpen = prev[iso] === true;
       return { ...prev, [iso]: !wasOpen };
     });
@@ -134,7 +172,7 @@ export function CalendarMonthTransactionsGrouped({
     if (!periodColumn || rows.length === 0) return [];
     const map = new Map<string, Record<string, unknown>[]>();
     for (const row of rows) {
-      const iso = periodToIsoDate(row[periodColumn]);
+      const iso = rowCalendarIsoKey(row, periodColumn);
       if (!iso) continue;
       if (
         monthScope != null &&
@@ -148,6 +186,7 @@ export function CalendarMonthTransactionsGrouped({
     const dates = [...map.keys()].sort((a, b) => b.localeCompare(a));
     return dates.map((iso) => {
       const dayRows = map.get(iso)!;
+      sortTransactionRowsLatestPeriodFirst(dayRows, periodColumn);
       let dayIncome = 0;
       let dayExpense = 0;
       for (const row of dayRows) {
@@ -158,6 +197,35 @@ export function CalendarMonthTransactionsGrouped({
       return { iso, rows: dayRows, dayIncome, dayExpense };
     });
   }, [rows, periodColumn, amountCol, monthScope]);
+
+  const expandAllDates = useCallback(() => {
+    setDayExpanded((prev) => {
+      const next = { ...prev };
+      for (const g of groups) {
+        next[g.iso] = true;
+      }
+      return next;
+    });
+  }, [groups]);
+
+  const collapseAllDates = useCallback(() => {
+    if (defaultDayRowsExpanded) {
+      setDayExpanded(Object.fromEntries(groups.map((g) => [g.iso, false])));
+    } else {
+      setDayExpanded({});
+    }
+  }, [groups, defaultDayRowsExpanded]);
+
+  const allDatesExpanded = useMemo(
+    () =>
+      groups.length > 0 &&
+      groups.every((g) =>
+        defaultDayRowsExpanded
+          ? dayExpanded[g.iso] !== false
+          : dayExpanded[g.iso] === true,
+      ),
+    [groups, dayExpanded, defaultDayRowsExpanded],
+  );
 
   const groupIsoSig = useMemo(
     () => groups.map((g) => g.iso).sort().join("\0"),
@@ -174,7 +242,7 @@ export function CalendarMonthTransactionsGrouped({
       monthScope == null
         ? "all"
         : `${monthScope.year}-${monthScope.month}`,
-    [monthScope?.year, monthScope?.month],
+    [monthScope],
   );
 
   const appliedInitialDayRef = useRef<string | null>(null);
@@ -198,12 +266,35 @@ export function CalendarMonthTransactionsGrouped({
     setDayExpanded({ [initialExpandedDayIso]: true });
   }, [groups, initialExpandedDayIso, monthScopeKey, periodColumn]);
 
+  const lastParentExpandRef = useRef<{
+    nonce: number;
+    isoSig: string;
+  } | null>(null);
+
+  useLayoutEffect(() => {
+    if (expandAllNonce == null || expandAllNonce < 1) return;
+    if (groups.length === 0) return;
+    const prev = lastParentExpandRef.current;
+    if (
+      prev != null &&
+      prev.nonce === expandAllNonce &&
+      prev.isoSig === groupIsoSig
+    ) {
+      return;
+    }
+    lastParentExpandRef.current = {
+      nonce: expandAllNonce,
+      isoSig: groupIsoSig,
+    };
+    setDayExpanded(Object.fromEntries(groups.map((g) => [g.iso, true])));
+  }, [expandAllNonce, groupIsoSig, groups]);
+
   const groupFailureReason = useMemo((): "unparseable" | "outside-month" | null => {
     if (!periodColumn || rows.length === 0) return null;
     let parsedAny = false;
     let inScopeAny = false;
     for (const row of rows) {
-      const iso = periodToIsoDate(row[periodColumn]);
+      const iso = rowCalendarIsoKey(row, periodColumn);
       if (!iso) continue;
       parsedAny = true;
       if (
@@ -243,6 +334,23 @@ export function CalendarMonthTransactionsGrouped({
 
   return (
     <div>
+      {showDateGroupControls ? (
+        <div className="mb-3 flex flex-wrap items-center justify-end gap-2">
+          <button
+            type="button"
+            className={btnSmallSecondary}
+            aria-expanded={allDatesExpanded}
+            aria-label={
+              allDatesExpanded
+                ? "Collapse all date sections"
+                : "Expand all date sections"
+            }
+            onClick={allDatesExpanded ? collapseAllDates : expandAllDates}
+          >
+            {allDatesExpanded ? "Collapse all dates" : "Expand all dates"}
+          </button>
+        </div>
+      ) : null}
       <div className="space-y-3">
       {groups.map((g) => {
         const d = new Date(`${g.iso}T12:00:00`);
@@ -262,10 +370,10 @@ export function CalendarMonthTransactionsGrouped({
               : "border-zinc-200 bg-zinc-50/80 dark:border-zinc-700 dark:bg-zinc-900/50";
         const dowHeaderHoverClass =
           dow === 0
-            ? "hover:bg-red-100/80 dark:hover:bg-red-950/50"
+            ? "hover:bg-red-100/90 dark:hover:bg-red-950/55 hover:ring-1 hover:ring-red-200/70 dark:hover:ring-red-900/45"
             : dow === 6
-              ? "hover:bg-blue-100/80 dark:hover:bg-blue-950/50"
-              : "hover:bg-zinc-100/90 dark:hover:bg-zinc-800/60";
+              ? "hover:bg-blue-100/90 dark:hover:bg-blue-950/55 hover:ring-1 hover:ring-blue-200/70 dark:hover:ring-blue-900/45"
+              : "hover:bg-zinc-200/90 dark:hover:bg-zinc-800/70 hover:ring-1 hover:ring-zinc-300/60 dark:hover:ring-zinc-600/50";
 
         const open = isDayOpen(g.iso);
 
@@ -295,16 +403,16 @@ export function CalendarMonthTransactionsGrouped({
                   </>
                 )}
               </div>
-              <div className="flex shrink-0 items-baseline gap-3 sm:gap-4">
-                <div className={`text-sm ${amountColClass}`}>
+              <div className="flex min-w-0 shrink flex-col items-end gap-0.5 sm:flex-row sm:items-baseline sm:gap-4">
+                <div className={dayHeaderAmountColClass}>
                   <span
-                    className={`font-semibold tabular-nums ${incomeHeadlineTextClass}`}
+                    className={`block font-semibold break-all sm:inline ${incomeHeadlineTextClass}`}
                   >
                     {formatMainCurrencyTotal(g.dayIncome, currencySettings)}
                   </span>
                 </div>
-                <div className={`text-sm ${amountColClass}`}>
-                  <span className="font-semibold tabular-nums text-rose-600 dark:text-rose-400">
+                <div className={dayHeaderAmountColClass}>
+                  <span className="block font-semibold break-all text-rose-600 dark:text-rose-400 sm:inline">
                     {formatMainCurrencyTotal(g.dayExpense, currencySettings)}
                   </span>
                 </div>
@@ -317,110 +425,75 @@ export function CalendarMonthTransactionsGrouped({
               aria-labelledby={`day-hdr-${g.iso}`}
               className="space-y-1 border-t border-zinc-200/90 bg-white/60 px-1 pb-2 pt-1 dark:border-zinc-700/90 dark:bg-zinc-950/30"
             >
-              {g.rows.map((row, i) => {
-                const id = getTransactionRowId(row);
-                const canEdit = id != null;
-                const { income, expense } = rowIncomeExpenseAmounts(row, amountCol);
-                const isTransfer = transferLegFromRow(row) != null;
-                const catRaw = String(row["Category"] ?? "").trim();
-                const categoryDisplay =
-                  isTransfer &&
-                  (!catRaw ||
-                    catRaw === "—" ||
-                    isRedundantTransferCategoryLabel(catRaw))
-                    ? "Other"
-                    : catRaw || "—";
-                const sub = String(row["Subcategory"] ?? "").trim();
-                const note = String(row["Note"] ?? "").trim();
-                const acct = String(row["Accounts"] ?? "").trim();
-                const { fromAccount, toAccount } = parseTransferAccountsFromRow(row);
-                const fromAcc = fromAccount.trim();
-                const toAcc = toAccount.trim();
-                const hasTransferAccountFlow =
-                  isTransfer && fromAcc.length > 0 && toAcc.length > 0;
-
-                return (
-                  <div
-                    key={row.id != null ? String(row.id) : i}
-                    role={canEdit ? "button" : undefined}
-                    tabIndex={canEdit ? 0 : undefined}
-                    onClick={canEdit ? () => onRowClick(row) : undefined}
-                    onKeyDown={
-                      canEdit
-                        ? (e) => {
-                            if (e.key === "Enter" || e.key === " ") {
-                              e.preventDefault();
-                              onRowClick(row);
-                            }
-                          }
-                        : undefined
-                    }
-                    className={`${txRowGridClass} rounded-lg px-2 py-2 text-sm ${
-                      canEdit
-                        ? "cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800/60"
-                        : ""
-                    }`}
-                  >
-                    <div className="min-w-0">
-                      <div className="font-medium text-zinc-900 dark:text-zinc-100">
-                        {categoryDisplay}
-                      </div>
-                      {sub ? (
-                        <div className="text-xs text-zinc-500 dark:text-zinc-400">
-                          {sub}
-                        </div>
-                      ) : null}
-                    </div>
-                    <div className="flex min-w-0 flex-col gap-1 leading-snug">
-                      {note ? (
-                        <div className="break-words text-sm text-zinc-800 dark:text-zinc-200">
-                          {note}
-                        </div>
-                      ) : null}
-                      {hasTransferAccountFlow ? (
-                        <div
-                          className={`inline-flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs ${transferMoneyTextClass}`}
-                          title="Transfer"
-                        >
-                          <span className="break-words">{fromAcc}</span>
-                          <span className="shrink-0 font-semibold" aria-hidden>
-                            →
-                          </span>
-                          <span className="break-words">{toAcc}</span>
-                        </div>
-                      ) : acct ? (
-                        <div className="break-words text-xs text-zinc-500 dark:text-zinc-400">
-                          {acct}
-                        </div>
-                      ) : null}
-                    </div>
-                    <div className="flex justify-end gap-3 sm:contents sm:gap-0">
-                      <div className={`tabular-nums ${amountColClass}`}>
-                        {income != null ? (
-                          <span className={`font-medium ${incomeFlowTextClass}`}>
-                            {formatPreviewAmountDisplay(
-                              income,
-                              row,
-                              currencySettings,
-                            )}
-                          </span>
-                        ) : null}
-                      </div>
-                      <div className={`tabular-nums ${amountColClass}`}>
-                        {expense != null ? (
-                          <span className="font-medium text-rose-600 dark:text-rose-400">
-                            {formatPreviewAmountDisplay(
-                              expense,
-                              row,
-                              currencySettings,
-                            )}
-                          </span>
-                        ) : null}
-                      </div>
-                    </div>
+              <div
+                className={`${txRowGridClass} mb-1 border-b border-zinc-200/80 px-2 pb-2 pt-0.5 dark:border-zinc-700/80 sm:hidden`}
+                aria-hidden
+              >
+                <div className={txRowTimeColClass}>
+                  <div className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                    Time
                   </div>
-                );
-              })}
+                  <div className="text-[10px] leading-none text-zinc-400/0 dark:text-zinc-500/0">
+                    &nbsp;
+                  </div>
+                </div>
+                <div className="min-w-0">
+                  <div className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                    Category
+                  </div>
+                  <div className="text-[10px] text-zinc-400 dark:text-zinc-500">
+                    Subcategory
+                  </div>
+                </div>
+                <div className="min-w-0">
+                  <div className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                    Note
+                  </div>
+                  <div className="text-[10px] text-zinc-400 dark:text-zinc-500">
+                    Account
+                  </div>
+                </div>
+                <div className="min-w-0">
+                  <div className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                    Description
+                  </div>
+                  <div className="text-[10px] leading-none text-zinc-400/0 dark:text-zinc-500/0">
+                    &nbsp;
+                  </div>
+                </div>
+                <div
+                  className={`text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400 ${txRowAmountColClass}`}
+                >
+                  Income
+                </div>
+                <div
+                  className={`text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400 ${txRowAmountColClass}`}
+                >
+                  Expense
+                </div>
+              </div>
+              {g.rows.length >= CALENDAR_DAY_TX_VIRTUALIZE_THRESHOLD ? (
+                <VirtualizedDayTxList
+                  rows={g.rows}
+                  periodColumn={periodColumn!}
+                  amountCol={amountCol}
+                  descriptionColumnKey={descriptionColumnKey}
+                  currencySettings={currencySettings}
+                  onRowClick={onRowClick}
+                />
+              ) : (
+                g.rows.map((row, i) => (
+                  <CalendarDayTxRow
+                    key={row.id != null ? String(row.id) : i}
+                    row={row}
+                    periodColumn={periodColumn!}
+                    amountCol={amountCol}
+                    descriptionColumnKey={descriptionColumnKey}
+                    currencySettings={currencySettings}
+                    onRowClick={onRowClick}
+                  />
+                ))
+              )}
             </div>
             ) : null}
           </div>

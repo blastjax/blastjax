@@ -1,12 +1,12 @@
 """
-SQLite storage for budget rows. Excel headers map to fixed SQL columns.
-Uploading an Excel file replaces all existing `budget_data` rows, then inserts
-rows from every worksheet in the file (duplicate rows are skipped by row hash).
-There is no per-row sheet name in the database.
+Budget workbook storage: SQLite file or PostgreSQL (``DATABASE_URL``).
 
-Timestamps are stored as ISO-8601 text (UTC) for stable sorting and migration
-from PostgreSQL. JSON preferences are stored as TEXT. Binary blobs are not used;
-if added later, use BLOB columns and pass bytes/buffer objects.
+Excel headers map to fixed SQL columns. Uploading an Excel file replaces all
+existing ``budget_data`` rows, then inserts rows from every worksheet (duplicate
+rows are skipped by row hash). There is no per-row sheet name in the database.
+
+Timestamps are stored as ISO-8601 text (UTC) for stable sorting. JSON preferences
+are stored as TEXT. Binary blobs are not used.
 """
 
 from __future__ import annotations
@@ -14,19 +14,26 @@ from __future__ import annotations
 import datetime as dt_module
 import hashlib
 import json
+import logging
 import os
 import secrets
+import shutil
 import sqlite3
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote, quote_plus
+
+import psycopg2
 
 from app.reserved_names import is_reserved_category_label
 
 from dotenv import load_dotenv
 
 import pandas as pd
+
+_log = logging.getLogger(__name__)
 
 # Project root (parent of backend/). Load env before reading DATABASE_URL.
 _ROOT = Path(__file__).resolve().parent.parent
@@ -51,18 +58,134 @@ def _parse_sqlite_url(url: str) -> Path:
     return p.resolve()
 
 
+def _sqlite_url_for_absolute_path(path: Path) -> str:
+    """``sqlite:////abs/path`` form expected by :func:`_parse_sqlite_url`."""
+    posix = path.resolve().as_posix()
+    if not posix.startswith("/"):
+        raise ValueError(f"SQLite path must be absolute for URL encoding: {path}")
+    return "sqlite:///" + posix
+
+
+# When ``BUDGET_SQLITE_WORKING_COPY`` is set: host bind path → tmp file; see ``apply_sqlite_working_copy_maybe``.
+_SQLITE_WORKING_HOST: Path | None = None
+_SQLITE_WORKING_TMP: Path | None = None
+
+
+def apply_sqlite_working_copy_maybe() -> None:
+    """
+    Docker Desktop (Windows) bind mounts often break SQLite entirely (disk I/O on
+    any journal mode). Copy ``DATABASE_URL``'s file to a container-local path
+    (default ``/tmp/...``), point ``DATABASE_URL`` there for the process lifetime,
+    then :func:`sync_sqlite_working_copy_maybe` copies back on shutdown.
+
+    Enable with ``BUDGET_SQLITE_WORKING_COPY=1``. Optional ``BUDGET_SQLITE_WORKING_COPY_PATH``.
+    """
+    global _SQLITE_WORKING_HOST, _SQLITE_WORKING_TMP
+    _SQLITE_WORKING_HOST = None
+    _SQLITE_WORKING_TMP = None
+    flag = (os.environ.get("BUDGET_SQLITE_WORKING_COPY") or "").strip().lower()
+    if flag not in ("1", "true", "yes", "on"):
+        return
+    url = (os.environ.get("DATABASE_URL") or "").strip()
+    if not url.lower().startswith("sqlite:"):
+        return
+    try:
+        host_path = _parse_sqlite_url(url)
+    except ValueError:
+        _log.warning("BUDGET_SQLITE_WORKING_COPY: invalid DATABASE_URL")
+        return
+    tmp_raw = (os.environ.get("BUDGET_SQLITE_WORKING_COPY_PATH") or "").strip()
+    tmp_path = Path(tmp_raw or "/tmp/budget.sqlite.working").expanduser()
+    if not tmp_path.is_absolute():
+        _log.warning("BUDGET_SQLITE_WORKING_COPY_PATH must be absolute; got %s", tmp_path)
+        return
+    tmp_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        if host_path.is_file():
+            shutil.copy2(host_path, tmp_path)
+        else:
+            host_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp_path.unlink(missing_ok=True)
+    except OSError as e:
+        _log.warning(
+            "BUDGET_SQLITE_WORKING_COPY: disabled (%s). Using DATABASE_URL on the host volume.",
+            e,
+        )
+        return
+    _SQLITE_WORKING_HOST = host_path
+    _SQLITE_WORKING_TMP = tmp_path
+    os.environ["DATABASE_URL"] = _sqlite_url_for_absolute_path(tmp_path)
+    _log.info(
+        "SQLite working copy: %s → %s (writes here; synced back on clean shutdown)",
+        host_path,
+        tmp_path,
+    )
+
+
+def sync_sqlite_working_copy_maybe() -> None:
+    """Persist working-copy DB back to the host path set by :func:`apply_sqlite_working_copy_maybe`."""
+    global _SQLITE_WORKING_HOST, _SQLITE_WORKING_TMP
+    host = _SQLITE_WORKING_HOST
+    tmp = _SQLITE_WORKING_TMP
+    _SQLITE_WORKING_HOST = None
+    _SQLITE_WORKING_TMP = None
+    if host is None or tmp is None:
+        return
+    if not tmp.is_file():
+        return
+    try:
+        host.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(tmp, host)
+        _log.info("SQLite working copy synced to %s", host)
+    except OSError as e:
+        _log.error(
+            "SQLite working copy: could not write to host path %s (%s). "
+            "Current database file is still at %s inside the container.",
+            host,
+            e,
+            tmp,
+        )
+
+
 def _is_unique_constraint(err: BaseException) -> bool:
-    return isinstance(err, sqlite3.IntegrityError) and "UNIQUE" in str(err)
+    if isinstance(err, sqlite3.IntegrityError):
+        return "UNIQUE" in str(err).upper()
+    if type(err).__module__.startswith("psycopg2"):
+        msg = str(err).lower()
+        return "unique" in msg and "violates" in msg
+    return False
+
+
+class _PostgresCursorProxy:
+    """psycopg2 uses ``%s`` placeholders; app SQL is written with ``?`` like sqlite3."""
+
+    __slots__ = ("_cur",)
+
+    def __init__(self, cur: Any) -> None:
+        self._cur = cur
+
+    def execute(self, operation: str, parameters: Any | None = None) -> Any:
+        op = operation.replace("?", "%s")
+        if parameters is not None:
+            return self._cur.execute(op, parameters)
+        return self._cur.execute(op)
+
+    def executemany(self, operation: str, seq_of_parameters: Any) -> Any:
+        return self._cur.executemany(operation.replace("?", "%s"), seq_of_parameters)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._cur, name)
 
 
 @contextmanager
-def _db_cursor(conn: sqlite3.Connection):
-    """sqlite3.Cursor is only a context manager on Python 3.12+."""
-    cur = conn.cursor()
+def db_cursor(conn: Any):
+    """Yield a cursor; PostgreSQL connections get ``?`` → ``%s`` translation."""
+    raw = conn.cursor()
+    cur: Any = _PostgresCursorProxy(raw) if storage_kind() == "postgres" else raw
     try:
         yield cur
     finally:
-        cur.close()
+        raw.close()
 
 EXCEL_TO_SQL: list[tuple[str, str]] = [
     ("Period", "period"),
@@ -86,13 +209,106 @@ IGNORED_LEGACY_EXCEL_COLS = frozenset({"Accounts.1"})
 WORKBOOK_SHEET_KEY = os.environ.get("BUDGET_WORKBOOK_SHEET", "Budget")
 
 
+def _database_url_from_db_parts() -> str | None:
+    """
+    Build ``postgresql://...`` when ``DATABASE_URL`` is unset but Postgres parts are.
+
+    Uses ``DB_HOST``, ``DB_NAME`` (required), ``DB_USER``, ``DB_PASSWORD``, ``DB_PORT``
+    (default ``5432``). User and password are URL-encoded for special characters.
+    """
+    host = (os.environ.get("DB_HOST") or "").strip()
+    if not host:
+        return None
+    dbname = (os.environ.get("DB_NAME") or "").strip()
+    if not dbname:
+        return None
+    user = (os.environ.get("DB_USER") or "").strip()
+    password = os.environ.get("DB_PASSWORD") or ""
+    port = (os.environ.get("DB_PORT") or "5432").strip() or "5432"
+    path = quote(dbname, safe="")
+    if user and password:
+        return (
+            f"postgresql://{quote_plus(user)}:{quote_plus(password)}"
+            f"@{host}:{port}/{path}"
+        )
+    if user:
+        return f"postgresql://{quote_plus(user)}@{host}:{port}/{path}"
+    if password:
+        return f"postgresql://:{quote_plus(password)}@{host}:{port}/{path}"
+    return f"postgresql://{host}:{port}/{path}"
+
+
 def database_url() -> str | None:
-    return os.environ.get("DATABASE_URL") or None
+    direct = (os.environ.get("DATABASE_URL") or "").strip()
+    if direct:
+        return direct
+    return _database_url_from_db_parts()
+
+
+def storage_kind() -> str:
+    """``sqlite`` | ``postgres`` | ``none`` from ``DATABASE_URL`` or ``DB_*`` parts."""
+    u = (database_url() or "").strip().lower()
+    if u.startswith("sqlite:"):
+        return "sqlite"
+    if u.startswith("postgresql:") or u.startswith("postgres:"):
+        return "postgres"
+    return "none"
 
 
 def use_database() -> bool:
-    u = database_url()
-    return bool(u and u.strip().lower().startswith("sqlite:"))
+    return storage_kind() in ("sqlite", "postgres")
+
+
+def minimal_schema_enabled() -> bool:
+    """When true, ``init_schema`` creates only payslip, installment, and installment_line."""
+    v = (os.environ.get("BUDGET_DB_MINIMAL_SCHEMA") or "").strip().lower()
+    return v in ("1", "true", "yes", "on")
+
+
+_SQLITE_JOURNAL_MODES = frozenset(
+    {"delete", "truncate", "persist", "memory", "wal", "off"}
+)
+
+
+def _sqlite_journal_io_error(e: BaseException) -> bool:
+    msg = str(e).lower()
+    return "i/o" in msg or "disk" in msg
+
+
+def _set_sqlite_journal_mode(conn: sqlite3.Connection) -> None:
+    """
+    Pick a journal mode the filesystem allows. Host bind mounts often reject
+    any on-disk journal (WAL sidecars, or DELETE rollback files) → try MEMORY.
+    """
+    env = (os.environ.get("BUDGET_SQLITE_JOURNAL_MODE") or "").strip().lower()
+    modes: list[str] = []
+    if env in _SQLITE_JOURNAL_MODES:
+        modes.append(env)
+    for m in ("wal", "delete", "memory"):
+        if m not in modes:
+            modes.append(m)
+    first = modes[0]
+    last_io: sqlite3.OperationalError | None = None
+    for mode in modes:
+        try:
+            conn.execute(f"PRAGMA journal_mode = {mode}")
+            row = conn.execute("PRAGMA journal_mode").fetchone()
+            actual = str(row[0]).lower() if row else mode
+            if mode != first:
+                _log.warning(
+                    "SQLite journal_mode: could not use %r on this storage; using %r. "
+                    "Set BUDGET_SQLITE_JOURNAL_MODE=memory for Docker bind mounts if needed.",
+                    first,
+                    actual,
+                )
+            return
+        except sqlite3.OperationalError as e:
+            last_io = e
+            if not _sqlite_journal_io_error(e):
+                raise
+    assert last_io is not None
+    _log.error("SQLite journal_mode: exhausted wal/delete/memory (%s)", last_io)
+    raise last_io
 
 
 def _configure_sqlite_connection(conn: sqlite3.Connection) -> None:
@@ -100,9 +316,13 @@ def _configure_sqlite_connection(conn: sqlite3.Connection) -> None:
     Per-connection settings for read-heavy workloads (WAL + larger cache).
     Override with BUDGET_SQLITE_CACHE_KB (negative = KiB, e.g. 65536 → 64 MiB)
     and BUDGET_SQLITE_MMAP_MB (0 to disable).
+
+    ``BUDGET_SQLITE_JOURNAL_MODE`` (delete, wal, memory, …): tried first; on disk
+    I/O errors the code falls back through wal → delete → memory. Docker bind
+    mounts often need ``memory`` (journal in RAM, DB file still on the volume).
     """
     conn.execute("PRAGMA foreign_keys = ON")
-    conn.execute("PRAGMA journal_mode = WAL")
+    _set_sqlite_journal_mode(conn)
     # WAL + NORMAL is a common balance; FULL is slower on every commit.
     conn.execute("PRAGMA synchronous = NORMAL")
     conn.execute("PRAGMA temp_store = MEMORY")
@@ -119,31 +339,53 @@ def _configure_sqlite_connection(conn: sqlite3.Connection) -> None:
         mmap_mb = 128
     mmap_mb = max(0, min(mmap_mb, 2048))
     if mmap_mb > 0:
-        conn.execute(f"PRAGMA mmap_size = {mmap_mb * 1024 * 1024}")
+        try:
+            conn.execute(f"PRAGMA mmap_size = {mmap_mb * 1024 * 1024}")
+        except sqlite3.OperationalError as e:
+            if _sqlite_journal_io_error(e):
+                _log.warning("PRAGMA mmap_size failed (%s); continuing with mmap disabled", e)
+            else:
+                raise
     # Milliseconds; complements connect(timeout=...).
     conn.execute("PRAGMA busy_timeout = 30000")
 
 
 @contextmanager
 def get_connection():
-    url = database_url()
-    if not url or not url.strip().lower().startswith("sqlite:"):
+    url = (database_url() or "").strip()
+    kind = storage_kind()
+    if kind == "sqlite":
+        if not url.lower().startswith("sqlite:"):
+            raise RuntimeError(
+                "DATABASE_URL must be a SQLite URL (e.g. sqlite:///./data/budget.sqlite)"
+            )
+        path = _parse_sqlite_url(url)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(str(path), timeout=30.0)
+        try:
+            _configure_sqlite_connection(conn)
+            yield conn
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+    elif kind == "postgres":
+        conn = psycopg2.connect(url)
+        try:
+            yield conn
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+    else:
         raise RuntimeError(
-            "DATABASE_URL must be set to a SQLite URL "
-            "(e.g. sqlite:///./data/budget.sqlite)"
+            "DATABASE_URL must be set to sqlite:///... or postgresql://... "
+            "(e.g. postgresql://user:pass@localhost:5432/budgetapp)"
         )
-    path = _parse_sqlite_url(url.strip())
-    path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(path), timeout=30.0)
-    try:
-        _configure_sqlite_connection(conn)
-        yield conn
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.close()
 
 
 def _ie_norm_sql() -> str:
@@ -231,7 +473,7 @@ def _purge_reserved_accounts_category_rows(cur: Any) -> None:
 def seed_category_catalog_from_budget_data() -> dict[str, int]:
     """Public entry: merge budget_data distinct labels into catalog tables."""
     with get_connection() as conn:
-        with _db_cursor(conn) as cur:
+        with db_cursor(conn) as cur:
             c, s = _seed_category_catalog_from_budget_data(cur)
     return {"categories_inserted": c, "subcategories_inserted": s}
 
@@ -262,48 +504,264 @@ def _backfill_installment_lines_if_empty(cur: Any) -> None:
             )
 
 
-def _ensure_sqlite_performance_indexes(cur: Any) -> None:
+def _ensure_category_catalog_hide_from_preview_column(cur: Any) -> None:
+    """Add hide_from_data_preview to category_catalog on older DBs (idempotent)."""
+    if storage_kind() == "postgres":
+        cur.execute(
+            """
+            SELECT 1 FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = 'category_catalog'
+              AND column_name = 'hide_from_data_preview'
+            LIMIT 1
+            """
+        )
+        if cur.fetchone():
+            return
+        cur.execute(
+            """
+            ALTER TABLE category_catalog
+            ADD COLUMN hide_from_data_preview INTEGER NOT NULL DEFAULT 0
+            """
+        )
+        return
+    cur.execute("PRAGMA table_info(category_catalog)")
+    cols = [row[1] for row in cur.fetchall()]
+    if "hide_from_data_preview" in cols:
+        return
+    cur.execute(
+        """
+        ALTER TABLE category_catalog ADD COLUMN hide_from_data_preview INTEGER NOT NULL DEFAULT 0
+        """
+    )
+
+
+_MINIMAL_PERF_INDEX_DDL = """
+CREATE INDEX IF NOT EXISTS idx_payslip_period_sort ON payslip(
+    period_year DESC, period_month DESC, period_half DESC, created_at DESC
+);
+CREATE INDEX IF NOT EXISTS idx_installment_finish_name ON installment(finish_date, name);
+"""
+
+_MINIMAL_SCHEMA_SQLITE = """
+CREATE TABLE IF NOT EXISTS payslip (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    total REAL,
+    commission REAL,
+    reimbursement REAL,
+    medical_reimbursement REAL,
+    others REAL,
+    mp2 REAL,
+    allowances REAL,
+    period_year INTEGER,
+    period_month INTEGER,
+    period_half INTEGER,
+    notes TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_payslip_created ON payslip (created_at DESC);
+
+CREATE TABLE IF NOT EXISTS installment (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    installment_current INTEGER NOT NULL,
+    installment_total INTEGER NOT NULL,
+    principal REAL NOT NULL,
+    interest REAL,
+    payment_total REAL NOT NULL,
+    start_date TEXT NOT NULL,
+    finish_date TEXT NOT NULL,
+    remaining REAL NOT NULL,
+    original_total REAL NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    CONSTRAINT chk_installment_n CHECK (
+        installment_total >= 1
+        AND installment_current >= 1
+        AND installment_current <= installment_total + 1
+    ),
+    CONSTRAINT chk_installment_amounts CHECK (payment_total > 0 AND remaining >= 0)
+);
+CREATE INDEX IF NOT EXISTS idx_installment_created ON installment (created_at DESC);
+
+CREATE TABLE IF NOT EXISTS installment_line (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    installment_id INTEGER NOT NULL REFERENCES installment(id) ON DELETE CASCADE,
+    seq INTEGER NOT NULL,
+    principal REAL NOT NULL DEFAULT 0,
+    interest REAL,
+    payment_total REAL NOT NULL,
+    UNIQUE (installment_id, seq)
+);
+CREATE INDEX IF NOT EXISTS idx_installment_line_parent
+    ON installment_line (installment_id);
+"""
+
+
+_PERFORMANCE_INDEX_DDL = """
+CREATE INDEX IF NOT EXISTS idx_budget_data_period ON budget_data(period);
+CREATE INDEX IF NOT EXISTS idx_budget_data_period_id ON budget_data(period, id);
+CREATE INDEX IF NOT EXISTS idx_budget_data_created_at ON budget_data(created_at);
+CREATE INDEX IF NOT EXISTS idx_budget_accounts_norm_id
+    ON budget_data (LOWER(TRIM(COALESCE(accounts, ''))), id);
+CREATE INDEX IF NOT EXISTS idx_budget_currency_norm_id
+    ON budget_data (LOWER(TRIM(COALESCE(currency, ''))), id);
+CREATE INDEX IF NOT EXISTS idx_budget_accounts_nonempty ON budget_data(accounts)
+    WHERE accounts IS NOT NULL AND TRIM(accounts) <> '';
+CREATE INDEX IF NOT EXISTS idx_budget_currency_nonempty ON budget_data(currency)
+    WHERE currency IS NOT NULL AND TRIM(currency) <> '';
+CREATE INDEX IF NOT EXISTS idx_payslip_period_sort ON payslip(
+    period_year DESC, period_month DESC, period_half DESC, created_at DESC
+);
+CREATE INDEX IF NOT EXISTS idx_installment_finish_name ON installment(finish_date, name);
+CREATE INDEX IF NOT EXISTS idx_category_catalog_name_lower ON category_catalog(LOWER(name));
+CREATE INDEX IF NOT EXISTS idx_subcategory_cat_lower ON subcategory_catalog(category_id, LOWER(name));
+"""
+
+
+def _ensure_performance_indexes(cur: Any) -> None:
     """
     Secondary indexes for common filters and ORDER BY paths (idempotent).
     Run after base schema; safe on existing DBs.
     """
-    cur.executescript(
-        """
-        -- budget_data: ISO period for time-range scans; created_at for recent-first ideas
-        CREATE INDEX IF NOT EXISTS idx_budget_data_period ON budget_data(period);
-        CREATE INDEX IF NOT EXISTS idx_budget_data_created_at ON budget_data(created_at);
-
-        -- Account/currency normalization lookups (LOWER(TRIM(...)) = ?) + ORDER BY id DESC
-        CREATE INDEX IF NOT EXISTS idx_budget_accounts_norm_id
-            ON budget_data (LOWER(TRIM(COALESCE(accounts, ''))), id);
-        CREATE INDEX IF NOT EXISTS idx_budget_currency_norm_id
-            ON budget_data (LOWER(TRIM(COALESCE(currency, ''))), id);
-
-        -- Distinct pickers: non-empty accounts/currency (trimmed)
-        CREATE INDEX IF NOT EXISTS idx_budget_accounts_nonempty ON budget_data(accounts)
-            WHERE accounts IS NOT NULL AND TRIM(accounts) <> '';
-        CREATE INDEX IF NOT EXISTS idx_budget_currency_nonempty ON budget_data(currency)
-            WHERE currency IS NOT NULL AND TRIM(currency) <> '';
-
-        -- Payslip list ordering
-        CREATE INDEX IF NOT EXISTS idx_payslip_period_sort ON payslip(
-            period_year DESC, period_month DESC, period_half DESC, created_at DESC
-        );
-
-        -- Installment list: ORDER BY finish_date, name
-        CREATE INDEX IF NOT EXISTS idx_installment_finish_name ON installment(finish_date, name);
-
-        -- Catalog UIs: ORDER BY LOWER(name)
-        CREATE INDEX IF NOT EXISTS idx_category_catalog_name_lower ON category_catalog(LOWER(name));
-        CREATE INDEX IF NOT EXISTS idx_subcategory_cat_lower ON subcategory_catalog(category_id, LOWER(name));
-        """
-    )
+    if storage_kind() == "postgres":
+        for stmt in _PERFORMANCE_INDEX_DDL.strip().split(";"):
+            s = stmt.strip()
+            if s:
+                cur.execute(s)
+        cur.execute("ANALYZE")
+        return
+    cur.executescript(_PERFORMANCE_INDEX_DDL)
     cur.execute("ANALYZE")
+
+
+def _ensure_minimal_performance_indexes(cur: Any) -> None:
+    if storage_kind() == "postgres":
+        for stmt in _MINIMAL_PERF_INDEX_DDL.strip().split(";"):
+            s = stmt.strip()
+            if s:
+                cur.execute(s)
+        cur.execute("ANALYZE")
+        return
+    cur.executescript(_MINIMAL_PERF_INDEX_DDL)
+    cur.execute("ANALYZE")
+
+
+def _migrate_payslip_drop_source_filename() -> None:
+    """Remove legacy payslip.source_filename column if present."""
+    if not use_database():
+        return
+    with get_connection() as conn:
+        with db_cursor(conn) as cur:
+            if storage_kind() == "postgres":
+                cur.execute(
+                    "ALTER TABLE payslip DROP COLUMN IF EXISTS source_filename"
+                )
+                return
+            cur.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='payslip'"
+            )
+            if cur.fetchone() is None:
+                return
+            cur.execute("PRAGMA table_info(payslip)")
+            cols = [row[1] for row in cur.fetchall()]
+            if "source_filename" in cols:
+                cur.execute("ALTER TABLE payslip DROP COLUMN source_filename")
 
 
 def init_schema() -> None:
     if not use_database():
         return
+    if minimal_schema_enabled():
+        if storage_kind() == "postgres":
+            _init_schema_minimal_postgres()
+        else:
+            _init_schema_minimal_sqlite()
+    elif storage_kind() == "postgres":
+        _init_schema_postgres()
+    else:
+        _init_schema_sqlite()
+    _migrate_payslip_drop_source_filename()
+
+
+def _init_schema_minimal_sqlite() -> None:
+    with get_connection() as conn:
+        with db_cursor(conn) as cur:
+            cur.executescript(_MINIMAL_SCHEMA_SQLITE)
+            _backfill_installment_lines_if_empty(cur)
+            _ensure_minimal_performance_indexes(cur)
+
+
+def _init_schema_minimal_postgres() -> None:
+    stmts = [
+        """
+        CREATE TABLE IF NOT EXISTS payslip (
+            id SERIAL PRIMARY KEY,
+            total DOUBLE PRECISION,
+            commission DOUBLE PRECISION,
+            reimbursement DOUBLE PRECISION,
+            medical_reimbursement DOUBLE PRECISION,
+            others DOUBLE PRECISION,
+            mp2 DOUBLE PRECISION,
+            allowances DOUBLE PRECISION,
+            period_year INTEGER,
+            period_month INTEGER,
+            period_half INTEGER,
+            notes TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() AT TIME ZONE 'UTC')
+        )
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_payslip_created ON payslip (created_at DESC)
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS installment (
+            id SERIAL PRIMARY KEY,
+            name TEXT NOT NULL,
+            installment_current INTEGER NOT NULL,
+            installment_total INTEGER NOT NULL,
+            principal DOUBLE PRECISION NOT NULL,
+            interest DOUBLE PRECISION,
+            payment_total DOUBLE PRECISION NOT NULL,
+            start_date TEXT NOT NULL,
+            finish_date TEXT NOT NULL,
+            remaining DOUBLE PRECISION NOT NULL,
+            original_total DOUBLE PRECISION NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() AT TIME ZONE 'UTC'),
+            CONSTRAINT chk_installment_n CHECK (
+                installment_total >= 1
+                AND installment_current >= 1
+                AND installment_current <= installment_total + 1
+            ),
+            CONSTRAINT chk_installment_amounts CHECK (payment_total > 0 AND remaining >= 0)
+        )
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_installment_created ON installment (created_at DESC)
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS installment_line (
+            id SERIAL PRIMARY KEY,
+            installment_id INTEGER NOT NULL REFERENCES installment(id) ON DELETE CASCADE,
+            seq INTEGER NOT NULL,
+            principal DOUBLE PRECISION NOT NULL DEFAULT 0,
+            interest DOUBLE PRECISION,
+            payment_total DOUBLE PRECISION NOT NULL,
+            UNIQUE (installment_id, seq)
+        )
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_installment_line_parent
+            ON installment_line (installment_id)
+        """,
+    ]
+    with get_connection() as conn:
+        with db_cursor(conn) as cur:
+            for s in stmts:
+                cur.execute(s.strip())
+            _backfill_installment_lines_if_empty(cur)
+            _ensure_minimal_performance_indexes(cur)
+
+
+def _init_schema_sqlite() -> None:
     schema_sql = """
     CREATE TABLE IF NOT EXISTS budget_data (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -323,7 +781,6 @@ def init_schema() -> None:
 
     CREATE TABLE IF NOT EXISTS payslip (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        source_filename TEXT,
         total REAL,
         commission REAL,
         reimbursement REAL,
@@ -424,6 +881,7 @@ def init_schema() -> None:
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL UNIQUE,
         is_hidden INTEGER NOT NULL DEFAULT 0 CHECK (is_hidden IN (0, 1)),
+        hide_from_data_preview INTEGER NOT NULL DEFAULT 0 CHECK (hide_from_data_preview IN (0, 1)),
         kind TEXT NOT NULL DEFAULT 'expense' CHECK (kind IN ('expense', 'income', 'mixed')),
         created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -453,7 +911,7 @@ def init_schema() -> None:
     );
     """
     with get_connection() as conn:
-        with _db_cursor(conn) as cur:
+        with db_cursor(conn) as cur:
             cur.executescript(schema_sql)
             cur.execute(
                 """
@@ -463,12 +921,203 @@ def init_schema() -> None:
             )
             _backfill_installment_lines_if_empty(cur)
             _purge_reserved_accounts_category_rows(cur)
+            _ensure_category_catalog_hide_from_preview_column(cur)
             _seed_category_catalog_from_budget_data(cur)
-            _ensure_sqlite_performance_indexes(cur)
+            _ensure_performance_indexes(cur)
+
+
+def _init_schema_postgres() -> None:
+    """Create application tables on PostgreSQL (idempotent)."""
+    stmts = [
+        """
+        CREATE TABLE IF NOT EXISTS budget_data (
+            id SERIAL PRIMARY KEY,
+            row_hash TEXT NOT NULL UNIQUE,
+            period TEXT,
+            accounts TEXT,
+            category TEXT,
+            subcategory TEXT,
+            note TEXT,
+            php DOUBLE PRECISION,
+            income_expense TEXT,
+            description TEXT,
+            amount DOUBLE PRECISION,
+            currency TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() AT TIME ZONE 'UTC')
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS payslip (
+            id SERIAL PRIMARY KEY,
+            total DOUBLE PRECISION,
+            commission DOUBLE PRECISION,
+            reimbursement DOUBLE PRECISION,
+            medical_reimbursement DOUBLE PRECISION,
+            others DOUBLE PRECISION,
+            mp2 DOUBLE PRECISION,
+            allowances DOUBLE PRECISION,
+            period_year INTEGER,
+            period_month INTEGER,
+            period_half INTEGER,
+            notes TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() AT TIME ZONE 'UTC')
+        )
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_payslip_created ON payslip (created_at DESC)
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS installment (
+            id SERIAL PRIMARY KEY,
+            name TEXT NOT NULL,
+            installment_current INTEGER NOT NULL,
+            installment_total INTEGER NOT NULL,
+            principal DOUBLE PRECISION NOT NULL,
+            interest DOUBLE PRECISION,
+            payment_total DOUBLE PRECISION NOT NULL,
+            start_date TEXT NOT NULL,
+            finish_date TEXT NOT NULL,
+            remaining DOUBLE PRECISION NOT NULL,
+            original_total DOUBLE PRECISION NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() AT TIME ZONE 'UTC'),
+            CONSTRAINT chk_installment_n CHECK (
+                installment_total >= 1
+                AND installment_current >= 1
+                AND installment_current <= installment_total + 1
+            ),
+            CONSTRAINT chk_installment_amounts CHECK (payment_total > 0 AND remaining >= 0)
+        )
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_installment_created ON installment (created_at DESC)
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS installment_line (
+            id SERIAL PRIMARY KEY,
+            installment_id INTEGER NOT NULL REFERENCES installment(id) ON DELETE CASCADE,
+            seq INTEGER NOT NULL,
+            principal DOUBLE PRECISION NOT NULL DEFAULT 0,
+            interest DOUBLE PRECISION,
+            payment_total DOUBLE PRECISION NOT NULL,
+            UNIQUE (installment_id, seq)
+        )
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_installment_line_parent
+            ON installment_line (installment_id)
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS recurring_rule (
+            id SERIAL PRIMARY KEY,
+            label TEXT NOT NULL,
+            kind TEXT NOT NULL CHECK (kind IN ('expense', 'income')),
+            frequency TEXT NOT NULL CHECK (
+                frequency IN ('monthly', 'weekly', 'quarterly', 'yearly')
+            ),
+            day_of_month INTEGER,
+            weekday INTEGER,
+            month_of_year INTEGER,
+            accounts TEXT,
+            category TEXT,
+            subcategory TEXT,
+            note TEXT,
+            description TEXT,
+            amount DOUBLE PRECISION NOT NULL,
+            currency TEXT,
+            is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
+            last_posted_period TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() AT TIME ZONE 'UTC'),
+            CONSTRAINT chk_recurring_monthly CHECK (
+                frequency <> 'monthly'
+                OR (day_of_month IS NOT NULL AND day_of_month >= 1 AND day_of_month <= 31)
+            ),
+            CONSTRAINT chk_recurring_weekly CHECK (
+                frequency <> 'weekly'
+                OR (weekday IS NOT NULL AND weekday >= 0 AND weekday <= 6)
+            ),
+            CONSTRAINT chk_recurring_quarterly CHECK (
+                frequency <> 'quarterly'
+                OR (day_of_month IS NOT NULL AND day_of_month >= 1 AND day_of_month <= 31)
+            ),
+            CONSTRAINT chk_recurring_yearly CHECK (
+                frequency <> 'yearly'
+                OR (
+                    day_of_month IS NOT NULL
+                    AND day_of_month >= 1
+                    AND day_of_month <= 31
+                    AND month_of_year IS NOT NULL
+                    AND month_of_year >= 1
+                    AND month_of_year <= 12
+                )
+            )
+        )
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_recurring_rule_active
+            ON recurring_rule (is_active) WHERE is_active != 0
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS category_catalog (
+            id SERIAL PRIMARY KEY,
+            name TEXT NOT NULL UNIQUE,
+            is_hidden INTEGER NOT NULL DEFAULT 0 CHECK (is_hidden IN (0, 1)),
+            hide_from_data_preview INTEGER NOT NULL DEFAULT 0 CHECK (hide_from_data_preview IN (0, 1)),
+            kind TEXT NOT NULL DEFAULT 'expense' CHECK (kind IN ('expense', 'income', 'mixed')),
+            created_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() AT TIME ZONE 'UTC')
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS subcategory_catalog (
+            id SERIAL PRIMARY KEY,
+            category_id INTEGER NOT NULL REFERENCES category_catalog(id) ON DELETE CASCADE,
+            name TEXT NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() AT TIME ZONE 'UTC'),
+            UNIQUE (category_id, name)
+        )
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_subcategory_catalog_cat
+            ON subcategory_catalog (category_id)
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS category_catalog_removed (
+            name TEXT PRIMARY KEY
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS subcategory_catalog_removed (
+            parent_category_name TEXT NOT NULL,
+            name TEXT NOT NULL,
+            PRIMARY KEY (parent_category_name, name)
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS user_ui_preferences (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            data TEXT NOT NULL DEFAULT '{}',
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() AT TIME ZONE 'UTC')
+        )
+        """,
+    ]
+    with get_connection() as conn:
+        with db_cursor(conn) as cur:
+            for s in stmts:
+                cur.execute(s.strip())
+            cur.execute(
+                """
+                INSERT INTO user_ui_preferences (id, data)
+                VALUES (1, '{}')
+                ON CONFLICT (id) DO NOTHING
+                """
+            )
+            _backfill_installment_lines_if_empty(cur)
+            _purge_reserved_accounts_category_rows(cur)
+            _ensure_category_catalog_hide_from_preview_column(cur)
+            _seed_category_catalog_from_budget_data(cur)
+            _ensure_performance_indexes(cur)
 
 
 def insert_payslip(
-    source_filename: str | None,
     total: float | None,
     commission: float | None,
     reimbursement: float | None,
@@ -483,18 +1132,17 @@ def insert_payslip(
 ) -> int:
     """Insert one payslip row; returns new id."""
     with get_connection() as conn:
-        with _db_cursor(conn) as cur:
+        with db_cursor(conn) as cur:
             cur.execute(
                 """
                 INSERT INTO payslip (
-                    source_filename, total, commission, reimbursement,
+                    total, commission, reimbursement,
                     medical_reimbursement, others, mp2, allowances,
                     period_year, period_month, period_half, notes
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 RETURNING id
                 """,
                 (
-                    source_filename,
                     total,
                     commission,
                     reimbursement,
@@ -515,10 +1163,10 @@ def insert_payslip(
 def list_payslips(limit: int = 200) -> list[dict[str, Any]]:
     limit = max(1, min(limit, 2000))
     with get_connection() as conn:
-        with _db_cursor(conn) as cur:
+        with db_cursor(conn) as cur:
             cur.execute(
                 """
-                SELECT id, source_filename, total, commission, reimbursement,
+                SELECT id, total, commission, reimbursement,
                        medical_reimbursement, others, mp2, allowances,
                        period_year, period_month, period_half, notes,
                        created_at
@@ -540,10 +1188,10 @@ def list_payslips(limit: int = 200) -> list[dict[str, Any]]:
 
 def get_payslip(payslip_id: int) -> dict[str, Any] | None:
     with get_connection() as conn:
-        with _db_cursor(conn) as cur:
+        with db_cursor(conn) as cur:
             cur.execute(
                 """
-                SELECT id, source_filename, total, commission, reimbursement,
+                SELECT id, total, commission, reimbursement,
                        medical_reimbursement, others, mp2, allowances,
                        period_year, period_month, period_half, notes,
                        created_at
@@ -575,7 +1223,7 @@ def update_payslip(
 ) -> bool:
     """Update row by id. Returns False if no row matched."""
     with get_connection() as conn:
-        with _db_cursor(conn) as cur:
+        with db_cursor(conn) as cur:
             cur.execute(
                 """
                 UPDATE payslip SET
@@ -612,7 +1260,7 @@ def update_payslip(
 
 def delete_payslip(payslip_id: int) -> bool:
     with get_connection() as conn:
-        with _db_cursor(conn) as cur:
+        with db_cursor(conn) as cur:
             cur.execute("DELETE FROM payslip WHERE id = ?", (payslip_id,))
             return cur.rowcount > 0
 
@@ -620,7 +1268,7 @@ def delete_payslip(payslip_id: int) -> bool:
 def list_installments(limit: int = 500) -> list[dict[str, Any]]:
     limit = max(1, min(limit, 2000))
     with get_connection() as conn:
-        with _db_cursor(conn) as cur:
+        with db_cursor(conn) as cur:
             cur.execute(
                 """
                 SELECT i.id, i.name, i.installment_current, i.installment_total,
@@ -644,7 +1292,7 @@ def list_installments(limit: int = 500) -> list[dict[str, Any]]:
 
 def get_installment(installment_id: int) -> dict[str, Any] | None:
     with get_connection() as conn:
-        with _db_cursor(conn) as cur:
+        with db_cursor(conn) as cur:
             cur.execute(
                 """
                 SELECT id, name, installment_current, installment_total,
@@ -674,7 +1322,7 @@ def insert_installment(
     original_total: float,
 ) -> int:
     with get_connection() as conn:
-        with _db_cursor(conn) as cur:
+        with db_cursor(conn) as cur:
             cur.execute(
                 """
                 INSERT INTO installment (
@@ -728,7 +1376,7 @@ def _seed_installment_lines(
 
 def list_installment_lines(installment_id: int) -> list[dict[str, Any]]:
     with get_connection() as conn:
-        with _db_cursor(conn) as cur:
+        with db_cursor(conn) as cur:
             cur.execute(
                 """
                 SELECT seq, principal, interest, payment_total
@@ -812,7 +1460,7 @@ def update_installment_line(
     """Update one schedule row; recomputes parent totals."""
     ptot = _line_payment_total(principal, interest)
     with get_connection() as conn:
-        with _db_cursor(conn) as cur:
+        with db_cursor(conn) as cur:
             cur.execute(
                 """
                 UPDATE installment_line SET
@@ -869,7 +1517,7 @@ def update_installment(
     original_total: float,
 ) -> bool:
     with get_connection() as conn:
-        with _db_cursor(conn) as cur:
+        with db_cursor(conn) as cur:
             cur.execute(
                 "SELECT installment_total FROM installment WHERE id = ?",
                 (installment_id,),
@@ -923,7 +1571,7 @@ def update_installment(
 
 def delete_installment(installment_id: int) -> bool:
     with get_connection() as conn:
-        with _db_cursor(conn) as cur:
+        with db_cursor(conn) as cur:
             cur.execute("DELETE FROM installment WHERE id = ?", (installment_id,))
             return cur.rowcount > 0
 
@@ -933,7 +1581,7 @@ def installment_apply_payment(installment_id: int) -> dict[str, Any] | None:
     Record one installment payment: advances current; remaining comes from line sums.
     """
     with get_connection() as conn:
-        with _db_cursor(conn) as cur:
+        with db_cursor(conn) as cur:
             cur.execute(
                 """
                 SELECT id, installment_current, installment_total, payment_total, remaining
@@ -1094,7 +1742,7 @@ def insert_budget_transaction(
     """Insert one row; uses a random row_hash so it never collides with Excel imports."""
     row_hash = secrets.token_hex(32)
     with get_connection() as conn:
-        with _db_cursor(conn) as cur:
+        with db_cursor(conn) as cur:
             acc = canonicalize_account_label(cur, accounts)
             cur.execute(
                 """
@@ -1186,7 +1834,7 @@ def insert_budget_transfer(
 
 def delete_budget_transaction(transaction_id: int) -> bool:
     with get_connection() as conn:
-        with _db_cursor(conn) as cur:
+        with db_cursor(conn) as cur:
             cur.execute("DELETE FROM budget_data WHERE id = ?", (transaction_id,))
             return cur.rowcount > 0
 
@@ -1319,7 +1967,7 @@ def update_budget_transaction(transaction_id: int, updates: dict[str, Any]) -> b
     if not updates:
         return False
     with get_connection() as conn:
-        with _db_cursor(conn) as cur:
+        with db_cursor(conn) as cur:
             return _update_budget_transaction_with_cursor(cur, transaction_id, updates)
 
 
@@ -1328,7 +1976,7 @@ def list_distinct_budget_accounts() -> list[str]:
     if not use_database():
         return []
     with get_connection() as conn:
-        with _db_cursor(conn) as cur:
+        with db_cursor(conn) as cur:
             cur.execute(
                 """
                 SELECT DISTINCT accounts FROM budget_data
@@ -1345,7 +1993,7 @@ def list_distinct_budget_currencies() -> list[str]:
     if not use_database():
         return []
     with get_connection() as conn:
-        with _db_cursor(conn) as cur:
+        with db_cursor(conn) as cur:
             cur.execute(
                 """
                 SELECT DISTINCT currency FROM budget_data
@@ -1370,7 +2018,7 @@ def clear_budget_accounts_label(label: str) -> tuple[int, int]:
     if not use_database():
         raise RuntimeError("DATABASE_URL is not set")
     with get_connection() as conn:
-        with _db_cursor(conn) as cur:
+        with db_cursor(conn) as cur:
             cur.execute(
                 """
                 SELECT id FROM budget_data
@@ -1410,7 +2058,7 @@ def clear_budget_currency_label(label: str) -> tuple[int, int]:
     if not use_database():
         raise RuntimeError("DATABASE_URL is not set")
     with get_connection() as conn:
-        with _db_cursor(conn) as cur:
+        with db_cursor(conn) as cur:
             cur.execute(
                 """
                 SELECT id FROM budget_data
@@ -1452,7 +2100,7 @@ def rename_budget_accounts_label(old_label: str, new_label: str) -> tuple[int, i
     if not use_database():
         raise RuntimeError("DATABASE_URL is not set")
     with get_connection() as conn:
-        with _db_cursor(conn) as cur:
+        with db_cursor(conn) as cur:
             cur.execute(
                 """
                 SELECT id FROM budget_data
@@ -1549,9 +2197,14 @@ def sync_excel_to_db(path: Path) -> SyncResult:
     """
 
     with get_connection() as conn:
-        with _db_cursor(conn) as cur:
-            cur.execute("DELETE FROM budget_data")
-            cur.execute("DELETE FROM sqlite_sequence WHERE name = 'budget_data'")
+        with db_cursor(conn) as cur:
+            if storage_kind() == "postgres":
+                cur.execute(
+                    "TRUNCATE budget_data RESTART IDENTITY CASCADE"
+                )
+            else:
+                cur.execute("DELETE FROM budget_data")
+                cur.execute("DELETE FROM sqlite_sequence WHERE name = 'budget_data'")
 
             # row_hash is unique; skip later duplicates (any Excel tab).
             seen_hashes: set[str] = set()
@@ -1596,8 +2249,10 @@ def load_workbook_from_db() -> dict[str, pd.DataFrame]:
     )
     with get_connection() as conn:
         q = f"SELECT {select_list} FROM budget_data ORDER BY id"
-        # SQLite stores timestamps as TEXT; parse Period so calendar/analyze see datetime64.
-        df = pd.read_sql_query(q, conn, parse_dates=["Period"])
+        # Keep Period as TEXT/object. `parse_dates=["Period"]` forces a single datetime64
+        # dtype and turns mixed ISO strings (naive vs +00:00) into NaT — those rows vanish
+        # from calendar APIs and serialize as null.
+        df = pd.read_sql_query(q, conn)
         if df.empty:
             return empty_workbook_placeholder()
         return {WORKBOOK_SHEET_KEY: df}
@@ -1611,7 +2266,7 @@ def get_user_ui_preferences() -> dict[str, Any]:
         return {}
     try:
         with get_connection() as conn:
-            with _db_cursor(conn) as cur:
+            with db_cursor(conn) as cur:
                 cur.execute("SELECT data FROM user_ui_preferences WHERE id = 1")
                 row = cur.fetchone()
                 if not row or row[0] is None:
@@ -1633,17 +2288,29 @@ def replace_user_ui_preferences(data: dict[str, Any]) -> None:
     if not isinstance(data, dict):
         raise ValueError("Preferences must be a JSON object")
     with get_connection() as conn:
-        with _db_cursor(conn) as cur:
-            cur.execute(
-                """
-                INSERT INTO user_ui_preferences (id, data, updated_at)
-                VALUES (1, ?, datetime('now'))
-                ON CONFLICT (id) DO UPDATE SET
-                    data = excluded.data,
-                    updated_at = datetime('now')
-                """,
-                (json.dumps(data),),
-            )
+        with db_cursor(conn) as cur:
+            if storage_kind() == "postgres":
+                cur.execute(
+                    """
+                    INSERT INTO user_ui_preferences (id, data, updated_at)
+                    VALUES (1, ?, CURRENT_TIMESTAMP)
+                    ON CONFLICT (id) DO UPDATE SET
+                        data = EXCLUDED.data,
+                        updated_at = CURRENT_TIMESTAMP
+                    """,
+                    (json.dumps(data),),
+                )
+            else:
+                cur.execute(
+                    """
+                    INSERT INTO user_ui_preferences (id, data, updated_at)
+                    VALUES (1, ?, datetime('now'))
+                    ON CONFLICT (id) DO UPDATE SET
+                        data = excluded.data,
+                        updated_at = datetime('now')
+                    """,
+                    (json.dumps(data),),
+                )
 
 
 def budget_data_is_empty() -> bool:
@@ -1652,7 +2319,7 @@ def budget_data_is_empty() -> bool:
         return True
     try:
         with get_connection() as conn:
-            with _db_cursor(conn) as cur:
+            with db_cursor(conn) as cur:
                 cur.execute("SELECT NOT EXISTS (SELECT 1 FROM budget_data)")
                 row = cur.fetchone()
                 return bool(row[0]) if row else True
@@ -1665,7 +2332,7 @@ def check_connection() -> bool:
         return False
     try:
         with get_connection() as conn:
-            with _db_cursor(conn) as cur:
+            with db_cursor(conn) as cur:
                 cur.execute("SELECT 1")
         return True
     except Exception:
@@ -1678,11 +2345,12 @@ def check_connection() -> bool:
 def list_category_catalog_tree() -> list[dict[str, Any]]:
     """List categories with nested subcategories for the settings UI."""
     with get_connection() as conn:
-        with _db_cursor(conn) as cur:
+        with db_cursor(conn) as cur:
             cur.execute(
                 """
-                SELECT id, name, COALESCE(is_hidden, FALSE),
-                       COALESCE(kind, 'expense')
+                SELECT id, name, (COALESCE(is_hidden, 0) <> 0),
+                       COALESCE(kind, 'expense'),
+                       (COALESCE(hide_from_data_preview, 0) <> 0)
                 FROM category_catalog ORDER BY LOWER(name)
                 """
             )
@@ -1692,6 +2360,7 @@ def list_category_catalog_tree() -> list[dict[str, Any]]:
                     "name": r[1],
                     "is_hidden": bool(r[2]),
                     "kind": r[3] if r[3] in ("expense", "income", "mixed") else "expense",
+                    "hide_from_data_preview": bool(r[4]),
                     "subcategories": [],
                 }
                 for r in cur.fetchall()
@@ -1717,17 +2386,26 @@ def delete_all_mixed_category_catalog_rows() -> int:
     `subcategory_catalog` rows cascade. `budget_data` category strings are unchanged.
     """
     with get_connection() as conn:
-        with _db_cursor(conn) as cur:
+        with db_cursor(conn) as cur:
             cur.execute(
                 "DELETE FROM category_catalog WHERE kind = 'mixed' RETURNING name"
             )
             deleted = cur.fetchall()
             n = len(deleted)
             for (name,) in deleted:
-                cur.execute(
-                    "INSERT OR IGNORE INTO category_catalog_removed (name) VALUES (?)",
-                    (name,),
-                )
+                if storage_kind() == "postgres":
+                    cur.execute(
+                        """
+                        INSERT INTO category_catalog_removed (name) VALUES (?)
+                        ON CONFLICT (name) DO NOTHING
+                        """,
+                        (name,),
+                    )
+                else:
+                    cur.execute(
+                        "INSERT OR IGNORE INTO category_catalog_removed (name) VALUES (?)",
+                        (name,),
+                    )
     if n:
         from app.workbook_cache import invalidate_cache
 
@@ -1747,7 +2425,7 @@ def create_category(name: str, *, kind: str = "expense") -> int:
     if k not in ("expense", "income", "mixed"):
         raise ValueError("kind must be expense, income, or mixed")
     with get_connection() as conn:
-        with _db_cursor(conn) as cur:
+        with db_cursor(conn) as cur:
             try:
                 cur.execute(
                     "INSERT INTO category_catalog (name, kind) VALUES (?, ?) RETURNING id",
@@ -1760,7 +2438,7 @@ def create_category(name: str, *, kind: str = "expense") -> int:
                     (name,),
                 )
                 return cid
-            except sqlite3.IntegrityError as e:
+            except Exception as e:
                 if not _is_unique_constraint(e):
                     raise
                 raise ValueError("A category with this name already exists") from e
@@ -1775,7 +2453,7 @@ def rename_category(category_id: int, new_name: str) -> None:
             '"Accounts" is reserved for the workbook Accounts column and cannot be used as a category name'
         )
     with get_connection() as conn:
-        with _db_cursor(conn) as cur:
+        with db_cursor(conn) as cur:
             cur.execute(
                 "SELECT name FROM category_catalog WHERE id = ?",
                 (category_id,),
@@ -1791,7 +2469,7 @@ def rename_category(category_id: int, new_name: str) -> None:
                     "UPDATE category_catalog SET name = ? WHERE id = ?",
                     (new_name, category_id),
                 )
-            except sqlite3.IntegrityError as e:
+            except Exception as e:
                 if not _is_unique_constraint(e):
                     raise
                 raise ValueError("A category with this name already exists") from e
@@ -1806,7 +2484,7 @@ def rename_category(category_id: int, new_name: str) -> None:
 
 def set_category_hidden(category_id: int, is_hidden: bool) -> None:
     with get_connection() as conn:
-        with _db_cursor(conn) as cur:
+        with db_cursor(conn) as cur:
             cur.execute(
                 """
                 UPDATE category_catalog SET is_hidden = ? WHERE id = ?
@@ -1817,12 +2495,25 @@ def set_category_hidden(category_id: int, is_hidden: bool) -> None:
                 raise LookupError("Category not found")
 
 
+def set_category_hide_from_data_preview(category_id: int, hide: bool) -> None:
+    with get_connection() as conn:
+        with db_cursor(conn) as cur:
+            cur.execute(
+                """
+                UPDATE category_catalog SET hide_from_data_preview = ? WHERE id = ?
+                """,
+                (1 if hide else 0, category_id),
+            )
+            if cur.rowcount == 0:
+                raise LookupError("Category not found")
+
+
 def set_category_kind(category_id: int, kind: str) -> None:
     k = (kind or "").strip().lower()
     if k not in ("expense", "income", "mixed"):
         raise ValueError("kind must be expense, income, or mixed")
     with get_connection() as conn:
-        with _db_cursor(conn) as cur:
+        with db_cursor(conn) as cur:
             cur.execute(
                 """
                 UPDATE category_catalog SET kind = ? WHERE id = ?
@@ -1838,15 +2529,23 @@ def apply_category_patch(
     *,
     new_name: str | None = None,
     is_hidden: bool | None = None,
+    hide_from_data_preview: bool | None = None,
     kind: str | None = None,
 ) -> None:
     """Rename and/or toggle visibility and/or kind."""
-    if new_name is None and is_hidden is None and kind is None:
+    if (
+        new_name is None
+        and is_hidden is None
+        and hide_from_data_preview is None
+        and kind is None
+    ):
         raise ValueError("No fields to update")
     if new_name is not None:
         rename_category(category_id, new_name)
     if is_hidden is not None:
         set_category_hidden(category_id, is_hidden)
+    if hide_from_data_preview is not None:
+        set_category_hide_from_data_preview(category_id, hide_from_data_preview)
     if kind is not None:
         set_category_kind(category_id, kind)
 
@@ -1854,7 +2553,7 @@ def apply_category_patch(
 def delete_category(category_id: int) -> None:
     """Remove the catalog row only; `budget_data` rows keep their category text."""
     with get_connection() as conn:
-        with _db_cursor(conn) as cur:
+        with db_cursor(conn) as cur:
             cur.execute(
                 "DELETE FROM category_catalog WHERE id = ? RETURNING name",
                 (category_id,),
@@ -1877,7 +2576,7 @@ def create_subcategory(category_id: int, name: str) -> int:
     if not name:
         raise ValueError("Subcategory name is required")
     with get_connection() as conn:
-        with _db_cursor(conn) as cur:
+        with db_cursor(conn) as cur:
             cur.execute(
                 "SELECT 1 FROM category_catalog WHERE id = ?",
                 (category_id,),
@@ -1908,7 +2607,7 @@ def create_subcategory(category_id: int, name: str) -> int:
                         (prow[0], name),
                     )
                 return sid
-            except sqlite3.IntegrityError as e:
+            except Exception as e:
                 if not _is_unique_constraint(e):
                     raise
                 raise ValueError(
@@ -1921,7 +2620,7 @@ def rename_subcategory(subcategory_id: int, new_name: str) -> None:
     if not new_name:
         raise ValueError("Subcategory name is required")
     with get_connection() as conn:
-        with _db_cursor(conn) as cur:
+        with db_cursor(conn) as cur:
             cur.execute(
                 """
                 SELECT c.name, s.name
@@ -1940,7 +2639,7 @@ def rename_subcategory(subcategory_id: int, new_name: str) -> None:
                     "UPDATE subcategory_catalog SET name = ? WHERE id = ?",
                     (new_name, subcategory_id),
                 )
-            except sqlite3.IntegrityError as e:
+            except Exception as e:
                 if not _is_unique_constraint(e):
                     raise
                 raise ValueError(
@@ -1959,7 +2658,7 @@ def rename_subcategory(subcategory_id: int, new_name: str) -> None:
 def delete_subcategory(subcategory_id: int) -> None:
     """Remove the catalog row only; `budget_data` rows keep their subcategory text."""
     with get_connection() as conn:
-        with _db_cursor(conn) as cur:
+        with db_cursor(conn) as cur:
             cur.execute(
                 """
                 SELECT c.name, s.name
@@ -1989,7 +2688,7 @@ def delete_subcategory(subcategory_id: int) -> None:
 
 def list_recurring_rules() -> list[dict[str, Any]]:
     with get_connection() as conn:
-        with _db_cursor(conn) as cur:
+        with db_cursor(conn) as cur:
             cur.execute(
                 """
                 SELECT id, label, kind, frequency, day_of_month, weekday,
@@ -2023,7 +2722,7 @@ def insert_recurring_rule(
     is_active: bool = True,
 ) -> int:
     with get_connection() as conn:
-        with _db_cursor(conn) as cur:
+        with db_cursor(conn) as cur:
             cur.execute(
                 """
                 INSERT INTO recurring_rule (
@@ -2085,7 +2784,7 @@ def update_recurring_rule(rule_id: int, fields: dict[str, Any]) -> bool:
         return False
     vals.append(rule_id)
     with get_connection() as conn:
-        with _db_cursor(conn) as cur:
+        with db_cursor(conn) as cur:
             cur.execute(
                 f"UPDATE recurring_rule SET {', '.join(sets)} WHERE id = ?",
                 vals,
@@ -2095,14 +2794,14 @@ def update_recurring_rule(rule_id: int, fields: dict[str, Any]) -> bool:
 
 def delete_recurring_rule(rule_id: int) -> bool:
     with get_connection() as conn:
-        with _db_cursor(conn) as cur:
+        with db_cursor(conn) as cur:
             cur.execute("DELETE FROM recurring_rule WHERE id = ?", (rule_id,))
             return cur.rowcount > 0
 
 
 def get_recurring_rule(rule_id: int) -> dict[str, Any] | None:
     with get_connection() as conn:
-        with _db_cursor(conn) as cur:
+        with db_cursor(conn) as cur:
             cur.execute(
                 """
                 SELECT id, label, kind, frequency, day_of_month, weekday,

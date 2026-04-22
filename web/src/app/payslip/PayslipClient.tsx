@@ -254,12 +254,6 @@ type Nav =
 
 const MONTHS = Array.from({ length: 12 }, (_, i) => i + 1);
 
-function chunk<T>(arr: T[], size: number): T[][] {
-  const out: T[][] = [];
-  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
-  return out;
-}
-
 function YearPayslipBlock({
   year,
   rows,
@@ -286,7 +280,7 @@ function YearPayslipBlock({
         )}
       </h3>
       {/* 3 months per row × 4 rows */}
-      <div className="grid w-full min-w-0 grid-cols-3 gap-3 sm:gap-3.5">
+      <div className="grid w-full min-w-0 grid-cols-3 gap-2 sm:gap-3.5">
         {MONTHS.map((month) => {
           const r1 = rowsForSlot(rows, year, month, 1);
           const r2 = rowsForSlot(rows, year, month, 2);
@@ -306,7 +300,7 @@ function YearPayslipBlock({
                 </span>
                 {monthSum != null && (
                   <span
-                    className="min-w-0 flex-1 truncate text-right text-xs tabular-nums text-zinc-600 dark:text-zinc-400"
+                    className="min-w-0 max-w-[58%] flex-1 text-right text-[10px] tabular-nums leading-tight text-zinc-600 break-all dark:text-zinc-400 sm:max-w-none sm:text-xs"
                     title={fmtNum(monthSum)}
                   >
                     {fmtNum(monthSum)}
@@ -329,13 +323,13 @@ function YearPayslipBlock({
                       }
                       title={st != null ? amountStr : label}
                       onClick={() => onOpenSlot(year, month, half as 1 | 2)}
-                      className={`flex min-h-[2.5rem] w-full min-w-0 items-center justify-end overflow-hidden rounded-md border px-1.5 py-2 text-right text-xs tabular-nums leading-none transition sm:text-sm ${
+                      className={`flex min-h-[2.5rem] w-full min-w-0 items-center justify-end rounded-md border px-1 py-2 text-right text-[10px] tabular-nums leading-tight transition break-all sm:px-1.5 sm:text-sm sm:leading-none ${
                         rs.length > 0
                           ? "border-indigo-200 bg-indigo-50/90 text-indigo-950 hover:bg-indigo-100 dark:border-indigo-900 dark:bg-indigo-950/50 dark:text-indigo-100 dark:hover:bg-indigo-900/60"
                           : "border-dashed border-zinc-200 bg-zinc-50/50 text-zinc-500 hover:border-zinc-300 hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900/40 dark:text-zinc-500 dark:hover:bg-zinc-800/60"
                       }`}
                     >
-                      <span className="block w-full min-w-0 truncate px-0.5">
+                      <span className="block w-full min-w-0 px-0.5">
                         {st != null ? amountStr : ""}
                       </span>
                     </button>
@@ -645,23 +639,20 @@ export default function PayslipClient() {
           </div>
         </div>
 
-        {!loading &&
-          chunk(years, 3).map((yearRow) => (
-            <div
-              key={yearRow.join("-")}
-              className="mb-10 grid w-full min-w-0 grid-cols-1 gap-8 border-t border-zinc-100 pt-8 first:border-t-0 first:pt-0 dark:border-zinc-800 md:grid-cols-2 md:gap-10 xl:grid-cols-3 xl:gap-10"
-            >
-              {yearRow.map((year) => (
+        {!loading && (
+          <div className="grid grid-cols-1 gap-x-6 gap-y-10 sm:grid-cols-2 lg:grid-cols-3">
+            {years.map((year) => (
+              <div key={year} className="min-w-0">
                 <YearPayslipBlock
-                  key={year}
                   year={year}
                   rows={rows}
                   saving={saving}
                   onOpenSlot={openSlot}
                 />
-              ))}
-            </div>
-          ))}
+              </div>
+            ))}
+          </div>
+        )}
 
         {!loading && unsorted.length > 0 && (
           <div className="mt-10 border-t border-amber-200 pt-8 dark:border-amber-900/50">

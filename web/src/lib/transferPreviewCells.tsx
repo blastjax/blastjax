@@ -1,5 +1,5 @@
 import { Fragment, type ReactNode } from "react";
-import { formatPeriodDisplay } from "@/lib/formatPeriod";
+import { formatPeriodDisplay, formatPeriodTimeOnly } from "@/lib/formatPeriod";
 import { parseTransferAccountsFromRow } from "@/lib/transferRowAccounts";
 import {
   formatCellForTone,
@@ -8,10 +8,18 @@ import {
   TRANSFER_FLOW_COLUMN,
 } from "@/lib/transactionRowTone";
 
+export type RenderTransferFlowAwareCellOptions = {
+  /** When the surrounding UI already shows the calendar date (e.g. day modal). */
+  periodStyle?: "full" | "timeOnly";
+  /** Sheet column name for the period (defaults to `"Period"`). */
+  periodColumnName?: string | null;
+};
+
 /** Data preview: transfers show Accounts → … → Category → Subcategory in Accounts; Category/Subcategory cells blank (same info). */
 export function renderTransferFlowAwareCell(
   row: Record<string, unknown>,
   column: string,
+  options?: RenderTransferFlowAwareCellOptions,
 ): ReactNode {
   if (column.trim().toLowerCase() === "currency") return "";
   const v = row[column];
@@ -51,7 +59,12 @@ export function renderTransferFlowAwareCell(
     return "";
   }
 
-  if (column === "Period") return formatPeriodDisplay(v);
+  const periodCol = options?.periodColumnName ?? "Period";
+  if (column === periodCol) {
+    return options?.periodStyle === "timeOnly"
+      ? formatPeriodTimeOnly(v)
+      : formatPeriodDisplay(v);
+  }
 
   if (column === "Income/Expense" && flow) {
     return "";

@@ -1,17 +1,36 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   CalendarMonthTransactionsGrouped,
   amountColumnName,
-  periodToIsoDate,
+  rowCalendarIsoKey,
   rowIncomeExpenseAmounts,
 } from "@/components/CalendarMonthTransactionsGrouped";
+import {
+  DATA_PREVIEW_TIME_COLUMN,
+  tableColumnsWithLeadingTime,
+} from "@/lib/dataPreviewTimeColumn";
+import { formatPeriodTimeOnly } from "@/lib/formatPeriod";
 import {
   formatMainCurrencyTotal,
   useCurrencySettings,
 } from "@/lib/currencySettings";
 import { incomeHeadlineTextClass } from "@/lib/incomeExpenseTheme";
+import {
+  isColumnExcludedFromDataPreview,
+  useDashboardColumnVisible,
+} from "@/lib/columnVisibility";
+import { getTransactionRowId } from "@/lib/transactionRowId";
+import { sortTransactionRowsLatestPeriodFirst } from "@/lib/sortTransactionRows";
+import { filterDataPreviewRows } from "@/lib/transferRowAccounts";
+import { renderTransferFlowAwareCell } from "@/lib/transferPreviewCells";
+import { transactionCellToneClass } from "@/lib/transactionRowTone";
+import {
+  btnSmallSecondary,
+  interactiveHoverSurface,
+  readonlyHoverSurface,
+} from "@/lib/ui";
 
 /** Match day header amount columns in CalendarMonthTransactionsGrouped. */
 const amountColClass =
@@ -42,23 +61,33 @@ export function AccountDrillMonthGrouped({
   columns,
   periodColumn,
   onRowClick,
-  /** Stable id (e.g. account name) so auto-open latest tx resets when switching accounts. */
-  drillKey,
 }: {
   rows: Record<string, unknown>[];
   columns: string[];
   periodColumn: string;
   onRowClick: (row: Record<string, unknown>) => void;
-  drillKey: string;
 }) {
   const currencySettings = useCurrencySettings();
+  const isColVisible = useDashboardColumnVisible();
+  const visibleColumns = useMemo(
+    () =>
+      columns.filter(
+        (c) => isColVisible(c) && !isColumnExcludedFromDataPreview(c),
+      ),
+    [columns, isColVisible],
+  );
   const amountCol = useMemo(() => amountColumnName(columns), [columns]);
+
+  const undatedTableColumns = useMemo(
+    () => tableColumnsWithLeadingTime(visibleColumns, periodColumn),
+    [visibleColumns, periodColumn],
+  );
 
   const { monthBuckets, undatedRows } = useMemo(() => {
     const byMonth = new Map<string, Record<string, unknown>[]>();
     const undated: Record<string, unknown>[] = [];
     for (const row of rows) {
-      const iso = periodToIsoDate(row[periodColumn]);
+      const iso = rowCalendarIsoKey(row, periodColumn);
       if (!iso) {
         undated.push(row);
         continue;
@@ -71,6 +100,7 @@ export function AccountDrillMonthGrouped({
     const buckets: MonthBucket[] = keys.map((ym) => {
       const [y, m] = ym.split("-").map(Number);
       const mr = byMonth.get(ym)!;
+      sortTransactionRowsLatestPeriodFirst(mr, periodColumn);
       let monthIncome = 0;
       let monthExpense = 0;
       for (const row of mr) {
@@ -89,6 +119,20 @@ export function AccountDrillMonthGrouped({
     });
     return { monthBuckets: buckets, undatedRows: undated };
   }, [rows, periodColumn, amountCol]);
+
+  const displayUndatedRows = useMemo(() => {
+    const filtered = filterDataPreviewRows(undatedRows);
+    if (filtered.length === 0) return filtered;
+    const periodKey =
+      undatedTableColumns.timeValueColumn ?? periodColumn ?? null;
+    const next = [...filtered];
+    sortTransactionRowsLatestPeriodFirst(next, periodKey);
+    return next;
+  }, [
+    undatedRows,
+    undatedTableColumns.timeValueColumn,
+    periodColumn,
+  ]);
 
   const yearGroups = useMemo((): YearGroup[] => {
     const byYear = new Map<number, MonthBucket[]>();
@@ -109,17 +153,6 @@ export function AccountDrillMonthGrouped({
     });
   }, [monthBuckets]);
 
-  /** Most recent calendar day in the loaded row set (Period → ISO date). */
-  const latestIso = useMemo(() => {
-    let max: string | null = null;
-    for (const row of rows) {
-      const iso = periodToIsoDate(row[periodColumn]);
-      if (!iso) continue;
-      if (!max || iso.localeCompare(max) > 0) max = iso;
-    }
-    return max;
-  }, [rows, periodColumn]);
-
   const [yearExpanded, setYearExpanded] = useState<Record<number, boolean>>({});
   const isYearOpen = (y: number) => yearExpanded[y] === true;
   const toggleYear = (y: number) => {
@@ -132,6 +165,7 @@ export function AccountDrillMonthGrouped({
   const [monthExpanded, setMonthExpanded] = useState<Record<string, boolean>>(
     {},
   );
+  const [expandAllDaysNonce, setExpandAllDaysNonce] = useState(0);
   const isMonthOpen = (ym: string) => monthExpanded[ym] === true;
   const toggleMonth = (ym: string) => {
     setMonthExpanded((prev) => {
@@ -140,35 +174,51 @@ export function AccountDrillMonthGrouped({
     });
   };
 
-  const autoLatestRef = useRef<string | null>(null);
-  useEffect(() => {
-    autoLatestRef.current = null;
-  }, [drillKey]);
+  const expandAllNestedDates = () => {
+    setYearExpanded(Object.fromEntries(yearGroups.map((yg) => [yg.year, true])));
+    setMonthExpanded(
+      Object.fromEntries(monthBuckets.map((b) => [b.ym, true])),
+    );
+    setExpandAllDaysNonce((n) => n + 1);
+  };
 
-  useEffect(() => {
-    if (!latestIso || !drillKey) return;
-    const sig = `${drillKey}\0${latestIso}`;
-    if (autoLatestRef.current === sig) return;
-    autoLatestRef.current = sig;
-    const y = Number(latestIso.slice(0, 4));
-    const ym = latestIso.slice(0, 7);
-    setYearExpanded((prev) => ({ ...prev, [y]: true }));
-    setMonthExpanded((prev) => ({ ...prev, [ym]: true }));
-  }, [latestIso, drillKey]);
+  const collapseAllNestedDates = () => {
+    setYearExpanded({});
+    setMonthExpanded({});
+  };
 
-  useEffect(() => {
-    if (!latestIso || !drillKey) return;
-    const t = window.setTimeout(() => {
-      document.getElementById(`day-hdr-${latestIso}`)?.scrollIntoView({
-        behavior: "smooth",
-        block: "nearest",
-      });
-    }, 480);
-    return () => window.clearTimeout(t);
-  }, [latestIso, drillKey]);
+  const nestedTreeFullyExpanded =
+    yearGroups.length > 0 &&
+    yearGroups.every((yg) => yearExpanded[yg.year] === true) &&
+    monthBuckets.length > 0 &&
+    monthBuckets.every((b) => monthExpanded[b.ym] === true);
+
+  const toggleNestedDates = () => {
+    if (nestedTreeFullyExpanded) collapseAllNestedDates();
+    else expandAllNestedDates();
+  };
 
   return (
     <div className="space-y-3">
+      {yearGroups.length > 0 ? (
+        <div className="flex flex-wrap justify-end gap-2">
+          <button
+            type="button"
+            className={btnSmallSecondary}
+            aria-expanded={nestedTreeFullyExpanded}
+            aria-label={
+              nestedTreeFullyExpanded
+                ? "Collapse all year, month, and date sections"
+                : "Expand all year, month, and date sections"
+            }
+            onClick={toggleNestedDates}
+          >
+            {nestedTreeFullyExpanded
+              ? "Collapse all dates"
+              : "Expand all dates"}
+          </button>
+        </div>
+      ) : null}
       {yearGroups.map((yg) => {
         const yearOpen = isYearOpen(yg.year);
         return (
@@ -266,12 +316,7 @@ export function AccountDrillMonthGrouped({
                             periodColumn={periodColumn}
                             monthScope={{ year: b.year, month: b.month }}
                             dateLabelStyle="day"
-                            initialExpandedDayIso={
-                              latestIso &&
-                              b.ym === latestIso.slice(0, 7)
-                                ? latestIso
-                                : null
-                            }
+                            expandAllNonce={expandAllDaysNonce}
                             onRowClick={onRowClick}
                           />
                         </div>
@@ -285,14 +330,82 @@ export function AccountDrillMonthGrouped({
         );
       })}
       {undatedRows.length > 0 ? (
-        <div className="rounded-xl border border-zinc-200 bg-zinc-50/80 px-3 py-3 text-sm dark:border-zinc-700 dark:bg-zinc-900/40">
-          <p className="text-xs font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+        <div className="rounded-xl border border-amber-200/90 bg-amber-50/70 px-3 py-3 text-sm dark:border-amber-900/50 dark:bg-amber-950/25">
+          <p className="text-xs font-medium uppercase tracking-wide text-amber-800 dark:text-amber-200/90">
             No parseable calendar date
           </p>
-          <p className="mt-1 text-zinc-600 dark:text-zinc-300">
+          <p className="mt-1 text-zinc-700 dark:text-zinc-300">
             {undatedRows.length} row{undatedRows.length === 1 ? "" : "s"} could
             not be grouped (check the Period column).
           </p>
+          {displayUndatedRows.length > 0 ? (
+            <div className="mt-3 overflow-x-auto rounded-lg border border-amber-200/80 bg-white/80 dark:border-amber-900/40 dark:bg-zinc-950/40">
+              <table className="w-full min-w-[32rem] table-fixed border-collapse text-left text-sm">
+                <thead className="bg-amber-50/90 text-xs uppercase text-amber-900/90 dark:bg-zinc-900/90 dark:text-amber-100/80">
+                  <tr>
+                    {undatedTableColumns.displayColumns.map((c) => (
+                      <th
+                        key={c}
+                        className="min-w-0 px-2 py-2 align-top font-medium"
+                      >
+                        {c === DATA_PREVIEW_TIME_COLUMN ? "Time" : c}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {displayUndatedRows.map((row, i) => {
+                    const txRowId = getTransactionRowId(row);
+                    const rowOpensEdit = txRowId != null;
+                    return (
+                      <tr
+                        key={row.id != null ? String(row.id) : i}
+                        title={rowOpensEdit ? "Click to edit" : undefined}
+                        onClick={
+                          rowOpensEdit
+                            ? () => onRowClick(row)
+                            : undefined
+                        }
+                        className={[
+                          "border-t border-amber-100 odd:bg-white even:bg-amber-50/50 dark:border-zinc-800 dark:odd:bg-zinc-950 dark:even:bg-zinc-900/50",
+                          rowOpensEdit
+                            ? `cursor-pointer ${interactiveHoverSurface}`
+                            : readonlyHoverSurface,
+                        ].join(" ")}
+                      >
+                        {undatedTableColumns.displayColumns.map((c) => (
+                          <td
+                            key={c}
+                            className={[
+                              "min-w-0 break-words px-2 py-2 align-top text-xs [overflow-wrap:anywhere]",
+                              c === DATA_PREVIEW_TIME_COLUMN
+                                ? "tabular-nums text-zinc-600 dark:text-zinc-400"
+                                : transactionCellToneClass(row, c),
+                            ].join(" ")}
+                          >
+                            {c === DATA_PREVIEW_TIME_COLUMN
+                              ? formatPeriodTimeOnly(
+                                  undatedTableColumns.timeValueColumn
+                                    ? row[undatedTableColumns.timeValueColumn]
+                                    : null,
+                                )
+                              : renderTransferFlowAwareCell(row, c, {
+                                  periodColumnName:
+                                    undatedTableColumns.timeValueColumn,
+                                })}
+                          </td>
+                        ))}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <p className="mt-2 text-xs text-zinc-600 dark:text-zinc-400">
+              No rows to show here (transfer-in legs are hidden in this list).
+            </p>
+          )}
         </div>
       ) : null}
     </div>

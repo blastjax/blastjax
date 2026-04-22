@@ -63,7 +63,6 @@ def payslip_create(body: PayslipCreate) -> dict[str, Any]:
     if not database_url():
         raise HTTPException(status_code=503, detail="DATABASE_URL is not set.")
     pid = insert_payslip(
-        None,
         body.total,
         body.commission,
         body.reimbursement,
@@ -120,7 +119,6 @@ async def payslip_upload(file: UploadFile = File(...)) -> dict[str, Any]:
     def _insert_rec(rec: dict[str, Any]) -> None:
         nonlocal ids
         pid = insert_payslip(
-            file.filename,
             rec["total"],
             rec["commission"],
             rec["reimbursement"],
@@ -178,7 +176,6 @@ def payslip_import_json(body: dict[str, Any] = Body(...)) -> dict[str, Any]:
     src = "payslip-import.json"
     for rec in recs:
         pid = insert_payslip(
-            src,
             rec["total"],
             rec["commission"],
             rec["reimbursement"],

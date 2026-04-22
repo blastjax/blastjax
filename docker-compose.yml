@@ -1,0 +1,45 @@
+# API uses PostgreSQL by default (`db` service). Override DATABASE_URL on `api` for SQLite instead.
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: blast
+      POSTGRES_DB: budgetapp
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      # Host 5433 avoids clashing with a local PostgreSQL install on 5432.
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U budgetapp -d budgetapp"]
+      interval: 3s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.backend
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://budgetapp:budgetapp@db:5432/budgetapp
+      BUDGET_CORS_ORIGINS: ${BUDGET_CORS_ORIGINS:-}
+
+  web:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.web
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://127.0.0.1:8000}
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+
+volumes:
+  pgdata:

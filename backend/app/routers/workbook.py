@@ -7,7 +7,7 @@ from typing import Any, Literal
 import pandas as pd
 from fastapi import APIRouter, HTTPException
 
-from app.services.dataframe import column_kind
+from app.services.dataframe import column_kind, period_series_to_sortable_utc
 from app.services.facets import (
     _facet_items_from_vc,
     _merge_catalog_into_facet_items,
@@ -15,6 +15,7 @@ from app.services.facets import (
     filter_reserved_category_facet_items,
 )
 from app.workbook_cache import load_workbook
+from db import storage_kind
 
 router = APIRouter(tags=["workbook"])
 
@@ -22,9 +23,10 @@ router = APIRouter(tags=["workbook"])
 @router.get("/api/workbook")
 def workbook_info() -> dict[str, Any]:
     frames = load_workbook()
+    src = storage_kind()
     return {
-        "path": "sqlite",
-        "source": "sqlite",
+        "path": src,
+        "source": src,
         "sheets": [
             {"name": name, "rows": int(len(df))} for name, df in frames.items()
         ],
@@ -81,7 +83,7 @@ def facet_column(
     kind = column_kind(s)
 
     if kind == "datetime":
-        ts = pd.to_datetime(s, errors="coerce").dropna()
+        ts = period_series_to_sortable_utc(s).dropna()
         if ts.empty:
             return {
                 "kind": "datetime",
@@ -129,7 +131,7 @@ def facet_column_workbook(
     kind = column_kind(s)
 
     if kind == "datetime":
-        ts = pd.to_datetime(s, errors="coerce").dropna()
+        ts = period_series_to_sortable_utc(s).dropna()
         if ts.empty:
             return {
                 "kind": "datetime",

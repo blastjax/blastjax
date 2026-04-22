@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { AppShell } from "@/components/AppShell";
 import { ThemeInitScript } from "@/components/ThemeInitScript";
@@ -20,6 +20,13 @@ export const metadata: Metadata = {
   description: "Explore Excel data with filters, summaries, and charts",
 };
 
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 5,
+  viewportFit: "cover",
+};
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -28,7 +35,7 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+        className={`${geistSans.variable} ${geistMono.variable} font-sans text-base leading-normal antialiased max-sm:text-[16px] max-sm:leading-[1.6] sm:leading-normal`}
       >
         <ThemeInitScript />
         <ThemeProvider>

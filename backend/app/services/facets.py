@@ -5,7 +5,7 @@ from typing import Any
 
 import pandas as pd
 
-from db import get_connection
+from db import db_cursor, get_connection
 
 from app.reserved_names import is_reserved_category_label
 from app.services.dataframe import column_kind
@@ -30,7 +30,8 @@ def _merged_column_series(
 ) -> pd.Series | None:
     parts: list[pd.Series] = []
     for df in frames.values():
-        if column_name in df.columns:
+        cols = set(df.columns)
+        if column_name in cols:
             parts.append(df[column_name])
     if not parts:
         return None
@@ -53,7 +54,7 @@ def _merge_catalog_into_facet_items(
         return filter_reserved_category_facet_items(column_name, items[:limit])
     try:
         with get_connection() as conn:
-            with conn.cursor() as cur:
+            with db_cursor(conn) as cur:
                 cur.execute(sql)
                 extra_names = [r[0] for r in cur.fetchall()]
     except Exception:

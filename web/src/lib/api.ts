@@ -1,5 +1,29 @@
-const base =
-  process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") ?? "http://127.0.0.1:8000";
+import { tryWasmApiFetch } from "@/lib/wasm/wasmRoutes";
+
+/** API origin (FastAPI) or same-origin base for GitHub Pages + sql.js WASM. */
+export function dataApiBase(): string {
+  if (
+    process.env.NEXT_PUBLIC_USE_WASM_SQLITE === "1" &&
+    typeof window !== "undefined"
+  ) {
+    const bp = (process.env.NEXT_PUBLIC_BASE_PATH ?? "").replace(/\/$/, "");
+    return `${window.location.origin}${bp}`;
+  }
+  const rawApi = process.env.NEXT_PUBLIC_API_URL?.trim();
+  return rawApi && rawApi.length > 0
+    ? rawApi.replace(/\/$/, "")
+    : "http://127.0.0.1:8000";
+}
+
+/** Thin wrapper around `fetch` (single place to extend with shared headers if needed). */
+export async function apiFetch(
+  input: RequestInfo | URL,
+  init?: RequestInit,
+): Promise<Response> {
+  const w = await tryWasmApiFetch(input, init);
+  if (w) return w;
+  return fetch(input, init);
+}
 
 /** Logical tab name from `/api/workbook` (backend `WORKBOOK_SHEET_KEY`, default `Budget`). */
 export const DEFAULT_WORKBOOK_SHEET = "Budget";
@@ -108,14 +132,14 @@ async function j<T>(res: Response): Promise<T> {
 
 export async function getWorkbook() {
   return j<{ path: string; sheets: { name: string; rows: number }[] }>(
-    await fetch(`${base}/api/workbook`, { cache: "no-store" }),
+    await apiFetch(`${dataApiBase()}/api/workbook`, { cache: "no-store" }),
   );
 }
 
 export async function getColumns(sheet: string) {
   return j<{ columns: ColumnMeta[] }>(
-    await fetch(
-      `${base}/api/sheet/${encodeURIComponent(sheet)}/columns`,
+    await apiFetch(
+      `${dataApiBase()}/api/sheet/${encodeURIComponent(sheet)}/columns`,
       { cache: "no-store" },
     ),
   );
@@ -135,8 +159,8 @@ export async function getFacet(
   if (opts?.q) p.set("q", opts.q);
   if (opts?.sort) p.set("sort", opts.sort);
   const qs = p.toString();
-  const url = `${base}/api/sheet/${encodeURIComponent(sheet)}/facet/${encodeURIComponent(column)}${qs ? `?${qs}` : ""}`;
-  return j<FacetResponse>(await fetch(url, { cache: "no-store" }));
+  const url = `${dataApiBase()}/api/sheet/${encodeURIComponent(sheet)}/facet/${encodeURIComponent(column)}${qs ? `?${qs}` : ""}`;
+  return j<FacetResponse>(await apiFetch(url, { cache: "no-store" }));
 }
 
 /** Distinct values for one column merged across every sheet (Category / Subcategory, etc.). */
@@ -149,8 +173,8 @@ export async function getWorkbookFacet(
   if (opts?.q) p.set("q", opts.q);
   if (opts?.sort) p.set("sort", opts.sort);
   const qs = p.toString();
-  const url = `${base}/api/workbook/facet/${encodeURIComponent(column)}${qs ? `?${qs}` : ""}`;
-  return j<FacetResponse>(await fetch(url, { cache: "no-store" }));
+  const url = `${dataApiBase()}/api/workbook/facet/${encodeURIComponent(column)}${qs ? `?${qs}` : ""}`;
+  return j<FacetResponse>(await apiFetch(url, { cache: "no-store" }));
 }
 
 /** Derived from Income/Expense column in budget data; `mixed` = both income- and expense-type rows. */
@@ -163,19 +187,21 @@ export type CategoryCatalogEntry = {
   kind?: CategoryCatalogKind;
   /** When true, omitted from transaction category pickers (still listed on Categories page). */
   is_hidden?: boolean;
+  /** When true, rows with this category are excluded from dashboard/calendar/stats data previews. */
+  hide_from_data_preview?: boolean;
   subcategories: { id: number; name: string }[];
 };
 
 export async function getCategoryCatalog() {
   return j<{ categories: CategoryCatalogEntry[] }>(
-    await fetch(`${base}/api/category-catalog`, { cache: "no-store" }),
+    await apiFetch(`${dataApiBase()}/api/category-catalog`, { cache: "no-store" }),
   );
 }
 
 /** Copy distinct category/subcategory strings from transaction rows into the catalog. */
 export async function seedCategoryCatalogFromBudget() {
   return j<{ categories_inserted: number; subcategories_inserted: number }>(
-    await fetch(`${base}/api/category-catalog/seed-from-budget`, {
+    await apiFetch(`${dataApiBase()}/api/category-catalog/seed-from-budget`, {
       method: "POST",
     }),
   );
@@ -186,7 +212,7 @@ export async function createCategoryCatalog(
   kind: "expense" | "income" = "expense",
 ) {
   return j<{ id: number }>(
-    await fetch(`${base}/api/category-catalog`, {
+    await apiFetch(`${dataApiBase()}/api/category-catalog`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name, kind }),
@@ -196,10 +222,15 @@ export async function createCategoryCatalog(
 
 export async function updateCategoryCatalog(
   id: number,
-  body: { name?: string; is_hidden?: boolean; kind?: CategoryCatalogKind },
+  body: {
+    name?: string;
+    is_hidden?: boolean;
+    hide_from_data_preview?: boolean;
+    kind?: CategoryCatalogKind;
+  },
 ) {
   return j<{ id: number }>(
-    await fetch(`${base}/api/category-catalog/${id}`, {
+    await apiFetch(`${dataApiBase()}/api/category-catalog/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -209,13 +240,13 @@ export async function updateCategoryCatalog(
 
 export async function deleteCategoryCatalog(id: number) {
   return j<{ ok: boolean }>(
-    await fetch(`${base}/api/category-catalog/${id}`, { method: "DELETE" }),
+    await apiFetch(`${dataApiBase()}/api/category-catalog/${id}`, { method: "DELETE" }),
   );
 }
 
 export async function createSubcategoryCatalog(categoryId: number, name: string) {
   return j<{ id: number; category_id: number }>(
-    await fetch(`${base}/api/category-catalog/${categoryId}/subcategories`, {
+    await apiFetch(`${dataApiBase()}/api/category-catalog/${categoryId}/subcategories`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name }),
@@ -225,7 +256,7 @@ export async function createSubcategoryCatalog(categoryId: number, name: string)
 
 export async function updateSubcategoryCatalog(id: number, name: string) {
   return j<{ id: number }>(
-    await fetch(`${base}/api/subcategory-catalog/${id}`, {
+    await apiFetch(`${dataApiBase()}/api/subcategory-catalog/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name }),
@@ -235,13 +266,13 @@ export async function updateSubcategoryCatalog(id: number, name: string) {
 
 export async function deleteSubcategoryCatalog(id: number) {
   return j<{ ok: boolean }>(
-    await fetch(`${base}/api/subcategory-catalog/${id}`, { method: "DELETE" }),
+    await apiFetch(`${dataApiBase()}/api/subcategory-catalog/${id}`, { method: "DELETE" }),
   );
 }
 
 export async function analyze(body: AnalyzeBody) {
   return j<AnalyzeResponse>(
-    await fetch(`${base}/api/analyze`, {
+    await apiFetch(`${dataApiBase()}/api/analyze`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -275,7 +306,7 @@ export async function createTransaction(body: TransactionPayload) {
     kind?: string;
     fee_id?: number;
   }>(
-    await fetch(`${base}/api/transaction`, {
+    await apiFetch(`${dataApiBase()}/api/transaction`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -285,7 +316,7 @@ export async function createTransaction(body: TransactionPayload) {
 
 export async function updateTransaction(id: number, body: TransactionPayload) {
   return j<{ id: number }>(
-    await fetch(`${base}/api/transaction/${id}`, {
+    await apiFetch(`${dataApiBase()}/api/transaction/${id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -298,7 +329,7 @@ export async function deleteTransaction(id: number) {
   if (!Number.isFinite(tid) || tid < 1) {
     throw new Error("Invalid transaction id");
   }
-  const res = await fetch(`${base}/api/transaction/${tid}`, {
+  const res = await apiFetch(`${dataApiBase()}/api/transaction/${tid}`, {
     method: "DELETE",
     cache: "no-store",
   });
@@ -365,8 +396,8 @@ export async function getAccountBalances(
   appendCurrencyConversion(p, currencyConversion);
   const qs = p.toString();
   return j<AccountBalancesResponse>(
-    await fetch(
-      `${base}/api/accounts/balances${qs ? `?${qs}` : ""}`,
+    await apiFetch(
+      `${dataApiBase()}/api/accounts/balances${qs ? `?${qs}` : ""}`,
       { cache: "no-store" },
     ),
   );
@@ -374,7 +405,6 @@ export async function getAccountBalances(
 
 export type PayslipRow = {
   id: number;
-  source_filename: string | null;
   total: number | null;
   commission: number | null;
   reimbursement: number | null;
@@ -411,13 +441,13 @@ export async function getPayslips(limit?: number) {
   if (limit != null) p.set("limit", String(limit));
   const qs = p.toString();
   return j<{ payslips: PayslipRow[] }>(
-    await fetch(`${base}/api/payslip${qs ? `?${qs}` : ""}`, { cache: "no-store" }),
+    await apiFetch(`${dataApiBase()}/api/payslip${qs ? `?${qs}` : ""}`, { cache: "no-store" }),
   );
 }
 
 export async function createPayslip(body: PayslipCreateBody) {
   return j<{ id: number; salary_transaction_id?: number }>(
-    await fetch(`${base}/api/payslip`, {
+    await apiFetch(`${dataApiBase()}/api/payslip`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -427,14 +457,14 @@ export async function createPayslip(body: PayslipCreateBody) {
 
 export async function getPayslip(id: number) {
   return j<PayslipRow>(
-    await fetch(`${base}/api/payslip/${id}`, { cache: "no-store" }),
+    await apiFetch(`${dataApiBase()}/api/payslip/${id}`, { cache: "no-store" }),
   );
 }
 
 /** Replace all fields (same shape as create). */
 export async function updatePayslip(id: number, body: PayslipCreateBody) {
   return j<{ id: number }>(
-    await fetch(`${base}/api/payslip/${id}`, {
+    await apiFetch(`${dataApiBase()}/api/payslip/${id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -444,7 +474,7 @@ export async function updatePayslip(id: number, body: PayslipCreateBody) {
 
 export async function deletePayslip(id: number) {
   return j<{ ok: boolean }>(
-    await fetch(`${base}/api/payslip/${id}`, { method: "DELETE" }),
+    await apiFetch(`${dataApiBase()}/api/payslip/${id}`, { method: "DELETE" }),
   );
 }
 
@@ -452,14 +482,14 @@ export async function uploadPayslipExcel(file: File) {
   const fd = new FormData();
   fd.append("file", file);
   return j<{ filename: string; inserted: number; ids: number[] }>(
-    await fetch(`${base}/api/payslip/upload`, { method: "POST", body: fd }),
+    await apiFetch(`${dataApiBase()}/api/payslip/upload`, { method: "POST", body: fd }),
   );
 }
 
 /** Nested shape: { "2024": { "Total": { "January": [a, b], ... }, ... }, ... } */
 export async function importPayslipJson(data: Record<string, unknown>) {
   return j<{ filename: string; inserted: number; ids: number[] }>(
-    await fetch(`${base}/api/payslip/import-json`, {
+    await apiFetch(`${dataApiBase()}/api/payslip/import-json`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
@@ -521,7 +551,7 @@ export async function getInstallments(limit?: number) {
   if (limit != null) p.set("limit", String(limit));
   const qs = p.toString();
   return j<{ installments: InstallmentRow[]; summary: InstallmentSummary }>(
-    await fetch(`${base}/api/installment${qs ? `?${qs}` : ""}`, {
+    await apiFetch(`${dataApiBase()}/api/installment${qs ? `?${qs}` : ""}`, {
       cache: "no-store",
     }),
   );
@@ -529,13 +559,13 @@ export async function getInstallments(limit?: number) {
 
 export async function getInstallment(id: number) {
   return j<InstallmentDetailResponse>(
-    await fetch(`${base}/api/installment/${id}`, { cache: "no-store" }),
+    await apiFetch(`${dataApiBase()}/api/installment/${id}`, { cache: "no-store" }),
   );
 }
 
 export async function createInstallment(body: InstallmentCreateBody) {
   return j<{ id: number }>(
-    await fetch(`${base}/api/installment`, {
+    await apiFetch(`${dataApiBase()}/api/installment`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -545,7 +575,7 @@ export async function createInstallment(body: InstallmentCreateBody) {
 
 export async function updateInstallment(id: number, body: InstallmentCreateBody) {
   return j<{ id: number }>(
-    await fetch(`${base}/api/installment/${id}`, {
+    await apiFetch(`${dataApiBase()}/api/installment/${id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -555,14 +585,14 @@ export async function updateInstallment(id: number, body: InstallmentCreateBody)
 
 export async function deleteInstallment(id: number) {
   return j<{ ok: boolean }>(
-    await fetch(`${base}/api/installment/${id}`, { method: "DELETE" }),
+    await apiFetch(`${dataApiBase()}/api/installment/${id}`, { method: "DELETE" }),
   );
 }
 
 /** Record one payment: lowers remaining and advances installment #. */
 export async function recordInstallmentPayment(id: number) {
   return j<{ installment: InstallmentRow }>(
-    await fetch(`${base}/api/installment/${id}/pay`, { method: "POST" }),
+    await apiFetch(`${dataApiBase()}/api/installment/${id}/pay`, { method: "POST" }),
   );
 }
 
@@ -572,7 +602,7 @@ export async function updateInstallmentLine(
   body: { principal: number; interest: number | null },
 ) {
   return j<InstallmentDetailResponse>(
-    await fetch(`${base}/api/installment/${installmentId}/line/${seq}`, {
+    await apiFetch(`${dataApiBase()}/api/installment/${installmentId}/line/${seq}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -603,7 +633,7 @@ export type RecurringRuleRow = {
 
 export async function getRecurringRules() {
   return j<{ rules: RecurringRuleRow[] }>(
-    await fetch(`${base}/api/recurring-rules`, { cache: "no-store" }),
+    await apiFetch(`${dataApiBase()}/api/recurring-rules`, { cache: "no-store" }),
   );
 }
 
@@ -625,7 +655,7 @@ export async function createRecurringRule(body: {
   is_active?: boolean;
 }) {
   return j<{ id: number }>(
-    await fetch(`${base}/api/recurring-rules`, {
+    await apiFetch(`${dataApiBase()}/api/recurring-rules`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -654,7 +684,7 @@ export async function updateRecurringRule(
   }>,
 ) {
   return j<{ id: number }>(
-    await fetch(`${base}/api/recurring-rules/${id}`, {
+    await apiFetch(`${dataApiBase()}/api/recurring-rules/${id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -664,7 +694,7 @@ export async function updateRecurringRule(
 
 export async function deleteRecurringRule(id: number) {
   return j<{ ok: boolean }>(
-    await fetch(`${base}/api/recurring-rules/${id}`, { method: "DELETE" }),
+    await apiFetch(`${dataApiBase()}/api/recurring-rules/${id}`, { method: "DELETE" }),
   );
 }
 
@@ -675,14 +705,14 @@ export async function postDueRecurringRules() {
       transaction_id: number;
       period_key: string;
     }[];
-  }>(await fetch(`${base}/api/recurring-rules/post-due`, { method: "POST" }));
+  }>(await apiFetch(`${dataApiBase()}/api/recurring-rules/post-due`, { method: "POST" }));
 }
 
 export async function uploadXlsx(file: File) {
   const fd = new FormData();
   fd.append("file", file);
   return j<{ path: string; filename: string }>(
-    await fetch(`${base}/api/upload`, { method: "POST", body: fd }),
+    await apiFetch(`${dataApiBase()}/api/upload`, { method: "POST", body: fd }),
   );
 }
 
@@ -740,8 +770,8 @@ export async function getCalendarBounds(
   appendCurrencyConversion(p, currencyConversion);
   const qs = p.toString();
   return j<CalendarBoundsResponse>(
-    await fetch(
-      `${base}/api/calendar/bounds${qs ? `?${qs}` : ""}`,
+    await apiFetch(
+      `${dataApiBase()}/api/calendar/bounds${qs ? `?${qs}` : ""}`,
       { cache: "no-store" },
     ),
   );
@@ -763,7 +793,7 @@ export async function getCalendarMonth(
   appendClientTimezoneOffset(p);
   appendCurrencyConversion(p, currencyConversion);
   return j<CalendarMonthResponse>(
-    await fetch(`${base}/api/calendar/month?${p}`, { cache: "no-store" }),
+    await apiFetch(`${dataApiBase()}/api/calendar/month?${p}`, { cache: "no-store" }),
   );
 }
 
@@ -788,7 +818,7 @@ export async function getCalendarYear(
   appendClientTimezoneOffset(p);
   appendCurrencyConversion(p, currencyConversion);
   return j<CalendarYearResponse>(
-    await fetch(`${base}/api/calendar/year?${p}`, { cache: "no-store" }),
+    await apiFetch(`${dataApiBase()}/api/calendar/year?${p}`, { cache: "no-store" }),
   );
 }
 
@@ -828,7 +858,7 @@ export async function getCalendarCategoryBreakdown(
   appendClientTimezoneOffset(p);
   appendCurrencyConversion(p, opts?.currencyConversion);
   return j<CalendarCategoryBreakdownResponse>(
-    await fetch(`${base}/api/calendar/category-breakdown?${p}`, {
+    await apiFetch(`${dataApiBase()}/api/calendar/category-breakdown?${p}`, {
       cache: "no-store",
     }),
   );
@@ -886,8 +916,8 @@ export async function getCalendarMonthTransactions(
   appendClientTimezoneOffset(p);
   appendCurrencyConversion(p, opts?.currencyConversion);
   return j<CalendarMonthTransactionsResponse>(
-    await fetch(
-      `${base}/api/calendar/month/transactions?${p}`,
+    await apiFetch(
+      `${dataApiBase()}/api/calendar/month/transactions?${p}`,
       { cache: "no-store" },
     ),
   );
@@ -938,7 +968,7 @@ export async function getCalendarYearTransactions(
   appendClientTimezoneOffset(p);
   appendCurrencyConversion(p, opts?.currencyConversion);
   return j<CalendarYearTransactionsResponse>(
-    await fetch(`${base}/api/calendar/year/transactions?${p}`, {
+    await apiFetch(`${dataApiBase()}/api/calendar/year/transactions?${p}`, {
       cache: "no-store",
     }),
   );
@@ -947,6 +977,8 @@ export async function getCalendarYearTransactions(
 export type CalendarDayResponse = {
   sheet: string;
   date: string;
+  /** Name of the date/time column (same as other calendar endpoints). */
+  period_column: string;
   columns: string[];
   /** All transactions for this day, by Period (newest first). */
   rows: Record<string, unknown>[];
@@ -969,20 +1001,20 @@ export async function getCalendarDay(
   appendClientTimezoneOffset(p);
   appendCurrencyConversion(p, currencyConversion);
   return j<CalendarDayResponse>(
-    await fetch(`${base}/api/calendar/day?${p}`, { cache: "no-store" }),
+    await apiFetch(`${dataApiBase()}/api/calendar/day?${p}`, { cache: "no-store" }),
   );
 }
 
 /** Dashboard/settings UI prefs stored in PostgreSQL (`user_ui_preferences`). */
 export async function getUserPreferences() {
   return j<{ data: Record<string, unknown> }>(
-    await fetch(`${base}/api/user-preferences`, { cache: "no-store" }),
+    await apiFetch(`${dataApiBase()}/api/user-preferences`, { cache: "no-store" }),
   );
 }
 
 export async function saveUserPreferences(payload: Record<string, unknown>) {
   return j<{ ok: boolean }>(
-    await fetch(`${base}/api/user-preferences`, {
+    await apiFetch(`${dataApiBase()}/api/user-preferences`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
@@ -992,7 +1024,7 @@ export async function saveUserPreferences(payload: Record<string, unknown>) {
 
 export async function getBudgetLabels() {
   return j<{ accounts: string[]; currencies: string[] }>(
-    await fetch(`${base}/api/budget-labels`, { cache: "no-store" }),
+    await apiFetch(`${dataApiBase()}/api/budget-labels`, { cache: "no-store" }),
   );
 }
 
@@ -1002,7 +1034,7 @@ export async function renameBudgetAccountLabel(oldLabel: string, newLabel: strin
     transactions_updated: number;
     recurring_rules_updated: number;
   }>(
-    await fetch(`${base}/api/budget-labels/rename-account`, {
+    await apiFetch(`${dataApiBase()}/api/budget-labels/rename-account`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ old_label: oldLabel, new_label: newLabel }),
@@ -1016,7 +1048,7 @@ export async function removeBudgetAccountLabel(label: string) {
     transactions_updated: number;
     recurring_rules_updated: number;
   }>(
-    await fetch(`${base}/api/budget-labels/remove-account`, {
+    await apiFetch(`${dataApiBase()}/api/budget-labels/remove-account`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ label }),
@@ -1030,7 +1062,7 @@ export async function removeBudgetCurrencyLabel(label: string) {
     transactions_updated: number;
     recurring_rules_updated: number;
   }>(
-    await fetch(`${base}/api/budget-labels/remove-currency`, {
+    await apiFetch(`${dataApiBase()}/api/budget-labels/remove-currency`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ label }),
@@ -1038,4 +1070,4 @@ export async function removeBudgetCurrencyLabel(label: string) {
   );
 }
 
-export { base as apiBase };
+export { dataApiBase as apiBase };

@@ -1,15 +1,30 @@
 "use client";
 
-import { useCallback, useEffect, useId, useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useState,
+  type MouseEvent,
+} from "react";
 import {
   type AnalyzeBody,
   type CurrencyConversionPayload,
   getCalendarMonthTransactions,
   getCalendarYearTransactions,
   getCategoryCatalog,
+  updateCategoryCatalog,
   type CategoryCatalogEntry,
   type CalendarCategoryBreakdownSlice,
 } from "@/lib/api";
+import { dispatchCategoryCatalogChanged } from "@/lib/categoryCatalogEvents";
+import { isCategoryHiddenFromPieCharts } from "@/lib/categoryPieVisibility";
+import {
+  DATA_PREVIEW_TIME_COLUMN,
+  tableColumnsWithLeadingTime,
+} from "@/lib/dataPreviewTimeColumn";
+import { formatPeriodTimeOnly } from "@/lib/formatPeriod";
 import { categoryPieColorAtIndex } from "@/lib/categoryPieColors";
 import { useTransactionModal } from "@/components/TransactionModalProvider";
 import { getTransactionRowId } from "@/lib/transactionRowId";
@@ -21,7 +36,17 @@ import { CalendarMonthTransactionsGrouped } from "@/components/CalendarMonthTran
 import { filterDataPreviewRows } from "@/lib/transferRowAccounts";
 import { renderTransferFlowAwareCell } from "@/lib/transferPreviewCells";
 import { transactionCellToneClass } from "@/lib/transactionRowTone";
-import { btnSecondary, modalBackdrop } from "@/lib/ui";
+import {
+  btnSecondary,
+  btnSmallSecondary,
+  interactiveHoverSurface,
+  modalBackdrop,
+  readonlyHoverSurface,
+} from "@/lib/ui";
+import {
+  toggleInstanceHidden,
+  useHiddenInstancesMap,
+} from "@/lib/valueInstanceVisibility";
 import {
   formatMainCurrencyTotal,
   useCurrencySettings,
@@ -87,7 +112,10 @@ type Props = {
   variant: "expense" | "income";
   /** Same order as the pie (largest first). */
   pieSlices: CalendarCategoryBreakdownSlice[];
-  pieTotal: number;
+  /** Sum of non-hidden slice values — denominator for % on visible categories. */
+  pieTotalVisible: number;
+  /** For hide/show button titles, e.g. `"expense"` or `"income"`. */
+  pieKindLabel: string;
   pieScope: "month" | "year";
   calendarYear: number;
   calendarMonth?: number;
@@ -99,7 +127,8 @@ type Props = {
 export function CategoryStatsDataPreview({
   variant,
   pieSlices,
-  pieTotal,
+  pieTotalVisible,
+  pieKindLabel,
   pieScope,
   calendarYear,
   calendarMonth,
@@ -109,6 +138,7 @@ export function CategoryStatsDataPreview({
 }: Props) {
   const subTxModalTitleId = useId();
   const { openTxEdit } = useTransactionModal();
+  const hiddenInstancesMap = useHiddenInstancesMap();
   const isColVisible = useDashboardColumnVisible();
   const currencySettings = useCurrencySettings();
   const fmt = useCallback(
@@ -292,6 +322,38 @@ export function CategoryStatsDataPreview({
     void fetchTransactionsForSubModal(categoryName, subName);
   };
 
+  const handlePieVisibilityClick = useCallback(
+    async (e: MouseEvent, categoryName: string) => {
+      e.stopPropagation();
+      const settingsHidden = (hiddenInstancesMap.Category ?? []).includes(
+        categoryName,
+      );
+      const entry = findCatalogCategory(catalog, categoryName);
+      const hidden = isCategoryHiddenFromPieCharts(
+        categoryName,
+        hiddenInstancesMap.Category,
+        catalog,
+      );
+      if (hidden) {
+        if (settingsHidden) {
+          toggleInstanceHidden("Category", categoryName, false);
+          return;
+        }
+        if (entry?.is_hidden === true && entry.id != null) {
+          try {
+            await updateCategoryCatalog(entry.id, { is_hidden: false });
+            dispatchCategoryCatalogChanged();
+          } catch {
+            /* ignore */
+          }
+        }
+        return;
+      }
+      toggleInstanceHidden("Category", categoryName, true);
+    },
+    [catalog, hiddenInstancesMap.Category],
+  );
+
   const closeTxDrillModal = useCallback(() => {
     setTxDrillModal(null);
     setSubModalColumns([]);
@@ -325,6 +387,17 @@ export function CategoryStatsDataPreview({
     [subModalColumns, isColVisible],
   );
 
+  const txTableWithTime = useMemo(
+    () => tableColumnsWithLeadingTime(visibleTxColumns, txPeriodColumn),
+    [visibleTxColumns, txPeriodColumn],
+  );
+
+  const subModalTableWithTime = useMemo(
+    () =>
+      tableColumnsWithLeadingTime(visibleSubModalColumns, subModalPeriodColumn),
+    [visibleSubModalColumns, subModalPeriodColumn],
+  );
+
   useEffect(() => {
     if (!txDrillModal) return;
     const onKey = (ev: KeyboardEvent) => {
@@ -339,6 +412,27 @@ export function CategoryStatsDataPreview({
     [pieSlices],
   );
 
+  /** Visible categories first (same value order as the pie), then hidden at the bottom. */
+  const pieSlicesForList = useMemo(() => {
+    if (!pieSlices.length) return [];
+    const vis: CalendarCategoryBreakdownSlice[] = [];
+    const hid: CalendarCategoryBreakdownSlice[] = [];
+    for (const s of pieSlices) {
+      if (
+        isCategoryHiddenFromPieCharts(
+          s.name,
+          hiddenInstancesMap.Category,
+          catalog,
+        )
+      ) {
+        hid.push(s);
+      } else {
+        vis.push(s);
+      }
+    }
+    return [...vis, ...hid];
+  }, [pieSlices, hiddenInstancesMap.Category, catalog]);
+
   if (pieSlices.length === 0) return null;
 
   return (
@@ -348,41 +442,71 @@ export function CategoryStatsDataPreview({
         By category
       </h4>
       <ul className="mt-2 space-y-1">
-        {pieSlices.map((slice, idx) => {
+        {pieSlicesForList.map((slice, idx) => {
+          const hidden = isCategoryHiddenFromPieCharts(
+            slice.name,
+            hiddenInstancesMap.Category,
+            catalog,
+          );
           const pct =
-            pieTotal > 0 ? Math.round((slice.value / pieTotal) * 1000) / 10 : 0;
-          const color = categoryPieColorAtIndex(idx);
+            !hidden && pieTotalVisible > 0
+              ? Math.round((slice.value / pieTotalVisible) * 1000) / 10
+              : null;
+          const color = hidden
+            ? "#a1a1aa"
+            : categoryPieColorAtIndex(idx);
           const isOpen = openCategory === slice.name;
           return (
             <li key={slice.name || "__empty__"} className="rounded-lg">
-              <button
-                type="button"
-                onClick={() => onCategoryClick(slice.name)}
-                className={`flex w-full min-w-0 items-baseline justify-between gap-2 rounded-md px-2 py-1.5 text-left text-sm transition hover:bg-zinc-100 dark:hover:bg-zinc-800/80 ${
-                  isOpen ? "bg-zinc-100 dark:bg-zinc-800/60" : ""
-                }`}
-              >
-                <span className="min-w-0 flex flex-1 items-baseline gap-2">
-                  <span
-                    className="shrink-0 text-sm font-semibold tabular-nums"
-                    style={{ color }}
-                  >
-                    {pct}%
-                  </span>
-                  <span
-                    className="min-w-0 truncate font-medium"
-                    style={{ color }}
-                  >
-                    {slice.name || "—"}
-                  </span>
-                </span>
-                <span
-                  className="shrink-0 tabular-nums font-semibold text-zinc-800 dark:text-zinc-200"
-                  style={{ color }}
+              <div className="flex w-full min-w-0 items-stretch gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => onCategoryClick(slice.name)}
+                  className={`flex min-w-0 flex-1 items-baseline justify-between gap-2 rounded-md px-2 py-1.5 text-left text-sm ${
+                    isOpen ? "bg-zinc-100 dark:bg-zinc-800/60" : ""
+                  } ${interactiveHoverSurface}`}
                 >
-                  {fmt(slice.value)}
-                </span>
-              </button>
+                  <span className="min-w-0 flex flex-1 items-baseline gap-2">
+                    <span
+                      className="shrink-0 text-sm font-semibold tabular-nums"
+                      style={{ color }}
+                      title={
+                        hidden
+                          ? "Excluded from pie chart — amount shown for reference"
+                          : "% of visible pie (hidden categories excluded from total)"
+                      }
+                    >
+                      {pct == null ? "—" : `${pct}%`}
+                    </span>
+                    <span
+                      className="min-w-0 truncate font-medium"
+                      style={{ color }}
+                    >
+                      {slice.name || "—"}
+                    </span>
+                  </span>
+                  <span
+                    className="shrink-0 tabular-nums font-semibold"
+                    style={{ color }}
+                  >
+                    {fmt(slice.value)}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  className={`${btnSmallSecondary} shrink-0 self-center px-2 py-1 text-[11px]`}
+                  title={
+                    hidden
+                      ? `Show “${slice.name}” on ${pieKindLabel} pie charts`
+                      : `Hide “${slice.name}” from ${pieKindLabel} pie charts (Settings → Which values → Category)`
+                  }
+                  onClick={(e) =>
+                    void handlePieVisibilityClick(e, slice.name)
+                  }
+                >
+                  {hidden ? "Show" : "Hide"}
+                </button>
+              </div>
               {isOpen && (
                 <div className="border-l-2 border-zinc-200 pl-3 ml-2 mt-1 dark:border-zinc-600">
                   {loading && (
@@ -404,7 +528,7 @@ export function CategoryStatsDataPreview({
                               onClick={() =>
                                 onSubcategoryClick(slice.name, sub.name)
                               }
-                              className="flex w-full min-w-0 items-baseline justify-between gap-2 rounded-md px-2 py-1 text-left text-xs transition hover:bg-zinc-100 dark:hover:bg-zinc-800/80"
+                              className={`flex w-full min-w-0 items-baseline justify-between gap-2 rounded-md px-2 py-1 text-left text-xs ${interactiveHoverSurface}`}
                             >
                               <span className="flex min-w-0 flex-1 items-baseline gap-2">
                                 <span
@@ -506,9 +630,9 @@ export function CategoryStatsDataPreview({
                     <table className="w-full min-w-[32rem] table-fixed border-collapse text-left text-sm">
                       <thead className="sticky top-0 z-10 bg-zinc-50 text-xs uppercase text-zinc-500 dark:bg-zinc-900/95 dark:text-zinc-400">
                         <tr>
-                          {visibleTxColumns.map((c) => (
+                          {txTableWithTime.displayColumns.map((c) => (
                             <th key={c} className="min-w-0 px-2 py-2 align-top font-medium">
-                              {c}
+                              {c === DATA_PREVIEW_TIME_COLUMN ? "Time" : c}
                             </th>
                           ))}
                         </tr>
@@ -532,16 +656,29 @@ export function CategoryStatsDataPreview({
                               className={[
                                 "border-t border-zinc-100 odd:bg-white even:bg-zinc-50/80 dark:border-zinc-800 dark:odd:bg-zinc-950 dark:even:bg-zinc-900/40",
                                 canEdit
-                                  ? "cursor-pointer hover:bg-zinc-100/90 dark:hover:bg-zinc-800/50"
-                                  : "",
+                                  ? `cursor-pointer ${interactiveHoverSurface}`
+                                  : readonlyHoverSurface,
                               ].join(" ")}
                             >
-                              {visibleTxColumns.map((c) => (
+                              {txTableWithTime.displayColumns.map((c) => (
                                 <td
                                   key={c}
-                                  className={`min-w-0 break-words px-2 py-2 align-top text-xs [overflow-wrap:anywhere] ${transactionCellToneClass(row, c)}`}
+                                  className={`min-w-0 break-words px-2 py-2 align-top text-xs [overflow-wrap:anywhere] ${
+                                    c === DATA_PREVIEW_TIME_COLUMN
+                                      ? "tabular-nums text-zinc-600 dark:text-zinc-400"
+                                      : transactionCellToneClass(row, c)
+                                  }`}
                                 >
-                                  {renderTransferFlowAwareCell(row, c)}
+                                  {c === DATA_PREVIEW_TIME_COLUMN
+                                    ? formatPeriodTimeOnly(
+                                        txTableWithTime.timeValueColumn
+                                          ? row[txTableWithTime.timeValueColumn]
+                                          : null,
+                                      )
+                                    : renderTransferFlowAwareCell(row, c, {
+                                        periodColumnName:
+                                          txTableWithTime.timeValueColumn,
+                                      })}
                                 </td>
                               ))}
                             </tr>
@@ -585,9 +722,9 @@ export function CategoryStatsDataPreview({
                       <table className="w-full min-w-[32rem] table-fixed border-collapse text-left text-sm">
                         <thead className="sticky top-0 z-10 bg-zinc-50 text-xs uppercase text-zinc-500 dark:bg-zinc-900/95 dark:text-zinc-400">
                           <tr>
-                            {visibleSubModalColumns.map((c) => (
+                            {subModalTableWithTime.displayColumns.map((c) => (
                               <th key={c} className="min-w-0 px-2 py-2 align-top font-medium">
-                                {c}
+                                {c === DATA_PREVIEW_TIME_COLUMN ? "Time" : c}
                               </th>
                             ))}
                           </tr>
@@ -611,16 +748,29 @@ export function CategoryStatsDataPreview({
                                 className={[
                                   "border-t border-zinc-100 odd:bg-white even:bg-zinc-50/80 dark:border-zinc-800 dark:odd:bg-zinc-950 dark:even:bg-zinc-900/40",
                                   canEdit
-                                    ? "cursor-pointer hover:bg-zinc-100/90 dark:hover:bg-zinc-800/50"
-                                    : "",
+                                    ? `cursor-pointer ${interactiveHoverSurface}`
+                                    : readonlyHoverSurface,
                                 ].join(" ")}
                               >
-                                {visibleSubModalColumns.map((c) => (
+                                {subModalTableWithTime.displayColumns.map((c) => (
                                   <td
                                     key={c}
-                                    className={`min-w-0 break-words px-2 py-2 align-top text-xs [overflow-wrap:anywhere] ${transactionCellToneClass(row, c)}`}
+                                    className={`min-w-0 break-words px-2 py-2 align-top text-xs [overflow-wrap:anywhere] ${
+                                      c === DATA_PREVIEW_TIME_COLUMN
+                                        ? "tabular-nums text-zinc-600 dark:text-zinc-400"
+                                        : transactionCellToneClass(row, c)
+                                    }`}
                                   >
-                                    {renderTransferFlowAwareCell(row, c)}
+                                    {c === DATA_PREVIEW_TIME_COLUMN
+                                      ? formatPeriodTimeOnly(
+                                          subModalTableWithTime.timeValueColumn
+                                            ? row[subModalTableWithTime.timeValueColumn]
+                                            : null,
+                                        )
+                                      : renderTransferFlowAwareCell(row, c, {
+                                          periodColumnName:
+                                            subModalTableWithTime.timeValueColumn,
+                                        })}
                                   </td>
                                 ))}
                               </tr>

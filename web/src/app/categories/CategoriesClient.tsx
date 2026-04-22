@@ -23,6 +23,7 @@ import {
   modalBackdropMobileSheet,
   modalTitle,
 } from "@/lib/ui";
+import { dispatchCategoryCatalogChanged } from "@/lib/categoryCatalogEvents";
 import { isReservedCategoryLabel } from "@/lib/reservedCategory";
 
 const KIND_LABEL: Record<CategoryCatalogKind, string> = {
@@ -104,6 +105,11 @@ export default function CategoriesClient() {
     }
   }, []);
 
+  const reloadCatalogAndNotify = useCallback(async () => {
+    await load();
+    dispatchCategoryCatalogChanged();
+  }, [load]);
+
   useEffect(() => {
     void load();
   }, [load]);
@@ -125,7 +131,7 @@ export default function CategoriesClient() {
       setSeedMessage(
         `Imported ${r.categories_inserted} new categories and ${r.subcategories_inserted} new subcategories from your data.`,
       );
-      await load();
+      await reloadCatalogAndNotify();
     } catch (e) {
       setError(
         e instanceof Error ? e.message : "Could not import from budget data",
@@ -144,7 +150,7 @@ export default function CategoriesClient() {
       await createCategoryCatalog(name, catalogTab);
       setNewCategory("");
       setAddModalOpen(false);
-      await load();
+      await reloadCatalogAndNotify();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not create category");
     } finally {
@@ -160,7 +166,7 @@ export default function CategoriesClient() {
     try {
       await updateCategoryCatalog(id, { name });
       setEditingCatId(null);
-      await load();
+      await reloadCatalogAndNotify();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not update category");
     } finally {
@@ -174,7 +180,7 @@ export default function CategoriesClient() {
     setError(null);
     try {
       await updateCategoryCatalog(id, { kind });
-      await load();
+      await reloadCatalogAndNotify();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not update category type");
     } finally {
@@ -188,10 +194,33 @@ export default function CategoriesClient() {
     setError(null);
     try {
       await updateCategoryCatalog(id, { is_hidden: nextHidden });
-      await load();
+      await reloadCatalogAndNotify();
     } catch (e) {
       setError(
         e instanceof Error ? e.message : "Could not update category visibility",
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function onToggleCategoryHideFromDataPreview(
+    id: number,
+    nextHidden: boolean,
+  ) {
+    if (saving) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await updateCategoryCatalog(id, {
+        hide_from_data_preview: nextHidden,
+      });
+      await reloadCatalogAndNotify();
+    } catch (e) {
+      setError(
+        e instanceof Error
+          ? e.message
+          : "Could not update category data preview visibility",
       );
     } finally {
       setSaving(false);
@@ -204,7 +233,7 @@ export default function CategoriesClient() {
     try {
       await deleteCategoryCatalog(id);
       setEditingCatId(null);
-      await load();
+      await reloadCatalogAndNotify();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not delete category");
     } finally {
@@ -220,7 +249,7 @@ export default function CategoriesClient() {
     try {
       await createSubcategoryCatalog(categoryId, name);
       setNewSubName((prev) => ({ ...prev, [categoryId]: "" }));
-      await load();
+      await reloadCatalogAndNotify();
     } catch (e) {
       setError(
         e instanceof Error ? e.message : "Could not create subcategory",
@@ -238,7 +267,7 @@ export default function CategoriesClient() {
     try {
       await updateSubcategoryCatalog(id, name);
       setEditingSubId(null);
-      await load();
+      await reloadCatalogAndNotify();
     } catch (e) {
       setError(
         e instanceof Error ? e.message : "Could not update subcategory",
@@ -254,7 +283,7 @@ export default function CategoriesClient() {
     try {
       await deleteSubcategoryCatalog(id);
       setEditingSubId(null);
-      await load();
+      await reloadCatalogAndNotify();
     } catch (e) {
       setError(
         e instanceof Error ? e.message : "Could not delete subcategory",
@@ -356,8 +385,16 @@ export default function CategoriesClient() {
                 Use the Expenses / Income tabs to manage each side. Types come from
                 your transaction Income/Expense column when you import from data;
                 you can change them below. “Accounts” is only a column on
-                transactions, not a category here. Hide removes a label from
-                pickers until you show it again.
+                transactions, not a category here.{" "}
+                <strong className="font-medium text-zinc-600 dark:text-zinc-300">
+                  Hide From Selection
+                </strong>{" "}
+                removes a label from category pickers;{" "}
+                <strong className="font-medium text-zinc-600 dark:text-zinc-300">
+                  Hide From Data Preview
+                </strong>{" "}
+                keeps it selectable but excludes it from dashboard, calendar,
+                stats, and account transaction previews.
               </p>
             </div>
             <div
@@ -411,17 +448,22 @@ export default function CategoriesClient() {
                 . Add one above or import from transaction data.
               </p>
             ) : (
-              <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+              <ul className="grid grid-cols-3 gap-2">
                 {tabFilteredCategories.map((c) => (
                   <li
                     key={c.id}
                     className={`flex h-full min-h-[12rem] flex-col rounded-lg border p-3 dark:border-zinc-800 ${
-                      c.is_hidden === true
-                        ? "border-dashed border-zinc-300 bg-zinc-100/60 dark:border-zinc-600 dark:bg-zinc-900/60"
-                        : "border-zinc-200 bg-zinc-50/80 dark:bg-zinc-900/40"
+                      c.is_hidden === true &&
+                      c.hide_from_data_preview === true
+                        ? "border-dashed border-zinc-300 bg-zinc-100/60 ring-1 ring-violet-400/35 dark:border-zinc-600 dark:bg-zinc-900/60 dark:ring-violet-700/45"
+                        : c.is_hidden === true
+                          ? "border-dashed border-zinc-300 bg-zinc-100/60 dark:border-zinc-600 dark:bg-zinc-900/60"
+                          : c.hide_from_data_preview === true
+                            ? "border-violet-300/90 bg-violet-50/50 dark:border-violet-800 dark:bg-violet-950/35"
+                            : "border-zinc-200 bg-zinc-50/80 dark:bg-zinc-900/40"
                     }`}
                   >
-                    <div className="flex shrink-0 flex-wrap items-center gap-2">
+                    <div className="flex w-full min-w-0 shrink-0 flex-col gap-2">
                       {editingCatId === c.id ? (
                         <div
                           className="flex min-h-[2.75rem] w-full flex-wrap items-center gap-2 rounded-lg border border-zinc-100 bg-white px-3 py-2 dark:border-zinc-800 dark:bg-zinc-950"
@@ -474,62 +516,95 @@ export default function CategoriesClient() {
                         </div>
                       ) : (
                         <>
-                          <button
-                            type="button"
-                            className="flex min-h-[2.75rem] min-w-0 flex-1 items-center rounded-lg border border-zinc-100 bg-white px-3 py-2 text-left transition hover:border-zinc-200 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:border-zinc-700 dark:hover:bg-zinc-900"
-                            title={`Edit “${c.name}”`}
-                            disabled={saving}
-                            onClick={() => {
-                              setEditingCatId(c.id);
-                              setEditCatName(c.name);
-                            }}
-                          >
-                            <span className="min-w-0 flex-1 truncate text-sm font-medium text-zinc-800 dark:text-zinc-200">
-                              {c.name}
-                            </span>
-                          </button>
-                          <button
-                            type="button"
-                            title={
-                              c.is_hidden === true
-                                ? "Show in transaction pickers"
-                                : "Hide from transaction pickers"
-                            }
-                            disabled={saving}
-                            onClick={() =>
-                              void onToggleCategoryHidden(
-                                c.id,
-                                !(c.is_hidden === true),
-                              )
-                            }
-                            className={`shrink-0 rounded-lg border px-2.5 py-2 text-xs font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 ${
-                              c.is_hidden === true
-                                ? "border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100 dark:border-amber-700 dark:bg-amber-950/50 dark:text-amber-100 dark:hover:bg-amber-900/50"
-                                : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
-                            }`}
-                          >
-                            {c.is_hidden === true ? "Show" : "Hide"}
-                          </button>
-                          <label className="sr-only" htmlFor={`cat-kind-${c.id}`}>
-                            Budget type for {c.name}
-                          </label>
-                          <select
-                            id={`cat-kind-${c.id}`}
-                            className="max-w-[11rem] shrink-0 rounded-lg border border-zinc-300 bg-white px-2 py-2 text-xs text-zinc-800 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200"
-                            value={normalizeKind(c.kind)}
-                            disabled={saving}
-                            onChange={(e) =>
-                              void onSetCategoryKind(
-                                c.id,
-                                e.target.value as CategoryCatalogKind,
-                              )
-                            }
-                            title="Expense vs income (from your data, or set manually). “Income & expense” lists under both tabs."
-                          >
-                            <option value="expense">{KIND_LABEL.expense}</option>
-                            <option value="income">{KIND_LABEL.income}</option>
-                            <option value="mixed">{KIND_LABEL.mixed}</option>
-                          </select>
+                          <div className="flex min-w-0 flex-wrap items-center gap-2">
+                            <button
+                              type="button"
+                              className="flex min-h-[2.75rem] min-w-0 flex-1 items-center rounded-lg border border-zinc-100 bg-white px-3 py-2 text-left transition hover:border-zinc-200 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:border-zinc-700 dark:hover:bg-zinc-900"
+                              title={`Edit “${c.name}”`}
+                              disabled={saving}
+                              onClick={() => {
+                                setEditingCatId(c.id);
+                                setEditCatName(c.name);
+                              }}
+                            >
+                              <span className="min-w-0 flex-1 truncate text-sm font-medium text-zinc-800 dark:text-zinc-200">
+                                {c.name}
+                              </span>
+                            </button>
+                            <label
+                              className="sr-only"
+                              htmlFor={`cat-kind-${c.id}`}
+                            >
+                              Budget type for {c.name}
+                            </label>
+                            <select
+                              id={`cat-kind-${c.id}`}
+                              className="max-w-full shrink-0 rounded-lg border border-zinc-300 bg-white px-2 py-2 text-xs text-zinc-800 sm:max-w-[11rem] dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200"
+                              value={normalizeKind(c.kind)}
+                              disabled={saving}
+                              onChange={(e) =>
+                                void onSetCategoryKind(
+                                  c.id,
+                                  e.target.value as CategoryCatalogKind,
+                                )
+                              }
+                              title="Expense vs income (from your data, or set manually). “Income & expense” lists under both tabs."
+                            >
+                              <option value="expense">{KIND_LABEL.expense}</option>
+                              <option value="income">{KIND_LABEL.income}</option>
+                              <option value="mixed">{KIND_LABEL.mixed}</option>
+                            </select>
+                          </div>
+                          <div className="flex w-full min-w-0 flex-wrap items-center gap-1">
+                            <button
+                              type="button"
+                              title={
+                                c.is_hidden === true
+                                  ? "Show in category pickers when adding or editing transactions"
+                                  : "Hide from category pickers when adding or editing transactions"
+                              }
+                              disabled={saving}
+                              onClick={() =>
+                                void onToggleCategoryHidden(
+                                  c.id,
+                                  !(c.is_hidden === true),
+                                )
+                              }
+                              className={`rounded-lg border px-2 py-2 text-[11px] font-medium leading-tight transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 sm:px-2.5 sm:text-xs ${
+                                c.is_hidden === true
+                                  ? "border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100 dark:border-amber-700 dark:bg-amber-950/50 dark:text-amber-100 dark:hover:bg-amber-900/50"
+                                  : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                              }`}
+                            >
+                              {c.is_hidden === true
+                                ? "Show In Selection"
+                                : "Hide From Selection"}
+                            </button>
+                            <button
+                              type="button"
+                              title={
+                                c.hide_from_data_preview === true
+                                  ? "Include this category in transaction data previews again"
+                                  : "Exclude this category from transaction data previews (dashboard, calendar, stats, account drill-down)"
+                              }
+                              disabled={saving}
+                              onClick={() =>
+                                void onToggleCategoryHideFromDataPreview(
+                                  c.id,
+                                  !(c.hide_from_data_preview === true),
+                                )
+                              }
+                              className={`rounded-lg border px-2 py-2 text-[11px] font-medium leading-tight transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 sm:px-2.5 sm:text-xs ${
+                                c.hide_from_data_preview === true
+                                  ? "border-violet-400 bg-violet-50 text-violet-950 hover:bg-violet-100 dark:border-violet-700 dark:bg-violet-950/60 dark:text-violet-100 dark:hover:bg-violet-900/50"
+                                  : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                              }`}
+                            >
+                              {c.hide_from_data_preview === true
+                                ? "Show In Data Preview"
+                                : "Hide From Data Preview"}
+                            </button>
+                          </div>
                         </>
                       )}
                     </div>

@@ -49,6 +49,17 @@ export function formatCellForTone(
   column?: string,
   row?: Record<string, unknown>,
 ): string {
+  if (column?.trim().toLowerCase() === "description") {
+    if (v === null || v === undefined) return "";
+    const s =
+      typeof v === "number"
+        ? !Number.isFinite(v)
+          ? ""
+          : String(v)
+        : String(v).trim();
+    if (s === "" || s === "—") return "";
+    return s;
+  }
   if (v === null || v === undefined) return "";
   if (typeof v === "number") {
     if (!Number.isFinite(v)) return "";
@@ -93,6 +104,9 @@ export function transactionCellToneClass(
   options?: { flowColumn?: string },
 ): string {
   if (options?.flowColumn && column === options.flowColumn) return "";
+  if (column.trim().toLowerCase() === "description") {
+    return "text-zinc-500 dark:text-zinc-400";
+  }
   const k = transactionRowKind(row);
   if (k === "income") return incomeFlowTextClass;
   if (k === "expense") return "text-rose-700 dark:text-rose-400";

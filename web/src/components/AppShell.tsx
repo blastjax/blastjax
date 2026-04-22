@@ -15,6 +15,7 @@ import {
   useShellLayout,
 } from "@/lib/shellLayoutContext";
 import { WorkbookActiveSheetProvider } from "@/lib/workbookActiveSheetContext";
+import { MobileTopBar } from "@/components/MobileTopBar";
 import { SidebarNav } from "@/components/SidebarNav";
 import { TransactionModalProvider } from "@/components/TransactionModalProvider";
 
@@ -66,7 +67,7 @@ function LeftResizeHandle() {
       role="separator"
       aria-orientation="vertical"
       aria-label="Drag to resize navigation panel"
-      className="z-20 w-2 shrink-0 cursor-col-resize touch-none select-none self-stretch border-0 bg-zinc-200/90 hover:bg-indigo-400/40 active:bg-indigo-500/45 dark:bg-zinc-700/90 dark:hover:bg-indigo-500/30 dark:active:bg-indigo-500/40"
+      className="z-20 hidden w-2 shrink-0 cursor-col-resize touch-none select-none self-stretch border-0 bg-zinc-200/90 hover:bg-indigo-400/40 active:bg-indigo-500/45 dark:bg-zinc-700/90 dark:hover:bg-indigo-500/30 dark:active:bg-indigo-500/40 lg:block"
       onPointerDown={onPointerDown}
     />
   );
@@ -122,8 +123,34 @@ function RightResizeHandle({ visible }: { visible: boolean }) {
       role="separator"
       aria-orientation="vertical"
       aria-label="Drag to resize account balances panel"
-      className="z-20 w-2 shrink-0 cursor-col-resize touch-none select-none self-stretch border-0 bg-zinc-200/90 hover:bg-indigo-400/40 active:bg-indigo-500/45 dark:bg-zinc-700/90 dark:hover:bg-indigo-500/30 dark:active:bg-indigo-500/40"
+      className="z-20 hidden w-2 shrink-0 cursor-col-resize touch-none select-none self-stretch border-0 bg-zinc-200/90 hover:bg-indigo-400/40 active:bg-indigo-500/45 dark:bg-zinc-700/90 dark:hover:bg-indigo-500/30 dark:active:bg-indigo-500/40 lg:block"
       onPointerDown={onPointerDown}
+    />
+  );
+}
+
+function MobileNavBackdrop() {
+  const { mobileNavOpen, closeMobileNav } = useShellLayout();
+  if (!mobileNavOpen) return null;
+  return (
+    <button
+      type="button"
+      aria-label="Close navigation menu"
+      className="fixed inset-x-0 bottom-0 top-14 z-[50] bg-zinc-900/45 backdrop-blur-[1px] lg:hidden"
+      onClick={closeMobileNav}
+    />
+  );
+}
+
+function MobileBalancesBackdrop() {
+  const { mobileBalancesOpen, closeMobileBalances } = useShellLayout();
+  if (!mobileBalancesOpen) return null;
+  return (
+    <button
+      type="button"
+      aria-label="Close account balances"
+      className="fixed inset-x-0 bottom-0 top-14 z-[51] bg-zinc-900/45 backdrop-blur-[1px] lg:hidden"
+      onClick={closeMobileBalances}
     />
   );
 }
@@ -144,18 +171,23 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
         <WorkbookActiveSheetProvider>
           <TransactionModalProvider>
             <UserPreferencesHydrate />
-            <div className="flex min-h-screen min-h-[100dvh] w-full min-w-0 flex-1 flex-row bg-[var(--background)]">
+            <div className="relative flex min-h-screen min-h-[100dvh] w-full min-w-0 flex-1 flex-col bg-[var(--background)] lg:flex-row">
+              <MobileTopBar />
+              <MobileNavBackdrop />
+              <MobileBalancesBackdrop />
               <SidebarNav />
-              <LeftResizeHandle />
-              <div className="min-h-0 min-w-0 flex-1 overflow-x-auto overflow-y-auto">
-                {children}
+              <div className="flex min-h-0 min-w-0 flex-1 flex-col pt-14 lg:flex-row lg:pt-0">
+                <LeftResizeHandle />
+                <div className="min-h-0 min-w-0 flex-1 overflow-x-auto overflow-y-auto">
+                  {children}
+                </div>
+                {showBalance ? (
+                  <>
+                    <RightResizeHandle visible />
+                    <AccountBalanceSidebar />
+                  </>
+                ) : null}
               </div>
-              {showBalance ? (
-                <>
-                  <RightResizeHandle visible />
-                  <AccountBalanceSidebar />
-                </>
-              ) : null}
             </div>
           </TransactionModalProvider>
         </WorkbookActiveSheetProvider>

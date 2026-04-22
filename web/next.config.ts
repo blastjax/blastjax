@@ -1,6 +1,19 @@
 import type { NextConfig } from "next";
 
+const staticExport = process.env.STATIC_EXPORT === "1";
+/** Slug only (e.g. ``budgetapp``); leading ``/`` is added here so Git Bash does not rewrite ``/repo`` paths. */
+const basePathRaw = (process.env.NEXT_PUBLIC_BASE_PATH ?? "").trim().replace(/^\/+/, "").replace(/\/+$/, "");
+const basePath = basePathRaw ? `/${basePathRaw}` : "";
+
 const nextConfig: NextConfig = {
+  ...(staticExport
+    ? {
+        output: "export" as const,
+        /** GitHub Pages serves directories as ``/path/index.html``; trailing slashes avoid 404 on refresh. */
+        trailingSlash: true,
+      }
+    : {}),
+  ...(basePath ? { basePath, assetPrefix: basePath } : {}),
   /**
    * On Windows, webpack’s default filesystem cache often hits ENOENT/rename races
    * (PackFileCacheStrategy, missing routes-manifest). Memory cache avoids that.

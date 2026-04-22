@@ -1,4 +1,4 @@
-"""In-memory workbook DataFrame cache (SQLite-backed)."""
+"""In-memory workbook DataFrame cache (backed by the configured SQL database)."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import pandas as pd
 from fastapi import HTTPException
 
 from app.config import DEFAULT_XLSX
-from db import database_url, load_workbook_from_db
+from db import load_workbook_from_db, use_database
 
 _active_path: Path = Path(
     os.environ.get("BUDGET_EXCEL_PATH", str(DEFAULT_XLSX))
@@ -33,10 +33,10 @@ def set_active_excel_path(path: Path) -> None:
 
 def load_workbook() -> dict[str, pd.DataFrame]:
     global _workbook_cache, _cache_key
-    if not database_url():
+    if not use_database():
         raise HTTPException(
             status_code=503,
-            detail="DATABASE_URL is not configured. Set it in .env — data is read from SQLite only.",
+            detail="DATABASE_URL is not configured. Set sqlite:///... or postgresql://... in .env.",
         )
     key = ("db", _db_cache_revision)
     if _workbook_cache is not None and _cache_key == key:

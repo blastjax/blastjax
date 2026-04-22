@@ -39,6 +39,10 @@ import {
   localToTimestamp,
   transactionPeriodLocalForDate,
 } from "@/lib/datetimeLocal";
+import {
+  TRANSACTIONS_CHANGED_EVENT,
+  subscribeTransactionsChangedDebounced,
+} from "@/lib/transactionsChanged";
 import { evaluateAmountExpression, parseFormNumber } from "@/lib/parseFormNumber";
 import {
   catalogCategoriesForTransactionKind,
@@ -80,7 +84,7 @@ import {
   modalTitle,
 } from "@/lib/ui";
 
-export const TRANSACTIONS_CHANGED_EVENT = "budgetapp:transactions-changed";
+export { TRANSACTIONS_CHANGED_EVENT };
 
 function dispatchTransactionsChanged() {
   if (typeof window === "undefined") return;
@@ -564,11 +568,10 @@ export function TransactionModalProvider({ children }: { children: ReactNode }) 
         });
     };
     load();
-    const onChanged = () => load();
-    window.addEventListener(TRANSACTIONS_CHANGED_EVENT, onChanged);
+    const unsub = subscribeTransactionsChangedDebounced(load);
     return () => {
       cancelled = true;
-      window.removeEventListener(TRANSACTIONS_CHANGED_EVENT, onChanged);
+      unsub();
     };
   }, [txModalOpen]);
 

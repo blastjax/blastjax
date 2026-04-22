@@ -17,10 +17,8 @@ import {
   uploadXlsx,
 } from "@/lib/api";
 import { FloatingAddButton } from "@/components/FloatingAddButton";
-import {
-  TRANSACTIONS_CHANGED_EVENT,
-  useTransactionModal,
-} from "@/components/TransactionModalProvider";
+import { useTransactionModal } from "@/components/TransactionModalProvider";
+import { subscribeTransactionsChangedDebounced } from "@/lib/transactionsChanged";
 import { useAccountExplore } from "@/lib/accountExploreContext";
 import { useWorkbookActiveSheet } from "@/lib/workbookActiveSheetContext";
 import {
@@ -30,6 +28,13 @@ import {
 import { localToTimestamp } from "@/lib/datetimeLocal";
 import { parseFormNumber } from "@/lib/parseFormNumber";
 import { CalendarMonthTransactionsGrouped } from "@/components/CalendarMonthTransactionsGrouped";
+import {
+  DATA_PREVIEW_TIME_COLUMN,
+  isDataPreviewTimeColumnSortActive,
+  sortColumnForDataPreviewTable,
+  tableColumnsWithLeadingTime,
+} from "@/lib/dataPreviewTimeColumn";
+import { formatPeriodTimeOnly } from "@/lib/formatPeriod";
 import { resolvePeriodColumnName } from "@/lib/periodColumn";
 import { filterDataPreviewRows } from "@/lib/transferRowAccounts";
 import { renderTransferFlowAwareCell } from "@/lib/transferPreviewCells";
@@ -38,6 +43,7 @@ import {
   transactionCellToneClass,
   transferMoneyTextClass,
 } from "@/lib/transactionRowTone";
+import { useCategoryCatalogDataPreviewFilters } from "@/lib/useCategoryCatalogDataPreviewFilters";
 import {
   useValueVisibilityFilters,
   valueVisibilityFiltersForAccountDrill,
@@ -54,6 +60,8 @@ import {
   btnPrimary,
   fileInputClass,
   inputClass,
+  interactiveHoverSurface,
+  readonlyHoverSurface,
   sectionCard,
 } from "@/lib/ui";
 
@@ -114,14 +122,26 @@ function cloneFilterState(f: FilterState): FilterState {
   return JSON.parse(JSON.stringify(f)) as FilterState;
 }
 
+/** Flat data-preview table (Summary): keep clock times and numeric amounts on one line. */
+function previewColumnPreferNoWrap(
+  columns: ColumnMeta[],
+  columnName: string,
+): boolean {
+  if (columnName === DATA_PREVIEW_TIME_COLUMN) return true;
+  const kind = columns.find((c) => c.name === columnName)?.kind;
+  return kind === "number";
+}
+
 export default function DashboardClient({
   lockedFilters = NO_LOCKED_FILTERS,
   pageTitle = "",
   pageSubtitle,
   hideUpload = false,
 }: DashboardClientProps = {}) {
+  const isSummary = pageTitle === "Summary";
   const isDashboardVisibleColumn = useDashboardColumnVisible();
   const valueVisibilityFilters = useValueVisibilityFilters();
+  const categoryCatalogPreviewFilters = useCategoryCatalogDataPreviewFilters();
   const accountExplore = useAccountExplore();
   const { setActiveSheet } = useWorkbookActiveSheet();
   const accountDrillFilters = useMemo((): AnalyzeBody["filters"] => {
@@ -130,13 +150,18 @@ export default function DashboardClient({
     return [{ column: "Accounts", op: "eq", value: d }];
   }, [accountExplore?.accountDrillDown]);
 
-  /** When drilling an account from the balance sidebar, still show Corrections even if hidden from pies. */
+  /** Settings “Which values” + category-catalog “hide from data preview”, with drill relaxation for audit categories. */
   const visibilityFiltersForAnalyze = useMemo(() => {
-    if (accountExplore?.accountDrillDown != null) {
-      return valueVisibilityFiltersForAccountDrill(valueVisibilityFilters);
-    }
-    return valueVisibilityFilters;
-  }, [accountExplore?.accountDrillDown, valueVisibilityFilters]);
+    const base =
+      accountExplore?.accountDrillDown != null
+        ? valueVisibilityFiltersForAccountDrill(valueVisibilityFilters)
+        : valueVisibilityFilters;
+    return [...(base ?? []), ...categoryCatalogPreviewFilters];
+  }, [
+    accountExplore?.accountDrillDown,
+    valueVisibilityFilters,
+    categoryCatalogPreviewFilters,
+  ]);
 
   useEffect(() => {
     const d = accountExplore?.accountDrillDown;
@@ -276,6 +301,11 @@ export default function DashboardClient({
     [result?.columns, columns],
   );
 
+  const summaryTablePreviewColumns = useMemo(
+    () => tableColumnsWithLeadingTime(previewColumns, previewPeriodColumn),
+    [previewColumns, previewPeriodColumn],
+  );
+
   const buildAnalyzePayload = useCallback(
     (page: number, pageSize: number): AnalyzeBody => {
       const committed = committedRef.current;
@@ -405,11 +435,9 @@ export default function DashboardClient({
   loadRef.current = load;
 
   useEffect(() => {
-    const onChanged = () => {
+    return subscribeTransactionsChangedDebounced(() => {
       void loadRef.current?.();
-    };
-    window.addEventListener(TRANSACTIONS_CHANGED_EVENT, onChanged);
-    return () => window.removeEventListener(TRANSACTIONS_CHANGED_EVENT, onChanged);
+    });
   }, []);
 
   useEffect(() => {
@@ -490,11 +518,12 @@ export default function DashboardClient({
   };
 
   const onPreviewColumnSort = (column: string) => {
-    if (sortCol === column) {
+    const resolved = sortColumnForDataPreviewTable(column, previewPeriodColumn);
+    if (sortCol === resolved) {
       setSortDir((d) => (d === "asc" ? "desc" : "asc"));
     } else {
-      setSortCol(column);
-      const meta = columns.find((c) => c.name === column);
+      setSortCol(resolved);
+      const meta = columns.find((c) => c.name === resolved);
       setSortDir(meta?.kind === "datetime" ? "desc" : "asc");
     }
   };
@@ -542,10 +571,14 @@ export default function DashboardClient({
   }
 
   return (
-    <div className="mx-auto flex w-full min-w-0 max-w-full flex-col gap-8 px-4 pb-28 py-8 sm:px-6">
-      <header className="flex flex-col gap-2 border-b border-zinc-200 pb-6 dark:border-zinc-800">
+    <div
+      className={`mx-auto flex w-full min-w-0 max-w-full flex-col px-3 pb-28 py-6 sm:px-6 sm:py-8 ${
+        isSummary ? "gap-5 sm:gap-8" : "gap-6 sm:gap-8"
+      }`}
+    >
+      <header className="flex flex-col gap-2 border-b border-zinc-200 pb-4 dark:border-zinc-800 sm:pb-6">
         <div className="flex flex-wrap items-start justify-between gap-3">
-          <h1 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
+          <h1 className="text-xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50 sm:text-2xl">
             {pageTitle}
           </h1>
         </div>
@@ -660,7 +693,7 @@ export default function DashboardClient({
               Budget totals
             </h2>
             {result.budget_totals.available ? (
-              <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="mt-4 grid min-w-0 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-4">
                 <BudgetTotalCard
                   label="Income"
                   value={result.budget_totals.total_income}
@@ -679,7 +712,14 @@ export default function DashboardClient({
                   formatMoney={fmtMain}
                 />
                 <BudgetTotalCard
-                  label="Net (income − expenses)"
+                  label={
+                    isSummary ? "Net" : "Net (income − expenses)"
+                  }
+                  labelTitle={
+                    isSummary
+                      ? "Net (income minus expenses)"
+                      : undefined
+                  }
                   value={result.budget_totals.net_income_minus_expense}
                   className={
                     (result.budget_totals.net_income_minus_expense ?? 0) >= 0
@@ -710,7 +750,7 @@ export default function DashboardClient({
               </div>
               {columns.some((c) => c.name === "Income/Expense") && (
                 <div
-                  className="flex flex-wrap items-center gap-1.5"
+                  className="flex max-w-full flex-nowrap items-center gap-1.5 overflow-x-auto pb-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
                   role="group"
                   aria-label="Filter by flow: all, expenses, incomes, or transfers"
                 >
@@ -747,7 +787,7 @@ export default function DashboardClient({
           </div>
           <div
             ref={tableScrollRef}
-            className="max-h-[min(70vh,720px)] w-full min-w-0 overflow-y-auto overflow-x-hidden"
+            className="max-h-[min(70vh,720px)] w-full min-w-0 overflow-y-auto overflow-x-auto"
           >
             {dataPreviewGroupedByDate &&
             previewPeriodColumn &&
@@ -763,31 +803,45 @@ export default function DashboardClient({
                     columns={result.columns}
                     periodColumn={previewPeriodColumn}
                     monthScope={null}
+                    showDateGroupControls={false}
                     onRowClick={openTxEdit}
                   />
                 )}
               </div>
             ) : (
-            <table className="w-full table-fixed border-collapse text-left text-sm">
+            <>
+              {isSummary && (
+                <p className="border-b border-zinc-100 px-4 py-2 text-xs text-zinc-500 max-sm:leading-snug sm:hidden dark:border-zinc-800 dark:text-zinc-400">
+                  Swipe sideways to see every column; amounts and times stay on one line.
+                </p>
+              )}
+              <table className="w-max min-w-full border-collapse text-left text-sm table-auto">
               <thead className="bg-zinc-50 text-xs uppercase text-zinc-500 dark:bg-zinc-900/80 dark:text-zinc-400">
                 <tr>
-                  {previewColumns.map((c) => {
-                    const active = sortCol === c;
+                  {summaryTablePreviewColumns.displayColumns.map((c) => {
+                    const active = isDataPreviewTimeColumnSortActive(
+                      c,
+                      sortCol,
+                      summaryTablePreviewColumns.timeValueColumn,
+                    );
                     const ariaSort = active
                       ? sortDir === "asc"
                         ? "ascending"
                         : "descending"
                       : "none";
+                    const headerNoWrap = previewColumnPreferNoWrap(columns, c);
                     return (
                       <th
                         key={c}
-                        className="min-w-0 px-1 py-1 align-top font-medium"
+                        className={`min-w-0 px-2 py-2 align-top font-medium sm:px-3 ${
+                          headerNoWrap ? "whitespace-nowrap" : ""
+                        }`}
                         aria-sort={ariaSort}
                       >
                         <button
                           type="button"
                           onClick={() => onPreviewColumnSort(c)}
-                          className="flex w-full min-w-0 items-start gap-1 rounded-md px-2 py-1.5 text-left hover:bg-zinc-200/90 dark:hover:bg-zinc-800/90"
+                          className="flex w-full min-w-0 items-start gap-1 rounded-md px-1.5 py-1.5 text-left hover:bg-zinc-200/90 sm:px-2 dark:hover:bg-zinc-800/90"
                           title={
                             active
                               ? sortDir === "asc"
@@ -796,8 +850,14 @@ export default function DashboardClient({
                               : "Sort by this column"
                           }
                         >
-                          <span className="min-w-0 flex-1 break-words normal-case">
-                            {c}
+                          <span
+                            className={
+                              headerNoWrap
+                                ? "shrink-0 whitespace-nowrap normal-case"
+                                : "min-w-0 flex-1 break-words normal-case [overflow-wrap:break-word]"
+                            }
+                          >
+                            {c === DATA_PREVIEW_TIME_COLUMN ? "Time" : c}
                           </span>
                           <span
                             className="inline-flex shrink-0 flex-col items-center leading-none text-[11px]"
@@ -832,7 +892,10 @@ export default function DashboardClient({
                 {previewTableRows.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={Math.max(1, previewColumns.length)}
+                      colSpan={Math.max(
+                        1,
+                        summaryTablePreviewColumns.displayColumns.length,
+                      )}
                       className="px-3 py-8 text-center text-sm text-zinc-800 dark:text-zinc-200"
                     >
                       No rows match the current filters.
@@ -854,27 +917,45 @@ export default function DashboardClient({
                         className={[
                           "border-t border-zinc-100 odd:bg-white even:bg-zinc-50/80 dark:border-zinc-800 dark:odd:bg-zinc-950 dark:even:bg-zinc-900/40",
                           rowOpensEdit
-                            ? "cursor-pointer hover:bg-zinc-100/90 dark:hover:bg-zinc-800/50"
-                            : "",
+                            ? `cursor-pointer ${interactiveHoverSurface}`
+                            : readonlyHoverSurface,
                         ].join(" ")}
                       >
-                        {previewColumns.map((c) => (
+                        {summaryTablePreviewColumns.displayColumns.map((c) => {
+                          const cellNoWrap = previewColumnPreferNoWrap(columns, c);
+                          return (
                           <td
                             key={c}
                             className={[
-                              "min-w-0 break-words px-2 py-2 align-top [overflow-wrap:anywhere]",
-                              transactionCellToneClass(row, c),
+                              "min-w-0 px-3 py-2.5 align-top",
+                              cellNoWrap
+                                ? "whitespace-nowrap"
+                                : "break-words [overflow-wrap:break-word]",
+                              c === DATA_PREVIEW_TIME_COLUMN
+                                ? "tabular-nums text-zinc-600 dark:text-zinc-400"
+                                : transactionCellToneClass(row, c),
                             ].join(" ")}
                           >
-                            {renderTransferFlowAwareCell(row, c)}
+                            {c === DATA_PREVIEW_TIME_COLUMN
+                              ? formatPeriodTimeOnly(
+                                  summaryTablePreviewColumns.timeValueColumn
+                                    ? row[summaryTablePreviewColumns.timeValueColumn]
+                                    : null,
+                                )
+                              : renderTransferFlowAwareCell(row, c, {
+                                  periodColumnName:
+                                    summaryTablePreviewColumns.timeValueColumn,
+                                })}
                           </td>
-                        ))}
+                        );
+                        })}
                       </tr>
                     );
                   })
                 )}
               </tbody>
             </table>
+            </>
             )}
             {tableRows.length > 0 &&
               tableRows.length < result.total_filtered_rows && (
@@ -902,21 +983,30 @@ export default function DashboardClient({
 
 function BudgetTotalCard({
   label,
+  labelTitle,
   value,
   className,
   formatMoney,
 }: {
   label: string;
+  /** Explains abbreviated labels (e.g. Summary “Net”). */
+  labelTitle?: string;
   value: number | null;
   className: string;
   formatMoney: (n: number | null | undefined) => string;
 }) {
   return (
-    <div className="rounded-lg border border-zinc-100 bg-zinc-50/80 p-3 dark:border-zinc-800 dark:bg-zinc-900/50">
-      <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">
+    <div className="min-w-0 rounded-lg border border-zinc-100 bg-zinc-50/80 p-3 dark:border-zinc-800 dark:bg-zinc-900/50">
+      <p
+        className="text-xs font-medium uppercase tracking-wide text-zinc-500 whitespace-nowrap sm:whitespace-normal"
+        title={labelTitle}
+      >
         {label}
       </p>
-      <p className={`mt-1 text-xl font-semibold tabular-nums ${className}`}>
+      <p
+        className={`mt-1 truncate text-lg font-semibold tabular-nums sm:text-xl ${className}`}
+        title={formatMoney(value)}
+      >
         {formatMoney(value)}
       </p>
     </div>
@@ -934,13 +1024,13 @@ function BudgetTransfersCard({
 }) {
   const tone = transferMoneyTextClass;
   return (
-    <div className="rounded-lg border border-zinc-100 bg-zinc-50/80 p-3 dark:border-zinc-800 dark:bg-zinc-900/50">
-      <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">
+    <div className="min-w-0 rounded-lg border border-zinc-100 bg-zinc-50/80 p-3 dark:border-zinc-800 dark:bg-zinc-900/50">
+      <p className="text-xs font-medium uppercase tracking-wide text-zinc-500 whitespace-nowrap">
         Transfers
       </p>
       <div className="mt-2 space-y-1.5">
-        <div className="flex items-center justify-between gap-2 text-sm tabular-nums">
-          <span className="inline-flex items-center gap-1.5 text-zinc-500">
+        <div className="flex min-w-0 items-center justify-between gap-2 text-sm tabular-nums whitespace-nowrap">
+          <span className="inline-flex min-w-0 shrink items-center gap-1.5 text-zinc-500">
             <span
               className={`text-base font-medium ${tone}`}
               aria-hidden
@@ -949,10 +1039,12 @@ function BudgetTransfersCard({
             </span>
             In
           </span>
-          <span className={`font-semibold ${tone}`}>{formatMoney(transferIn)}</span>
+          <span className={`shrink-0 truncate font-semibold ${tone}`} title={formatMoney(transferIn)}>
+            {formatMoney(transferIn)}
+          </span>
         </div>
-        <div className="flex items-center justify-between gap-2 text-sm tabular-nums">
-          <span className="inline-flex items-center gap-1.5 text-zinc-500">
+        <div className="flex min-w-0 items-center justify-between gap-2 text-sm tabular-nums whitespace-nowrap">
+          <span className="inline-flex min-w-0 shrink items-center gap-1.5 text-zinc-500">
             <span
               className={`text-base font-medium ${tone}`}
               aria-hidden
@@ -961,7 +1053,9 @@ function BudgetTransfersCard({
             </span>
             Out
           </span>
-          <span className={`font-semibold ${tone}`}>{formatMoney(transferOut)}</span>
+          <span className={`shrink-0 truncate font-semibold ${tone}`} title={formatMoney(transferOut)}>
+            {formatMoney(transferOut)}
+          </span>
         </div>
       </div>
     </div>

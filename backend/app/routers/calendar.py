@@ -20,10 +20,42 @@ from app.services.calendar_service import (
     prepare_calendar_frame,
 )
 from app.reserved_names import is_reserved_category_label
-from app.services.dataframe import apply_search_all, df_records
+from app.services.dataframe import apply_search_all, df_records, period_series_to_sortable_utc
 from app.workbook_cache import load_workbook, resolve_sheet_name
 
 router = APIRouter(tags=["calendar"])
+
+
+def _order_calendar_date_after_period(display: pd.DataFrame, period_col: str) -> pd.DataFrame:
+    """Keep `calendar_date` next to Period so API rows stay readable."""
+    if "calendar_date" not in display.columns or period_col not in display.columns:
+        return display
+    cols = list(display.columns)
+    cols.remove("calendar_date")
+    insert_at = cols.index(period_col) + 1
+    cols.insert(insert_at, "calendar_date")
+    return display[cols]
+
+
+def _sort_by_period_then_id(
+    df: pd.DataFrame,
+    period_col: str,
+    *,
+    ascending: bool,
+) -> pd.DataFrame:
+    """Sort by Period (UTC-comparable); tie-break on id so order stays stable after edits."""
+    if period_col not in df.columns:
+        return df
+    _k = "__period_sort_utc__"
+    out = df.assign(**{_k: period_series_to_sortable_utc(df[period_col])})
+    by_keys = [_k]
+    asc = [ascending]
+    if "id" in out.columns:
+        by_keys.append("id")
+        asc.append(ascending)
+    return out.sort_values(by=by_keys, ascending=asc, na_position="last").drop(
+        columns=[_k], errors="ignore"
+    )
 
 
 def _parse_currency_conversion(
@@ -454,9 +486,11 @@ def calendar_month_transactions(
             "sort_direction": sort_direction,
         }
 
+    sub["calendar_date"] = pd.to_datetime(sub["_d"]).dt.strftime("%Y-%m-%d")
     sub["Flow"] = flow_classification_series(sub, ie_col, amt_col)
     drop_cols = ["_d", "_income", "_expense", "_transfer_in", "_transfer_out"]
     display = sub.drop(columns=[c for c in drop_cols if c in sub.columns])
+    display = _order_calendar_date_after_period(display, period_col)
 
     cols_no_flow = [c for c in display.columns if c != "Flow"]
     # Match dashboard data preview: Flow sits between Accounts and Category (insert after Accounts).
@@ -465,6 +499,8 @@ def calendar_month_transactions(
         ordered = cols_no_flow[: acc_idx + 1] + ["Flow"] + cols_no_flow[acc_idx + 1 :]
     elif period_col in cols_no_flow:
         idx = cols_no_flow.index(period_col) + 1
+        if idx < len(cols_no_flow) and cols_no_flow[idx] == "calendar_date":
+            idx += 1
         ordered = cols_no_flow[:idx] + ["Flow"] + cols_no_flow[idx:]
     else:
         ordered = ["Flow"] + cols_no_flow
@@ -484,7 +520,10 @@ def calendar_month_transactions(
     if not sc or not str(sc).strip():
         sc = period_col if period_col in display.columns else str(display.columns[0])
     ascending = sd == "asc"
-    display = display.sort_values(by=sc, ascending=ascending, na_position="last")
+    if sc == period_col and period_col in display.columns:
+        display = _sort_by_period_then_id(display, period_col, ascending=ascending)
+    else:
+        display = display.sort_values(by=sc, ascending=ascending, na_position="last")
 
     return {
         "sheet": sheet_resolved,
@@ -565,9 +604,11 @@ def calendar_year_transactions(
             "sort_direction": sort_direction,
         }
 
+    sub["calendar_date"] = pd.to_datetime(sub["_d"]).dt.strftime("%Y-%m-%d")
     sub["Flow"] = flow_classification_series(sub, ie_col, amt_col)
     drop_cols = ["_d", "_income", "_expense", "_transfer_in", "_transfer_out"]
     display = sub.drop(columns=[c for c in drop_cols if c in sub.columns])
+    display = _order_calendar_date_after_period(display, period_col)
 
     cols_no_flow = [c for c in display.columns if c != "Flow"]
     if "Accounts" in cols_no_flow:
@@ -575,6 +616,8 @@ def calendar_year_transactions(
         ordered = cols_no_flow[: acc_idx + 1] + ["Flow"] + cols_no_flow[acc_idx + 1 :]
     elif period_col in cols_no_flow:
         idx = cols_no_flow.index(period_col) + 1
+        if idx < len(cols_no_flow) and cols_no_flow[idx] == "calendar_date":
+            idx += 1
         ordered = cols_no_flow[:idx] + ["Flow"] + cols_no_flow[idx:]
     else:
         ordered = ["Flow"] + cols_no_flow
@@ -594,7 +637,10 @@ def calendar_year_transactions(
     if not sc or not str(sc).strip():
         sc = period_col if period_col in display.columns else str(display.columns[0])
     ascending = sd == "asc"
-    display = display.sort_values(by=sc, ascending=ascending, na_position="last")
+    if sc == period_col and period_col in display.columns:
+        display = _sort_by_period_then_id(display, period_col, ascending=ascending)
+    else:
+        display = display.sort_values(by=sc, ascending=ascending, na_position="last")
 
     return {
         "sheet": sheet_resolved,
@@ -630,17 +676,34 @@ def calendar_day(
     ef = parse_extra_filters_json(extra_filters)
     raw, sheet_resolved = calendar_raw_df(frames, sheet_name, ef)
     conv = _parse_currency_conversion(currency_main, currency_rates)
-    df, period_col, _, _ = prepare_calendar_frame(
+    df, period_col, amt_col, ie_col = prepare_calendar_frame(
         raw, tz_offset_minutes=tz_offset_minutes, currency_conversion=conv
     )
 
     day_df = df[df["_d"] == target].copy()
+    if len(day_df) > 0:
+        day_df["calendar_date"] = pd.to_datetime(day_df["_d"]).dt.strftime("%Y-%m-%d")
+        day_df["Flow"] = flow_classification_series(day_df, ie_col, amt_col)
     drop_cols = ["_d", "_income", "_expense", "_transfer_in", "_transfer_out"]
     display_df = day_df.drop(columns=[c for c in drop_cols if c in day_df.columns])
+    if len(day_df) > 0 and period_col in display_df.columns:
+        display_df = _order_calendar_date_after_period(display_df, period_col)
+        cols_no_flow = [c for c in display_df.columns if c != "Flow"]
+        if "Accounts" in cols_no_flow:
+            acc_idx = cols_no_flow.index("Accounts")
+            ordered = cols_no_flow[: acc_idx + 1] + ["Flow"] + cols_no_flow[acc_idx + 1 :]
+        elif period_col in cols_no_flow:
+            idx = cols_no_flow.index(period_col) + 1
+            if idx < len(cols_no_flow) and cols_no_flow[idx] == "calendar_date":
+                idx += 1
+            ordered = cols_no_flow[:idx] + ["Flow"] + cols_no_flow[idx:]
+        else:
+            ordered = ["Flow"] + cols_no_flow
+        display_df = display_df[ordered]
 
     if period_col in display_df.columns:
-        display_df = display_df.sort_values(
-            by=period_col, ascending=False, na_position="last"
+        display_df = _sort_by_period_then_id(
+            display_df, period_col, ascending=False
         )
 
     rows_records = df_records(display_df)
@@ -653,6 +716,7 @@ def calendar_day(
     return {
         "sheet": sheet_resolved,
         "date": target.isoformat(),
+        "period_column": period_col,
         "columns": [str(c) for c in display_df.columns],
         "rows": rows_records,
         "total_income": round(total_income, 2),

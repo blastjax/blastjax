@@ -322,7 +322,7 @@ export default function AccountsClient() {
                 Accounts
               </h2>
               <p className="mt-1 text-[11px] text-zinc-500 dark:text-zinc-400">
-                Balance from the first workbook sheet. Up to five cards per row on wide screens.
+                Balance from the first workbook sheet. Three account cards per row.
               </p>
             </div>
             {displayAccounts.length === 0 ? (
@@ -335,7 +335,7 @@ export default function AccountsClient() {
                 No accounts match &quot;{searchQuery.trim()}&quot;.
               </p>
             ) : (
-              <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+              <ul className="grid grid-cols-3 gap-2">
                 {filteredAccounts.map((a) => {
                   const shownInSidebar = isAccountShownInBalanceSidebar(
                     sidebarHidden,
@@ -534,7 +534,7 @@ export default function AccountsClient() {
                       Restore brings the name back to your active list. Your transactions are
                       unchanged.
                     </p>
-                    <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+                    <ul className="grid grid-cols-3 gap-2">
                       {deletedSorted.map((entry) => {
                         const bal = balanceLookup(balanceRows, entry.name);
                         return (
@@ -592,7 +592,7 @@ export default function AccountsClient() {
                 No subcurrencies configured. Add codes and rates under Settings.
               </p>
             ) : (
-              <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+              <ul className="grid grid-cols-3 gap-2">
                 {currencySettings.subcurrencies
                   .filter((s) => normalizeCurrencyCode(s.code.trim()))
                   .map((s, idx) => {
@@ -657,8 +657,7 @@ export default function AccountsClient() {
                 Currencies
               </h2>
               <p className="mt-1 text-[11px] text-zinc-500 dark:text-zinc-400">
-                Distinct values in the Currency column. Same card layout as accounts (up to five per
-                row on wide screens).
+                Distinct values in the Currency column. Same card layout as accounts (three per row).
               </p>
             </div>
             {currencies.length === 0 ? (
@@ -666,7 +665,7 @@ export default function AccountsClient() {
                 No currency codes in the workbook.
               </p>
             ) : (
-              <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+              <ul className="grid grid-cols-3 gap-2">
                 {currencies.map((c) => (
                   <li
                     key={c}

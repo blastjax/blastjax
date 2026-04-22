@@ -14,10 +14,18 @@ import {
   useDashboardColumnVisible,
 } from "@/lib/columnVisibility";
 import { AccountDrillMonthGrouped } from "@/components/AccountDrillMonthGrouped";
+import {
+  DATA_PREVIEW_TIME_COLUMN,
+  isDataPreviewTimeColumnSortActive,
+  sortColumnForDataPreviewTable,
+  tableColumnsWithLeadingTime,
+} from "@/lib/dataPreviewTimeColumn";
+import { formatPeriodTimeOnly } from "@/lib/formatPeriod";
 import { resolvePeriodColumnNameFromKinds } from "@/lib/periodColumn";
 import { filterDataPreviewRows } from "@/lib/transferRowAccounts";
 import { renderTransferFlowAwareCell } from "@/lib/transferPreviewCells";
 import { transactionCellToneClass } from "@/lib/transactionRowTone";
+import { useCategoryCatalogDataPreviewFilters } from "@/lib/useCategoryCatalogDataPreviewFilters";
 import {
   useValueVisibilityFilters,
   valueVisibilityFiltersForAccountDrill,
@@ -36,7 +44,9 @@ import {
   btnSecondary,
   fieldLabelText,
   inputClass,
+  interactiveHoverSurface,
   modalBackdropHigh,
+  readonlyHoverSurface,
 } from "@/lib/ui";
 
 const PAGE_SIZE = 80;
@@ -63,9 +73,13 @@ export function AccountDrillModal({
   const { openTxEdit } = useTransactionModal();
   const isColVisible = useDashboardColumnVisible();
   const valueVisibilityFilters = useValueVisibilityFilters();
+  const categoryCatalogPreviewFilters = useCategoryCatalogDataPreviewFilters();
   const drillVisibilityFilters = useMemo(
-    () => valueVisibilityFiltersForAccountDrill(valueVisibilityFilters),
-    [valueVisibilityFilters],
+    () => [
+      ...valueVisibilityFiltersForAccountDrill(valueVisibilityFilters ?? []),
+      ...categoryCatalogPreviewFilters,
+    ],
+    [valueVisibilityFilters, categoryCatalogPreviewFilters],
   );
   const currencySettings = useCurrencySettings();
   const currencyConversion = useMemo(
@@ -116,6 +130,11 @@ export function AccountDrillModal({
   const periodColumnForGrouping = useMemo(
     () => resolvePeriodColumnNameFromKinds(columns, columnKindByName),
     [columns, columnKindByName],
+  );
+
+  const accountDrillFlatTableColumns = useMemo(
+    () => tableColumnsWithLeadingTime(visibleColumns, periodColumnForGrouping),
+    [visibleColumns, periodColumnForGrouping],
   );
 
   const activeSortCol = useMemo(
@@ -283,18 +302,22 @@ export function AccountDrillModal({
 
   const handleHeaderSort = useCallback(
     (column: string) => {
-      if (loading || !columns.includes(column)) return;
-      const same = activeSortCol === column;
+      const sortKey = sortColumnForDataPreviewTable(
+        column,
+        periodColumnForGrouping,
+      );
+      if (loading || !columns.includes(sortKey)) return;
+      const same = activeSortCol === sortKey;
       const nextDir = same
         ? sortDir === "asc"
           ? "desc"
           : "asc"
-        : columnKindByName[column] === "datetime"
+        : columnKindByName[sortKey] === "datetime"
           ? "desc"
           : "asc";
       requestGenRef.current += 1;
       const gen = requestGenRef.current;
-      setSortCol(column);
+      setSortCol(sortKey);
       setSortDir(nextDir);
       setLoading(true);
       setError(null);
@@ -308,7 +331,7 @@ export function AccountDrillModal({
             sheet,
             filters: [...accountFilters, ...drillVisibilityFilters],
             search_all: q.length > 0 ? q : undefined,
-            sort: { column, direction: nextDir },
+            sort: { column: sortKey, direction: nextDir },
             page: 0,
             page_size: PAGE_SIZE,
             currency_conversion: currencyConversion ?? undefined,
@@ -338,6 +361,7 @@ export function AccountDrillModal({
       columnKindByName,
       searchDebounced,
       currencyConversion,
+      periodColumnForGrouping,
     ],
   );
 
@@ -555,7 +579,6 @@ export function AccountDrillModal({
               {periodColumnForGrouping ? (
                 <div className="px-0">
                   <AccountDrillMonthGrouped
-                    drillKey={accountName}
                     rows={displayRows}
                     columns={columns}
                     periodColumn={periodColumnForGrouping}
@@ -569,8 +592,12 @@ export function AccountDrillModal({
               <table className="w-full min-w-[32rem] table-fixed border-collapse text-left text-sm">
                 <thead className="sticky top-0 z-10 bg-zinc-50 text-xs uppercase text-zinc-500 dark:bg-zinc-900/95 dark:text-zinc-400">
                   <tr>
-                    {visibleColumns.map((c) => {
-                      const active = activeSortCol === c;
+                    {accountDrillFlatTableColumns.displayColumns.map((c) => {
+                      const active = isDataPreviewTimeColumnSortActive(
+                        c,
+                        activeSortCol,
+                        accountDrillFlatTableColumns.timeValueColumn,
+                      );
                       const ariaSort = active
                         ? sortDir === "asc"
                           ? "ascending"
@@ -596,7 +623,7 @@ export function AccountDrillModal({
                             }
                           >
                             <span className="min-w-0 flex-1 break-words normal-case">
-                              {c}
+                              {c === DATA_PREVIEW_TIME_COLUMN ? "Time" : c}
                             </span>
                             <span
                               className="inline-flex shrink-0 flex-col leading-none text-[10px]"
@@ -646,19 +673,30 @@ export function AccountDrillModal({
                       className={[
                         "border-t border-zinc-100 odd:bg-white even:bg-zinc-50/80 dark:border-zinc-800 dark:odd:bg-zinc-950 dark:even:bg-zinc-900/40",
                         rowOpensEdit
-                          ? "cursor-pointer hover:bg-zinc-100/90 dark:hover:bg-zinc-800/50"
-                          : "",
+                          ? `cursor-pointer ${interactiveHoverSurface}`
+                          : readonlyHoverSurface,
                       ].join(" ")}
                     >
-                      {visibleColumns.map((c) => (
+                      {accountDrillFlatTableColumns.displayColumns.map((c) => (
                         <td
                           key={c}
                           className={[
                             "min-w-0 break-words px-2 py-2 align-top text-xs [overflow-wrap:anywhere]",
-                            transactionCellToneClass(row, c),
+                            c === DATA_PREVIEW_TIME_COLUMN
+                              ? "tabular-nums text-zinc-600 dark:text-zinc-400"
+                              : transactionCellToneClass(row, c),
                           ].join(" ")}
                         >
-                          {renderTransferFlowAwareCell(row, c)}
+                          {c === DATA_PREVIEW_TIME_COLUMN
+                            ? formatPeriodTimeOnly(
+                                accountDrillFlatTableColumns.timeValueColumn
+                                  ? row[accountDrillFlatTableColumns.timeValueColumn]
+                                  : null,
+                              )
+                            : renderTransferFlowAwareCell(row, c, {
+                                periodColumnName:
+                                  accountDrillFlatTableColumns.timeValueColumn,
+                              })}
                         </td>
                       ))}
                     </tr>

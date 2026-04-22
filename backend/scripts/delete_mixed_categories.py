@@ -13,11 +13,11 @@ from dotenv import load_dotenv
 load_dotenv(BACKEND.parent / ".env")
 load_dotenv(BACKEND / ".env")
 
-from db import database_url, delete_all_mixed_category_catalog_rows
+from db import delete_all_mixed_category_catalog_rows, use_database
 
 
 def main() -> None:
-    if not database_url():
+    if not use_database():
         print("DATABASE_URL is not set.", file=sys.stderr)
         sys.exit(1)
     n = delete_all_mixed_category_catalog_rows()

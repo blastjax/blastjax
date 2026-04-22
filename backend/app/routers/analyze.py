@@ -12,9 +12,11 @@ from app.services.dataframe import (
     apply_search_all,
     df_records,
     numeric_summary,
+    period_series_to_sortable_utc,
     run_aggregate,
 )
 from app.workbook_cache import load_workbook, resolve_sheet_name
+from db import storage_kind
 
 router = APIRouter(tags=["analyze"])
 
@@ -28,6 +30,7 @@ def analyze(body: AnalyzeBody) -> dict[str, Any]:
     total = int(len(filtered))
     summary = numeric_summary(filtered)
 
+    fc = frozenset(filtered.columns)
     # Default: newest transactions first (data preview UX when client omits sort).
     if body.sort is not None and str(body.sort.column).strip():
         sort_col = body.sort.column
@@ -35,38 +38,31 @@ def analyze(body: AnalyzeBody) -> dict[str, Any]:
     else:
         sort_col = None
         sort_dir = "desc"
-        if "Period" in filtered.columns:
+        if "Period" in fc:
             sort_col = "Period"
-        elif "id" in filtered.columns:
+        elif "id" in fc:
             sort_col = "id"
 
     page_df = filtered
     if sort_col:
-        if sort_col not in page_df.columns:
+        if sort_col not in fc:
             raise HTTPException(status_code=400, detail=f"Unknown sort column: {sort_col}")
         ascending = sort_dir == "asc"
-        if sort_col == "Period" and not pd.api.types.is_datetime64_any_dtype(
-            page_df[sort_col]
-        ):
-            tmp = pd.to_datetime(page_df[sort_col], errors="coerce")
+        if sort_col == "Period":
+            tmp = period_series_to_sortable_utc(page_df[sort_col])
             page_df = page_df.assign(_period_sort=tmp)
             by_keys = ["_period_sort"]
             asc = [ascending]
-            if "id" in page_df.columns:
+            if "id" in fc:
                 by_keys.append("id")
                 asc.append(ascending)
             page_df = (
                 page_df.sort_values(by=by_keys, ascending=asc, na_position="last")
-                .drop(columns=["_period_sort"])
+                .drop(columns=["_period_sort"], errors="ignore")
             )
         else:
-            by_keys = [sort_col]
-            asc = [ascending]
-            if sort_col == "Period" and "id" in page_df.columns:
-                by_keys.append("id")
-                asc.append(ascending)
             page_df = page_df.sort_values(
-                by=by_keys, ascending=asc, na_position="last"
+                by=[sort_col], ascending=ascending, na_position="last"
             )
 
     # page_size <= 0 returns all matching rows (no pagination cap)
@@ -96,7 +92,7 @@ def analyze(body: AnalyzeBody) -> dict[str, Any]:
     budget_totals = budget_flow_totals(filtered, conv)
 
     return {
-        "file": "sqlite",
+        "file": storage_kind(),
         "sheet": sheet_name,
         "total_filtered_rows": total,
         "numeric_summary": summary,

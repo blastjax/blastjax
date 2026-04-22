@@ -17,16 +17,24 @@ class CategoryCatalogRename(BaseModel):
 
 
 class CategoryCatalogPatch(BaseModel):
-    """Partial update: rename, visibility, and/or kind."""
+    """Partial update: rename, visibility, data-preview visibility, and/or kind."""
 
     name: str | None = Field(default=None, min_length=1)
     is_hidden: bool | None = None
+    hide_from_data_preview: bool | None = None
     kind: Literal["expense", "income", "mixed"] | None = None
 
     @model_validator(mode="after")
     def at_least_one_field(self) -> CategoryCatalogPatch:
-        if self.name is None and self.is_hidden is None and self.kind is None:
-            raise ValueError("Provide name, is_hidden, and/or kind")
+        if (
+            self.name is None
+            and self.is_hidden is None
+            and self.hide_from_data_preview is None
+            and self.kind is None
+        ):
+            raise ValueError(
+                "Provide name, is_hidden, hide_from_data_preview, and/or kind",
+            )
         return self
 
 

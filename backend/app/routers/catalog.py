@@ -68,6 +68,7 @@ def patch_category_catalog(
             category_id,
             new_name=body.name,
             is_hidden=body.is_hidden,
+            hide_from_data_preview=body.hide_from_data_preview,
             kind=body.kind,
         )
     except LookupError:

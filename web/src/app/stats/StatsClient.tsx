@@ -1,21 +1,21 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   getCalendarBounds,
   getCalendarCategoryBreakdown,
+  type AnalyzeBody,
   type CalendarCategoryBreakdownResponse,
 } from "@/lib/api";
 import { CategoryPieSection } from "@/components/CategoryPieSection";
 import { FloatingAddButton } from "@/components/FloatingAddButton";
-import {
-  TRANSACTIONS_CHANGED_EVENT,
-  useTransactionModal,
-} from "@/components/TransactionModalProvider";
+import { useTransactionModal } from "@/components/TransactionModalProvider";
+import { subscribeTransactionsChangedDebounced } from "@/lib/transactionsChanged";
 import {
   buildCurrencyConversionPayload,
   useCurrencySettings,
 } from "@/lib/currencySettings";
+import { useCategoryCatalogDataPreviewFilters } from "@/lib/useCategoryCatalogDataPreviewFilters";
 import { useValueVisibilityFilters } from "@/lib/valueInstanceVisibility";
 
 function pad2(n: number) {
@@ -57,6 +57,26 @@ function toIsoDate(d: Date): string {
 export default function StatsClient() {
   const { openTxCreate, txModalOpen } = useTransactionModal();
   const valueVisibilityFilters = useValueVisibilityFilters();
+  const categoryCatalogPreviewFilters = useCategoryCatalogDataPreviewFilters();
+  const statsExtraFilters = useMemo(
+    () => [...(valueVisibilityFilters ?? []), ...categoryCatalogPreviewFilters],
+    [valueVisibilityFilters, categoryCatalogPreviewFilters],
+  );
+
+  /**
+   * Category pie + “By category” list must include every category with activity, including
+   * ones hidden via Settings or catalog hide-from-preview — those use `Category` `nin`
+   * filters that would otherwise drop rows before aggregation.
+   */
+  const statsExtraFiltersForCategoryPie = useMemo(():
+    | AnalyzeBody["filters"]
+    | undefined => {
+    const raw = statsExtraFilters ?? [];
+    const next = raw.filter(
+      (f) => !(f.column === "Category" && f.op === "nin"),
+    );
+    return next.length ? next : undefined;
+  }, [statsExtraFilters]);
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth() + 1);
@@ -68,6 +88,9 @@ export default function StatsClient() {
   const [categoryPiePeriodTab, setCategoryPiePeriodTab] = useState<
     "month" | "year"
   >("month");
+  const [categoryPieKindTab, setCategoryPieKindTab] = useState<
+    "expense" | "income"
+  >("expense");
   const [txDateBounds, setTxDateBounds] = useState<{
     first_date: string | null;
     last_date: string | null;
@@ -85,7 +108,7 @@ export default function StatsClient() {
     try {
       const r = await getCalendarBounds(
         undefined,
-        valueVisibilityFilters,
+        statsExtraFilters,
         currencyConversion ?? undefined,
       );
       setTxDateBounds({
@@ -95,7 +118,7 @@ export default function StatsClient() {
     } catch {
       setTxDateBounds(null);
     }
-  }, [valueVisibilityFilters, currencyConversion]);
+  }, [statsExtraFilters, currencyConversion]);
 
   useEffect(() => {
     void loadBounds();
@@ -109,11 +132,11 @@ export default function StatsClient() {
         const [m, y] = await Promise.all([
           getCalendarCategoryBreakdown(year, {
             month,
-            extraFilters: valueVisibilityFilters,
+            extraFilters: statsExtraFiltersForCategoryPie,
             currencyConversion: currencyConversion ?? undefined,
           }),
           getCalendarCategoryBreakdown(year, {
-            extraFilters: valueVisibilityFilters,
+            extraFilters: statsExtraFiltersForCategoryPie,
             currencyConversion: currencyConversion ?? undefined,
           }),
         ]);
@@ -136,20 +159,22 @@ export default function StatsClient() {
   }, [
     year,
     month,
-    valueVisibilityFilters,
+    statsExtraFiltersForCategoryPie,
     currencyConversion,
     breakdownRefresh,
   ]);
 
+  const statsTxChangedRef = useRef<() => void>(() => {});
+  statsTxChangedRef.current = () => {
+    void loadBounds();
+    setBreakdownRefresh((x) => x + 1);
+  };
+
   useEffect(() => {
-    const onTxChanged = () => {
-      void loadBounds();
-      setBreakdownRefresh((x) => x + 1);
-    };
-    window.addEventListener(TRANSACTIONS_CHANGED_EVENT, onTxChanged);
-    return () =>
-      window.removeEventListener(TRANSACTIONS_CHANGED_EVENT, onTxChanged);
-  }, [loadBounds]);
+    return subscribeTransactionsChangedDebounced(() => {
+      statsTxChangedRef.current();
+    });
+  }, []);
 
   const txBoundsMeta = useMemo((): TxBoundsMeta | null => {
     if (!txDateBounds?.first_date || !txDateBounds?.last_date) return null;
@@ -263,13 +288,13 @@ export default function StatsClient() {
   });
 
   return (
-    <div className="mx-auto flex w-full min-w-0 max-w-full flex-col gap-8 px-4 pb-28 py-8 sm:px-6">
-      <header className="flex flex-col gap-2 border-b border-zinc-200 pb-6 dark:border-zinc-800">
-        <h1 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
+    <div className="mx-auto flex w-full min-w-0 max-w-full flex-col gap-6 px-3 pb-28 py-6 sm:gap-8 sm:px-6 sm:py-8">
+      <header className="flex flex-col gap-2 border-b border-zinc-200 pb-4 dark:border-zinc-800 sm:pb-6">
+        <h1 className="text-xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50 sm:text-2xl">
           Stats
         </h1>
         <p className="max-w-2xl text-sm text-zinc-600 dark:text-zinc-400">
-          Category expense and income pie charts for the selected period. Same data as the
+          Category pie chart for expenses or income for the selected period. Same data as the
           calendar view, scoped by month or year.
         </p>
       </header>
@@ -442,57 +467,91 @@ export default function StatsClient() {
               (aligned with Expense / Income on Categories).
             </p>
           </div>
+          <div
+            className="flex flex-wrap items-center gap-3"
+            role="tablist"
+            aria-label="Expense or income pie chart"
+          >
+            <button
+              type="button"
+              role="tab"
+              aria-selected={categoryPieKindTab === "expense"}
+              className={`min-h-[2.75rem] rounded-full border-2 px-5 py-2.5 text-sm font-semibold shadow-sm transition sm:min-h-[3rem] sm:px-6 sm:text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400 ${
+                categoryPieKindTab === "expense"
+                  ? "border-rose-600 bg-rose-600 text-white dark:border-rose-500 dark:bg-rose-600"
+                  : "border-rose-200 bg-rose-50 text-rose-900 hover:bg-rose-100 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-100 dark:hover:bg-rose-950/70"
+              }`}
+              onClick={() => setCategoryPieKindTab("expense")}
+            >
+              Expense
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={categoryPieKindTab === "income"}
+              className={`min-h-[2.75rem] rounded-full border-2 px-5 py-2.5 text-sm font-semibold shadow-sm transition sm:min-h-[3rem] sm:px-6 sm:text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 ${
+                categoryPieKindTab === "income"
+                  ? "border-blue-600 bg-blue-600 text-white dark:border-blue-500 dark:bg-blue-600"
+                  : "border-blue-200 bg-blue-50 text-blue-900 hover:bg-blue-100 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-100 dark:hover:bg-blue-950/70"
+              }`}
+              onClick={() => setCategoryPieKindTab("income")}
+            >
+              Income
+            </button>
+          </div>
           {categoryPiePeriodTab === "month" ? (
-            <div className="grid gap-4 lg:grid-cols-2">
-              <CategoryPieSection
-                title="Expenses by category (this month)"
-                variant="expense"
-                breakdown={monthBreakdown}
-                loading={breakdownLoading}
-                pieScope="month"
-                calendarYear={year}
-                calendarMonth={month}
-                periodLabel={monthLabel}
-                extraFilters={valueVisibilityFilters}
-                currencyConversion={currencyConversion ?? undefined}
-              />
-              <CategoryPieSection
-                title="Income by category (this month)"
-                variant="income"
-                breakdown={monthBreakdown}
-                loading={breakdownLoading}
-                pieScope="month"
-                calendarYear={year}
-                calendarMonth={month}
-                periodLabel={monthLabel}
-                extraFilters={valueVisibilityFilters}
-                currencyConversion={currencyConversion ?? undefined}
-              />
+            <div className="max-w-3xl">
+              {categoryPieKindTab === "expense" ? (
+                <CategoryPieSection
+                  title="Expenses by category (this month)"
+                  variant="expense"
+                  breakdown={monthBreakdown}
+                  loading={breakdownLoading}
+                  pieScope="month"
+                  calendarYear={year}
+                  calendarMonth={month}
+                  extraFilters={statsExtraFiltersForCategoryPie}
+                  currencyConversion={currencyConversion ?? undefined}
+                />
+              ) : (
+                <CategoryPieSection
+                  title="Income by category (this month)"
+                  variant="income"
+                  breakdown={monthBreakdown}
+                  loading={breakdownLoading}
+                  pieScope="month"
+                  calendarYear={year}
+                  calendarMonth={month}
+                  extraFilters={statsExtraFiltersForCategoryPie}
+                  currencyConversion={currencyConversion ?? undefined}
+                />
+              )}
             </div>
           ) : (
-            <div className="grid gap-4 lg:grid-cols-2">
-              <CategoryPieSection
-                title="Expenses by category (this year)"
-                variant="expense"
-                breakdown={yearBreakdown}
-                loading={breakdownLoading}
-                pieScope="year"
-                calendarYear={year}
-                periodLabel={String(year)}
-                extraFilters={valueVisibilityFilters}
-                currencyConversion={currencyConversion ?? undefined}
-              />
-              <CategoryPieSection
-                title="Income by category (this year)"
-                variant="income"
-                breakdown={yearBreakdown}
-                loading={breakdownLoading}
-                pieScope="year"
-                calendarYear={year}
-                periodLabel={String(year)}
-                extraFilters={valueVisibilityFilters}
-                currencyConversion={currencyConversion ?? undefined}
-              />
+            <div className="max-w-3xl">
+              {categoryPieKindTab === "expense" ? (
+                <CategoryPieSection
+                  title="Expenses by category (this year)"
+                  variant="expense"
+                  breakdown={yearBreakdown}
+                  loading={breakdownLoading}
+                  pieScope="year"
+                  calendarYear={year}
+                  extraFilters={statsExtraFiltersForCategoryPie}
+                  currencyConversion={currencyConversion ?? undefined}
+                />
+              ) : (
+                <CategoryPieSection
+                  title="Income by category (this year)"
+                  variant="income"
+                  breakdown={yearBreakdown}
+                  loading={breakdownLoading}
+                  pieScope="year"
+                  calendarYear={year}
+                  extraFilters={statsExtraFiltersForCategoryPie}
+                  currencyConversion={currencyConversion ?? undefined}
+                />
+              )}
             </div>
           )}
         </div>

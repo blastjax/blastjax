@@ -19,17 +19,17 @@ export const fieldTriggerButton =
   "w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-left text-sm text-zinc-800 shadow-sm transition hover:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-100 dark:hover:border-indigo-500";
 
 export const modalBackdrop =
-  "fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4";
+  "fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-3 sm:p-4";
 
 /** Backdrop with lighter scrim; bottom-aligned on small screens (add-category pattern). */
 export const modalBackdropMobileSheet =
-  "fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4 sm:items-center sm:bg-black/50 sm:p-6";
+  "fixed inset-0 z-[60] flex items-end justify-center bg-black/40 p-3 sm:items-center sm:bg-black/50 sm:p-6";
 
 export const modalBackdropHigh =
-  "fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4";
+  "fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-3 sm:p-4";
 
 export const modalPanel =
-  "max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl border border-zinc-200 bg-white p-6 shadow-xl dark:border-zinc-700 dark:bg-zinc-950";
+  "max-h-[min(90dvh,90vh)] w-full max-w-lg overflow-y-auto rounded-xl border border-zinc-200 bg-white p-4 shadow-xl sm:p-6 dark:border-zinc-700 dark:bg-zinc-950";
 
 export const modalTitle =
   "text-lg font-semibold text-zinc-900 dark:text-zinc-50";
@@ -76,6 +76,34 @@ export const btnCompactEmerald =
 
 export const btnCompactIndigoOutline =
   "inline-flex items-center justify-center rounded-lg border border-indigo-300 bg-white px-3 py-1.5 text-xs font-medium text-indigo-900 shadow-sm transition hover:bg-indigo-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 dark:border-indigo-600 dark:bg-transparent dark:text-indigo-100 dark:hover:bg-indigo-900/60";
+
+/** Unselected in-month day cells on calendar month / mini grids. */
+export const calendarDayHover =
+  "transition-[background-color,box-shadow] duration-150 hover:bg-indigo-50 hover:shadow-md hover:ring-1 hover:ring-indigo-200/80 dark:hover:bg-indigo-950/45 dark:hover:ring-indigo-600/50";
+
+/** Spill (adjacent-month) day cells on calendar grids. */
+export const calendarDayHoverSpill =
+  "transition-[background-color,box-shadow,opacity] duration-150 hover:bg-indigo-50/90 hover:opacity-100 hover:shadow-sm hover:ring-1 hover:ring-indigo-200/70 dark:hover:bg-indigo-950/40 dark:hover:opacity-100 dark:hover:ring-indigo-600/45";
+
+/** Year overview month cards that wrap a mini calendar. */
+export const calendarYearMonthCardHover =
+  "transition-[border-color,box-shadow,background-color] duration-150 hover:border-indigo-300 hover:bg-indigo-50/70 hover:shadow-md dark:hover:border-indigo-600 dark:hover:bg-indigo-950/35";
+
+/** Data preview, drill modals, grouped tx rows — interactive (click opens edit / drill). */
+export const interactiveHoverSurface =
+  "transition-colors duration-150 hover:bg-indigo-50 hover:shadow-sm dark:hover:bg-indigo-950/40";
+
+/** Same table/list context when the row is not clickable — still underline hover target. */
+export const readonlyHoverSurface =
+  "transition-colors duration-150 hover:bg-zinc-100 dark:hover:bg-zinc-800/55";
+
+/** Sidebar main nav links when the route is not active. */
+export const sidebarNavInactiveHover =
+  "hover:bg-indigo-50 hover:text-indigo-950 dark:hover:bg-indigo-950/40 dark:hover:text-indigo-50";
+
+/** Account balance list row (full-width control inside the card). */
+export const accountBalanceRowHover =
+  "transition-colors duration-150 hover:bg-indigo-50/95 dark:hover:bg-indigo-950/35";
 
 /** Native file input: style the button part consistently. */
 export const fileInputClass =

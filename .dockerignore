@@ -1,0 +1,12 @@
+.git
+.github
+**/node_modules
+**/.next
+**/venv
+**/.venv
+**/__pycache__
+**/*.pyc
+**/*.pyo
+.env
+agent-transcripts
+terminals

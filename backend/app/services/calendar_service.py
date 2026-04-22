@@ -10,7 +10,7 @@ import pandas as pd
 from fastapi import HTTPException
 
 from app.schemas.analyze import Filter
-from app.services.dataframe import apply_filters, column_kind
+from app.services.dataframe import apply_filters, column_kind, parse_period_mixed
 from app.workbook_cache import resolve_sheet_name
 
 
@@ -22,7 +22,8 @@ def _currency_multiplier_numpy(
     """1.0 for main/blank/unknown; sub_rates values multiply amount into main currency."""
     n = len(df)
     main_u = (main_code or "").strip().upper()
-    if not main_u or "Currency" not in df.columns:
+    colset = set(df.columns)
+    if not main_u or "Currency" not in colset:
         return np.ones(n, dtype=float)
     rates_upper: dict[str, float] = {}
     for k, v in (sub_rates or {}).items():
@@ -43,27 +44,33 @@ def _currency_multiplier_numpy(
 
 def _calendar_columns(df: pd.DataFrame) -> tuple[str, str, str | None]:
     """Find Period (datetime), Amount, and Income/Expense columns."""
+    colset = set(df.columns)
     period_col = None
-    for c in df.columns:
-        if column_kind(df[c]) == "datetime":
-            period_col = c
-            break
-    # SQLite / some imports keep Period as object strings; still valid for calendar.
-    if period_col is None and "Period" in df.columns:
-        parsed = pd.to_datetime(df["Period"], errors="coerce")
+    # Prefer Period first when it parses as dates (O(1) column check + one vectorized parse).
+    if "Period" in colset:
+        parsed = df["Period"].map(parse_period_mixed)
         if parsed.notna().any():
             period_col = "Period"
+    if period_col is None:
+        for c in df.columns:
+            if c == "Period":
+                continue
+            if column_kind(df[c]) == "datetime":
+                period_col = c
+                break
     if period_col is None:
         raise HTTPException(
             status_code=400,
             detail="No date/time column found for calendar",
         )
     amt_col = None
-    if "Amount" in df.columns:
+    if "Amount" in colset:
         amt_col = "Amount"
     else:
         for c in df.columns:
-            if c != period_col and column_kind(df[c]) == "number":
+            if c == period_col or str(c) == "Period":
+                continue
+            if column_kind(df[c]) == "number":
                 amt_col = c
                 break
     if amt_col is None:
@@ -88,6 +95,7 @@ def _income_expense_transfer_parts(
     Split rows into income, expense, transfer-in, and transfer-out.
     Transfers are not counted as income or expense (separate category).
     """
+    colset = set(df.columns)
     amt = pd.to_numeric(df[amt_col], errors="coerce").fillna(0).to_numpy(dtype=float)
     if currency_conversion:
         main = str(currency_conversion.get("main_code") or "").strip()
@@ -98,7 +106,7 @@ def _income_expense_transfer_parts(
             amt = amt * mult
     amt = np.abs(amt)
     z = np.zeros(len(df))
-    if ie_col is None or ie_col not in df.columns:
+    if ie_col is None or ie_col not in colset:
         return z, amt, z, z
 
     ie = df[ie_col].fillna("").astype(str).str.lower()
@@ -124,7 +132,8 @@ def _income_expense_transfer_parts(
 def flow_classification_series(df: pd.DataFrame, ie_col: str | None, amt_col: str) -> pd.Series:
     """Per-row label: Income, Expense, Transfer-In, Transfer-Out (same rules as _income_expense_transfer_parts)."""
     n = len(df)
-    if ie_col is None or ie_col not in df.columns:
+    colset = set(df.columns)
+    if ie_col is None or ie_col not in colset:
         return pd.Series(["Expense"] * n, index=df.index, dtype=object)
     ie = df[ie_col].fillna("").astype(str).str.lower()
     is_tin = ie.str.contains("transfer-in", na=False)
@@ -150,7 +159,7 @@ def apply_category_filter_to_display(
     """Keep rows whose Category matches; use (Uncategorized) for blank cells (same as pie breakdown)."""
     if category is None or not str(category).strip():
         return display
-    if "Category" not in display.columns:
+    if "Category" not in set(display.columns):
         return display.iloc[0:0].copy()
     cf = str(category)
     s = display["Category"].fillna("").astype(str)
@@ -165,7 +174,7 @@ def apply_subcategory_filter_to_display(
     """After category filter: keep rows whose Subcategory matches; (Uncategorized) for blank."""
     if subcategory is None or not str(subcategory).strip():
         return display
-    if "Subcategory" not in display.columns:
+    if "Subcategory" not in set(display.columns):
         return display.iloc[0:0].copy()
     sf = str(subcategory)
     s = display["Subcategory"].fillna("").astype(str)
@@ -176,11 +185,14 @@ def apply_subcategory_filter_to_display(
 
 def amount_and_ie_columns(df: pd.DataFrame) -> tuple[str | None, str | None]:
     """Amount column and Income/Expense column (same rules as calendar, without requiring Period)."""
+    colset = set(df.columns)
     amt_col = None
-    if "Amount" in df.columns:
+    if "Amount" in colset:
         amt_col = "Amount"
     else:
         for c in df.columns:
+            if str(c) == "Period":
+                continue
             if column_kind(df[c]) == "number":
                 amt_col = c
                 break
@@ -202,7 +214,8 @@ def budget_flow_totals(
     (aligned with calendar classification).
     """
     amt_col, ie_col = amount_and_ie_columns(df)
-    if not amt_col or amt_col not in df.columns:
+    colset = set(df.columns)
+    if not amt_col or amt_col not in colset:
         return {
             "available": False,
             "amount_column": None,
@@ -240,19 +253,34 @@ def prepare_calendar_frame(
     """
     Build per-row calendar bucket date `_d` from Period.
 
-    When `tz_offset_minutes` is set, it must be the browser's
-    `Date.getTimezoneOffset()` so `_d` matches the user's local calendar day
-    (fixes midnight local appearing on the wrong day when stored as UTC).
-    When omitted, uses pandas' default date extraction (legacy behavior).
+    **Naive** datetimes (typical spreadsheet / SQLite text): use the calendar date
+    from the stored components — no UTC reinterpretation (avoids e.g. April 20
+    19:13 becoming April 21 when the browser is UTC+8).
+
+    **Timezone-aware** datetimes (e.g. ``...Z``): interpret as absolute instants,
+    convert to UTC, then map to the user's local calendar day using the browser's
+    ``Date.getTimezoneOffset()`` (same as JS: ``localMs = utcMs - offset * 60000``).
+
+    When ``tz_offset_minutes`` is omitted, naive ``.dt.date`` is used for all rows.
     """
     period_col, amt_col, ie_col = _calendar_columns(df)
     out = df.copy()
-    if tz_offset_minutes is not None:
-        ts = pd.to_datetime(out[period_col], errors="coerce", utc=True)
-        # Same relation as JS: localMs = utcMs - getTimezoneOffset() * 60000
-        out["_d"] = (ts - pd.to_timedelta(tz_offset_minutes, unit="m")).dt.date
-    else:
-        out["_d"] = pd.to_datetime(out[period_col], errors="coerce").dt.date
+
+    def _calendar_bucket_date(val: Any, tz_off: int | None) -> Any:
+        ts = parse_period_mixed(val)
+        if pd.isna(ts):
+            return pd.NaT
+        if ts.tz is None:
+            return ts.date()
+        ts_utc = ts.tz_convert("UTC")
+        if tz_off is None:
+            return ts_utc.date()
+        local = ts_utc - pd.Timedelta(minutes=tz_off)
+        return local.date()
+
+    out["_d"] = out[period_col].map(
+        lambda v: _calendar_bucket_date(v, tz_offset_minutes),
+    )
     inc, exp, tin, tout = _income_expense_transfer_parts(
         out, ie_col, amt_col, currency_conversion
     )
@@ -305,10 +333,11 @@ def per_account_balances(
     Remaining net balance per Accounts value: income + transfer_in - expense - transfer_out
     (same sign rules as calendar / budget totals), summed over all rows per account.
     """
-    if "Accounts" not in df.columns:
+    colset = set(df.columns)
+    if "Accounts" not in colset:
         return []
     amt_col, ie_col = amount_and_ie_columns(df)
-    if not amt_col or amt_col not in df.columns:
+    if not amt_col or amt_col not in colset:
         return []
     inc, exp, tin, tout = _income_expense_transfer_parts(
         df, ie_col, amt_col, currency_conversion

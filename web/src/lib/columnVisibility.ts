@@ -15,6 +15,7 @@ export const DATA_PREVIEW_EXCLUDED_COLUMNS = new Set([
   "Income/Expense",
   "Currency",
   "Flow",
+  "calendar_date",
 ]);
 
 /** Use when building column lists for any data preview table (dashboard, calendar, account drill). */

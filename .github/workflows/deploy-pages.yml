@@ -1,0 +1,63 @@
+name: Deploy GitHub Pages
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Optional seed SQLite for WASM
+        run: |
+          mkdir -p web/public
+          if [ -f data/budget.sqlite ]; then
+            cp data/budget.sqlite web/public/budget.sqlite
+          fi
+
+      - name: Install and static export
+        working-directory: web
+        env:
+          STATIC_EXPORT: "1"
+          NEXT_PUBLIC_USE_WASM_SQLITE: "1"
+        run: |
+          REPO="${{ github.event.repository.name }}"
+          OWNER="${{ github.repository_owner }}"
+          if [ "$REPO" = "${OWNER}.github.io" ]; then
+            export NEXT_PUBLIC_BASE_PATH=""
+          else
+            export NEXT_PUBLIC_BASE_PATH="$REPO"
+          fi
+          npm ci && npm run build:static
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web/out
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4

@@ -1,20 +1,58 @@
 """DataFrame filtering, aggregation, and serialization for analyze API."""
 from __future__ import annotations
 
+import datetime as dt
 import json
 from typing import Any
 
+import numpy as np
 import pandas as pd
 from fastapi import HTTPException
 
 from app.schemas.analyze import Filter, Measure
+
+
+def parse_period_mixed(val: Any) -> pd.Timestamp:
+    """
+    Parse one Period cell without pandas' whole-column coercion (which turns mixed
+    naive + offset-aware ISO strings into NaT when dtype is unified).
+    """
+    if val is None or val is pd.NaT:
+        return pd.NaT
+    if isinstance(val, pd.Timestamp):
+        return val
+    if isinstance(val, dt.datetime):
+        return pd.Timestamp(val)
+    if isinstance(val, str):
+        t = val.strip()
+        if not t or t.lower() in ("nat", "none", "null"):
+            return pd.NaT
+        out = pd.Timestamp(t)
+        return pd.NaT if pd.isna(out) else out
+    if isinstance(val, (bool, np.bool_)):
+        return pd.NaT
+    if isinstance(val, (int, np.integer)):
+        return pd.to_datetime(val, errors="coerce")
+    if isinstance(val, (float, np.floating)):
+        if np.isnan(val):
+            return pd.NaT
+        fv = float(val)
+        if 20_000 < fv < 100_000:
+            return pd.Timestamp("1899-12-30") + pd.Timedelta(days=fv)
+        return pd.to_datetime(val, errors="coerce")
+    try:
+        out = pd.Timestamp(val)
+        return pd.NaT if pd.isna(out) else out
+    except (TypeError, ValueError, OverflowError):
+        return pd.NaT
+
 
 def column_kind(s: pd.Series) -> str:
     if pd.api.types.is_datetime64_any_dtype(s):
         return "datetime"
     # SQLite / exports: Period is often object dtype ISO strings; still the calendar date column.
     if str(s.name) == "Period":
-        parsed = pd.to_datetime(s, errors="coerce")
+        parsed = s.map(parse_period_mixed)
         if parsed.notna().any():
             return "datetime"
     if pd.api.types.is_bool_dtype(s):
@@ -24,9 +62,30 @@ def column_kind(s: pd.Series) -> str:
     return "string"
 
 
+def _coerce_series_timestamps(s: pd.Series) -> pd.Series:
+    """Datetime64 column, or Period object/strings parsed per-cell (mixed tz-safe)."""
+    if pd.api.types.is_datetime64_any_dtype(s):
+        return pd.to_datetime(s, errors="coerce")
+    if str(s.name) == "Period":
+        return s.map(parse_period_mixed)
+    return pd.to_datetime(s, errors="coerce")
+
+
+def period_series_to_sortable_utc(s: pd.Series) -> pd.Series:
+    """
+    Single datetime64[ns, UTC] series for sort/min/max.
+
+    Mixed naive + offset-aware Period values are not directly comparable; pandas may
+    raise or (in some paths) fail factorize with:
+    \"'values' is not ordered, please explicitly specify the categories order ...\".
+    """
+    ts = _coerce_series_timestamps(s)
+    return pd.to_datetime(ts, utc=True, errors="coerce")
+
+
 def _series_datetime_tz(series: pd.Series) -> Any | None:
     """Timezone of a datetime column (e.g. UTC from SQLite ISO strings), or None if naive."""
-    ts = pd.to_datetime(series, errors="coerce")
+    ts = _coerce_series_timestamps(series)
     return getattr(ts.dtype, "tz", None)
 
 
@@ -50,8 +109,9 @@ def _align_datetime_boundary(series: pd.Series, v: Any) -> pd.Timestamp:
 
 def apply_filters(df: pd.DataFrame, filters: list[Filter]) -> pd.DataFrame:
     out = df
+    colset = frozenset(out.columns)
     for f in filters:
-        if f.column not in out.columns:
+        if f.column not in colset:
             raise HTTPException(status_code=400, detail=f"Unknown column: {f.column}")
         s = out[f.column]
         if f.op == "isnull":
@@ -107,8 +167,8 @@ def apply_filters(df: pd.DataFrame, filters: list[Filter]) -> pd.DataFrame:
             continue
         v = f.value
         if f.op == "eq":
-            if pd.api.types.is_datetime64_any_dtype(s):
-                ts = pd.to_datetime(s, errors="coerce")
+            if pd.api.types.is_datetime64_any_dtype(s) or str(s.name) == "Period":
+                ts = _coerce_series_timestamps(s)
                 b = _align_datetime_boundary(s, v)
                 out = out[ts == b]
             else:
@@ -118,8 +178,8 @@ def apply_filters(df: pd.DataFrame, filters: list[Filter]) -> pd.DataFrame:
                 else:
                     out = out[s == v]
         elif f.op == "ne":
-            if pd.api.types.is_datetime64_any_dtype(s):
-                ts = pd.to_datetime(s, errors="coerce")
+            if pd.api.types.is_datetime64_any_dtype(s) or str(s.name) == "Period":
+                ts = _coerce_series_timestamps(s)
                 b = _align_datetime_boundary(s, v)
                 out = out[ts != b]
             else:
@@ -129,8 +189,8 @@ def apply_filters(df: pd.DataFrame, filters: list[Filter]) -> pd.DataFrame:
         elif f.op == "startswith":
             out = out[s.astype(str).str.startswith(str(v), na=False)]
         elif f.op in ("gt", "gte", "lt", "lte"):
-            if pd.api.types.is_datetime64_any_dtype(s):
-                ts = pd.to_datetime(s, errors="coerce")
+            if pd.api.types.is_datetime64_any_dtype(s) or str(s.name) == "Period":
+                ts = _coerce_series_timestamps(s)
                 try:
                     raw = pd.Timestamp(v)
                 except (ValueError, TypeError):
@@ -193,6 +253,9 @@ def apply_search_all(df: pd.DataFrame, q: str | None) -> pd.DataFrame:
 def numeric_summary(df: pd.DataFrame) -> dict[str, dict[str, float | int]]:
     summary: dict[str, dict[str, float | int]] = {}
     for c in df.columns:
+        # Avoid column_kind's full Period parse (datetime path) when summing numeric columns only.
+        if str(c) == "Period":
+            continue
         if column_kind(df[c]) != "number":
             continue
         ser = pd.to_numeric(df[c], errors="coerce").dropna()
@@ -236,11 +299,12 @@ def _measure_cell(sub: pd.DataFrame, m: Measure) -> float | int | None:
 def run_aggregate(
     df: pd.DataFrame, group_by: list[str], measures: list[Measure]
 ) -> pd.DataFrame:
+    colset = frozenset(df.columns)
     for g in group_by:
-        if g not in df.columns:
+        if g not in colset:
             raise HTTPException(status_code=400, detail=f"group_by unknown column: {g}")
     for m in measures:
-        if m.column not in df.columns:
+        if m.column not in colset:
             raise HTTPException(status_code=400, detail=f"measure unknown column: {m.column}")
     records: list[dict[str, Any]] = []
     for keys, sub in df.groupby(group_by, dropna=False):
