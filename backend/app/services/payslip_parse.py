@@ -21,6 +21,9 @@ _PAYSPLIP_HEADER_MAP: dict[str, str] = {
     "mp2": "mp2",
     "allowances": "allowances",
     "allowance": "allowances",
+    "13thmonth": "thirteenth_month",
+    "thirteenthmonth": "thirteenth_month",
+    "basicsalary": "basic_salary",
     "notes": "notes",
     "note": "notes",
     "periodyear": "period_year",
@@ -86,6 +89,8 @@ def _payslip_row_dict(row: pd.Series, colmap: dict[str, str]) -> dict[str, Any]:
         "others": None,
         "mp2": None,
         "allowances": None,
+        "thirteenth_month": None,
+        "basic_salary": None,
         "period_year": None,
         "period_month": None,
         "period_half": None,
@@ -125,6 +130,8 @@ def _payslip_row_is_empty(rec: dict[str, Any]) -> bool:
         "others",
         "mp2",
         "allowances",
+        "thirteenth_month",
+        "basic_salary",
     ):
         v = rec.get(k)
         if v is not None and not (isinstance(v, float) and np.isnan(v)):
@@ -142,6 +149,8 @@ def _payslip_empty_rec() -> dict[str, Any]:
         "others": None,
         "mp2": None,
         "allowances": None,
+        "thirteenth_month": None,
+        "basic_salary": None,
         "period_year": None,
         "period_month": None,
         "period_half": None,
@@ -224,6 +233,12 @@ def _payslip_section_from_label(first_col: str) -> str | None:
         return "reimbursement"
     if "commission" in tl:
         return "commission"
+    if "basic" in tl and "salary" in tl:
+        return "basic_salary"
+    if "13th" in tl and "month" in tl:
+        return "thirteenth_month"
+    if "thirteenth" in tl and "month" in tl:
+        return "thirteenth_month"
     if "allowance" in tl:
         return "allowances"
     if tl == "mp2" or re.match(r"^mp2\b", tl):
@@ -241,6 +256,8 @@ _SECTION_TO_FIELD: dict[str, str] = {
     "others": "others",
     "mp2": "mp2",
     "allowances": "allowances",
+    "thirteenth_month": "thirteenth_month",
+    "basic_salary": "basic_salary",
 }
 
 _SECTION_TITLE: dict[str, str] = {
@@ -251,6 +268,8 @@ _SECTION_TITLE: dict[str, str] = {
     "others": "Others",
     "mp2": "MP2",
     "allowances": "Allowances",
+    "thirteenth_month": "13th Month",
+    "basic_salary": "Basic salary",
 }
 
 
@@ -525,6 +544,8 @@ def _payslip_records_from_nested_json(data: dict[str, Any]) -> list[dict[str, An
                 "others",
                 "mp2",
                 "allowances",
+                "thirteenth_month",
+                "basic_salary",
             )
 
             def fill_rec(half: int | None, hi: int) -> dict[str, Any]:

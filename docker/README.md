@@ -1,27 +1,18 @@
 # Docker
 
-## SQLite on the host
+## PostgreSQL
 
-The API container mounts **`./data` on your machine** to **`/app/data`** inside the container and sets:
+Compose runs **Postgres 16** as service **`db`** and points the API at:
 
-`DATABASE_URL=sqlite:////app/data/budget.sqlite`
+`postgresql://postgres:blast@db:5432/budgetapp`
 
-Create the folder and place your database file there (or start the stack once and let the app create an empty file):
+Data lives in the **`pgdata`** named volume. The **`api`** service loads your root **`.env`** (`env_file`). Use the same **`DATABASE_URL`** as on the host (for example `...@127.0.0.1:5433/budgetapp`); inside the container the backend **rewrites** `127.0.0.1` / `localhost` to **`db:5432`** so Compose networking works. Remote URLs (Neon, etc.) are left unchanged.
 
-```bash
-mkdir -p data
-# optional: copy an existing DB
-# cp /path/to/budget.sqlite data/budget.sqlite
-```
+## Builds (cache + image size)
 
-Confirm the file is visible on the host and inside the API container:
-
-```bash
-ls -la data/budget.sqlite   # host (may not exist until first run creates it)
-docker compose exec api ls -la /app/data
-```
-
-Compose sets **`BUDGET_SQLITE_WORKING_COPY=1`** by default. On **Windows Docker Desktop**, a bind-mounted `./data` folder often makes **every** SQLite journal mode fail with `disk I/O error`. The API then copies `budget.sqlite` from the mount to **`/tmp`** inside the container (normal filesystem), runs against that copy, and **`sync_sqlite_working_copy_maybe`** copies it back to `./data` when the process shuts down cleanly (`docker compose stop`, Ctrl+C). **`docker compose kill`** or `SIGKILL` skips that sync—avoid those if you need changes persisted to the host file immediately.
+- **Compose** uses a **small build context per service** (`./backend` for API, `./web` for the UI) so unrelated file changes do not invalidate the other image’s layers.
+- **BuildKit** (default in current Docker Desktop) enables cache mounts in the Dockerfiles: `pip` wheels under `/root/.cache/pip`, npm under `/root/.npm`, and Next’s compiler cache under `/app/.next/cache`. Rebuilds after dependency changes are much faster than a cold build.
+- The **web** image ships a **[Next.js standalone](https://nextjs.org/docs/app/api-reference/config/next-config-js/output)** bundle (`node server.js`) instead of the full `node_modules` tree, which shrinks the final layer set.
 
 ## Run
 
@@ -34,6 +25,7 @@ docker compose up
 
 - Web: `http://localhost:3000`
 - API: `http://127.0.0.1:8000`
+- Postgres on the host: `localhost:5433` (user `postgres`, password `blast`, db `budgetapp`)
 
 The web bundle is built with `NEXT_PUBLIC_API_URL` (default `http://127.0.0.1:8000`). To change it, set the variable when building, for example:
 

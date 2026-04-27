@@ -3,14 +3,12 @@
 from __future__ import annotations
 
 import io
-from datetime import date, datetime, time
 from typing import Any
 
 import pandas as pd
 from fastapi import APIRouter, Body, File, HTTPException, Query, UploadFile
 
 from app.schemas.payslip import PayslipCreate
-from app.workbook_cache import invalidate_cache
 from app.services.payslip_parse import (
     _map_payslip_columns,
     _parse_payslip_horizontal_year_columns,
@@ -23,7 +21,6 @@ from db import (
     database_url,
     delete_payslip,
     get_payslip,
-    insert_budget_transaction,
     insert_payslip,
     list_payslips,
     update_payslip,
@@ -31,14 +28,12 @@ from db import (
 
 router = APIRouter(tags=["payslip"])
 
-# Manual payslip add: mirror as budget income (see POST /api/payslip).
-PAYSLIP_INCOME_ACCOUNT = "BDO"
-PAYSLIP_INCOME_CATEGORY = "Salary"
 
-
-def _period_today_midnight() -> datetime:
-    """Local calendar date at 00:00 (server timezone), stored as budget Period."""
-    return datetime.combine(date.today(), time.min)
+def _rec_pag_ibig(rec: dict[str, Any]) -> Any:
+    """Prefer pag_ibig; accept legacy employee_hdmf from imports."""
+    if "pag_ibig" in rec:
+        return rec["pag_ibig"]
+    return rec.get("employee_hdmf")
 
 
 @router.get("/api/payslip")
@@ -70,29 +65,18 @@ def payslip_create(body: PayslipCreate) -> dict[str, Any]:
         body.others,
         body.mp2,
         body.allowances,
+        body.thirteenth_month,
+        body.basic_salary,
         body.period_year,
         body.period_month,
         body.period_half,
         body.notes,
+        body.withholding_tax,
+        body.sss_contribution,
+        body.philhealth,
+        body.pag_ibig,
     )
-    out: dict[str, Any] = {"id": pid}
-    total = body.total
-    if total is not None and float(total) > 0:
-        tid = insert_budget_transaction(
-            period=_period_today_midnight(),
-            accounts=PAYSLIP_INCOME_ACCOUNT,
-            category=PAYSLIP_INCOME_CATEGORY,
-            subcategory=None,
-            note=body.notes,
-            php=None,
-            income_expense="Income",
-            description=f"Payslip #{pid}",
-            amount=float(total),
-            currency=None,
-        )
-        invalidate_cache()
-        out["salary_transaction_id"] = tid
-    return out
+    return {"id": pid}
 
 
 @router.post("/api/payslip/upload")
@@ -126,10 +110,16 @@ async def payslip_upload(file: UploadFile = File(...)) -> dict[str, Any]:
             rec["others"],
             rec["mp2"],
             rec["allowances"],
+            rec.get("thirteenth_month"),
+            rec.get("basic_salary"),
             rec["period_year"],
             rec["period_month"],
             rec["period_half"],
             rec["notes"],
+            rec.get("withholding_tax"),
+            rec.get("sss_contribution"),
+            rec.get("philhealth"),
+            _rec_pag_ibig(rec),
         )
         ids.append(pid)
 
@@ -183,10 +173,16 @@ def payslip_import_json(body: dict[str, Any] = Body(...)) -> dict[str, Any]:
             rec["others"],
             rec["mp2"],
             rec["allowances"],
+            rec.get("thirteenth_month"),
+            rec.get("basic_salary"),
             rec["period_year"],
             rec["period_month"],
             rec["period_half"],
             rec.get("notes"),
+            rec.get("withholding_tax"),
+            rec.get("sss_contribution"),
+            rec.get("philhealth"),
+            _rec_pag_ibig(rec),
         )
         ids.append(pid)
     if not ids:
@@ -224,10 +220,16 @@ def payslip_replace(payslip_id: int, body: PayslipCreate) -> dict[str, Any]:
         body.others,
         body.mp2,
         body.allowances,
+        body.thirteenth_month,
+        body.basic_salary,
         body.period_year,
         body.period_month,
         body.period_half,
         body.notes,
+        body.withholding_tax,
+        body.sss_contribution,
+        body.philhealth,
+        body.pag_ibig,
     )
     if not ok:
         raise HTTPException(status_code=404, detail="Payslip not found.")

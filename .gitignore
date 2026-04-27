@@ -7,5 +7,4 @@ uploads/
 venv/
 .venv/
 data/
-*.sqlite
 postman/

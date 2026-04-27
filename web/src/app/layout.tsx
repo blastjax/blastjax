@@ -16,8 +16,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Budget workbook",
-  description: "Explore Excel data with filters, summaries, and charts",
+  title: "Payslip & installments",
+  description: "Payslip calendar and loan schedules",
 };
 
 export const viewport: Viewport = {

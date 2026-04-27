@@ -9,10 +9,13 @@ const nextConfig: NextConfig = {
   ...(staticExport
     ? {
         output: "export" as const,
-        /** GitHub Pages serves directories as ``/path/index.html``; trailing slashes avoid 404 on refresh. */
+        /** Static hosts often map directories as ``/path/index.html``; trailing slashes avoid 404 on refresh. */
         trailingSlash: true,
       }
-    : {}),
+    : {
+        /** Minimal runtime for Docker (`docker/Dockerfile.web` runner stage). */
+        output: "standalone" as const,
+      }),
   ...(basePath ? { basePath, assetPrefix: basePath } : {}),
   /**
    * On Windows, webpack’s default filesystem cache often hits ENOENT/rename races

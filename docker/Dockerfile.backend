@@ -1,15 +1,19 @@
-# API: reads PostgreSQL or SQLite per DATABASE_URL (see docker-compose and docker/README.md).
+# API: PostgreSQL via DATABASE_URL (see docker-compose and docker/README.md).
+# Build with context directory `backend/` (see docker-compose).
+# syntax=docker/dockerfile:1
 FROM python:3.12-slim-bookworm
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
 
 WORKDIR /app
 
-COPY backend/requirements.txt /app/backend/requirements.txt
-RUN pip install --no-cache-dir -r /app/backend/requirements.txt
+COPY requirements.txt .
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install -r requirements.txt
 
-COPY backend /app/backend
-
-WORKDIR /app/backend
-ENV PYTHONUNBUFFERED=1
+COPY . .
 
 EXPOSE 8000
 CMD ["python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

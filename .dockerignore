@@ -1,5 +1,7 @@
+# Used when build context is the repo root. Compose uses `backend/` and `web/` contexts instead.
 .git
 .github
+**/.git
 **/node_modules
 **/.next
 **/venv
@@ -8,5 +10,14 @@
 **/*.pyc
 **/*.pyo
 .env
+.env.*
+**/.env
+**/.env.*
+data
+uploads
+web/.turbo
+**/*.md
 agent-transcripts
 terminals
+.cursor
+mcps

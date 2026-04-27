@@ -16,6 +16,6 @@ def health() -> dict[str, Any]:
     }
     if not database_url():
         out["status"] = "degraded"
-        out["detail"] = "DATABASE_URL missing in .env"
+        out["detail"] = "DATABASE_URL (or DB_*) missing in .env"
     return out
 

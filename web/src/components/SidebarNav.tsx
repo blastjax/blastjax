@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect } from "react";
-import { sidebarNavInactiveHover } from "@/lib/ui";
+const sidebarNavInactiveHover =
+  "hover:bg-zinc-100 dark:hover:bg-zinc-800/80";
 import { RAIL_WIDTH, useShellLayout } from "@/lib/shellLayoutContext";
 import { useLgUp } from "@/lib/useLgUp";
 
@@ -11,6 +12,7 @@ import { useLgUp } from "@/lib/useLgUp";
 const LINKS = [
   { href: "/installments", label: "Installments" },
   { href: "/payslip", label: "Payslip" },
+  { href: "/salary-stats", label: "Salary Stats" },
 ] as const;
 
 export function SidebarNav() {

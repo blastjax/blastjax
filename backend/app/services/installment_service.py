@@ -6,7 +6,7 @@ from typing import Any
 
 
 def _coerce_date(v: Any) -> dt.date | None:
-    """SQLite returns DATE/TEXT as str; Postgres returned date objects."""
+    """Coerce DATE/TIMESTAMP/text from the DB into ``date``."""
     if v is None:
         return None
     if isinstance(v, dt.datetime):
