@@ -158,6 +158,7 @@ export function ShellLayoutProvider({ children }: { children: ReactNode }) {
       if (mq.matches) {
         setMobileNavOpen(false);
         setMobileBalancesOpen(false);
+        setLeftCollapsedState(false);
       }
     };
     mq.addEventListener("change", onChange);

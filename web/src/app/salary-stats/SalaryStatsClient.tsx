@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { usePathname } from "next/navigation";
+import Link from "next/link";
 import {
   Area,
   CartesianGrid,
@@ -14,6 +16,12 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import { useTheme } from "@/components/ThemeProvider";
+import {
+  CHART_SERIES_LABEL,
+  loadChartPalette,
+  type ChartSeriesColorKey,
+} from "@/lib/chartPalette";
 import { getPayslips, type PayslipRow } from "@/lib/api";
 
 /** Pie + non-deduction line categories (MP2 is grouped with statutory deductions). */
@@ -24,7 +32,7 @@ const PIE_SERIES_KEYS = [
   "commission",
   "thirteenth_month",
   "medical_reimbursement",
-] as const;
+] as const satisfies readonly ChartSeriesColorKey[];
 
 type PieSeriesKey = (typeof PIE_SERIES_KEYS)[number];
 
@@ -34,39 +42,11 @@ const DEDUCTION_KEYS = [
   "philhealth",
   "pag_ibig",
   "mp2",
-] as const;
+] as const satisfies readonly ChartSeriesColorKey[];
 
 const LINE_SERIES_KEYS = [...PIE_SERIES_KEYS, ...DEDUCTION_KEYS] as const;
 
 type LineSeriesKey = (typeof LINE_SERIES_KEYS)[number];
-
-const CHART_LABEL: Record<LineSeriesKey, string> = {
-  reimbursement: "Reimbursement",
-  others: "Others",
-  allowances: "Allowances",
-  commission: "Commission",
-  thirteenth_month: "13th Month",
-  mp2: "MP2",
-  medical_reimbursement: "Medical reimbursement",
-  withholding_tax: "Withholding tax",
-  sss_contribution: "SSS contribution",
-  philhealth: "Philhealth",
-  pag_ibig: "Pag-ibig",
-};
-
-const CHART_COLOR: Record<LineSeriesKey, string> = {
-  reimbursement: "#3b82f6",
-  others: "#8b5cf6",
-  allowances: "#64748b",
-  commission: "#f43f5e",
-  thirteenth_month: "#ea580c",
-  mp2: "#06b6d4",
-  medical_reimbursement: "#14b8a6",
-  withholding_tax: "#71717a",
-  sss_contribution: "#b91c1c",
-  philhealth: "#f97316",
-  pag_ibig: "#fb7185",
-};
 
 function emptyTotals<K extends keyof PayslipRow>(
   keys: readonly K[],
@@ -442,6 +422,35 @@ export default function SalaryStatsClient() {
       >,
   );
 
+  const pathname = usePathname();
+  const { theme } = useTheme();
+  const chartPalette = useMemo(() => {
+    void pathname;
+    return loadChartPalette();
+  }, [pathname]);
+  const chartSeriesColors = chartPalette[theme];
+  const axisTickFill = theme === "dark" ? "#a1a1aa" : "#71717a";
+
+  const chartTooltipStyle = useMemo(
+    () =>
+      theme === "dark"
+        ? {
+            backgroundColor: "rgba(24, 24, 27, 0.92)",
+            border: "1px solid rgb(63 63 70)",
+            borderRadius: "8px",
+            fontSize: "12px",
+            color: "#fafafa",
+          }
+        : {
+            backgroundColor: "rgba(255, 255, 255, 0.96)",
+            border: "1px solid rgb(228 228 231)",
+            borderRadius: "8px",
+            fontSize: "12px",
+            color: "#18181b",
+          },
+    [theme],
+  );
+
   const load = useCallback(async () => {
     setError(null);
     setLoading(true);
@@ -484,7 +493,7 @@ export default function SalaryStatsClient() {
     for (const k of PIE_SERIES_KEYS) {
       list.push({
         key: k,
-        name: CHART_LABEL[k],
+        name: CHART_SERIES_LABEL[k],
         value: sums[k],
       });
     }
@@ -548,13 +557,6 @@ export default function SalaryStatsClient() {
   const toggleAdditionsSeries = () => toggleSeriesGroup(PIE_SERIES_KEYS);
   const toggleDeductionsSeries = () => toggleSeriesGroup(DEDUCTION_KEYS);
 
-  const chartTooltipStyle = {
-    backgroundColor: "rgba(24, 24, 27, 0.92)",
-    border: "1px solid rgb(63 63 70)",
-    borderRadius: "8px",
-    fontSize: "12px",
-  };
-
   return (
     <div className="box-border flex w-full min-w-0 flex-col gap-10 px-4 pb-28 pt-10 sm:px-6 lg:px-8">
       <header className="border-b border-zinc-200 pb-8 dark:border-zinc-800">
@@ -564,7 +566,14 @@ export default function SalaryStatsClient() {
         <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
           Compare reimbursement, allowances, commission, 13th month, medical
           reimbursement, and others by period. MP2 and statutory items are summarized
-          under deductions.
+          under deductions. Chart colors are under{" "}
+          <Link
+            href="/settings"
+            className="font-medium text-indigo-600 underline-offset-2 hover:underline dark:text-indigo-400"
+          >
+            Settings
+          </Link>
+          .
         </p>
       </header>
 
@@ -578,9 +587,11 @@ export default function SalaryStatsClient() {
       )}
 
       {loading ? (
-        <p className="text-sm text-zinc-600 dark:text-zinc-400">Loading payslips…</p>
-      ) : (
-        <>
+          <p className="text-sm text-zinc-600 dark:text-zinc-400">
+            Loading payslips…
+          </p>
+        ) : (
+          <>
           <section className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950 sm:p-6">
             <h2 className="text-lg font-medium text-zinc-900 dark:text-zinc-50">
               Composition
@@ -674,12 +685,13 @@ export default function SalaryStatsClient() {
                       cx="50%"
                       cy="50%"
                       outerRadius="80%"
+                      labelLine={{ stroke: axisTickFill }}
                       label={({ name, percent }) =>
                         `${name} ${((percent ?? 0) * 100).toFixed(0)}%`
                       }
                     >
                       {pieSlices.map((s) => (
-                        <Cell key={s.key} fill={CHART_COLOR[s.key]} />
+                        <Cell key={s.key} fill={chartSeriesColors[s.key]} />
                       ))}
                     </Pie>
                     <Tooltip
@@ -705,7 +717,7 @@ export default function SalaryStatsClient() {
                     className="flex items-center justify-between gap-4 rounded-md border border-transparent px-0.5 py-1 sm:border-zinc-200/80 sm:px-2 sm:py-1.5 dark:sm:border-zinc-700/80"
                   >
                     <span className="text-zinc-600 dark:text-zinc-400">
-                      {CHART_LABEL[k]}
+                      {CHART_SERIES_LABEL[k]}
                     </span>
                     <span className="text-sm font-medium tabular-nums text-red-600 dark:text-red-400">
                       {fmtMoney(piePeriodDeductions.sums[k])}
@@ -795,10 +807,10 @@ export default function SalaryStatsClient() {
                   />
                   <span
                     className="inline-block h-2 w-2 rounded-full"
-                    style={{ backgroundColor: CHART_COLOR[k] }}
+                    style={{ backgroundColor: chartSeriesColors[k] }}
                     aria-hidden
                   />
-                  {CHART_LABEL[k]}
+                  {CHART_SERIES_LABEL[k]}
                 </label>
               ))}
             </div>
@@ -819,10 +831,12 @@ export default function SalaryStatsClient() {
                     margin={{ top: 8, right: 8, bottom: 8, left: 8 }}
                   >
                     <CartesianGrid strokeDasharray="3 3" className="stroke-zinc-200 dark:stroke-zinc-700" />
-                    <XAxis dataKey="label" tick={{ fontSize: 11 }} className="text-zinc-600" />
+                    <XAxis
+                      dataKey="label"
+                      tick={{ fontSize: 11, fill: axisTickFill }}
+                    />
                     <YAxis
-                      tick={{ fontSize: 11 }}
-                      className="text-zinc-600"
+                      tick={{ fontSize: 11, fill: axisTickFill }}
                       tickFormatter={(v) =>
                         Number(v) >= 1000
                           ? `${(Number(v) / 1000).toFixed(1)}k`
@@ -839,10 +853,10 @@ export default function SalaryStatsClient() {
                         key={k}
                         type="monotone"
                         dataKey={k}
-                        name={CHART_LABEL[k]}
-                        stroke={CHART_COLOR[k]}
+                        name={CHART_SERIES_LABEL[k]}
+                        stroke={chartSeriesColors[k]}
                         strokeWidth={2}
-                        fill={CHART_COLOR[k]}
+                        fill={chartSeriesColors[k]}
                         fillOpacity={0.22}
                         dot={{ r: 3 }}
                         activeDot={{ r: 5 }}
@@ -864,8 +878,8 @@ export default function SalaryStatsClient() {
               </div>
             )}
           </section>
-        </>
-      )}
+          </>
+        )}
     </div>
   );
 }
