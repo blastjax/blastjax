@@ -1,5 +1,6 @@
 services:
   api:
+    restart: always
     build:
       context: ./backend
       dockerfile: ../docker/Dockerfile.backend
@@ -12,6 +13,7 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
   web:
+    restart: always
     build:
       context: ./web
       dockerfile: ../docker/Dockerfile.web
@@ -21,6 +23,3 @@ services:
       - "3000:3000"
     depends_on:
       - api
-
-volumes:
-  pgdata:
