@@ -30,6 +30,18 @@ import {
   type FormState,
   MONTHS,
 } from "./payslipModalForm";
+import { PayslipFormFields } from "./PayslipFormFields";
+import {
+  emptyForm,
+  initialAddPayslipForm,
+  initialManualPayslipForm,
+  loadPayslipDefaultsBundle,
+  payslipDefaultsFormForSlotHalf,
+  PAYSLIP_DEFAULTS_SAVED_EVENT,
+  tryParseFormStateJson,
+  type FormState,
+  MONTHS,
+} from "./payslipModalForm";
 
 /** Annual ceiling; allowance resets each April 1 (Apr → Mar policy year). */
 const MEDICAL_REIMBURSEMENT_ANNUAL_CAP = 11500;
@@ -159,6 +171,21 @@ function deductionsTotalFromRow(r: PayslipRow): number {
     num(r.philhealth) +
     num(r.pag_ibig) +
     num(r.mp2)
+  );
+}
+
+/** Gross pay: income components before deductions (matches details modal breakdown). */
+function grossTotalFromRow(r: PayslipRow): number {
+  const num = (v: number | null | undefined) =>
+    v != null && Number.isFinite(v) ? v : 0;
+  return (
+    num(r.basic_salary) +
+    num(r.commission) +
+    num(r.allowances) +
+    num(r.reimbursement) +
+    num(r.others) +
+    num(r.thirteenth_month) +
+    num(r.medical_reimbursement)
   );
 }
 
@@ -364,6 +391,11 @@ function fmtPctOfTotal(
   totalSum: number,
   ofLabel: "gross" | "net" = "gross",
 ): string {
+function fmtPctOfTotal(
+  amount: number,
+  totalSum: number,
+  ofLabel: "gross" | "net" = "gross",
+): string {
   if (!(totalSum > 0)) return "—";
   const pct = (amount / totalSum) * 100;
   const s = pct.toLocaleString(undefined, {
@@ -457,6 +489,14 @@ function PayslipYearStatsSection({ rows }: { rows: PayslipRow[] }) {
     sums.pag_ibig +
     sums.mp2;
   const totalPlusDeductions = sums.total + deductionsSumYtd;
+  /** Breakdown cards: compare line items to gross (net + deductions), falling back to net if gross is unset. */
+  const pctDenominator =
+    totalPlusDeductions > 0 ? totalPlusDeductions : sums.total;
+
+  const medicalVsTotalPct =
+    pctDenominator > 0
+      ? Math.min(100, Math.max(0, (medicalUsed / pctDenominator) * 100))
+      : 0;
   /** Breakdown cards: compare line items to gross (net + deductions), falling back to net if gross is unset. */
   const pctDenominator =
     totalPlusDeductions > 0 ? totalPlusDeductions : sums.total;
@@ -584,6 +624,8 @@ function PayslipYearStatsSection({ rows }: { rows: PayslipRow[] }) {
       const pctOfTotal =
         pctDenominator > 0
           ? Math.min(100, Math.max(0, (amount / pctDenominator) * 100))
+        pctDenominator > 0
+          ? Math.min(100, Math.max(0, (amount / pctDenominator) * 100))
           : 0;
       return (
         <div
@@ -605,6 +647,7 @@ function PayslipYearStatsSection({ rows }: { rows: PayslipRow[] }) {
                 </h3>
                 <p className={`mt-0.5 text-[11px] ${theme.sub}`}>
                   {fmtPctOfTotal(amount, pctDenominator)}
+                  {fmtPctOfTotal(amount, pctDenominator)}
                 </p>
               </div>
               <div
@@ -622,6 +665,7 @@ function PayslipYearStatsSection({ rows }: { rows: PayslipRow[] }) {
               aria-valuemax={100}
               aria-valuenow={Math.round(pctOfTotal)}
               aria-label="Basic salary as percent of year gross"
+              aria-label="Basic salary as percent of year gross"
             >
               <div
                 className={`h-full rounded-full transition-[width] ${theme.barFill}`}
@@ -637,6 +681,8 @@ function PayslipYearStatsSection({ rows }: { rows: PayslipRow[] }) {
     const amount = sumForId(id);
     const dragging = dragOrderIdx === orderIdx;
     const pctOfTotal =
+      pctDenominator > 0
+        ? Math.min(100, Math.max(0, (amount / pctDenominator) * 100))
       pctDenominator > 0
         ? Math.min(100, Math.max(0, (amount / pctDenominator) * 100))
         : 0;
@@ -700,6 +746,7 @@ function PayslipYearStatsSection({ rows }: { rows: PayslipRow[] }) {
               </h3>
               <p className={`mt-0.5 text-[11px] ${theme.sub}`}>
                 {fmtPctOfTotal(amount, pctDenominator)}
+                {fmtPctOfTotal(amount, pctDenominator)}
               </p>
             </div>
             <div
@@ -716,6 +763,7 @@ function PayslipYearStatsSection({ rows }: { rows: PayslipRow[] }) {
             aria-valuemin={0}
             aria-valuemax={100}
             aria-valuenow={Math.round(pctOfTotal)}
+            aria-label={`${STAT_LABEL[id]} as percent of year gross`}
             aria-label={`${STAT_LABEL[id]} as percent of year gross`}
           >
             <div
@@ -819,6 +867,7 @@ function PayslipYearStatsSection({ rows }: { rows: PayslipRow[] }) {
               </div>
               <p className={`text-[11px] ${MEDICAL_REIMBURSEMENT_STAT_THEME.sub}`}>
                 {fmtPctOfTotal(medicalUsed, pctDenominator)}
+                {fmtPctOfTotal(medicalUsed, pctDenominator)}
               </p>
               <div
                 className="h-1.5 w-full overflow-hidden rounded-full bg-zinc-200/80 dark:bg-zinc-700/80"
@@ -826,6 +875,7 @@ function PayslipYearStatsSection({ rows }: { rows: PayslipRow[] }) {
                 aria-valuemin={0}
                 aria-valuemax={100}
                 aria-valuenow={Math.round(medicalVsTotalPct)}
+                aria-label="Medical reimbursement used as percent of year gross"
                 aria-label="Medical reimbursement used as percent of year gross"
               >
                 <div
@@ -1291,6 +1341,8 @@ export default function PayslipClient() {
   modalFormRef.current = modalForm;
   const navRef = useRef(nav);
   navRef.current = nav;
+  const navRef = useRef(nav);
+  navRef.current = nav;
 
   const load = useCallback(async () => {
     setError(null);
@@ -1346,6 +1398,7 @@ export default function PayslipClient() {
     const items = rowsForSlot(rows, year, month, half);
     if (items.length === 0) {
       setNav({ screen: "add", year, month, half });
+      setNav({ screen: "add", year, month, half });
     } else {
       setNav({ screen: "detail", row: items[0] });
     }
@@ -1361,6 +1414,10 @@ export default function PayslipClient() {
       }
       if (n.screen === "add") {
         stashPayslipModalDraft(n, modalFormRef.current);
+        const slotRows = rowsForSlot(rows, n.year, n.month, n.half);
+        if (slotRows.length === 0) {
+          return null;
+        }
         const slotRows = rowsForSlot(rows, n.year, n.month, n.half);
         if (slotRows.length === 0) {
           return null;
@@ -1480,6 +1537,15 @@ export default function PayslipClient() {
           payslipDefaultsFormForSlotHalf(b, nav.half),
         ),
       );
+      const b = loadPayslipDefaultsBundle();
+      setModalForm(
+        initialAddPayslipForm(
+          nav.year,
+          nav.month,
+          nav.half,
+          payslipDefaultsFormForSlotHalf(b, nav.half),
+        ),
+      );
     } else if (nav.screen === "manual") {
       const raw = sessionStorage.getItem(PAYSLIP_DRAFT_MANUAL);
       if (raw) {
@@ -1491,8 +1557,38 @@ export default function PayslipClient() {
       }
       const b = loadPayslipDefaultsBundle();
       setModalForm(initialManualPayslipForm(b.formFirst, b.formSecond));
+      const b = loadPayslipDefaultsBundle();
+      setModalForm(initialManualPayslipForm(b.formFirst, b.formSecond));
     }
   }, [nav]);
+
+  useEffect(() => {
+    const onDefaultsSaved = () => {
+      const n = navRef.current;
+      if (!n || (n.screen !== "add" && n.screen !== "manual")) return;
+      clearPayslipModalDraft(n);
+      const b = loadPayslipDefaultsBundle();
+      if (n.screen === "add") {
+        setModalForm(
+          initialAddPayslipForm(
+            n.year,
+            n.month,
+            n.half,
+            payslipDefaultsFormForSlotHalf(b, n.half),
+          ),
+        );
+      } else {
+        setModalForm(initialManualPayslipForm(b.formFirst, b.formSecond));
+      }
+    };
+    window.addEventListener(PAYSLIP_DEFAULTS_SAVED_EVENT, onDefaultsSaved);
+    return () => {
+      window.removeEventListener(
+        PAYSLIP_DEFAULTS_SAVED_EVENT,
+        onDefaultsSaved,
+      );
+    };
+  }, []);
 
   useEffect(() => {
     const onDefaultsSaved = () => {
@@ -1837,6 +1933,8 @@ export default function PayslipClient() {
                       {n} entries in this half — use ‹ › or arrow keys for other
                       payslips, or close and open that calendar slot to see the full
                       list.
+                      payslips, or close and open that calendar slot to see the full
+                      list.
                     </p>
                   );
                 })()}
@@ -1844,6 +1942,14 @@ export default function PayslipClient() {
                   <div className="min-w-0">
                     <dl className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
                       <div>
+                        <dt className="text-xs text-zinc-500">Gross total</dt>
+                        <dd className="tabular-nums font-medium text-zinc-900 dark:text-zinc-100">
+                          {fmtNum(grossTotalFromRow(nav.row))}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="text-xs text-zinc-500">Net total</dt>
+                        <dd className="tabular-nums font-medium text-zinc-900 dark:text-zinc-100">
                         <dt className="text-xs text-zinc-500">Gross total</dt>
                         <dd className="tabular-nums font-medium text-zinc-900 dark:text-zinc-100">
                           {fmtNum(grossTotalFromRow(nav.row))}
@@ -1941,6 +2047,7 @@ export default function PayslipClient() {
                   </aside>
                 </div>
                 <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
+                <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
                   <button
                     type="button"
                     className="rounded-md bg-indigo-600 px-3 py-2 text-sm text-white hover:bg-indigo-500"
@@ -2035,6 +2142,7 @@ export default function PayslipClient() {
                   }}
                 >
                   <PayslipFormFields
+                  <PayslipFormFields
                     form={modalForm}
                     setForm={setModalForm}
                     disabled={saving}
@@ -2084,6 +2192,7 @@ export default function PayslipClient() {
                   }}
                 >
                   <PayslipFormFields
+                  <PayslipFormFields
                     form={modalForm}
                     setForm={setModalForm}
                     disabled={saving}
@@ -2126,6 +2235,7 @@ export default function PayslipClient() {
                     void saveManualAdd();
                   }}
                 >
+                  <PayslipFormFields
                   <PayslipFormFields
                     form={modalForm}
                     setForm={setModalForm}
