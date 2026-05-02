@@ -10,7 +10,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from db import database_url, init_schema
+from db import close_connection_pool, database_url, init_schema
 
 log = logging.getLogger(__name__)
 
@@ -33,7 +33,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             "DATABASE_URL (or DB_*) is not set — API requests that need the DB will fail until .env is configured.",
         )
     init_schema()
-    yield
+    try:
+        yield
+    finally:
+        close_connection_pool()
 
 
 def create_app() -> FastAPI:

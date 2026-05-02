@@ -23,3 +23,7 @@ class InstallmentCreate(BaseModel):
 class InstallmentLineUpdate(BaseModel):
     principal: float = Field(ge=0)
     interest: float | None = Field(default=None, ge=0)
+
+
+class InstallmentLinesReorder(BaseModel):
+    line_ids: list[int] = Field(min_length=1)

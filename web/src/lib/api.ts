@@ -166,6 +166,7 @@ export type InstallmentRow = {
 };
 
 export type InstallmentLineRow = {
+  id: number;
   seq: number;
   principal: number;
   interest: number | null;
@@ -255,6 +256,16 @@ export async function updateInstallmentLine(
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
+    }),
+  );
+}
+
+export async function reorderInstallmentLines(installmentId: number, lineIds: number[]) {
+  return j<InstallmentDetailResponse>(
+    await apiFetch(`${dataApiBase()}/api/installment/${installmentId}/lines/reorder`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ line_ids: lineIds }),
     }),
   );
 }

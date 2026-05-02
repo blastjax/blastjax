@@ -18,6 +18,18 @@ import {
   type PayslipRow,
 } from "@/lib/api";
 import { parseFormNumber } from "@/lib/parseFormNumber";
+import { PayslipFormFields } from "./PayslipFormFields";
+import {
+  emptyForm,
+  initialAddPayslipForm,
+  initialManualPayslipForm,
+  loadPayslipDefaultsBundle,
+  payslipDefaultsFormForSlotHalf,
+  PAYSLIP_DEFAULTS_SAVED_EVENT,
+  tryParseFormStateJson,
+  type FormState,
+  MONTHS,
+} from "./payslipModalForm";
 
 /** Annual ceiling; allowance resets each April 1 (Apr → Mar policy year). */
 const MEDICAL_REIMBURSEMENT_ANNUAL_CAP = 11500;
@@ -147,6 +159,21 @@ function deductionsTotalFromRow(r: PayslipRow): number {
     num(r.philhealth) +
     num(r.pag_ibig) +
     num(r.mp2)
+  );
+}
+
+/** Gross pay: income components before deductions (matches details modal breakdown). */
+function grossTotalFromRow(r: PayslipRow): number {
+  const num = (v: number | null | undefined) =>
+    v != null && Number.isFinite(v) ? v : 0;
+  return (
+    num(r.basic_salary) +
+    num(r.commission) +
+    num(r.allowances) +
+    num(r.reimbursement) +
+    num(r.others) +
+    num(r.thirteenth_month) +
+    num(r.medical_reimbursement)
   );
 }
 
@@ -332,18 +359,18 @@ function sanitizeStatOrder(parsed: unknown): DraggableStatId[] {
   return out.slice(0, DEFAULT_STAT_CARD_ORDER.length);
 }
 
-function fmtPctOfTotal(amount: number, totalSum: number): string {
+function fmtPctOfTotal(
+  amount: number,
+  totalSum: number,
+  ofLabel: "gross" | "net" = "gross",
+): string {
   if (!(totalSum > 0)) return "—";
   const pct = (amount / totalSum) * 100;
-  const x = Math.round(pct * 10) / 10;
-  const s =
-    x % 1 === 0
-      ? String(Math.round(x))
-      : x.toLocaleString(undefined, {
-          minimumFractionDigits: 1,
-          maximumFractionDigits: 1,
-        });
-  return `${s}% of total`;
+  const s = pct.toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+  return `${s}% of ${ofLabel}`;
 }
 
 /** Shared shell: stretch with grid row height (match tallest card in the row). */
@@ -419,10 +446,6 @@ function PayslipYearStatsSection({ rows }: { rows: PayslipRow[] }) {
     Math.max(0, (medicalUsed / MEDICAL_REIMBURSEMENT_ANNUAL_CAP) * 100),
   );
   const medicalOver = medicalRemaining < 0;
-  const medicalVsTotalPct =
-    sums.total > 0
-      ? Math.min(100, Math.max(0, (medicalUsed / sums.total) * 100))
-      : 0;
 
   const sumForId = (id: Exclude<DraggableStatId, "months_remaining" | "basic">) =>
     sums[DRAGGABLE_FIELD[id]];
@@ -434,6 +457,14 @@ function PayslipYearStatsSection({ rows }: { rows: PayslipRow[] }) {
     sums.pag_ibig +
     sums.mp2;
   const totalPlusDeductions = sums.total + deductionsSumYtd;
+  /** Breakdown cards: compare line items to gross (net + deductions), falling back to net if gross is unset. */
+  const pctDenominator =
+    totalPlusDeductions > 0 ? totalPlusDeductions : sums.total;
+
+  const medicalVsTotalPct =
+    pctDenominator > 0
+      ? Math.min(100, Math.max(0, (medicalUsed / pctDenominator) * 100))
+      : 0;
 
   const basicSalaryYearSum = sums.basic_salary;
 
@@ -479,25 +510,21 @@ function PayslipYearStatsSection({ rows }: { rows: PayslipRow[] }) {
       const pctYearRemaining =
         halvesLeft <= 0 ? 0 : Math.min(100, (halvesLeft / 24) * 100);
       const pctRemainingLabel = (() => {
-        const x = Math.round(pctYearRemaining * 10) / 10;
-        const s =
-          x % 1 === 0
-            ? String(Math.round(x))
-            : x.toLocaleString(undefined, {
-                minimumFractionDigits: 1,
-                maximumFractionDigits: 1,
-              });
+        const s = pctYearRemaining.toLocaleString(undefined, {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        });
         return `${s}% of year remaining`;
       })();
       const monthsApprox =
-        halvesLeft <= 0 ? 0 : Math.round((halvesLeft / 2) * 10) / 10;
+        halvesLeft <= 0 ? 0 : Math.round((halvesLeft / 2) * 100) / 100;
       const dragging = dragOrderIdx === orderIdx;
       const displayMain =
         monthsApprox === 0
-          ? "0"
+          ? "0.00"
           : monthsApprox.toLocaleString(undefined, {
-              maximumFractionDigits: 1,
-              minimumFractionDigits: monthsApprox % 1 === 0 ? 0 : 1,
+              maximumFractionDigits: 2,
+              minimumFractionDigits: 2,
             });
 
       return (
@@ -554,10 +581,9 @@ function PayslipYearStatsSection({ rows }: { rows: PayslipRow[] }) {
       const theme = STAT_THEMES.basic;
       const amount = basicSalaryYearSum;
       const dragging = dragOrderIdx === orderIdx;
-      const totalSum = sums.total;
       const pctOfTotal =
-        totalSum > 0
-          ? Math.min(100, Math.max(0, (amount / totalSum) * 100))
+        pctDenominator > 0
+          ? Math.min(100, Math.max(0, (amount / pctDenominator) * 100))
           : 0;
       return (
         <div
@@ -578,7 +604,7 @@ function PayslipYearStatsSection({ rows }: { rows: PayslipRow[] }) {
                   {STAT_LABEL.basic}
                 </h3>
                 <p className={`mt-0.5 text-[11px] ${theme.sub}`}>
-                  {fmtPctOfTotal(amount, totalSum)}
+                  {fmtPctOfTotal(amount, pctDenominator)}
                 </p>
               </div>
               <div
@@ -595,7 +621,7 @@ function PayslipYearStatsSection({ rows }: { rows: PayslipRow[] }) {
               aria-valuemin={0}
               aria-valuemax={100}
               aria-valuenow={Math.round(pctOfTotal)}
-              aria-label="Basic salary as percent of year total"
+              aria-label="Basic salary as percent of year gross"
             >
               <div
                 className={`h-full rounded-full transition-[width] ${theme.barFill}`}
@@ -610,10 +636,9 @@ function PayslipYearStatsSection({ rows }: { rows: PayslipRow[] }) {
     const theme = STAT_THEMES[id];
     const amount = sumForId(id);
     const dragging = dragOrderIdx === orderIdx;
-    const totalSum = sums.total;
     const pctOfTotal =
-      totalSum > 0
-        ? Math.min(100, Math.max(0, (amount / totalSum) * 100))
+      pctDenominator > 0
+        ? Math.min(100, Math.max(0, (amount / pctDenominator) * 100))
         : 0;
 
     if (id === "total") {
@@ -674,7 +699,7 @@ function PayslipYearStatsSection({ rows }: { rows: PayslipRow[] }) {
                 {STAT_LABEL[id]}
               </h3>
               <p className={`mt-0.5 text-[11px] ${theme.sub}`}>
-                {fmtPctOfTotal(amount, totalSum)}
+                {fmtPctOfTotal(amount, pctDenominator)}
               </p>
             </div>
             <div
@@ -691,7 +716,7 @@ function PayslipYearStatsSection({ rows }: { rows: PayslipRow[] }) {
             aria-valuemin={0}
             aria-valuemax={100}
             aria-valuenow={Math.round(pctOfTotal)}
-            aria-label={`${STAT_LABEL[id]} as percent of year total`}
+            aria-label={`${STAT_LABEL[id]} as percent of year gross`}
           >
             <div
               className={`h-full rounded-full transition-[width] ${theme.barFill}`}
@@ -793,7 +818,7 @@ function PayslipYearStatsSection({ rows }: { rows: PayslipRow[] }) {
                 />
               </div>
               <p className={`text-[11px] ${MEDICAL_REIMBURSEMENT_STAT_THEME.sub}`}>
-                {fmtPctOfTotal(medicalUsed, sums.total)}
+                {fmtPctOfTotal(medicalUsed, pctDenominator)}
               </p>
               <div
                 className="h-1.5 w-full overflow-hidden rounded-full bg-zinc-200/80 dark:bg-zinc-700/80"
@@ -801,7 +826,7 @@ function PayslipYearStatsSection({ rows }: { rows: PayslipRow[] }) {
                 aria-valuemin={0}
                 aria-valuemax={100}
                 aria-valuenow={Math.round(medicalVsTotalPct)}
-                aria-label="Medical reimbursement used as percent of year payslip total"
+                aria-label="Medical reimbursement used as percent of year gross"
               >
                 <div
                   className="h-full rounded-full bg-teal-700 transition-[width] dark:bg-teal-400"
@@ -927,67 +952,6 @@ function fmtPayPeriod(
   return s || "—";
 }
 
-type FormState = {
-  period_year: string;
-  period_month: string;
-  period_half: "" | "1" | "2";
-  total: string;
-  basic_salary: string;
-  commission: string;
-  reimbursement: string;
-  medical_reimbursement: string;
-  others: string;
-  mp2: string;
-  allowances: string;
-  thirteenth_month: string;
-  notes: string;
-  withholding_tax: string;
-  sss_contribution: string;
-  philhealth: string;
-  pag_ibig: string;
-};
-
-const emptyForm = (): FormState => ({
-  period_year: "",
-  period_month: "",
-  period_half: "",
-  total: "",
-  basic_salary: "",
-  commission: "",
-  reimbursement: "",
-  medical_reimbursement: "",
-  others: "",
-  mp2: "",
-  allowances: "",
-  thirteenth_month: "",
-  notes: "",
-  withholding_tax: "",
-  sss_contribution: "",
-  philhealth: "",
-  pag_ibig: "",
-});
-
-/** Default field values for new payslip rows (add from FAB or calendar half). */
-const DEFAULT_MP2 = "5000";
-const DEFAULT_ALLOWANCES = "1108.30";
-
-/** New manual row: current year/month; day 1–15 → 1st half, 16–31 → 2nd half. */
-function defaultFormFromToday(): FormState {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = now.getMonth() + 1;
-  const day = now.getDate();
-  const half: "1" | "2" = day >= 1 && day <= 15 ? "1" : "2";
-  return {
-    ...emptyForm(),
-    period_year: String(year),
-    period_month: String(month),
-    period_half: half,
-    mp2: DEFAULT_MP2,
-    allowances: DEFAULT_ALLOWANCES,
-  };
-}
-
 const PAYSLIP_DRAFT_EDIT_PREFIX = "budgetapp:payslip:draft:edit:";
 const PAYSLIP_DRAFT_ADD_PREFIX = "budgetapp:payslip:draft:add:";
 const PAYSLIP_DRAFT_MANUAL = "budgetapp:payslip:draft:manual";
@@ -1002,31 +966,6 @@ function payslipDraftKeyAdd(
   half: number,
 ): string {
   return `${PAYSLIP_DRAFT_ADD_PREFIX}${year}:${month}:${half}`;
-}
-
-function tryParseFormStateJson(raw: string): FormState | null {
-  try {
-    const o = JSON.parse(raw) as unknown;
-    if (!o || typeof o !== "object") return null;
-    const x = o as Record<string, unknown>;
-    const base = emptyForm();
-    (Object.keys(base) as (keyof FormState)[]).forEach((k) => {
-      const v = x[k as string];
-      if (typeof v === "string") {
-        (base as Record<string, string>)[k] = v;
-      }
-    });
-    if (
-      base.period_half !== "" &&
-      base.period_half !== "1" &&
-      base.period_half !== "2"
-    ) {
-      base.period_half = "";
-    }
-    return base;
-  } catch {
-    return null;
-  }
 }
 
 function stashPayslipModalDraft(
@@ -1251,8 +1190,6 @@ type Nav =
   | { screen: "edit"; row: PayslipRow }
   | { screen: "add"; year: number; month: number; half: 1 | 2 };
 
-const MONTHS = Array.from({ length: 12 }, (_, i) => i + 1);
-
 function YearPayslipBlock({
   year,
   rows,
@@ -1343,192 +1280,6 @@ function YearPayslipBlock({
   );
 }
 
-function FormFields({
-  form,
-  setForm,
-  disabled,
-  lockPeriod,
-}: {
-  form: FormState;
-  setForm: React.Dispatch<React.SetStateAction<FormState>>;
-  disabled?: boolean;
-  lockPeriod?: boolean;
-}) {
-  const deductionFields = (
-    <>
-      <label className="flex flex-col gap-1 text-sm">
-        <span className="text-zinc-600 dark:text-zinc-400">Withholding tax</span>
-        <input
-          type="text"
-          inputMode="decimal"
-          className="rounded-md border border-zinc-300 bg-white px-3 py-2 dark:border-zinc-700 dark:bg-zinc-950"
-          value={form.withholding_tax}
-          onChange={(e) =>
-            setForm((f) => ({ ...f, withholding_tax: e.target.value }))
-          }
-          disabled={disabled}
-        />
-      </label>
-      <label className="flex flex-col gap-1 text-sm">
-        <span className="text-zinc-600 dark:text-zinc-400">SSS contribution</span>
-        <input
-          type="text"
-          inputMode="decimal"
-          className="rounded-md border border-zinc-300 bg-white px-3 py-2 dark:border-zinc-700 dark:bg-zinc-950"
-          value={form.sss_contribution}
-          onChange={(e) =>
-            setForm((f) => ({ ...f, sss_contribution: e.target.value }))
-          }
-          disabled={disabled}
-        />
-      </label>
-      <label className="flex flex-col gap-1 text-sm">
-        <span className="text-zinc-600 dark:text-zinc-400">Philhealth</span>
-        <input
-          type="text"
-          inputMode="decimal"
-          className="rounded-md border border-zinc-300 bg-white px-3 py-2 dark:border-zinc-700 dark:bg-zinc-950"
-          value={form.philhealth}
-          onChange={(e) =>
-            setForm((f) => ({ ...f, philhealth: e.target.value }))
-          }
-          disabled={disabled}
-        />
-      </label>
-      <label className="flex flex-col gap-1 text-sm">
-        <span className="text-zinc-600 dark:text-zinc-400">
-          Pag-ibig (Employee HDMF)
-        </span>
-        <input
-          type="text"
-          inputMode="decimal"
-          className="rounded-md border border-zinc-300 bg-white px-3 py-2 dark:border-zinc-700 dark:bg-zinc-950"
-          value={form.pag_ibig}
-          onChange={(e) =>
-            setForm((f) => ({ ...f, pag_ibig: e.target.value }))
-          }
-          disabled={disabled}
-        />
-      </label>
-      <label className="flex flex-col gap-1 text-sm">
-        <span className="text-zinc-600 dark:text-zinc-400">MP2</span>
-        <input
-          type="text"
-          inputMode="decimal"
-          className="rounded-md border border-zinc-300 bg-white px-3 py-2 dark:border-zinc-700 dark:bg-zinc-950"
-          value={form.mp2}
-          onChange={(e) =>
-            setForm((f) => ({ ...f, mp2: e.target.value }))
-          }
-          disabled={disabled}
-        />
-      </label>
-    </>
-  );
-
-  return (
-    <div className="grid min-w-0 gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,17.5rem)] lg:items-start lg:gap-8">
-      <div className="grid min-w-0 gap-5 sm:grid-cols-2 lg:grid-cols-3">
-      <label className="flex flex-col gap-1 text-sm">
-        <span className="text-zinc-600 dark:text-zinc-400">Period year</span>
-        <input
-          type="text"
-          inputMode="numeric"
-          className="rounded-md border border-zinc-300 bg-white px-3 py-2 dark:border-zinc-700 dark:bg-zinc-950"
-          value={form.period_year}
-          onChange={(e) =>
-            setForm((f) => ({ ...f, period_year: e.target.value }))
-          }
-          placeholder="e.g. 2024"
-          disabled={disabled || lockPeriod}
-        />
-      </label>
-      <label className="flex flex-col gap-1 text-sm">
-        <span className="text-zinc-600 dark:text-zinc-400">Month</span>
-        <select
-          className="rounded-md border border-zinc-300 bg-white px-3 py-2 dark:border-zinc-700 dark:bg-zinc-950"
-          value={form.period_month}
-          onChange={(e) =>
-            setForm((f) => ({ ...f, period_month: e.target.value }))
-          }
-          disabled={disabled || lockPeriod}
-        >
-          <option value="">—</option>
-          {MONTHS.map((m) => (
-            <option key={m} value={String(m)}>
-              {new Date(2000, m - 1, 1).toLocaleString(undefined, {
-                month: "long",
-              })}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label className="flex flex-col gap-1 text-sm">
-        <span className="text-zinc-600 dark:text-zinc-400">Half of month</span>
-        <select
-          className="rounded-md border border-zinc-300 bg-white px-3 py-2 dark:border-zinc-700 dark:bg-zinc-950"
-          value={form.period_half}
-          onChange={(e) =>
-            setForm((f) => ({
-              ...f,
-              period_half: e.target.value as "" | "1" | "2",
-            }))
-          }
-          disabled={disabled || lockPeriod}
-        >
-          <option value="">—</option>
-          <option value="1">First half</option>
-          <option value="2">Second half</option>
-        </select>
-      </label>
-      {(
-        [
-          ["total", "Total"],
-          ["basic_salary", "Basic salary"],
-          ["commission", "Commission"],
-          ["reimbursement", "Reimbursement"],
-          ["medical_reimbursement", "Medical reimbursement"],
-          ["others", "Others"],
-          ["allowances", "Allowances"],
-          ["thirteenth_month", "13th Month"],
-        ] as const
-      ).map(([key, label]) => (
-        <label key={key} className="flex flex-col gap-1 text-sm">
-          <span className="text-zinc-600 dark:text-zinc-400">{label}</span>
-          <input
-            type="text"
-            inputMode="decimal"
-            className="rounded-md border border-zinc-300 bg-white px-3 py-2 dark:border-zinc-700 dark:bg-zinc-950"
-            value={form[key]}
-            onChange={(e) =>
-              setForm((f) => ({ ...f, [key]: e.target.value }))
-            }
-            disabled={disabled}
-          />
-        </label>
-      ))}
-      <label className="flex flex-col gap-1 text-sm sm:col-span-2 lg:col-span-3">
-        <span className="text-zinc-600 dark:text-zinc-400">Notes</span>
-        <textarea
-          className="min-h-[4rem] rounded-md border border-zinc-300 bg-white px-3 py-2 dark:border-zinc-700 dark:bg-zinc-950"
-          value={form.notes}
-          onChange={(e) =>
-            setForm((f) => ({ ...f, notes: e.target.value }))
-          }
-          disabled={disabled}
-        />
-      </label>
-      </div>
-      <aside className="flex min-w-0 flex-col gap-4 rounded-lg border border-zinc-200 bg-zinc-50/90 p-4 shadow-sm dark:border-zinc-700 dark:bg-zinc-900/50">
-        <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-          Deductions
-        </p>
-        <div className="flex flex-col gap-4">{deductionFields}</div>
-      </aside>
-    </div>
-  );
-}
-
 export default function PayslipClient() {
   const [error, setError] = useState<string | null>(null);
   const [rows, setRows] = useState<PayslipRow[]>([]);
@@ -1538,6 +1289,8 @@ export default function PayslipClient() {
   const [modalForm, setModalForm] = useState<FormState>(emptyForm());
   const modalFormRef = useRef(modalForm);
   modalFormRef.current = modalForm;
+  const navRef = useRef(nav);
+  navRef.current = nav;
 
   const load = useCallback(async () => {
     setError(null);
@@ -1592,7 +1345,7 @@ export default function PayslipClient() {
   const openSlot = (year: number, month: number, half: 1 | 2) => {
     const items = rowsForSlot(rows, year, month, half);
     if (items.length === 0) {
-      setNav({ screen: "slot", year, month, half });
+      setNav({ screen: "add", year, month, half });
     } else {
       setNav({ screen: "detail", row: items[0] });
     }
@@ -1608,6 +1361,10 @@ export default function PayslipClient() {
       }
       if (n.screen === "add") {
         stashPayslipModalDraft(n, modalFormRef.current);
+        const slotRows = rowsForSlot(rows, n.year, n.month, n.half);
+        if (slotRows.length === 0) {
+          return null;
+        }
         return { screen: "slot", year: n.year, month: n.month, half: n.half };
       }
       if (n.screen === "detail") {
@@ -1714,14 +1471,15 @@ export default function PayslipClient() {
           return;
         }
       }
-      setModalForm({
-        ...emptyForm(),
-        period_year: String(nav.year),
-        period_month: String(nav.month),
-        period_half: String(nav.half) as "1" | "2",
-        mp2: DEFAULT_MP2,
-        allowances: DEFAULT_ALLOWANCES,
-      });
+      const b = loadPayslipDefaultsBundle();
+      setModalForm(
+        initialAddPayslipForm(
+          nav.year,
+          nav.month,
+          nav.half,
+          payslipDefaultsFormForSlotHalf(b, nav.half),
+        ),
+      );
     } else if (nav.screen === "manual") {
       const raw = sessionStorage.getItem(PAYSLIP_DRAFT_MANUAL);
       if (raw) {
@@ -1731,9 +1489,38 @@ export default function PayslipClient() {
           return;
         }
       }
-      setModalForm(defaultFormFromToday());
+      const b = loadPayslipDefaultsBundle();
+      setModalForm(initialManualPayslipForm(b.formFirst, b.formSecond));
     }
   }, [nav]);
+
+  useEffect(() => {
+    const onDefaultsSaved = () => {
+      const n = navRef.current;
+      if (!n || (n.screen !== "add" && n.screen !== "manual")) return;
+      clearPayslipModalDraft(n);
+      const b = loadPayslipDefaultsBundle();
+      if (n.screen === "add") {
+        setModalForm(
+          initialAddPayslipForm(
+            n.year,
+            n.month,
+            n.half,
+            payslipDefaultsFormForSlotHalf(b, n.half),
+          ),
+        );
+      } else {
+        setModalForm(initialManualPayslipForm(b.formFirst, b.formSecond));
+      }
+    };
+    window.addEventListener(PAYSLIP_DEFAULTS_SAVED_EVENT, onDefaultsSaved);
+    return () => {
+      window.removeEventListener(
+        PAYSLIP_DEFAULTS_SAVED_EVENT,
+        onDefaultsSaved,
+      );
+    };
+  }, []);
 
   useEffect(() => {
     if (!nav || nav.screen !== "detail") return;
@@ -2048,7 +1835,8 @@ export default function PayslipClient() {
                   return (
                     <p className="mb-4 rounded-md border border-amber-200 bg-amber-50/90 px-3 py-2 text-xs text-amber-950 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
                       {n} entries in this half — use ‹ › or arrow keys for other
-                      payslips, or Back for this slot&apos;s list.
+                      payslips, or close and open that calendar slot to see the full
+                      list.
                     </p>
                   );
                 })()}
@@ -2056,8 +1844,14 @@ export default function PayslipClient() {
                   <div className="min-w-0">
                     <dl className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
                       <div>
-                        <dt className="text-xs text-zinc-500">Total</dt>
-                        <dd className="tabular-nums text-zinc-900 dark:text-zinc-100">
+                        <dt className="text-xs text-zinc-500">Gross total</dt>
+                        <dd className="tabular-nums font-medium text-zinc-900 dark:text-zinc-100">
+                          {fmtNum(grossTotalFromRow(nav.row))}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="text-xs text-zinc-500">Net total</dt>
+                        <dd className="tabular-nums font-medium text-zinc-900 dark:text-zinc-100">
                           {fmtNum(nav.row.total)}
                         </dd>
                       </div>
@@ -2146,14 +1940,7 @@ export default function PayslipClient() {
                     </dl>
                   </aside>
                 </div>
-                <div className="mt-4 flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    className="rounded-md border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-600"
-                    onClick={goBack}
-                  >
-                    Back
-                  </button>
+                <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
                   <button
                     type="button"
                     className="rounded-md bg-indigo-600 px-3 py-2 text-sm text-white hover:bg-indigo-500"
@@ -2247,7 +2034,7 @@ export default function PayslipClient() {
                     void saveEdit();
                   }}
                 >
-                  <FormFields
+                  <PayslipFormFields
                     form={modalForm}
                     setForm={setModalForm}
                     disabled={saving}
@@ -2296,7 +2083,7 @@ export default function PayslipClient() {
                     void saveAddInModal();
                   }}
                 >
-                  <FormFields
+                  <PayslipFormFields
                     form={modalForm}
                     setForm={setModalForm}
                     disabled={saving}
@@ -2339,7 +2126,7 @@ export default function PayslipClient() {
                     void saveManualAdd();
                   }}
                 >
-                  <FormFields
+                  <PayslipFormFields
                     form={modalForm}
                     setForm={setModalForm}
                     disabled={saving}

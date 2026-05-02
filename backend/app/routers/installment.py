@@ -3,18 +3,19 @@ from __future__ import annotations
 from typing import Any
 from fastapi import APIRouter, HTTPException, Query
 
-from app.schemas.installment import InstallmentCreate, InstallmentLineUpdate
+from app.schemas.installment import InstallmentCreate, InstallmentLineUpdate, InstallmentLinesReorder
 from app.services.installment_service import installment_summary, serialize_installment_row
 from db import (
     database_url,
     delete_installment,
+    fetch_installment_with_lines,
     get_installment,
     insert_installment,
     installment_apply_payment,
-    list_installment_lines,
     list_installments,
+    reorder_installment_lines,
     update_installment,
-    update_installment_line,
+    update_installment_line_and_fetch_detail,
 )
 
 router = APIRouter(tags=["installment"])
@@ -53,7 +54,7 @@ def installment_create(body: InstallmentCreate) -> dict[str, Any]:
     orig = (
         body.original_total
         if body.original_total is not None
-        else body.installment_total * body.payment_total
+        else float(body.installment_total) * float(body.principal)
     )
     if rem < 0:
         raise HTTPException(status_code=400, detail="remaining cannot be negative.")
@@ -76,13 +77,12 @@ def installment_create(body: InstallmentCreate) -> dict[str, Any]:
 def installment_one(installment_id: int) -> dict[str, Any]:
     if not database_url():
         raise HTTPException(status_code=503, detail="DATABASE_URL is not set.")
-    row = get_installment(installment_id)
-    if not row:
+    detail = fetch_installment_with_lines(installment_id)
+    if not detail:
         raise HTTPException(status_code=404, detail="Installment not found.")
-    lines = list_installment_lines(installment_id)
     return {
-        "installment": serialize_installment_row(row),
-        "lines": lines,
+        "installment": serialize_installment_row(detail["installment"]),
+        "lines": detail["lines"],
     }
 
 
@@ -101,19 +101,39 @@ def installment_line_update(
         raise HTTPException(status_code=404, detail="Installment not found.")
     if seq > int(row.get("installment_total") or 0):
         raise HTTPException(status_code=400, detail="seq exceeds installment total.")
-    ok = update_installment_line(
+    detail = update_installment_line_and_fetch_detail(
         installment_id,
         seq,
         body.principal,
         body.interest,
     )
-    if not ok:
+    if not detail:
         raise HTTPException(status_code=404, detail="Schedule line not found.")
-    out = get_installment(installment_id)
-    assert out is not None
     return {
-        "installment": serialize_installment_row(out),
-        "lines": list_installment_lines(installment_id),
+        "installment": serialize_installment_row(detail["installment"]),
+        "lines": detail["lines"],
+    }
+
+
+@router.put("/api/installment/{installment_id}/lines/reorder")
+def installment_lines_reorder(
+    installment_id: int,
+    body: InstallmentLinesReorder,
+) -> dict[str, Any]:
+    """Reorder schedule rows (month order); renumbers ``seq`` and recomputes aggregates."""
+    if not database_url():
+        raise HTTPException(status_code=503, detail="DATABASE_URL is not set.")
+    if not get_installment(installment_id):
+        raise HTTPException(status_code=404, detail="Installment not found.")
+    detail = reorder_installment_lines(installment_id, body.line_ids)
+    if not detail:
+        raise HTTPException(
+            status_code=400,
+            detail="line_ids must list every schedule row id for this installment exactly once.",
+        )
+    return {
+        "installment": serialize_installment_row(detail["installment"]),
+        "lines": detail["lines"],
     }
 
 
@@ -137,7 +157,7 @@ def installment_replace(installment_id: int, body: InstallmentCreate) -> dict[st
     orig = (
         body.original_total
         if body.original_total is not None
-        else body.installment_total * body.payment_total
+        else float(body.installment_total) * float(body.principal)
     )
     if rem < 0:
         raise HTTPException(status_code=400, detail="remaining cannot be negative.")

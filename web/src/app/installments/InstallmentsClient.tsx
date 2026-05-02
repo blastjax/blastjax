@@ -8,9 +8,11 @@ import {
   getInstallment,
   getInstallments,
   recordInstallmentPayment,
+  reorderInstallmentLines,
   updateInstallment,
   updateInstallmentLine,
   type InstallmentDetailResponse,
+  type InstallmentLineRow,
   type InstallmentRow,
   type InstallmentSummary,
 } from "@/lib/api";
@@ -119,8 +121,15 @@ function installmentScheduleProgressPct(r: InstallmentRow): number {
   if (cur > tot || (Number.isFinite(rem) && rem <= 0)) return 100;
   return Math.min(
     100,
-    Math.max(0, Math.round(((cur - 1) / tot) * 100)),
+    Math.max(0, ((cur - 1) / tot) * 100),
   );
+}
+
+function fmtPct2(pct: number): string {
+  return pct.toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
 }
 
 const emptyForm = {
@@ -151,7 +160,9 @@ export default function InstallmentsClient() {
   const [lineEdits, setLineEdits] = useState<
     Record<number, { principal: string; interest: string }>
   >({});
-  const [savingLineSeq, setSavingLineSeq] = useState<number | null>(null);
+  /** Line ids in display order (drag to reorder; saved with Save changes). */
+  const [lineOrderIds, setLineOrderIds] = useState<number[]>([]);
+  const [savingSchedule, setSavingSchedule] = useState(false);
 
   const load = useCallback(async () => {
     setError(null);
@@ -185,16 +196,151 @@ export default function InstallmentsClient() {
   }, [addModalOpen]);
 
   useEffect(() => {
-    if (!detail) return;
+    if (!detail) {
+      setLineOrderIds([]);
+      return;
+    }
     const e: Record<number, { principal: string; interest: string }> = {};
     for (const ln of detail.lines) {
-      e[ln.seq] = {
+      e[ln.id] = {
         principal: String(ln.principal),
         interest: ln.interest != null ? String(ln.interest) : "",
       };
     }
     setLineEdits(e);
+    setLineOrderIds(detail.lines.map((l) => l.id));
   }, [detail]);
+
+  const orderedScheduleLines = useMemo((): InstallmentLineRow[] => {
+    if (!detail) return [];
+    const byId = new Map(detail.lines.map((l) => [l.id, l]));
+    const ids =
+      lineOrderIds.length === detail.lines.length
+        ? lineOrderIds
+        : detail.lines.map((l) => l.id);
+    return ids
+      .map((id) => byId.get(id))
+      .filter((ln): ln is InstallmentLineRow => ln != null);
+  }, [detail, lineOrderIds]);
+
+  const scheduleHasChanges = useMemo(() => {
+    if (!detail) return false;
+    const baselineIds = detail.lines.map((l) => l.id);
+    const orderDirty =
+      lineOrderIds.length !== baselineIds.length ||
+      lineOrderIds.some((id, i) => id !== baselineIds[i]);
+    if (orderDirty) return true;
+    for (const ln of detail.lines) {
+      const ed = lineEdits[ln.id];
+      if (!ed) continue;
+      const p = parseFormNumber(ed.principal);
+      if (p == null || p < 0) return true;
+      let iVal: number | null = null;
+      if (ed.interest.trim() !== "") {
+        const i = parseFormNumber(ed.interest);
+        if (i == null || i < 0) return true;
+        iVal = i;
+      }
+      if (p !== ln.principal) return true;
+      const oi = ln.interest;
+      if (iVal === null && oi != null) return true;
+      if (iVal !== null && oi === null) return true;
+      if (
+        iVal !== null &&
+        oi !== null &&
+        iVal !== oi
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }, [detail, lineEdits, lineOrderIds]);
+
+  const saveScheduleEdits = useCallback(async () => {
+    if (!detail) return;
+    const insId = detail.installment.id;
+    const baselineIds = detail.lines.map((l) => l.id);
+    const orderDirty =
+      lineOrderIds.length !== baselineIds.length ||
+      lineOrderIds.some((id, i) => id !== baselineIds[i]);
+
+    const pendingAmountEdits: {
+      seq: number;
+      principal: number;
+      interest: number | null;
+    }[] = [];
+    for (const ln of detail.lines) {
+      const ed = lineEdits[ln.id];
+      if (!ed) continue;
+      const principal = parseFormNumber(ed.principal);
+      if (principal == null || principal < 0) {
+        setError(`Payment #${ln.seq}: principal must be a valid non-negative number.`);
+        return;
+      }
+      let interest: number | null = null;
+      if (ed.interest.trim() !== "") {
+        const i = parseFormNumber(ed.interest);
+        if (i == null || i < 0) {
+          setError(`Payment #${ln.seq}: interest must be a valid non-negative number.`);
+          return;
+        }
+        interest = i;
+      }
+      const oi = ln.interest;
+      const changed =
+        principal !== ln.principal ||
+        (interest === null && oi != null) ||
+        (interest !== null && oi === null) ||
+        (interest !== null && oi !== null && interest !== oi);
+      if (changed) {
+        pendingAmountEdits.push({ seq: ln.seq, principal, interest });
+      }
+    }
+
+    if (!orderDirty && pendingAmountEdits.length === 0) return;
+
+    setSavingSchedule(true);
+    setError(null);
+    try {
+      let working = detail;
+      if (orderDirty) {
+        working = await reorderInstallmentLines(insId, lineOrderIds);
+        setDetail(working);
+        setLineOrderIds(working.lines.map((l) => l.id));
+      }
+
+      let last: InstallmentDetailResponse | null = null;
+      for (const ln of working.lines) {
+        const ed = lineEdits[ln.id];
+        if (!ed) continue;
+        const principal = parseFormNumber(ed.principal);
+        if (principal == null || principal < 0) continue;
+        let interest: number | null = null;
+        if (ed.interest.trim() !== "") {
+          const i = parseFormNumber(ed.interest);
+          if (i == null || i < 0) continue;
+          interest = i;
+        }
+        const oi = ln.interest;
+        const changed =
+          principal !== ln.principal ||
+          (interest === null && oi != null) ||
+          (interest !== null && oi === null) ||
+          (interest !== null && oi !== null && interest !== oi);
+        if (!changed) continue;
+        last = await updateInstallmentLine(insId, ln.seq, {
+          principal,
+          interest,
+        });
+      }
+      if (last) setDetail(last);
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Save failed");
+    } finally {
+      setSavingSchedule(false);
+    }
+  }, [detail, lineEdits, lineOrderIds, load]);
 
   useEffect(() => {
     if (scheduleModalId == null) return;
@@ -227,40 +373,6 @@ export default function InstallmentsClient() {
       setScheduleModalId(null);
     } finally {
       setDetailLoading(false);
-    }
-  };
-
-  const saveLine = async (seq: number) => {
-    if (!detail) return;
-    const ed = lineEdits[seq];
-    if (!ed) return;
-    const principal = parseFormNumber(ed.principal);
-    if (principal == null || principal < 0) {
-      setError("Principal must be a valid non-negative number.");
-      return;
-    }
-    let interest: number | null = null;
-    if (ed.interest.trim() !== "") {
-      const i = parseFormNumber(ed.interest);
-      if (i == null || i < 0) {
-        setError("Interest must be a valid non-negative number.");
-        return;
-      }
-      interest = i;
-    }
-    setSavingLineSeq(seq);
-    setError(null);
-    try {
-      const out = await updateInstallmentLine(detail.installment.id, seq, {
-        principal,
-        interest,
-      });
-      setDetail(out);
-      await load();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Save failed");
-    } finally {
-      setSavingLineSeq(null);
     }
   };
 
@@ -659,7 +771,7 @@ export default function InstallmentsClient() {
                     />
                   </div>
                   <p className="mt-2 text-xs text-zinc-700 dark:text-zinc-300">
-                    {pct}% of schedule
+                    {fmtPct2(pct)}% of schedule
                   </p>
                 </li>
               );
@@ -681,12 +793,12 @@ export default function InstallmentsClient() {
           }}
         >
           <div
-            className="max-h-[90vh] w-full max-w-3xl overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-xl dark:border-zinc-700 dark:bg-zinc-950"
+            className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-xl dark:border-zinc-700 dark:bg-zinc-950"
             role="dialog"
             aria-modal="true"
             aria-labelledby="schedule-title"
           >
-            <div className="flex items-start justify-between gap-2 border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
+            <div className="flex shrink-0 items-start justify-between gap-2 border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
               <h2
                 id="schedule-title"
                 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50"
@@ -701,7 +813,7 @@ export default function InstallmentsClient() {
                 Close
               </button>
             </div>
-            <div className="max-h-[calc(90vh-4rem)] overflow-auto p-4">
+            <div className="min-h-0 flex-1 overflow-auto p-4">
               {detailLoading && (
                 <p className="text-sm text-zinc-800 dark:text-zinc-200">Loading schedule…</p>
               )}
@@ -712,6 +824,9 @@ export default function InstallmentsClient() {
               )}
               {!detailLoading && detail && detail.lines.length > 0 && (
                 <div className="overflow-x-auto">
+                <p className="mb-3 text-xs text-zinc-600 dark:text-zinc-400">
+                  Drag a row to reorder payments. Due dates follow the new row order after you save.
+                </p>
                 <table className="w-full min-w-[36rem] text-left text-sm">
                   <thead>
                     <tr className="border-b border-zinc-200 text-xs uppercase text-zinc-500 dark:border-zinc-800">
@@ -719,13 +834,13 @@ export default function InstallmentsClient() {
                       <th className="pb-2 pr-2">Due (mm-yyyy)</th>
                       <th className="pb-2 pr-2">Principal</th>
                       <th className="pb-2 pr-2">Interest</th>
-                      <th className="pb-2 pr-2">Total</th>
-                      <th className="pb-2"> </th>
+                      <th className="pb-2">Total</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {detail.lines.map((ln) => {
-                      const ed = lineEdits[ln.seq];
+                    {orderedScheduleLines.map((ln, idx) => {
+                      const ed = lineEdits[ln.id];
+                      const visPos = idx + 1;
                       const p = ed
                         ? (parseFormNumber(ed.principal) ?? NaN)
                         : ln.principal;
@@ -742,13 +857,57 @@ export default function InstallmentsClient() {
                         ln.seq === detail.installment.installment_current;
                       return (
                         <tr
-                          key={ln.seq}
-                          className={`border-b border-zinc-100 dark:border-zinc-800 ${
+                          key={ln.id}
+                          draggable
+                          className={`cursor-grab border-b border-zinc-100 active:cursor-grabbing dark:border-zinc-800 ${
                             isNext ? "bg-indigo-50/80 dark:bg-indigo-950/30" : ""
                           }`}
+                          title="Drag row to reorder"
+                          onDragStart={(e) => {
+                            const el = e.target as HTMLElement | null;
+                            if (
+                              !el ||
+                              el.closest(
+                                "input, textarea, button, select, option",
+                              )
+                            ) {
+                              e.preventDefault();
+                              return;
+                            }
+                            e.dataTransfer.setData(
+                              "text/plain",
+                              String(ln.id),
+                            );
+                            e.dataTransfer.effectAllowed = "move";
+                          }}
+                          onDragOver={(e) => {
+                            e.preventDefault();
+                            e.dataTransfer.dropEffect = "move";
+                          }}
+                          onDrop={(e) => {
+                            e.preventDefault();
+                            const fromId = Number(
+                              e.dataTransfer.getData("text/plain"),
+                            );
+                            if (
+                              !Number.isFinite(fromId) ||
+                              fromId === ln.id
+                            ) {
+                              return;
+                            }
+                            setLineOrderIds((prev) => {
+                              const next = [...prev];
+                              const from = next.indexOf(fromId);
+                              const to = next.indexOf(ln.id);
+                              if (from < 0 || to < 0) return prev;
+                              next.splice(from, 1);
+                              next.splice(to, 0, fromId);
+                              return next;
+                            });
+                          }}
                         >
                           <td className="py-2 pr-2 font-mono tabular-nums">
-                            {ln.seq}
+                            {visPos}
                             {isNext && (
                               <span className="ml-1 text-[10px] font-sans text-indigo-600 dark:text-indigo-300">
                                 (next)
@@ -757,24 +916,28 @@ export default function InstallmentsClient() {
                           </td>
                           <td className="py-2 pr-2 tabular-nums text-zinc-800 dark:text-zinc-200">
                             {fmtMonthYearFromDate(
-                              dueMonthForSeq(detail.installment.start_date, ln.seq),
+                              dueMonthForSeq(
+                                detail.installment.start_date,
+                                visPos,
+                              ),
                             )}
                           </td>
-                          <td className="py-2 pr-2">
+                          <td className="cursor-auto py-2 pr-2">
                             <input
                               type="text"
                               inputMode="decimal"
-                              className="w-28 rounded border border-zinc-300 bg-white px-2 py-1 text-sm dark:border-zinc-600 dark:bg-zinc-900"
+                              draggable={false}
+                              className="w-28 cursor-text rounded border border-zinc-300 bg-white px-2 py-1 text-sm dark:border-zinc-600 dark:bg-zinc-900"
                               value={
                                 ed?.principal ?? String(ln.principal)
                               }
                               onChange={(e) =>
                                 setLineEdits((prev) => ({
                                   ...prev,
-                                  [ln.seq]: {
+                                  [ln.id]: {
                                     principal: e.target.value,
                                     interest:
-                                      prev[ln.seq]?.interest ??
+                                      prev[ln.id]?.interest ??
                                       (ln.interest != null
                                         ? String(ln.interest)
                                         : ""),
@@ -783,12 +946,13 @@ export default function InstallmentsClient() {
                               }
                             />
                           </td>
-                          <td className="py-2 pr-2">
+                          <td className="cursor-auto py-2 pr-2">
                             <input
                               type="text"
                               inputMode="decimal"
                               placeholder="—"
-                              className="w-24 rounded border border-zinc-300 bg-white px-2 py-1 text-sm dark:border-zinc-600 dark:bg-zinc-900"
+                              draggable={false}
+                              className="w-24 cursor-text rounded border border-zinc-300 bg-white px-2 py-1 text-sm dark:border-zinc-600 dark:bg-zinc-900"
                               value={
                                 ed?.interest ??
                                 (ln.interest != null ? String(ln.interest) : "")
@@ -796,9 +960,9 @@ export default function InstallmentsClient() {
                               onChange={(e) =>
                                 setLineEdits((prev) => ({
                                   ...prev,
-                                  [ln.seq]: {
+                                  [ln.id]: {
                                     principal:
-                                      prev[ln.seq]?.principal ??
+                                      prev[ln.id]?.principal ??
                                       String(ln.principal),
                                     interest: e.target.value,
                                   },
@@ -806,18 +970,8 @@ export default function InstallmentsClient() {
                               }
                             />
                           </td>
-                          <td className="py-2 pr-2 tabular-nums text-zinc-800 dark:text-zinc-100">
+                          <td className="py-2 tabular-nums text-zinc-800 dark:text-zinc-100">
                             {fmtMoney(rowTotal)}
-                          </td>
-                          <td className="py-2">
-                            <button
-                              type="button"
-                              disabled={savingLineSeq === ln.seq}
-                              className="rounded bg-indigo-600 px-2 py-1 text-xs font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
-                              onClick={() => void saveLine(ln.seq)}
-                            >
-                              {savingLineSeq === ln.seq ? "…" : "Save"}
-                            </button>
                           </td>
                         </tr>
                       );
@@ -827,6 +981,18 @@ export default function InstallmentsClient() {
                 </div>
               )}
             </div>
+            {!detailLoading && detail && detail.lines.length > 0 && (
+              <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-zinc-800 bg-black px-4 py-3 dark:border-zinc-700 dark:bg-black">
+                <button
+                  type="button"
+                  disabled={savingSchedule || !scheduleHasChanges}
+                  className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-500 disabled:opacity-50"
+                  onClick={() => void saveScheduleEdits()}
+                >
+                  {savingSchedule ? "Saving…" : "Save changes"}
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}

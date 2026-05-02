@@ -12,6 +12,7 @@ from typing import Any
 from urllib.parse import parse_qsl, quote, quote_plus, urlencode, urlparse, urlunparse
 
 import psycopg2
+from psycopg2 import pool
 from dotenv import load_dotenv
 
 _log = logging.getLogger(__name__)
@@ -23,7 +24,9 @@ def _load_env_files() -> None:
     """Load repo-root `.env` then `backend/.env` (or `/app/.env` in the API image)."""
     for path in (_BACKEND_DIR.parent / ".env", _BACKEND_DIR / ".env"):
         if path.is_file():
-            load_dotenv(path)
+            # Prefer values from these files over inherited OS/env vars so local Neon `DB_*`
+            # is not shadowed by a leftover machine-level `DATABASE_URL`.
+            load_dotenv(path, override=True)
 
 
 def _rewrite_database_url_for_docker() -> None:
@@ -65,7 +68,7 @@ def _rewrite_database_url_for_docker() -> None:
         )
     )
     os.environ["DATABASE_URL"] = new_url
-    _log.info(
+    _log.debug(
         "Docker: DATABASE_URL host %s → db:5432 (same credentials and database path)",
         host,
     )
@@ -128,10 +131,18 @@ def _database_url_from_db_parts() -> str | None:
 
 
 def database_url() -> str | None:
+    """
+    Resolve Postgres URL. When ``DB_HOST`` and ``DB_NAME`` (and other DB_* parts) are set,
+    those win over ``DATABASE_URL`` so a machine-level ``DATABASE_URL`` cannot silently
+    override Neon's ``DB_*`` from the project ``.env``.
+    """
+    from_parts = _database_url_from_db_parts()
+    if from_parts:
+        return from_parts
     direct = (os.environ.get("DATABASE_URL") or "").strip()
     if direct:
         return direct
-    return _database_url_from_db_parts()
+    return None
 
 
 def _postgres_connect_url(url: str) -> str:
@@ -164,22 +175,60 @@ def use_database() -> bool:
     return storage_kind() == "postgres"
 
 
-@contextmanager
-def get_connection():
+_pg_pool: pool.ThreadedConnectionPool | None = None
+
+
+def _pool_bounds() -> tuple[int, int]:
+    mn = int(os.environ.get("DB_POOL_MIN") or "1")
+    mx = int(os.environ.get("DB_POOL_MAX") or "10")
+    mn = max(1, mn)
+    mx = max(mn, min(mx, 50))
+    return mn, mx
+
+
+def _ensure_pool() -> pool.ThreadedConnectionPool:
+    """Lazy pool: reuse TCP/TLS sessions to Postgres (Neon) instead of connecting per request."""
+    global _pg_pool
+    if _pg_pool is not None:
+        return _pg_pool
     url = (database_url() or "").strip()
     if storage_kind() != "postgres":
         raise RuntimeError(
             "DATABASE_URL must be a postgresql://... URL (or set DB_HOST, DB_NAME, …).",
         )
-    conn = psycopg2.connect(_postgres_connect_url(url))
+    mn, mx = _pool_bounds()
+    _pg_pool = pool.ThreadedConnectionPool(mn, mx, dsn=_postgres_connect_url(url))
+    return _pg_pool
+
+
+def close_connection_pool() -> None:
+    """Release pooled connections on process shutdown (e.g. uvicorn reload)."""
+    global _pg_pool
+    if _pg_pool is not None:
+        _pg_pool.closeall()
+        _pg_pool = None
+
+
+@contextmanager
+def get_connection():
+    if storage_kind() != "postgres":
+        raise RuntimeError(
+            "DATABASE_URL must be a postgresql://... URL (or set DB_HOST, DB_NAME, …).",
+        )
+    p = _ensure_pool()
+    conn = p.getconn()
     try:
+        # Neon/pooled roles sometimes get an empty search_path; unqualified DDL then fails with
+        # InvalidSchemaName: no schema has been selected to create in.
+        with conn.cursor() as cur:
+            cur.execute("SET search_path TO public")
         yield conn
         conn.commit()
     except Exception:
         conn.rollback()
         raise
     finally:
-        conn.close()
+        p.putconn(conn)
 
 
 _MINIMAL_PERF_INDEX_DDL = """
@@ -302,6 +351,9 @@ def _migrate_payslip_deduction_columns() -> None:
 def _init_schema_minimal() -> None:
     stmts = [
         """
+        CREATE SCHEMA IF NOT EXISTS public
+        """,
+        """
         CREATE TABLE IF NOT EXISTS payslip (
             id SERIAL PRIMARY KEY,
             total DOUBLE PRECISION,
@@ -376,6 +428,26 @@ def _init_schema_minimal() -> None:
             _ensure_minimal_performance_indexes(cur)
 
 
+def _migrate_installment_original_total_from_principal() -> None:
+    """Keep installment.original_total equal to sum(principal) on schedule lines (not payment_total)."""
+    if not use_database():
+        return
+    with get_connection() as conn:
+        with db_cursor(conn) as cur:
+            cur.execute(
+                """
+                UPDATE installment i
+                SET original_total = s.sum_p
+                FROM (
+                    SELECT installment_id, COALESCE(SUM(principal), 0) AS sum_p
+                    FROM installment_line
+                    GROUP BY installment_id
+                ) AS s
+                WHERE i.id = s.installment_id
+                """
+            )
+
+
 def init_schema() -> None:
     if not use_database():
         return
@@ -385,6 +457,7 @@ def init_schema() -> None:
     _migrate_payslip_deduction_columns()
     _migrate_payslip_thirteenth_month()
     _migrate_payslip_basic_salary()
+    _migrate_installment_original_total_from_principal()
 
 
 def insert_payslip(
@@ -594,23 +667,57 @@ def list_installments(limit: int = 500) -> list[dict[str, Any]]:
             return out
 
 
+def _installment_row_dict(cur: Any, installment_id: int) -> dict[str, Any] | None:
+    cur.execute(
+        """
+        SELECT id, name, installment_current, installment_total,
+               principal, interest, payment_total, start_date, finish_date,
+               remaining, original_total, created_at
+        FROM installment WHERE id = ?
+        """,
+        (installment_id,),
+    )
+    row = cur.fetchone()
+    if not row:
+        return None
+    cols = [d[0] for d in cur.description]
+    return dict(zip(cols, row))
+
+
+def _installment_lines_rows(cur: Any, installment_id: int) -> list[dict[str, Any]]:
+    cur.execute(
+        """
+        SELECT id, seq, principal, interest, payment_total
+        FROM installment_line
+        WHERE installment_id = ?
+        ORDER BY seq ASC
+        """,
+        (installment_id,),
+    )
+    cols = [d[0] for d in cur.description]
+    out: list[dict[str, Any]] = []
+    for r in cur.fetchall():
+        out.append(dict(zip(cols, r)))
+    return out
+
+
 def get_installment(installment_id: int) -> dict[str, Any] | None:
     with get_connection() as conn:
         with db_cursor(conn) as cur:
-            cur.execute(
-                """
-                SELECT id, name, installment_current, installment_total,
-                       principal, interest, payment_total, start_date, finish_date,
-                       remaining, original_total, created_at
-                FROM installment WHERE id = ?
-                """,
-                (installment_id,),
-            )
-            row = cur.fetchone()
-            if not row:
+            return _installment_row_dict(cur, installment_id)
+
+
+def fetch_installment_with_lines(
+    installment_id: int,
+) -> dict[str, Any] | None:
+    """Single transaction: installment row + schedule lines (halves round trips vs two calls)."""
+    with get_connection() as conn:
+        with db_cursor(conn) as cur:
+            inst = _installment_row_dict(cur, installment_id)
+            if not inst:
                 return None
-            cols = [d[0] for d in cur.description]
-            return dict(zip(cols, row))
+            lines = _installment_lines_rows(cur, installment_id)
+            return {"installment": inst, "lines": lines}
 
 
 def insert_installment(
@@ -681,20 +788,7 @@ def _seed_installment_lines(
 def list_installment_lines(installment_id: int) -> list[dict[str, Any]]:
     with get_connection() as conn:
         with db_cursor(conn) as cur:
-            cur.execute(
-                """
-                SELECT seq, principal, interest, payment_total
-                FROM installment_line
-                WHERE installment_id = ?
-                ORDER BY seq ASC
-                """,
-                (installment_id,),
-            )
-            cols = [d[0] for d in cur.description]
-            out: list[dict[str, Any]] = []
-            for r in cur.fetchall():
-                out.append(dict(zip(cols, r)))
-            return out
+            return _installment_lines_rows(cur, installment_id)
 
 
 def _recompute_installment_aggregates(cur: Any, installment_id: int) -> None:
@@ -708,7 +802,7 @@ def _recompute_installment_aggregates(cur: Any, installment_id: int) -> None:
     current = int(row[0])
     cur.execute(
         """
-        SELECT COALESCE(SUM(payment_total), 0)
+        SELECT COALESCE(SUM(principal), 0)
         FROM installment_line WHERE installment_id = ?
         """,
         (installment_id,),
@@ -780,6 +874,84 @@ def update_installment_line(
             return True
 
 
+def update_installment_line_and_fetch_detail(
+    installment_id: int,
+    seq: int,
+    principal: float,
+    interest: float | None,
+) -> dict[str, Any] | None:
+    """
+    UPDATE line, recompute aggregates, return installment + lines in one transaction.
+    Returns None if the schedule row did not exist (rowcount 0).
+    """
+    ptot = _line_payment_total(principal, interest)
+    with get_connection() as conn:
+        with db_cursor(conn) as cur:
+            cur.execute(
+                """
+                UPDATE installment_line SET
+                    principal = ?,
+                    interest = ?,
+                    payment_total = ?
+                WHERE installment_id = ? AND seq = ?
+                """,
+                (principal, interest, ptot, installment_id, seq),
+            )
+            if cur.rowcount == 0:
+                return None
+            _recompute_installment_aggregates(cur, installment_id)
+            inst = _installment_row_dict(cur, installment_id)
+            if not inst:
+                return None
+            lines = _installment_lines_rows(cur, installment_id)
+            return {"installment": inst, "lines": lines}
+
+
+def reorder_installment_lines(
+    installment_id: int,
+    ordered_line_ids: list[int],
+) -> dict[str, Any] | None:
+    """
+    Renumber ``seq`` so rows appear in ``ordered_line_ids`` order (top → bottom).
+    Returns None if ``ordered_line_ids`` is not exactly the set of line ids for this plan.
+    """
+    if not ordered_line_ids:
+        return None
+    with get_connection() as conn:
+        with db_cursor(conn) as cur:
+            cur.execute(
+                """
+                SELECT id FROM installment_line
+                WHERE installment_id = ?
+                ORDER BY seq ASC
+                """,
+                (installment_id,),
+            )
+            existing_ids = [r[0] for r in cur.fetchall()]
+            if len(ordered_line_ids) != len(existing_ids):
+                return None
+            if set(ordered_line_ids) != set(existing_ids):
+                return None
+            cur.execute(
+                "UPDATE installment_line SET seq = id + 1000000 WHERE installment_id = ?",
+                (installment_id,),
+            )
+            for i, lid in enumerate(ordered_line_ids):
+                cur.execute(
+                    """
+                    UPDATE installment_line SET seq = ?
+                    WHERE installment_id = ? AND id = ?
+                    """,
+                    (i + 1, installment_id, lid),
+                )
+            _recompute_installment_aggregates(cur, installment_id)
+            inst = _installment_row_dict(cur, installment_id)
+            if not inst:
+                return None
+            lines = _installment_lines_rows(cur, installment_id)
+            return {"installment": inst, "lines": lines}
+
+
 def _resync_installment_lines_on_total_change(
     cur: Any,
     installment_id: int,
@@ -795,15 +967,22 @@ def _resync_installment_lines_on_total_change(
     for seq in range(1, int(new_total) + 1):
         cur.execute(
             """
-            INSERT INTO installment_line (installment_id, seq, principal, interest, payment_total)
-            VALUES (?, ?, ?, ?, ?)
-            ON CONFLICT (installment_id, seq) DO UPDATE SET
-                principal = excluded.principal,
-                interest = excluded.interest,
-                payment_total = excluded.payment_total
+            UPDATE installment_line SET
+                principal = ?,
+                interest = ?,
+                payment_total = ?
+            WHERE installment_id = ? AND seq = ?
             """,
-            (installment_id, seq, principal, interest, ptot),
+            (principal, interest, ptot, installment_id, seq),
         )
+        if cur.rowcount == 0:
+            cur.execute(
+                """
+                INSERT INTO installment_line (installment_id, seq, principal, interest, payment_total)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (installment_id, seq, principal, interest, ptot),
+            )
 
 
 def update_installment(
