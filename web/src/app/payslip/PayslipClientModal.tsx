@@ -148,20 +148,22 @@ export function PayslipClientModal({
                           ))}
                         </ul>
                       )}
-                      <button
-                        type="button"
-                        className="w-full rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500"
-                        onClick={() =>
-                          setNav({
-                            screen: "add",
-                            year: nav.year,
-                            month: nav.month,
-                            half: nav.half,
-                          })
-                        }
-                      >
-                        Add entry for this half
-                      </button>
+                      {items.length === 0 && (
+                        <button
+                          type="button"
+                          className="w-full rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500"
+                          onClick={() =>
+                            setNav({
+                              screen: "add",
+                              year: nav.year,
+                              month: nav.month,
+                              half: nav.half,
+                            })
+                          }
+                        >
+                          Add entry for this half
+                        </button>
+                      )}
                     </>
                   );
                 })()}
@@ -390,21 +392,11 @@ export function PayslipClientModal({
                         ) {
                           return (
                             <>
-                              Edit · {slotTitle(y, m, h)}{" "}
-                              <span className="font-medium tabular-nums text-zinc-500 dark:text-zinc-400">
-                                (#{r.id})
-                              </span>
+                              Edit · {slotTitle(y, m, h)}
                             </>
                           );
                         }
-                        return (
-                          <>
-                            Edit payslip{" "}
-                            <span className="font-medium tabular-nums text-zinc-500 dark:text-zinc-400">
-                              (#{r.id})
-                            </span>
-                          </>
-                        );
+                        return "Edit payslip";
                       })()}
                     </h2>
                     {(() => {

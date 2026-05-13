@@ -8,15 +8,14 @@ import {
   getPayslip,
   getPayslips,
   updatePayslip,
+  type PayslipCreateBody,
   type PayslipRow,
 } from "@/lib/api";
 import {
   clearPayslipModalDraft,
   formFromRow,
   formToCreateBody,
-  payslipDraftKeyAdd,
   payslipDraftKeyEdit,
-  PAYSLIP_DRAFT_MANUAL,
   stashPayslipModalDraft,
 } from "./payslipDraft";
 import {
@@ -66,6 +65,33 @@ export default function PayslipClient() {
     }
   }, []);
 
+  const scheduledSlotFromBody = (
+    body: PayslipCreateBody,
+  ): { year: number; month: number; half: 1 | 2 } | null => {
+    const { period_year: year, period_month: month, period_half: half } = body;
+    if (
+      year == null ||
+      !Number.isFinite(year) ||
+      month == null ||
+      month < 1 ||
+      month > 12 ||
+      (half !== 1 && half !== 2)
+    ) {
+      return null;
+    }
+    return {
+      year: Math.trunc(year),
+      month: Math.trunc(month),
+      half: half === 1 ? 1 : 2,
+    };
+  };
+
+  const existingScheduledRowForBody = (body: PayslipCreateBody) => {
+    const slot = scheduledSlotFromBody(body);
+    if (!slot) return null;
+    return rowsForSlot(rows, slot.year, slot.month, slot.half)[0] ?? null;
+  };
+
   useEffect(() => {
     void load();
   }, [load]);
@@ -92,7 +118,17 @@ export default function PayslipClient() {
     setSaving(true);
     setError(null);
     try {
-      await createPayslip(formToCreateBody(modalForm));
+      const body = formToCreateBody(modalForm);
+      const existing = existingScheduledRowForBody(body);
+      if (existing) {
+        await updatePayslip(existing.id, body);
+        clearPayslipModalDraft(nav);
+        const updated = await getPayslip(existing.id);
+        await load();
+        setNav({ screen: "detail", row: updated });
+        return;
+      }
+      await createPayslip(body);
       clearPayslipModalDraft(nav);
       setNav(null);
       await load();
@@ -187,7 +223,17 @@ export default function PayslipClient() {
     setSaving(true);
     setError(null);
     try {
-      await createPayslip(formToCreateBody(modalForm));
+      const body = formToCreateBody(modalForm);
+      const existing = rowsForSlot(rows, nav.year, nav.month, nav.half)[0];
+      if (existing) {
+        await updatePayslip(existing.id, body);
+        clearPayslipModalDraft(nav);
+        const updated = await getPayslip(existing.id);
+        await load();
+        setNav({ screen: "detail", row: updated });
+        return;
+      }
+      await createPayslip(body);
       clearPayslipModalDraft(nav);
       await load();
       setNav({
@@ -217,16 +263,6 @@ export default function PayslipClient() {
       }
       setModalForm(formFromRow(nav.row));
     } else if (nav.screen === "add") {
-      const raw = sessionStorage.getItem(
-        payslipDraftKeyAdd(nav.year, nav.month, nav.half),
-      );
-      if (raw) {
-        const d = tryParseFormStateJson(raw);
-        if (d) {
-          setModalForm(d);
-          return;
-        }
-      }
       const b = loadPayslipDefaultsBundle();
       setModalForm(
         initialAddPayslipForm(
@@ -237,14 +273,6 @@ export default function PayslipClient() {
         ),
       );
     } else if (nav.screen === "manual") {
-      const raw = sessionStorage.getItem(PAYSLIP_DRAFT_MANUAL);
-      if (raw) {
-        const d = tryParseFormStateJson(raw);
-        if (d) {
-          setModalForm(d);
-          return;
-        }
-      }
       const b = loadPayslipDefaultsBundle();
       setModalForm(initialManualPayslipForm(b.formFirst, b.formSecond));
     }
