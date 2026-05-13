@@ -74,20 +74,10 @@ export function PayslipDefaultsPanel() {
       <h2 className="text-lg font-medium text-zinc-900 dark:text-zinc-50">
         Payslip defaults
       </h2>
-      <p className="mt-2 max-w-3xl text-sm leading-relaxed text-zinc-600 dark:text-zinc-400">
-        You have two saved templates: one for the first half of the month and one
-        for the second. The calendar add modal uses the template that matches the
-        slot you opened. The + button uses today&apos;s calendar half to pick which
-        template to load. Toggling below switches which template you are editing.
-      </p>
       <fieldset className="mt-8 rounded-lg border border-zinc-200 bg-zinc-50/80 px-4 py-4 dark:border-zinc-700 dark:bg-zinc-900/40">
         <legend className="px-1 text-sm font-medium text-zinc-800 dark:text-zinc-100">
           Edit defaults for
         </legend>
-        <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-          Switch between first and second half to edit each template. Save stores both;
-          open payslip modals pick up the matching half after save.
-        </p>
         <div
           className="mt-4 inline-flex w-full max-w-md flex-col gap-2 sm:flex-row sm:items-stretch"
           role="radiogroup"

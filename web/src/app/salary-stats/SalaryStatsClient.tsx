@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
-import Link from "next/link";
 import {
   Area,
   CartesianGrid,
@@ -563,18 +562,6 @@ export default function SalaryStatsClient() {
         <h1 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
           Salary Stats
         </h1>
-        <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
-          Compare reimbursement, allowances, commission, 13th month, medical
-          reimbursement, and others by period. MP2 and statutory items are summarized
-          under deductions. Chart colors are under{" "}
-          <Link
-            href="/settings"
-            className="font-medium text-indigo-600 underline-offset-2 hover:underline dark:text-indigo-400"
-          >
-            Settings
-          </Link>
-          .
-        </p>
       </header>
 
       {error && (
@@ -596,11 +583,6 @@ export default function SalaryStatsClient() {
             <h2 className="text-lg font-medium text-zinc-900 dark:text-zinc-50">
               Composition
             </h2>
-            <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-              Share of salary-related components including 13th month when present
-              (excludes deductions, MP2, and gross total). Deductions for the same period
-              are listed below.
-            </p>
 
             <div className="mt-4 flex flex-wrap items-center justify-center gap-3">
               <div className="flex rounded-lg border border-zinc-200 p-0.5 dark:border-zinc-700">

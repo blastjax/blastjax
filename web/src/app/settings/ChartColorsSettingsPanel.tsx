@@ -33,12 +33,6 @@ export function ChartColorsSettingsPanel() {
       <h2 className="text-lg font-medium text-zinc-900 dark:text-zinc-50">
         Chart colors
       </h2>
-      <p className="mt-2 max-w-3xl text-sm leading-relaxed text-zinc-600 dark:text-zinc-400">
-        The composition pie chart, trend line chart, and series checkboxes on
-        Salary Stats use these colors. Set one palette for light app theme and
-        another for dark; charts pick the row that matches the current theme.
-        Switch the app theme below or from the sidebar to preview.
-      </p>
 
       <div className="mt-6 flex flex-wrap items-center gap-3">
         <span className="text-sm text-zinc-600 dark:text-zinc-400">

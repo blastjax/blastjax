@@ -17,9 +17,6 @@ export default function SettingsClient() {
             <h1 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
               Settings
             </h1>
-            <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
-              Browser-only preferences for payslip defaults and salary chart colors.
-            </p>
           </div>
           <div
             className="inline-flex shrink-0 rounded-lg border border-zinc-200 bg-zinc-50/80 p-0.5 dark:border-zinc-700 dark:bg-zinc-900/50"

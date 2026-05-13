@@ -330,6 +330,22 @@ def _migrate_payslip_basic_salary() -> None:
             )
 
 
+def _migrate_payslip_created_at_default() -> None:
+    """Ensure older payslip tables can create rows without explicit timestamps."""
+    if not use_database():
+        return
+    with get_connection() as conn:
+        with db_cursor(conn) as cur:
+            cur.execute(
+                "ALTER TABLE payslip ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ"
+            )
+            cur.execute("UPDATE payslip SET created_at = CURRENT_TIMESTAMP WHERE created_at IS NULL")
+            cur.execute(
+                "ALTER TABLE payslip ALTER COLUMN created_at SET DEFAULT CURRENT_TIMESTAMP"
+            )
+            cur.execute("ALTER TABLE payslip ALTER COLUMN created_at SET NOT NULL")
+
+
 def _migrate_payslip_deduction_columns() -> None:
     """Add withholding / statutory deduction columns if missing (existing DBs)."""
     if not use_database():
@@ -457,6 +473,7 @@ def init_schema() -> None:
     _migrate_payslip_deduction_columns()
     _migrate_payslip_thirteenth_month()
     _migrate_payslip_basic_salary()
+    _migrate_payslip_created_at_default()
     _migrate_installment_original_total_from_principal()
 
 
