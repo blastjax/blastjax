@@ -236,6 +236,7 @@ CREATE INDEX IF NOT EXISTS idx_payslip_period_sort ON payslip(
     period_year DESC, period_month DESC, period_half DESC, created_at DESC
 );
 CREATE INDEX IF NOT EXISTS idx_installment_finish_name ON installment(finish_date, name);
+CREATE INDEX IF NOT EXISTS idx_house_payment_name ON house_payment(name);
 """
 
 def _backfill_installment_lines_if_empty(cur: Any) -> None:
@@ -261,6 +262,8 @@ def _backfill_installment_lines_if_empty(cur: Any) -> None:
                 """,
                 (iid, seq, principal, interest, ptot),
             )
+
+
 
 
 def _ensure_minimal_performance_indexes(cur: Any) -> None:
@@ -435,6 +438,31 @@ def _init_schema_minimal() -> None:
         CREATE INDEX IF NOT EXISTS idx_installment_line_parent
             ON installment_line (installment_id)
         """,
+        """
+        CREATE TABLE IF NOT EXISTS house_payment (
+            id SERIAL PRIMARY KEY,
+            name TEXT NOT NULL,
+            notes TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() AT TIME ZONE 'UTC')
+        )
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_house_payment_created ON house_payment (created_at DESC)
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS house_payment_entry (
+            id SERIAL PRIMARY KEY,
+            house_payment_id INTEGER NOT NULL REFERENCES house_payment(id) ON DELETE CASCADE,
+            paid_on DATE NOT NULL,
+            amount DOUBLE PRECISION NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() AT TIME ZONE 'UTC'),
+            CONSTRAINT chk_house_payment_entry_amount CHECK (amount >= 0)
+        )
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_house_payment_entry_parent
+            ON house_payment_entry (house_payment_id, paid_on DESC)
+        """,
     ]
     with get_connection() as conn:
         with db_cursor(conn) as cur:
@@ -464,6 +492,41 @@ def _migrate_installment_original_total_from_principal() -> None:
             )
 
 
+def _migrate_house_payment_simplify() -> None:
+    """
+    Simplified house-payment model: only ``name`` + ``notes`` on the plan, with
+    individual payments stored in ``house_payment_entry`` (date + amount).
+    Drops the prior installment-style columns and the legacy ``house_payment_line``
+    table.
+    """
+    if not use_database():
+        return
+    with get_connection() as conn:
+        with db_cursor(conn) as cur:
+            cur.execute("DROP TABLE IF EXISTS house_payment_line CASCADE")
+            cur.execute(
+                "ALTER TABLE house_payment DROP CONSTRAINT IF EXISTS chk_house_payment_n"
+            )
+            cur.execute(
+                "ALTER TABLE house_payment DROP CONSTRAINT IF EXISTS chk_house_payment_amounts"
+            )
+            for col in (
+                "installment_current",
+                "installment_total",
+                "principal",
+                "interest",
+                "payment_total",
+                "start_date",
+                "finish_date",
+                "remaining",
+                "original_total",
+                "down_payment",
+            ):
+                cur.execute(
+                    f"ALTER TABLE house_payment DROP COLUMN IF EXISTS {col}"
+                )
+
+
 def init_schema() -> None:
     if not use_database():
         return
@@ -475,6 +538,7 @@ def init_schema() -> None:
     _migrate_payslip_basic_salary()
     _migrate_payslip_created_at_default()
     _migrate_installment_original_total_from_principal()
+    _migrate_house_payment_simplify()
 
 
 def insert_payslip(
@@ -1123,6 +1187,197 @@ def installment_apply_payment(installment_id: int) -> dict[str, Any] | None:
             r2 = cur.fetchone()
             cols = [d[0] for d in cur.description]
             return dict(zip(cols, r2))
+
+
+def _house_payment_row_dict(
+    cur: Any, house_payment_id: int
+) -> dict[str, Any] | None:
+    cur.execute(
+        """
+        SELECT id, name, notes, created_at
+        FROM house_payment WHERE id = ?
+        """,
+        (house_payment_id,),
+    )
+    row = cur.fetchone()
+    if not row:
+        return None
+    cols = [d[0] for d in cur.description]
+    return dict(zip(cols, row))
+
+
+def _house_payment_entries_rows(
+    cur: Any, house_payment_id: int
+) -> list[dict[str, Any]]:
+    cur.execute(
+        """
+        SELECT id, paid_on, amount, created_at
+        FROM house_payment_entry
+        WHERE house_payment_id = ?
+        ORDER BY paid_on DESC, id DESC
+        """,
+        (house_payment_id,),
+    )
+    cols = [d[0] for d in cur.description]
+    out: list[dict[str, Any]] = []
+    for r in cur.fetchall():
+        out.append(dict(zip(cols, r)))
+    return out
+
+
+def _house_payment_entries_aggregate(
+    cur: Any, house_payment_id: int
+) -> tuple[int, float, Any]:
+    cur.execute(
+        """
+        SELECT COUNT(*), COALESCE(SUM(amount), 0), MAX(paid_on)
+        FROM house_payment_entry WHERE house_payment_id = ?
+        """,
+        (house_payment_id,),
+    )
+    row = cur.fetchone()
+    if not row:
+        return 0, 0.0, None
+    return int(row[0] or 0), float(row[1] or 0.0), row[2]
+
+
+def list_house_payments(limit: int = 500) -> list[dict[str, Any]]:
+    limit = max(1, min(limit, 2000))
+    with get_connection() as conn:
+        with db_cursor(conn) as cur:
+            cur.execute(
+                """
+                SELECT h.id, h.name, h.notes, h.created_at,
+                       COALESCE(e.entry_count, 0) AS entry_count,
+                       COALESCE(e.total_paid, 0) AS total_paid,
+                       e.last_paid_on
+                FROM house_payment h
+                LEFT JOIN (
+                    SELECT house_payment_id,
+                           COUNT(*) AS entry_count,
+                           COALESCE(SUM(amount), 0) AS total_paid,
+                           MAX(paid_on) AS last_paid_on
+                    FROM house_payment_entry
+                    GROUP BY house_payment_id
+                ) AS e ON e.house_payment_id = h.id
+                ORDER BY h.name ASC, h.id ASC
+                LIMIT ?
+                """,
+                (limit,),
+            )
+            cols = [d[0] for d in cur.description]
+            out: list[dict[str, Any]] = []
+            for r in cur.fetchall():
+                out.append(dict(zip(cols, r)))
+            return out
+
+
+def get_house_payment(house_payment_id: int) -> dict[str, Any] | None:
+    with get_connection() as conn:
+        with db_cursor(conn) as cur:
+            return _house_payment_row_dict(cur, house_payment_id)
+
+
+def fetch_house_payment_with_entries(
+    house_payment_id: int,
+) -> dict[str, Any] | None:
+    with get_connection() as conn:
+        with db_cursor(conn) as cur:
+            row = _house_payment_row_dict(cur, house_payment_id)
+            if not row:
+                return None
+            entries = _house_payment_entries_rows(cur, house_payment_id)
+            count, total_paid, last_paid_on = _house_payment_entries_aggregate(
+                cur, house_payment_id
+            )
+            row["entry_count"] = count
+            row["total_paid"] = total_paid
+            row["last_paid_on"] = last_paid_on
+            return {"house_payment": row, "entries": entries}
+
+
+def insert_house_payment(name: str, notes: str | None) -> int:
+    with get_connection() as conn:
+        with db_cursor(conn) as cur:
+            cur.execute(
+                """
+                INSERT INTO house_payment (name, notes)
+                VALUES (?, ?)
+                RETURNING id
+                """,
+                (name, notes),
+            )
+            return int(cur.fetchone()[0])
+
+
+def update_house_payment(
+    house_payment_id: int, name: str, notes: str | None
+) -> bool:
+    with get_connection() as conn:
+        with db_cursor(conn) as cur:
+            cur.execute(
+                """
+                UPDATE house_payment SET name = ?, notes = ?
+                WHERE id = ?
+                """,
+                (name, notes, house_payment_id),
+            )
+            return cur.rowcount > 0
+
+
+def delete_house_payment(house_payment_id: int) -> bool:
+    with get_connection() as conn:
+        with db_cursor(conn) as cur:
+            cur.execute(
+                "DELETE FROM house_payment WHERE id = ?", (house_payment_id,)
+            )
+            return cur.rowcount > 0
+
+
+def insert_house_payment_entry(
+    house_payment_id: int, paid_on: Any, amount: float
+) -> int | None:
+    with get_connection() as conn:
+        with db_cursor(conn) as cur:
+            if not _house_payment_row_dict(cur, house_payment_id):
+                return None
+            cur.execute(
+                """
+                INSERT INTO house_payment_entry (house_payment_id, paid_on, amount)
+                VALUES (?, ?, ?)
+                RETURNING id
+                """,
+                (house_payment_id, paid_on, amount),
+            )
+            return int(cur.fetchone()[0])
+
+
+def update_house_payment_entry(
+    house_payment_id: int, entry_id: int, paid_on: Any, amount: float
+) -> bool:
+    with get_connection() as conn:
+        with db_cursor(conn) as cur:
+            cur.execute(
+                """
+                UPDATE house_payment_entry SET paid_on = ?, amount = ?
+                WHERE id = ? AND house_payment_id = ?
+                """,
+                (paid_on, amount, entry_id, house_payment_id),
+            )
+            return cur.rowcount > 0
+
+
+def delete_house_payment_entry(house_payment_id: int, entry_id: int) -> bool:
+    with get_connection() as conn:
+        with db_cursor(conn) as cur:
+            cur.execute(
+                """
+                DELETE FROM house_payment_entry
+                WHERE id = ? AND house_payment_id = ?
+                """,
+                (entry_id, house_payment_id),
+            )
+            return cur.rowcount > 0
 
 
 def check_connection() -> bool:

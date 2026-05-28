@@ -11,6 +11,7 @@ import { useLgUp } from "@/lib/useLgUp";
 /** Other routes still exist; only these appear in the shell nav. */
 const LINKS = [
   { href: "/installments", label: "Installments" },
+  { href: "/house-payments", label: "House Payments" },
   { href: "/salary-stats", label: "Salary Stats" },
   { href: "/payslip", label: "Payslip" },
   { href: "/settings", label: "Settings" },

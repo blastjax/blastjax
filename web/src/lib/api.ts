@@ -269,3 +269,126 @@ export async function reorderInstallmentLines(installmentId: number, lineIds: nu
     }),
   );
 }
+
+export type HousePaymentRow = {
+  id: number;
+  name: string;
+  notes: string | null;
+  created_at: string;
+  entry_count: number;
+  total_paid: number;
+  last_paid_on: string | null;
+};
+
+export type HousePaymentEntry = {
+  id: number;
+  paid_on: string;
+  amount: number;
+  created_at: string;
+};
+
+export type HousePaymentDetailResponse = {
+  house_payment: HousePaymentRow;
+  entries: HousePaymentEntry[];
+};
+
+export type HousePaymentSummary = {
+  sum_total_paid: number;
+  total_entries: number;
+  plan_count: number;
+};
+
+export type HousePaymentCreateBody = {
+  name: string;
+  notes?: string | null;
+};
+
+export type HousePaymentEntryBody = {
+  paid_on: string;
+  amount: number;
+};
+
+export async function getHousePayments(limit?: number) {
+  const p = new URLSearchParams();
+  if (limit != null) p.set("limit", String(limit));
+  const qs = p.toString();
+  return j<{ house_payments: HousePaymentRow[]; summary: HousePaymentSummary }>(
+    await apiFetch(`${dataApiBase()}/api/house-payment${qs ? `?${qs}` : ""}`, {
+      cache: "no-store",
+    }),
+  );
+}
+
+export async function getHousePayment(id: number) {
+  return j<HousePaymentDetailResponse>(
+    await apiFetch(`${dataApiBase()}/api/house-payment/${id}`, { cache: "no-store" }),
+  );
+}
+
+export async function createHousePayment(body: HousePaymentCreateBody) {
+  return j<{ id: number }>(
+    await apiFetch(`${dataApiBase()}/api/house-payment`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  );
+}
+
+export async function updateHousePayment(id: number, body: HousePaymentCreateBody) {
+  return j<{ id: number }>(
+    await apiFetch(`${dataApiBase()}/api/house-payment/${id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  );
+}
+
+export async function deleteHousePayment(id: number) {
+  return j<{ ok: boolean }>(
+    await apiFetch(`${dataApiBase()}/api/house-payment/${id}`, { method: "DELETE" }),
+  );
+}
+
+export async function createHousePaymentEntry(
+  housePaymentId: number,
+  body: HousePaymentEntryBody,
+) {
+  return j<{ id: number }>(
+    await apiFetch(`${dataApiBase()}/api/house-payment/${housePaymentId}/entry`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  );
+}
+
+export async function updateHousePaymentEntry(
+  housePaymentId: number,
+  entryId: number,
+  body: HousePaymentEntryBody,
+) {
+  return j<{ id: number }>(
+    await apiFetch(
+      `${dataApiBase()}/api/house-payment/${housePaymentId}/entry/${entryId}`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      },
+    ),
+  );
+}
+
+export async function deleteHousePaymentEntry(
+  housePaymentId: number,
+  entryId: number,
+) {
+  return j<{ ok: boolean }>(
+    await apiFetch(
+      `${dataApiBase()}/api/house-payment/${housePaymentId}/entry/${entryId}`,
+      { method: "DELETE" },
+    ),
+  );
+}

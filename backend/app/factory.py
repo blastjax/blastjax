@@ -54,9 +54,14 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    from app.routers import health, installment, payslip
+    from app.routers import health, house_payment, installment, payslip
 
-    for router in (health.router, payslip.router, installment.router):
+    for router in (
+        health.router,
+        payslip.router,
+        installment.router,
+        house_payment.router,
+    ):
         app.include_router(router)
 
     return app
