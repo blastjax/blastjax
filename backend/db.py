@@ -209,6 +209,45 @@ def close_connection_pool() -> None:
         _pg_pool = None
 
 
+def _connection_is_closed(conn: Any) -> bool:
+    """``psycopg2`` connections expose ``closed != 0`` once the socket is gone."""
+    try:
+        return bool(getattr(conn, "closed", 1))
+    except Exception:
+        return True
+
+
+def _acquire_live_connection(p: pool.ThreadedConnectionPool) -> Any:
+    """
+    Check out a known-good connection, replacing any the server has dropped.
+
+    Pooled Postgres providers (Neon, PgBouncer) silently kill idle TCP sockets.
+    ``psycopg2.pool`` doesn't validate connections on checkout, so the first
+    cursor on a stale connection raises ``InterfaceError: connection already
+    closed`` — and then our cleanup path explodes trying to roll it back.
+
+    Ping with ``SELECT 1`` (also sets the ``search_path`` Neon's pooled roles
+    need), and on failure discard the connection and try a fresh one.
+    """
+    last_err: Exception | None = None
+    for _ in range(3):
+        conn = p.getconn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1")
+                cur.execute("SET search_path TO public")
+            return conn
+        except (psycopg2.InterfaceError, psycopg2.OperationalError) as e:
+            last_err = e
+            try:
+                p.putconn(conn, close=True)
+            except Exception:
+                pass
+            continue
+    assert last_err is not None
+    raise last_err
+
+
 @contextmanager
 def get_connection():
     if storage_kind() != "postgres":
@@ -216,19 +255,36 @@ def get_connection():
             "DATABASE_URL must be a postgresql://... URL (or set DB_HOST, DB_NAME, …).",
         )
     p = _ensure_pool()
-    conn = p.getconn()
+    conn = _acquire_live_connection(p)
+    broken = False
     try:
-        # Neon/pooled roles sometimes get an empty search_path; unqualified DDL then fails with
-        # InvalidSchemaName: no schema has been selected to create in.
-        with conn.cursor() as cur:
-            cur.execute("SET search_path TO public")
         yield conn
-        conn.commit()
+        try:
+            conn.commit()
+        except (psycopg2.InterfaceError, psycopg2.OperationalError):
+            broken = True
+            raise
     except Exception:
-        conn.rollback()
+        # Roll back any partial transaction, but tolerate a connection that
+        # was already torn down by the server (otherwise rollback itself raises
+        # ``InterfaceError: connection already closed`` and hides the real error).
+        try:
+            if not _connection_is_closed(conn):
+                conn.rollback()
+        except (psycopg2.InterfaceError, psycopg2.OperationalError):
+            broken = True
+        except Exception:
+            broken = True
         raise
     finally:
-        p.putconn(conn)
+        if _connection_is_closed(conn):
+            broken = True
+        try:
+            # ``close=True`` makes the pool discard the dead connection so the
+            # next checkout opens a fresh one instead of replaying the failure.
+            p.putconn(conn, close=broken)
+        except Exception:
+            pass
 
 
 _MINIMAL_PERF_INDEX_DDL = """
