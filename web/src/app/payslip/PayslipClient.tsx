@@ -40,6 +40,49 @@ import { PayslipClientModal } from "./PayslipClientModal";
 import { PayslipYearStatsSection } from "./PayslipYearStatsSection";
 import { YearPayslipBlock } from "./YearPayslipBlock";
 
+/** localStorage key for the show/hide-gross toggle on the calendar. */
+const LS_PAYSLIP_SHOW_GROSS = "budgetapp:payslip:showGross";
+
+/** Outline eye icon (visible state). */
+function EyeIcon({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden
+    >
+      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  );
+}
+
+/** Outline eye-with-slash icon (hidden state). */
+function EyeOffIcon({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden
+    >
+      <path d="M9.88 9.88a3 3 0 1 0 4.24 4.24" />
+      <path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68" />
+      <path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61" />
+      <line x1="2" y1="2" x2="22" y2="22" />
+    </svg>
+  );
+}
+
 export default function PayslipClient() {
   const [error, setError] = useState<string | null>(null);
   const [rows, setRows] = useState<PayslipRow[]>([]);
@@ -47,10 +90,28 @@ export default function PayslipClient() {
   const [saving, setSaving] = useState(false);
   const [nav, setNav] = useState<Nav | null>(null);
   const [modalForm, setModalForm] = useState<FormState>(emptyForm());
+  const [showGross, setShowGross] = useState(true);
   const modalFormRef = useRef(modalForm);
   modalFormRef.current = modalForm;
   const navRef = useRef(nav);
   navRef.current = nav;
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(LS_PAYSLIP_SHOW_GROSS);
+      if (raw === "0" || raw === "false") setShowGross(false);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(LS_PAYSLIP_SHOW_GROSS, showGross ? "1" : "0");
+    } catch {
+      /* ignore */
+    }
+  }, [showGross]);
 
   const load = useCallback(async () => {
     setError(null);
@@ -351,12 +412,28 @@ export default function PayslipClient() {
       )}
 
       <section className="rounded-xl border border-zinc-200 bg-white p-6 shadow-sm sm:p-8 dark:border-zinc-800 dark:bg-zinc-950">
-        <div className="mb-8 flex items-baseline justify-between gap-4">
-          <div>
-            <h2 className="text-lg font-medium text-zinc-900 dark:text-zinc-50">
-              Pay period calendar
-            </h2>
-          </div>
+        <div className="mb-8 flex items-center justify-between gap-4">
+          <h2 className="text-lg font-medium text-zinc-900 dark:text-zinc-50">
+            Pay period calendar
+          </h2>
+          <button
+            type="button"
+            onClick={() => setShowGross((v) => !v)}
+            aria-pressed={showGross}
+            aria-label={
+              showGross
+                ? "Hide gross amounts in calendar"
+                : "Show gross amounts in calendar"
+            }
+            title={
+              showGross
+                ? "Hide gross amounts in calendar"
+                : "Show gross amounts in calendar"
+            }
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-zinc-300 bg-white text-zinc-700 shadow-sm transition-colors hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+          >
+            {showGross ? <EyeIcon /> : <EyeOffIcon />}
+          </button>
         </div>
 
         {!loading && <PayslipYearStatsSection rows={rows} />}
@@ -369,6 +446,7 @@ export default function PayslipClient() {
                   year={year}
                   rows={rows}
                   saving={saving}
+                  showGross={showGross}
                   onOpenSlot={openSlot}
                 />
               </div>

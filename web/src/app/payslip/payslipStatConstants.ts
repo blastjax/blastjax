@@ -185,7 +185,7 @@ export function sanitizeStatOrder(parsed: unknown): DraggableStatId[] {
 
 /** Shared shell: stretch with grid row height (match tallest card in the row). */
 export const PAYSLIP_STAT_CARD_SHELL =
-  "flex h-full min-h-0 min-w-0 cursor-grab flex-col rounded-lg border px-3 py-2.5 shadow-sm transition-opacity active:cursor-grabbing";
+  "flex h-full min-h-0 min-w-0 flex-col rounded-lg border px-3 py-2.5 shadow-sm";
 
 /** Pinned stat card (e.g. medical): same layout, no drag cursor. */
 export const PAYSLIP_STAT_CARD_SHELL_PINNED =

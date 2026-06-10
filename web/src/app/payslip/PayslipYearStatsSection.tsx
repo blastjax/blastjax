@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type DragEvent } from "react";
+import { useMemo, useState } from "react";
 import type { PayslipRow } from "@/lib/api";
 import {
   countPayslipRowsInCalendarYear,
@@ -12,7 +12,6 @@ import { fmtNum, fmtPctOfTotal } from "./payslipDisplay";
 import {
   DEFAULT_STAT_CARD_ORDER,
   DRAGGABLE_FIELD,
-  LS_PAYSLIP_STAT_ORDER,
   MEDICAL_REIMBURSEMENT_ANNUAL_CAP,
   MEDICAL_REIMBURSEMENT_LABEL,
   MEDICAL_REIMBURSEMENT_STAT_THEME,
@@ -22,8 +21,6 @@ import {
   type DraggableStatId,
   STAT_LABEL,
   STAT_THEMES,
-  isDraggableStatId,
-  sanitizeStatOrder,
 } from "./payslipStatConstants";
 
 export function PayslipYearStatsSection({ rows }: { rows: PayslipRow[] }) {
@@ -56,28 +53,6 @@ export function PayslipYearStatsSection({ rows }: { rows: PayslipRow[] }) {
     [rows, statsYear],
   );
 
-  const [statCardOrder, setStatCardOrder] = useState<DraggableStatId[]>(
-    DEFAULT_STAT_CARD_ORDER,
-  );
-  const [dragOrderIdx, setDragOrderIdx] = useState<number | null>(null);
-
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(LS_PAYSLIP_STAT_ORDER);
-      if (raw) setStatCardOrder(sanitizeStatOrder(JSON.parse(raw)));
-    } catch {
-      /* ignore */
-    }
-  }, []);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(LS_PAYSLIP_STAT_ORDER, JSON.stringify(statCardOrder));
-    } catch {
-      /* ignore */
-    }
-  }, [statCardOrder]);
-
   /** Policy year aligned with selected calendar stats year (July → Apr–Mar window containing mid-year). */
   const medicalAprilStart = medicalYearStartFromPeriod(statsYear, 7);
   const medicalUsed = sumMedicalReimbursementForMedicalYear(rows, medicalAprilStart);
@@ -109,40 +84,7 @@ export function PayslipYearStatsSection({ rows }: { rows: PayslipRow[] }) {
 
   const basicSalaryYearSum = sums.basic_salary;
 
-  const onDragStart = (id: DraggableStatId, orderIdx: number) => (e: DragEvent) => {
-    setDragOrderIdx(orderIdx);
-    e.dataTransfer.effectAllowed = "move";
-    // `text/plain` is the most reliable type across browsers for drop.getData().
-    e.dataTransfer.setData("text/plain", id);
-  };
-
-  const onDragEnd = () => setDragOrderIdx(null);
-
-  const onDragOverCard = (e: DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    e.dataTransfer.dropEffect = "move";
-  };
-
-  const onDropOn = (targetOrderIdx: number) => (e: DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const draggedIdRaw = e.dataTransfer.getData("text/plain").trim();
-    if (!draggedIdRaw || !isDraggableStatId(draggedIdRaw)) return;
-    const draggedId = draggedIdRaw as DraggableStatId;
-    setStatCardOrder((prev) => {
-      const from = prev.indexOf(draggedId);
-      if (from < 0 || from === targetOrderIdx) return prev;
-      const next = [...prev];
-      const t = next[from];
-      next[from] = next[targetOrderIdx];
-      next[targetOrderIdx] = t;
-      return next;
-    });
-    setDragOrderIdx(null);
-  };
-
-  const renderDraggable = (id: DraggableStatId, orderIdx: number) => {
+  const renderStatCard = (id: DraggableStatId) => {
     if (id === "months_remaining") {
       const theme = STAT_THEMES.months_remaining;
       const payCount = countPayslipRowsInCalendarYear(rows, statsYear);
@@ -157,28 +99,11 @@ export function PayslipYearStatsSection({ rows }: { rows: PayslipRow[] }) {
         });
         return `${s}% of year remaining`;
       })();
-      const monthsApprox =
-        halvesLeft <= 0 ? 0 : Math.round((halvesLeft / 2) * 100) / 100;
-      const dragging = dragOrderIdx === orderIdx;
-      const displayMain =
-        monthsApprox === 0
-          ? "0.00"
-          : monthsApprox.toLocaleString(undefined, {
-              maximumFractionDigits: 2,
-              minimumFractionDigits: 2,
-            });
 
       return (
         <div
           key={id}
-          draggable
-          onDragStart={onDragStart(id, orderIdx)}
-          onDragEnd={onDragEnd}
-          onDragOver={onDragOverCard}
-          onDrop={onDropOn(orderIdx)}
-          className={`${PAYSLIP_STAT_CARD_SHELL} ${theme.border} ${theme.bg} ${
-            dragging ? "opacity-60" : ""
-          }`}
+          className={`${PAYSLIP_STAT_CARD_SHELL} ${theme.border} ${theme.bg}`}
         >
           <div className="flex min-h-0 flex-1 flex-col">
             <div className="flex items-start justify-between gap-2">
@@ -189,13 +114,13 @@ export function PayslipYearStatsSection({ rows }: { rows: PayslipRow[] }) {
                   {STAT_LABEL.months_remaining}
                 </h3>
                 <p className={`mt-0.5 text-[11px] ${theme.sub}`}>
-                  {payCount}/24 payslips · {pctRemainingLabel}
+                  {pctRemainingLabel}
                 </p>
               </div>
               <div
                 className={`shrink-0 text-xs font-semibold tabular-nums leading-tight ${theme.value}`}
               >
-                {displayMain}%
+                {payCount}/24
               </div>
             </div>
           </div>
@@ -221,7 +146,6 @@ export function PayslipYearStatsSection({ rows }: { rows: PayslipRow[] }) {
     if (id === "basic") {
       const theme = STAT_THEMES.basic;
       const amount = basicSalaryYearSum;
-      const dragging = dragOrderIdx === orderIdx;
       const pctOfTotal =
         pctDenominator > 0
           ? Math.min(100, Math.max(0, (amount / pctDenominator) * 100))
@@ -229,14 +153,7 @@ export function PayslipYearStatsSection({ rows }: { rows: PayslipRow[] }) {
       return (
         <div
           key={id}
-          draggable
-          onDragStart={onDragStart(id, orderIdx)}
-          onDragEnd={onDragEnd}
-          onDragOver={onDragOverCard}
-          onDrop={onDropOn(orderIdx)}
-          className={`${PAYSLIP_STAT_CARD_SHELL} ${theme.border} ${theme.bg} ${
-            dragging ? "opacity-60" : ""
-          }`}
+          className={`${PAYSLIP_STAT_CARD_SHELL} ${theme.border} ${theme.bg}`}
         >
           <div className="flex min-h-0 flex-1 flex-col">
             <div className="flex items-start justify-between gap-2">
@@ -276,7 +193,6 @@ export function PayslipYearStatsSection({ rows }: { rows: PayslipRow[] }) {
 
     const theme = STAT_THEMES[id];
     const amount = sumForId(id);
-    const dragging = dragOrderIdx === orderIdx;
     const pctOfTotal =
       pctDenominator > 0
         ? Math.min(100, Math.max(0, (amount / pctDenominator) * 100))
@@ -286,14 +202,7 @@ export function PayslipYearStatsSection({ rows }: { rows: PayslipRow[] }) {
       return (
         <div
           key={id}
-          draggable
-          onDragStart={onDragStart(id, orderIdx)}
-          onDragEnd={onDragEnd}
-          onDragOver={onDragOverCard}
-          onDrop={onDropOn(orderIdx)}
-          className={`${PAYSLIP_STAT_CARD_SHELL} ${theme.border} ${theme.bg} ${
-            dragging ? "opacity-60" : ""
-          }`}
+          className={`${PAYSLIP_STAT_CARD_SHELL} ${theme.border} ${theme.bg}`}
         >
           <div className="flex min-h-0 flex-1 flex-col">
             <div className="flex items-start justify-between gap-2">
@@ -324,14 +233,7 @@ export function PayslipYearStatsSection({ rows }: { rows: PayslipRow[] }) {
     return (
       <div
         key={id}
-        draggable
-        onDragStart={onDragStart(id, orderIdx)}
-        onDragEnd={onDragEnd}
-        onDragOver={onDragOverCard}
-        onDrop={onDropOn(orderIdx)}
-        className={`${PAYSLIP_STAT_CARD_SHELL} ${theme.border} ${theme.bg} ${
-          dragging ? "opacity-60" : ""
-        }`}
+        className={`${PAYSLIP_STAT_CARD_SHELL} ${theme.border} ${theme.bg}`}
       >
         <div className="flex min-h-0 flex-1 flex-col">
           <div className="flex items-start justify-between gap-2">
@@ -398,7 +300,7 @@ export function PayslipYearStatsSection({ rows }: { rows: PayslipRow[] }) {
       </div>
 
       <div className="grid min-w-0 grid-cols-2 items-stretch gap-3 sm:gap-4 md:gap-5">
-        {statCardOrder.map((id, idx) => renderDraggable(id, idx))}
+        {DEFAULT_STAT_CARD_ORDER.map((id) => renderStatCard(id))}
       </div>
 
       <div className="mt-4 flex w-full justify-center sm:mt-5">

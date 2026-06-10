@@ -248,3 +248,71 @@ export function sumTotalForYear(
   }
   return any ? s : null;
 }
+
+/**
+ * Per-row gross matching the year-stats Total card: net (`total`) plus the
+ * statutory deductions (withholding, SSS, Philhealth, Pag-ibig, MP2). Returns
+ * ``null`` when ``total`` is missing so callers can treat empty slots the same
+ * way ``sumTotal`` does.
+ */
+export function grossWithDeductionsFromRow(r: PayslipRow): number | null {
+  if (r.total == null || !Number.isFinite(r.total)) return null;
+  const num = (v: number | null | undefined) =>
+    v != null && Number.isFinite(v) ? v : 0;
+  return (
+    r.total +
+    num(r.withholding_tax) +
+    num(r.sss_contribution) +
+    num(r.philhealth) +
+    num(r.pag_ibig) +
+    num(r.mp2)
+  );
+}
+
+export function sumGross(rs: PayslipRow[]): number | null {
+  let s = 0;
+  let any = false;
+  for (const r of rs) {
+    const g = grossWithDeductionsFromRow(r);
+    if (g == null) continue;
+    s += g;
+    any = true;
+  }
+  return any ? s : null;
+}
+
+/** Sum of gross for both halves of a month (scheduled rows only). */
+export function sumGrossForMonth(
+  rows: PayslipRow[],
+  year: number,
+  month: number,
+): number | null {
+  const r1 = rowsForSlot(rows, year, month, 1);
+  const r2 = rowsForSlot(rows, year, month, 2);
+  return sumGross([...r1, ...r2]);
+}
+
+/** Sum of gross for all scheduled slots in a calendar year. */
+export function sumGrossForYear(
+  rows: PayslipRow[],
+  year: number,
+): number | null {
+  let s = 0;
+  let any = false;
+  for (const r of rows) {
+    if (r.period_year !== year) continue;
+    if (
+      r.period_month == null ||
+      r.period_half == null ||
+      r.period_half < 1 ||
+      r.period_half > 2
+    ) {
+      continue;
+    }
+    const g = grossWithDeductionsFromRow(r);
+    if (g == null) continue;
+    s += g;
+    any = true;
+  }
+  return any ? s : null;
+}
