@@ -5,6 +5,7 @@ import type {
   MutableRefObject,
   SetStateAction,
 } from "react";
+import { Modal } from "@/components/Modal";
 import type { PayslipRow } from "@/lib/api";
 import { PayslipFormFields } from "./PayslipFormFields";
 import {
@@ -49,27 +50,23 @@ export function PayslipClientModal({
   saveManualAdd: () => void | Promise<void>;
   handleDelete: (id: number) => void | Promise<void>;
 }) {
+  const onCloseDialog = () => {
+    if (
+      nav.screen === "edit" ||
+      nav.screen === "add" ||
+      nav.screen === "manual"
+    ) {
+      stashPayslipModalDraft(nav, modalFormRef.current);
+    }
+    setNav(null);
+  };
   return (
-        <div
-          className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-5 sm:items-center sm:p-6"
-          role="presentation"
-          onMouseDown={(e) => {
-            if (e.target !== e.currentTarget) return;
-            if (
-              nav.screen === "edit" ||
-              nav.screen === "add" ||
-              nav.screen === "manual"
-            ) {
-              stashPayslipModalDraft(nav, modalFormRef.current);
-            }
-            setNav(null);
-          }}
-        >
-          <div
-            className="max-h-[95vh] w-full max-w-5xl overflow-y-auto rounded-xl border border-zinc-200 bg-white p-6 shadow-xl sm:p-8 lg:max-w-6xl dark:border-zinc-700 dark:bg-zinc-950"
-            role="dialog"
-            aria-modal="true"
-          >
+    <Modal
+      open
+      onClose={onCloseDialog}
+      backdropClassName="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-5 sm:items-center sm:p-6"
+      dialogClassName="max-h-[95vh] w-full max-w-5xl overflow-y-auto rounded-xl border border-zinc-200 bg-white p-6 shadow-xl sm:p-8 lg:max-w-6xl dark:border-zinc-700 dark:bg-zinc-950"
+    >
             {nav.screen === "slot" && (
               <>
                 <div className="mb-4 flex items-start justify-between gap-2">
@@ -553,7 +550,6 @@ export function PayslipClientModal({
                 </form>
               </>
             )}
-          </div>
-        </div>
+    </Modal>
   );
 }

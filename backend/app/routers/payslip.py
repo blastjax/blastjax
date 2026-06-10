@@ -6,8 +6,9 @@ import io
 from typing import Any
 
 import pandas as pd
-from fastapi import APIRouter, Body, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, UploadFile
 
+from app.deps import require_db
 from app.schemas.payslip import PayslipCreate
 from app.services.payslip_parse import (
     _map_payslip_columns,
@@ -18,7 +19,6 @@ from app.services.payslip_parse import (
     _payslip_row_is_empty,
 )
 from db import (
-    database_url,
     delete_payslip,
     get_payslip,
     insert_payslip,
@@ -26,7 +26,7 @@ from db import (
     update_payslip,
 )
 
-router = APIRouter(tags=["payslip"])
+router = APIRouter(tags=["payslip"], dependencies=[Depends(require_db)])
 
 
 def _rec_pag_ibig(rec: dict[str, Any]) -> Any:
@@ -36,28 +36,23 @@ def _rec_pag_ibig(rec: dict[str, Any]) -> Any:
     return rec.get("employee_hdmf")
 
 
+def _serialize_payslip(row: dict[str, Any]) -> dict[str, Any]:
+    ca = row.get("created_at")
+    if hasattr(ca, "isoformat"):
+        row["created_at"] = ca.isoformat()
+    return row
+
+
 @router.get("/api/payslip")
 def payslip_list(
     limit: int = Query(default=1000, ge=1, le=2000),
 ) -> dict[str, Any]:
-    if not database_url():
-        raise HTTPException(
-            status_code=503,
-            detail="DATABASE_URL is not set.",
-        )
-    rows = list_payslips(limit=limit)
-    for r in rows:
-        ca = r.get("created_at")
-        if hasattr(ca, "isoformat"):
-            r["created_at"] = ca.isoformat()
-    return {"payslips": rows}
+    return {"payslips": [_serialize_payslip(r) for r in list_payslips(limit=limit)]}
 
 
 @router.post("/api/payslip")
 def payslip_create(body: PayslipCreate) -> dict[str, Any]:
-    if not database_url():
-        raise HTTPException(status_code=503, detail="DATABASE_URL is not set.")
-    pid = insert_payslip(
+    row = insert_payslip(
         body.total,
         body.commission,
         body.reimbursement,
@@ -76,13 +71,11 @@ def payslip_create(body: PayslipCreate) -> dict[str, Any]:
         body.philhealth,
         body.pag_ibig,
     )
-    return {"id": pid}
+    return _serialize_payslip(row)
 
 
 @router.post("/api/payslip/upload")
 async def payslip_upload(file: UploadFile = File(...)) -> dict[str, Any]:
-    if not database_url():
-        raise HTTPException(status_code=503, detail="DATABASE_URL is not set.")
     if not file.filename or not file.filename.lower().endswith((".xlsx", ".xlsm")):
         raise HTTPException(
             status_code=400,
@@ -101,8 +94,7 @@ async def payslip_upload(file: UploadFile = File(...)) -> dict[str, Any]:
     ids: list[int] = []
 
     def _insert_rec(rec: dict[str, Any]) -> None:
-        nonlocal ids
-        pid = insert_payslip(
+        row = insert_payslip(
             rec["total"],
             rec["commission"],
             rec["reimbursement"],
@@ -121,7 +113,7 @@ async def payslip_upload(file: UploadFile = File(...)) -> dict[str, Any]:
             rec.get("philhealth"),
             _rec_pag_ibig(rec),
         )
-        ids.append(pid)
+        ids.append(int(row["id"]))
 
     if colmap:
         for _, row in df_wide.iterrows():
@@ -157,15 +149,13 @@ async def payslip_upload(file: UploadFile = File(...)) -> dict[str, Any]:
 @router.post("/api/payslip/import-json")
 def payslip_import_json(body: dict[str, Any] = Body(...)) -> dict[str, Any]:
     """Import nested year → category → month JSON (arrays [1st half, 2nd half])."""
-    if not database_url():
-        raise HTTPException(status_code=503, detail="DATABASE_URL is not set.")
     if not isinstance(body, dict):
         raise HTTPException(status_code=400, detail="JSON root must be an object.")
     recs = _payslip_records_from_nested_json(body)
     ids: list[int] = []
     src = "payslip-import.json"
     for rec in recs:
-        pid = insert_payslip(
+        row = insert_payslip(
             rec["total"],
             rec["commission"],
             rec["reimbursement"],
@@ -184,7 +174,7 @@ def payslip_import_json(body: dict[str, Any] = Body(...)) -> dict[str, Any]:
             rec.get("philhealth"),
             _rec_pag_ibig(rec),
         )
-        ids.append(pid)
+        ids.append(int(row["id"]))
     if not ids:
         raise HTTPException(
             status_code=400,
@@ -196,22 +186,15 @@ def payslip_import_json(body: dict[str, Any] = Body(...)) -> dict[str, Any]:
 
 @router.get("/api/payslip/{payslip_id}")
 def payslip_one(payslip_id: int) -> dict[str, Any]:
-    if not database_url():
-        raise HTTPException(status_code=503, detail="DATABASE_URL is not set.")
     row = get_payslip(payslip_id)
     if not row:
         raise HTTPException(status_code=404, detail="Payslip not found.")
-    ca = row.get("created_at")
-    if hasattr(ca, "isoformat"):
-        row["created_at"] = ca.isoformat()
-    return row
+    return _serialize_payslip(row)
 
 
 @router.put("/api/payslip/{payslip_id}")
 def payslip_replace(payslip_id: int, body: PayslipCreate) -> dict[str, Any]:
-    if not database_url():
-        raise HTTPException(status_code=503, detail="DATABASE_URL is not set.")
-    ok = update_payslip(
+    row = update_payslip(
         payslip_id,
         body.total,
         body.commission,
@@ -231,15 +214,13 @@ def payslip_replace(payslip_id: int, body: PayslipCreate) -> dict[str, Any]:
         body.philhealth,
         body.pag_ibig,
     )
-    if not ok:
+    if row is None:
         raise HTTPException(status_code=404, detail="Payslip not found.")
-    return {"id": payslip_id}
+    return _serialize_payslip(row)
 
 
 @router.delete("/api/payslip/{payslip_id}")
 def payslip_remove(payslip_id: int) -> dict[str, Any]:
-    if not database_url():
-        raise HTTPException(status_code=503, detail="DATABASE_URL is not set.")
     if not delete_payslip(payslip_id):
         raise HTTPException(status_code=404, detail="Payslip not found.")
     return {"ok": True}

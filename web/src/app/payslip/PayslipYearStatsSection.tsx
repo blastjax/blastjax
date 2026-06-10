@@ -1,12 +1,10 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import type { PayslipRow } from "@/lib/api";
+import { useState } from "react";
 import {
-  countPayslipRowsInCalendarYear,
   medicalYearStartFromPeriod,
-  sumFieldForCalendarYear,
-  sumMedicalReimbursementForMedicalYear,
+  yearSlotsFromIndex,
+  type PayslipIndex,
 } from "./payslipAggregates";
 import { fmtNum, fmtPctOfTotal } from "./payslipDisplay";
 import {
@@ -23,39 +21,15 @@ import {
   STAT_THEMES,
 } from "./payslipStatConstants";
 
-export function PayslipYearStatsSection({ rows }: { rows: PayslipRow[] }) {
+export function PayslipYearStatsSection({ index }: { index: PayslipIndex }) {
   const [statsYear, setStatsYear] = useState(() => new Date().getFullYear());
 
-  const sums = useMemo(
-    () => ({
-      total: sumFieldForCalendarYear(rows, statsYear, "total"),
-      basic_salary: sumFieldForCalendarYear(rows, statsYear, "basic_salary"),
-      reimbursement: sumFieldForCalendarYear(rows, statsYear, "reimbursement"),
-      others: sumFieldForCalendarYear(rows, statsYear, "others"),
-      allowances: sumFieldForCalendarYear(rows, statsYear, "allowances"),
-      commission: sumFieldForCalendarYear(rows, statsYear, "commission"),
-      mp2: sumFieldForCalendarYear(rows, statsYear, "mp2"),
-      withholding_tax: sumFieldForCalendarYear(rows, statsYear, "withholding_tax"),
-      sss_contribution: sumFieldForCalendarYear(rows, statsYear, "sss_contribution"),
-      philhealth: sumFieldForCalendarYear(rows, statsYear, "philhealth"),
-      pag_ibig: sumFieldForCalendarYear(rows, statsYear, "pag_ibig"),
-      medical_reimbursement: sumFieldForCalendarYear(
-        rows,
-        statsYear,
-        "medical_reimbursement",
-      ),
-      thirteenth_month: sumFieldForCalendarYear(
-        rows,
-        statsYear,
-        "thirteenth_month",
-      ),
-    }),
-    [rows, statsYear],
-  );
+  const yearSlots = yearSlotsFromIndex(index, statsYear);
+  const sums = yearSlots.fieldSums;
 
   /** Policy year aligned with selected calendar stats year (July → Apr–Mar window containing mid-year). */
   const medicalAprilStart = medicalYearStartFromPeriod(statsYear, 7);
-  const medicalUsed = sumMedicalReimbursementForMedicalYear(rows, medicalAprilStart);
+  const medicalUsed = index.medicalByPolicyYear.get(medicalAprilStart) ?? 0;
   const medicalRemaining = MEDICAL_REIMBURSEMENT_ANNUAL_CAP - medicalUsed;
   const medicalPctCap = Math.min(
     100,
@@ -87,7 +61,7 @@ export function PayslipYearStatsSection({ rows }: { rows: PayslipRow[] }) {
   const renderStatCard = (id: DraggableStatId) => {
     if (id === "months_remaining") {
       const theme = STAT_THEMES.months_remaining;
-      const payCount = countPayslipRowsInCalendarYear(rows, statsYear);
+      const payCount = yearSlots.paySlotCount;
       const payslipSlotPct = Math.min(100, (payCount / 24) * 100);
       const halvesLeft = Math.max(0, 24 - Math.min(payCount, 24));
       const pctYearRemaining =

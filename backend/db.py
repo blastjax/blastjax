@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
@@ -145,22 +146,42 @@ def database_url() -> str | None:
     return None
 
 
+_LIBPQ_DEFAULT_PARAMS: tuple[tuple[str, str], ...] = (
+    # Faster detection of half-open sockets (Neon / PgBouncer / NAT idle kills).
+    # Without these, a dropped TCP socket isn't noticed until the next query
+    # actually tries to write — which is exactly the case our pre-ping is for.
+    ("keepalives", "1"),
+    ("keepalives_idle", "30"),
+    ("keepalives_interval", "10"),
+    ("keepalives_count", "3"),
+    # Tag connections so they're easy to spot in pg_stat_activity. Allowed by
+    # Neon's pooler (which has a strict allow-list for startup parameters).
+    ("application_name", "budgetapp"),
+)
+
+
 def _postgres_connect_url(url: str) -> str:
-    """Neon rejects non-TLS handshakes unless ``sslmode=require`` (or stricter) is set."""
+    """
+    Normalize the DSN: enforce TLS for Neon and bake server-side defaults
+    (search_path, keepalives) into the connection string so they're applied
+    once at connect time instead of on every pool checkout.
+    """
     u = url.strip()
     low = u.lower()
     if not (low.startswith("postgresql:") or low.startswith("postgres:")):
         return u
     parsed = urlparse(u)
-    host = (parsed.hostname or "").lower()
-    if "neon.tech" not in host:
-        return u
     pairs = parse_qsl(parsed.query, keep_blank_values=True)
     keys_lower = {k.lower() for k, _ in pairs}
-    if "sslmode" in keys_lower:
-        return u
-    merged = list(pairs) + [("sslmode", "require")]
-    new_query = urlencode(merged)
+    host = (parsed.hostname or "").lower()
+    if "neon.tech" in host and "sslmode" not in keys_lower:
+        pairs.append(("sslmode", "require"))
+        keys_lower.add("sslmode")
+    for key, value in _LIBPQ_DEFAULT_PARAMS:
+        if key.lower() not in keys_lower:
+            pairs.append((key, value))
+            keys_lower.add(key.lower())
+    new_query = urlencode(pairs, quote_via=quote)
     return urlunparse(parsed._replace(query=new_query))
 
 
@@ -207,6 +228,8 @@ def close_connection_pool() -> None:
     if _pg_pool is not None:
         _pg_pool.closeall()
         _pg_pool = None
+    _conn_last_seen.clear()
+    _conn_initialized.clear()
 
 
 def _connection_is_closed(conn: Any) -> bool:
@@ -215,6 +238,39 @@ def _connection_is_closed(conn: Any) -> bool:
         return bool(getattr(conn, "closed", 1))
     except Exception:
         return True
+
+
+# Per-connection "last successfully released" timestamps, keyed by ``id(conn)``.
+# Used to skip the pre-ping when a connection was used very recently and is
+# overwhelmingly likely to still be alive. Cleared whenever we discard a
+# connection from the pool.
+_conn_last_seen: dict[int, float] = {}
+
+# Tracks which physical connections have already had session-level setup
+# applied (e.g. ``SET search_path``). Neon's pooler doesn't allow
+# ``search_path`` in libpq startup options, so we have to issue it via
+# ``SET`` — but the GUC persists for the life of the connection, so we only
+# need to do it once per ``getconn`` of a given connection object.
+_conn_initialized: set[int] = set()
+
+
+def _initialize_session(conn: Any) -> None:
+    """Apply per-connection settings that can't be baked into the DSN."""
+    if id(conn) in _conn_initialized:
+        return
+    with conn.cursor() as cur:
+        cur.execute("SET search_path TO public")
+    _conn_initialized.add(id(conn))
+
+
+def _ping_after_idle_seconds() -> float:
+    raw = os.environ.get("DB_PING_AFTER_IDLE_SECONDS")
+    if raw is None or not raw.strip():
+        return 30.0
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        return 30.0
 
 
 def _acquire_live_connection(p: pool.ThreadedConnectionPool) -> Any:
@@ -226,19 +282,35 @@ def _acquire_live_connection(p: pool.ThreadedConnectionPool) -> Any:
     cursor on a stale connection raises ``InterfaceError: connection already
     closed`` — and then our cleanup path explodes trying to roll it back.
 
-    Ping with ``SELECT 1`` (also sets the ``search_path`` Neon's pooled roles
-    need), and on failure discard the connection and try a fresh one.
+    To avoid paying a ``SELECT 1`` round-trip on every request, only ping
+    connections that have been idle longer than ``DB_PING_AFTER_IDLE_SECONDS``
+    (default 30s). Recently-used connections are returned immediately; if one
+    happens to be stale anyway, the cleanup path in :func:`get_connection`
+    will discard it and the next checkout will receive a fresh one.
     """
+    threshold = _ping_after_idle_seconds()
     last_err: Exception | None = None
     for _ in range(3):
         conn = p.getconn()
+        if _connection_is_closed(conn):
+            _drop_conn_state(conn)
+            try:
+                p.putconn(conn, close=True)
+            except Exception:
+                pass
+            continue
+        last_seen = _conn_last_seen.get(id(conn))
+        now = time.monotonic()
         try:
-            with conn.cursor() as cur:
-                cur.execute("SELECT 1")
-                cur.execute("SET search_path TO public")
+            if last_seen is None or (now - last_seen) >= threshold:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+            _initialize_session(conn)
+            _conn_last_seen[id(conn)] = now
             return conn
         except (psycopg2.InterfaceError, psycopg2.OperationalError) as e:
             last_err = e
+            _drop_conn_state(conn)
             try:
                 p.putconn(conn, close=True)
             except Exception:
@@ -246,6 +318,11 @@ def _acquire_live_connection(p: pool.ThreadedConnectionPool) -> Any:
             continue
     assert last_err is not None
     raise last_err
+
+
+def _drop_conn_state(conn: Any) -> None:
+    _conn_last_seen.pop(id(conn), None)
+    _conn_initialized.discard(id(conn))
 
 
 @contextmanager
@@ -279,6 +356,10 @@ def get_connection():
     finally:
         if _connection_is_closed(conn):
             broken = True
+        if broken:
+            _drop_conn_state(conn)
+        else:
+            _conn_last_seen[id(conn)] = time.monotonic()
         try:
             # ``close=True`` makes the pool discard the dead connection so the
             # next checkout opens a fresh one instead of replaying the failure.
@@ -327,104 +408,71 @@ def _ensure_minimal_performance_indexes(cur: Any) -> None:
         s = stmt.strip()
         if s:
             cur.execute(s)
-    cur.execute("ANALYZE")
 
 
-def _migrate_payslip_rename_employee_hdmf_to_pag_ibig() -> None:
+def _migrate_payslip_rename_employee_hdmf_to_pag_ibig(cur: Any) -> None:
     """Rename legacy payslip column employee_hdmf -> pag_ibig (once)."""
-    if not use_database():
-        return
-    with get_connection() as conn:
-        with db_cursor(conn) as cur:
-            cur.execute(
-                """
-                DO $$ BEGIN
-                  IF EXISTS (
-                    SELECT 1 FROM information_schema.columns
-                    WHERE table_schema = 'public'
-                      AND table_name = 'payslip'
-                      AND column_name = 'employee_hdmf'
-                  ) AND NOT EXISTS (
-                    SELECT 1 FROM information_schema.columns
-                    WHERE table_schema = 'public'
-                      AND table_name = 'payslip'
-                      AND column_name = 'pag_ibig'
-                  ) THEN
-                    ALTER TABLE payslip RENAME COLUMN employee_hdmf TO pag_ibig;
-                  END IF;
-                END $$;
-                """
-            )
-
-
-def _migrate_payslip_drop_source_filename() -> None:
-    if not use_database():
-        return
-    with get_connection() as conn:
-        with db_cursor(conn) as cur:
-            cur.execute(
-                "ALTER TABLE payslip DROP COLUMN IF EXISTS source_filename"
-            )
-
-
-def _migrate_payslip_thirteenth_month() -> None:
-    """Add 13th month pay column if missing (existing DBs)."""
-    if not use_database():
-        return
-    with get_connection() as conn:
-        with db_cursor(conn) as cur:
-            cur.execute(
-                "ALTER TABLE payslip ADD COLUMN IF NOT EXISTS thirteenth_month DOUBLE PRECISION"
-            )
-
-
-def _migrate_payslip_basic_salary() -> None:
-    """Add basic salary column if missing (existing DBs)."""
-    if not use_database():
-        return
-    with get_connection() as conn:
-        with db_cursor(conn) as cur:
-            cur.execute(
-                "ALTER TABLE payslip ADD COLUMN IF NOT EXISTS basic_salary DOUBLE PRECISION"
-            )
-
-
-def _migrate_payslip_created_at_default() -> None:
-    """Ensure older payslip tables can create rows without explicit timestamps."""
-    if not use_database():
-        return
-    with get_connection() as conn:
-        with db_cursor(conn) as cur:
-            cur.execute(
-                "ALTER TABLE payslip ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ"
-            )
-            cur.execute("UPDATE payslip SET created_at = CURRENT_TIMESTAMP WHERE created_at IS NULL")
-            cur.execute(
-                "ALTER TABLE payslip ALTER COLUMN created_at SET DEFAULT CURRENT_TIMESTAMP"
-            )
-            cur.execute("ALTER TABLE payslip ALTER COLUMN created_at SET NOT NULL")
-
-
-def _migrate_payslip_deduction_columns() -> None:
-    """Add withholding / statutory deduction columns if missing (existing DBs)."""
-    if not use_database():
-        return
-    new_cols: tuple[tuple[str, str], ...] = (
-        ("withholding_tax", "REAL"),
-        ("sss_contribution", "REAL"),
-        ("philhealth", "REAL"),
-        ("pag_ibig", "REAL"),
+    cur.execute(
+        """
+        DO $$ BEGIN
+          IF EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = 'payslip'
+              AND column_name = 'employee_hdmf'
+          ) AND NOT EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = 'payslip'
+              AND column_name = 'pag_ibig'
+          ) THEN
+            ALTER TABLE payslip RENAME COLUMN employee_hdmf TO pag_ibig;
+          END IF;
+        END $$;
+        """
     )
-    with get_connection() as conn:
-        with db_cursor(conn) as cur:
-            for name, typ in new_cols:
-                cur.execute(
-                    f"ALTER TABLE payslip ADD COLUMN IF NOT EXISTS {name} {typ.replace('REAL', 'DOUBLE PRECISION')}"
-                )
 
 
-def _init_schema_minimal() -> None:
-    stmts = [
+def _migrate_payslip_drop_source_filename(cur: Any) -> None:
+    cur.execute("ALTER TABLE payslip DROP COLUMN IF EXISTS source_filename")
+
+
+def _migrate_payslip_thirteenth_month(cur: Any) -> None:
+    """Add 13th month pay column if missing (existing DBs)."""
+    cur.execute(
+        "ALTER TABLE payslip ADD COLUMN IF NOT EXISTS thirteenth_month DOUBLE PRECISION"
+    )
+
+
+def _migrate_payslip_basic_salary(cur: Any) -> None:
+    """Add basic salary column if missing (existing DBs)."""
+    cur.execute(
+        "ALTER TABLE payslip ADD COLUMN IF NOT EXISTS basic_salary DOUBLE PRECISION"
+    )
+
+
+def _migrate_payslip_created_at_default(cur: Any) -> None:
+    """Ensure older payslip tables can create rows without explicit timestamps."""
+    cur.execute("ALTER TABLE payslip ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ")
+    cur.execute(
+        "UPDATE payslip SET created_at = CURRENT_TIMESTAMP WHERE created_at IS NULL"
+    )
+    cur.execute(
+        "ALTER TABLE payslip ALTER COLUMN created_at SET DEFAULT CURRENT_TIMESTAMP"
+    )
+    cur.execute("ALTER TABLE payslip ALTER COLUMN created_at SET NOT NULL")
+
+
+def _migrate_payslip_deduction_columns(cur: Any) -> None:
+    """Add withholding / statutory deduction columns if missing (existing DBs)."""
+    for name in ("withholding_tax", "sss_contribution", "philhealth", "pag_ibig"):
+        cur.execute(
+            f"ALTER TABLE payslip ADD COLUMN IF NOT EXISTS {name} DOUBLE PRECISION"
+        )
+
+
+def _init_schema_minimal_stmts() -> list[str]:
+    return [
         """
         CREATE SCHEMA IF NOT EXISTS public
         """,
@@ -520,81 +568,256 @@ def _init_schema_minimal() -> None:
             ON house_payment_entry (house_payment_id, paid_on DESC)
         """,
     ]
-    with get_connection() as conn:
-        with db_cursor(conn) as cur:
-            for s in stmts:
-                cur.execute(s.strip())
-            _backfill_installment_lines_if_empty(cur)
-            _ensure_minimal_performance_indexes(cur)
 
 
-def _migrate_installment_original_total_from_principal() -> None:
+def _migrate_installment_original_total_from_principal(cur: Any) -> None:
     """Keep installment.original_total equal to sum(principal) on schedule lines (not payment_total)."""
-    if not use_database():
-        return
-    with get_connection() as conn:
-        with db_cursor(conn) as cur:
-            cur.execute(
-                """
-                UPDATE installment i
-                SET original_total = s.sum_p
-                FROM (
-                    SELECT installment_id, COALESCE(SUM(principal), 0) AS sum_p
-                    FROM installment_line
-                    GROUP BY installment_id
-                ) AS s
-                WHERE i.id = s.installment_id
-                """
-            )
+    cur.execute(
+        """
+        UPDATE installment i
+        SET original_total = s.sum_p
+        FROM (
+            SELECT installment_id, COALESCE(SUM(principal), 0) AS sum_p
+            FROM installment_line
+            GROUP BY installment_id
+        ) AS s
+        WHERE i.id = s.installment_id
+        """
+    )
 
 
-def _migrate_house_payment_simplify() -> None:
+def _migrate_installment_repair_constraints(cur: Any) -> None:
+    """
+    Add the primary key, unique, and foreign-key constraints that
+    ``_init_schema_minimal_stmts`` would have set on a fresh DB but that
+    were missing on databases created by earlier versions (where
+    ``CREATE TABLE IF NOT EXISTS`` saw an existing table and skipped the
+    full DDL). Idempotent — each constraint is added only when not already
+    present.
+
+    ``installment_line`` is the only table where the missing
+    ``UNIQUE (installment_id, seq)`` constraint is load-bearing for our
+    own helpers (``_resync_installment_lines_on_total_change`` uses
+    ``ON CONFLICT (installment_id, seq)``).
+    """
+    cur.execute(
+        """
+        DO $$ BEGIN
+          IF NOT EXISTS (
+            SELECT 1 FROM pg_constraint
+            WHERE conrelid = 'installment'::regclass AND contype = 'p'
+          ) AND NOT EXISTS (
+            SELECT id FROM installment GROUP BY id HAVING COUNT(*) > 1 LIMIT 1
+          ) THEN
+            ALTER TABLE installment ADD PRIMARY KEY (id);
+          END IF;
+        END $$;
+        """
+    )
+    cur.execute(
+        """
+        DO $$ BEGIN
+          IF NOT EXISTS (
+            SELECT 1 FROM pg_constraint
+            WHERE conrelid = 'installment_line'::regclass AND contype = 'p'
+          ) AND NOT EXISTS (
+            SELECT id FROM installment_line GROUP BY id HAVING COUNT(*) > 1 LIMIT 1
+          ) THEN
+            ALTER TABLE installment_line ADD PRIMARY KEY (id);
+          END IF;
+        END $$;
+        """
+    )
+    cur.execute(
+        """
+        DO $$ BEGIN
+          IF NOT EXISTS (
+            SELECT 1 FROM pg_constraint
+            WHERE conrelid = 'installment_line'::regclass
+              AND contype = 'u'
+              AND conkey = (
+                SELECT array_agg(attnum ORDER BY attnum)
+                FROM pg_attribute
+                WHERE attrelid = 'installment_line'::regclass
+                  AND attname IN ('installment_id', 'seq')
+              )
+          ) AND NOT EXISTS (
+            SELECT installment_id, seq FROM installment_line
+            GROUP BY installment_id, seq HAVING COUNT(*) > 1 LIMIT 1
+          ) THEN
+            ALTER TABLE installment_line
+              ADD CONSTRAINT installment_line_installment_id_seq_key
+              UNIQUE (installment_id, seq);
+          END IF;
+        END $$;
+        """
+    )
+    cur.execute(
+        """
+        DO $$ BEGIN
+          IF NOT EXISTS (
+            SELECT 1 FROM pg_constraint
+            WHERE conrelid = 'installment_line'::regclass AND contype = 'f'
+          ) AND EXISTS (
+            SELECT 1 FROM pg_constraint
+            WHERE conrelid = 'installment'::regclass AND contype = 'p'
+          ) AND NOT EXISTS (
+            SELECT 1 FROM installment_line il
+            LEFT JOIN installment i ON i.id = il.installment_id
+            WHERE i.id IS NULL
+            LIMIT 1
+          ) THEN
+            ALTER TABLE installment_line
+              ADD CONSTRAINT installment_line_installment_id_fkey
+              FOREIGN KEY (installment_id) REFERENCES installment(id) ON DELETE CASCADE;
+          END IF;
+        END $$;
+        """
+    )
+    # Resync SERIAL sequences past existing max(id) so future inserts don't
+    # immediately violate the new primary keys. Safe to run unconditionally —
+    # ``setval`` accepts the new last-used value and ``nextval`` after this
+    # returns ``max+1``.
+    cur.execute(
+        """
+        SELECT setval(
+            pg_get_serial_sequence('installment', 'id'),
+            GREATEST(1, COALESCE((SELECT MAX(id) FROM installment), 1))
+        )
+        """
+    )
+    cur.execute(
+        """
+        SELECT setval(
+            pg_get_serial_sequence('installment_line', 'id'),
+            GREATEST(1, COALESCE((SELECT MAX(id) FROM installment_line), 1))
+        )
+        """
+    )
+
+
+def _migrate_aux_created_at_defaults(cur: Any) -> None:
+    """
+    Ensure non-payslip tables created before ``created_at`` had a default
+    can still accept inserts that don't supply a timestamp. Idempotent —
+    re-applying the default / NOT NULL on a column that already has them
+    is a no-op.
+    """
+    for tbl in ("installment", "house_payment", "house_payment_entry"):
+        cur.execute(
+            f"UPDATE {tbl} SET created_at = (NOW() AT TIME ZONE 'UTC') WHERE created_at IS NULL"
+        )
+        cur.execute(
+            f"ALTER TABLE {tbl} ALTER COLUMN created_at SET DEFAULT (NOW() AT TIME ZONE 'UTC')"
+        )
+        cur.execute(
+            f"ALTER TABLE {tbl} ALTER COLUMN created_at SET NOT NULL"
+        )
+
+
+def _migrate_house_payment_simplify(cur: Any) -> None:
     """
     Simplified house-payment model: only ``name`` + ``notes`` on the plan, with
     individual payments stored in ``house_payment_entry`` (date + amount).
     Drops the prior installment-style columns and the legacy ``house_payment_line``
     table.
     """
+    cur.execute("DROP TABLE IF EXISTS house_payment_line CASCADE")
+    cur.execute(
+        "ALTER TABLE house_payment DROP CONSTRAINT IF EXISTS chk_house_payment_n"
+    )
+    cur.execute(
+        "ALTER TABLE house_payment DROP CONSTRAINT IF EXISTS chk_house_payment_amounts"
+    )
+    for col in (
+        "installment_current",
+        "installment_total",
+        "principal",
+        "interest",
+        "payment_total",
+        "start_date",
+        "finish_date",
+        "remaining",
+        "original_total",
+        "down_payment",
+    ):
+        cur.execute(f"ALTER TABLE house_payment DROP COLUMN IF EXISTS {col}")
+
+
+# Bump this whenever the DDL or migrations below change. ``init_schema()``
+# uses it to skip the entire migration block on warm starts (very common
+# on Neon, where containers cold-start often).
+_SCHEMA_VERSION = 4
+
+
+def init_schema() -> None:
+    """
+    Ensure the database matches the expected schema. On warm starts (when
+    ``_app_meta.schema_version`` already equals ``_SCHEMA_VERSION``), this is
+    a single ``SELECT`` round-trip and returns immediately. On a fresh DB or
+    after ``_SCHEMA_VERSION`` bumps, it runs the minimal DDL plus all
+    migrations in a single transaction and stamps the new version.
+    """
     if not use_database():
         return
     with get_connection() as conn:
         with db_cursor(conn) as cur:
-            cur.execute("DROP TABLE IF EXISTS house_payment_line CASCADE")
             cur.execute(
-                "ALTER TABLE house_payment DROP CONSTRAINT IF EXISTS chk_house_payment_n"
-            )
-            cur.execute(
-                "ALTER TABLE house_payment DROP CONSTRAINT IF EXISTS chk_house_payment_amounts"
-            )
-            for col in (
-                "installment_current",
-                "installment_total",
-                "principal",
-                "interest",
-                "payment_total",
-                "start_date",
-                "finish_date",
-                "remaining",
-                "original_total",
-                "down_payment",
-            ):
-                cur.execute(
-                    f"ALTER TABLE house_payment DROP COLUMN IF EXISTS {col}"
+                """
+                CREATE TABLE IF NOT EXISTS _app_meta (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL
                 )
+                """
+            )
+            cur.execute(
+                "SELECT value FROM _app_meta WHERE key = 'schema_version'"
+            )
+            row = cur.fetchone()
+            current = 0
+            if row:
+                try:
+                    current = int(row[0])
+                except (TypeError, ValueError):
+                    current = 0
+            if current >= _SCHEMA_VERSION:
+                return
+            for stmt in _init_schema_minimal_stmts():
+                cur.execute(stmt.strip())
+            _backfill_installment_lines_if_empty(cur)
+            _ensure_minimal_performance_indexes(cur)
+            _migrate_payslip_drop_source_filename(cur)
+            _migrate_payslip_rename_employee_hdmf_to_pag_ibig(cur)
+            _migrate_payslip_deduction_columns(cur)
+            _migrate_payslip_thirteenth_month(cur)
+            _migrate_payslip_basic_salary(cur)
+            _migrate_payslip_created_at_default(cur)
+            _migrate_installment_original_total_from_principal(cur)
+            _migrate_house_payment_simplify(cur)
+            _migrate_aux_created_at_defaults(cur)
+            _migrate_installment_repair_constraints(cur)
+            cur.execute(
+                """
+                INSERT INTO _app_meta (key, value)
+                VALUES ('schema_version', ?)
+                ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+                """,
+                (str(_SCHEMA_VERSION),),
+            )
 
 
-def init_schema() -> None:
-    if not use_database():
-        return
-    _init_schema_minimal()
-    _migrate_payslip_drop_source_filename()
-    _migrate_payslip_rename_employee_hdmf_to_pag_ibig()
-    _migrate_payslip_deduction_columns()
-    _migrate_payslip_thirteenth_month()
-    _migrate_payslip_basic_salary()
-    _migrate_payslip_created_at_default()
-    _migrate_installment_original_total_from_principal()
-    _migrate_house_payment_simplify()
+_PAYSLIP_RETURN_COLS = """
+    id, total, commission, reimbursement,
+    medical_reimbursement, others, mp2, allowances,
+    thirteenth_month, basic_salary,
+    period_year, period_month, period_half, notes,
+    withholding_tax, sss_contribution, philhealth, pag_ibig,
+    created_at
+"""
+
+
+def _row_to_dict(cur: Any, row: Any) -> dict[str, Any]:
+    return dict(zip([d[0] for d in cur.description], row))
 
 
 def insert_payslip(
@@ -615,11 +838,12 @@ def insert_payslip(
     sss_contribution: float | None = None,
     philhealth: float | None = None,
     pag_ibig: float | None = None,
-) -> int:
+) -> dict[str, Any]:
+    """Insert and return the full row (single round trip thanks to ``RETURNING``)."""
     with get_connection() as conn:
         with db_cursor(conn) as cur:
             cur.execute(
-                """
+                f"""
                 INSERT INTO payslip (
                     total, commission, reimbursement,
                     medical_reimbursement, others, mp2, allowances,
@@ -627,7 +851,7 @@ def insert_payslip(
                     period_year, period_month, period_half, notes,
                     withholding_tax, sss_contribution, philhealth, pag_ibig
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                RETURNING id
+                RETURNING {_PAYSLIP_RETURN_COLS}
                 """,
                 (
                     total,
@@ -649,8 +873,7 @@ def insert_payslip(
                     pag_ibig,
                 ),
             )
-            row = cur.fetchone()
-            return int(row[0])
+            return _row_to_dict(cur, cur.fetchone())
 
 
 def list_payslips(limit: int = 200) -> list[dict[str, Any]]:
@@ -658,13 +881,8 @@ def list_payslips(limit: int = 200) -> list[dict[str, Any]]:
     with get_connection() as conn:
         with db_cursor(conn) as cur:
             cur.execute(
-                """
-                SELECT id, total, commission, reimbursement,
-                       medical_reimbursement, others, mp2, allowances,
-                       thirteenth_month, basic_salary,
-                       period_year, period_month, period_half, notes,
-                       withholding_tax, sss_contribution, philhealth, pag_ibig,
-                       created_at
+                f"""
+                SELECT {_PAYSLIP_RETURN_COLS}
                 FROM payslip
                 ORDER BY period_year DESC NULLS LAST,
                          period_month DESC NULLS LAST,
@@ -675,33 +893,18 @@ def list_payslips(limit: int = 200) -> list[dict[str, Any]]:
                 (limit,),
             )
             cols = [d[0] for d in cur.description]
-            out: list[dict[str, Any]] = []
-            for r in cur.fetchall():
-                out.append(dict(zip(cols, r)))
-            return out
+            return [dict(zip(cols, r)) for r in cur.fetchall()]
 
 
 def get_payslip(payslip_id: int) -> dict[str, Any] | None:
     with get_connection() as conn:
         with db_cursor(conn) as cur:
             cur.execute(
-                """
-                SELECT id, total, commission, reimbursement,
-                       medical_reimbursement, others, mp2, allowances,
-                       thirteenth_month, basic_salary,
-                       period_year, period_month, period_half, notes,
-                       withholding_tax, sss_contribution, philhealth, pag_ibig,
-                       created_at
-                FROM payslip
-                WHERE id = ?
-                """,
+                f"SELECT {_PAYSLIP_RETURN_COLS} FROM payslip WHERE id = ?",
                 (payslip_id,),
             )
             row = cur.fetchone()
-            if not row:
-                return None
-            cols = [d[0] for d in cur.description]
-            return dict(zip(cols, row))
+            return _row_to_dict(cur, row) if row else None
 
 
 def update_payslip(
@@ -723,11 +926,12 @@ def update_payslip(
     sss_contribution: float | None = None,
     philhealth: float | None = None,
     pag_ibig: float | None = None,
-) -> bool:
+) -> dict[str, Any] | None:
+    """Update and return the full row, or ``None`` if no row matched."""
     with get_connection() as conn:
         with db_cursor(conn) as cur:
             cur.execute(
-                """
+                f"""
                 UPDATE payslip SET
                     total = ?,
                     commission = ?,
@@ -747,6 +951,7 @@ def update_payslip(
                     philhealth = ?,
                     pag_ibig = ?
                 WHERE id = ?
+                RETURNING {_PAYSLIP_RETURN_COLS}
                 """,
                 (
                     total,
@@ -769,7 +974,8 @@ def update_payslip(
                     payslip_id,
                 ),
             )
-            return cur.rowcount > 0
+            row = cur.fetchone()
+            return _row_to_dict(cur, row) if row else None
 
 
 def delete_payslip(payslip_id: int) -> bool:
@@ -805,20 +1011,24 @@ def list_installments(limit: int = 500) -> list[dict[str, Any]]:
 
 
 def _installment_row_dict(cur: Any, installment_id: int) -> dict[str, Any] | None:
+    """Read one installment header row including the joined ``due_payment`` field."""
     cur.execute(
         """
-        SELECT id, name, installment_current, installment_total,
-               principal, interest, payment_total, start_date, finish_date,
-               remaining, original_total, created_at
-        FROM installment WHERE id = ?
+        SELECT i.id, i.name, i.installment_current, i.installment_total,
+               i.principal, i.interest, i.payment_total, i.start_date, i.finish_date,
+               i.remaining, i.original_total, i.created_at,
+               COALESCE(il.payment_total, i.payment_total) AS due_payment
+        FROM installment i
+        LEFT JOIN installment_line il
+            ON il.installment_id = i.id AND il.seq = i.installment_current
+        WHERE i.id = ?
         """,
         (installment_id,),
     )
     row = cur.fetchone()
     if not row:
         return None
-    cols = [d[0] for d in cur.description]
-    return dict(zip(cols, row))
+    return _row_to_dict(cur, row)
 
 
 def _installment_lines_rows(cur: Any, installment_id: int) -> list[dict[str, Any]]:
@@ -832,10 +1042,48 @@ def _installment_lines_rows(cur: Any, installment_id: int) -> list[dict[str, Any
         (installment_id,),
     )
     cols = [d[0] for d in cur.description]
-    out: list[dict[str, Any]] = []
-    for r in cur.fetchall():
-        out.append(dict(zip(cols, r)))
-    return out
+    return [dict(zip(cols, r)) for r in cur.fetchall()]
+
+
+def _installment_detail(cur: Any, installment_id: int) -> dict[str, Any] | None:
+    """Header + lines in a single round trip via ``json_agg``."""
+    cur.execute(
+        """
+        SELECT
+            to_jsonb(hdr) AS installment,
+            COALESCE(
+                (SELECT jsonb_agg(
+                            jsonb_build_object(
+                                'id', l.id,
+                                'seq', l.seq,
+                                'principal', l.principal,
+                                'interest', l.interest,
+                                'payment_total', l.payment_total
+                            )
+                            ORDER BY l.seq ASC
+                        )
+                   FROM installment_line l
+                   WHERE l.installment_id = hdr.id),
+                '[]'::jsonb
+            ) AS lines
+        FROM (
+            SELECT i.id, i.name, i.installment_current, i.installment_total,
+                   i.principal, i.interest, i.payment_total,
+                   i.start_date, i.finish_date,
+                   i.remaining, i.original_total, i.created_at,
+                   COALESCE(il.payment_total, i.payment_total) AS due_payment
+            FROM installment i
+            LEFT JOIN installment_line il
+                ON il.installment_id = i.id AND il.seq = i.installment_current
+            WHERE i.id = ?
+        ) AS hdr
+        """,
+        (installment_id,),
+    )
+    row = cur.fetchone()
+    if not row:
+        return None
+    return {"installment": row[0], "lines": list(row[1] or [])}
 
 
 def get_installment(installment_id: int) -> dict[str, Any] | None:
@@ -847,14 +1095,10 @@ def get_installment(installment_id: int) -> dict[str, Any] | None:
 def fetch_installment_with_lines(
     installment_id: int,
 ) -> dict[str, Any] | None:
-    """Single transaction: installment row + schedule lines (halves round trips vs two calls)."""
+    """Single transaction: installment row + schedule lines."""
     with get_connection() as conn:
         with db_cursor(conn) as cur:
-            inst = _installment_row_dict(cur, installment_id)
-            if not inst:
-                return None
-            lines = _installment_lines_rows(cur, installment_id)
-            return {"installment": inst, "lines": lines}
+            return _installment_detail(cur, installment_id)
 
 
 def insert_installment(
@@ -868,7 +1112,8 @@ def insert_installment(
     finish_date: Any,
     remaining: float,
     original_total: float,
-) -> int:
+) -> dict[str, Any]:
+    """Insert + seed lines + return ``{installment, lines}`` (skips a follow-up GET)."""
     with get_connection() as conn:
         with db_cursor(conn) as cur:
             cur.execute(
@@ -893,11 +1138,12 @@ def insert_installment(
                     original_total,
                 ),
             )
-            row = cur.fetchone()
-            iid = int(row[0])
+            iid = int(cur.fetchone()[0])
             _seed_installment_lines(cur, iid, installment_total, principal, interest)
             _recompute_installment_aggregates(cur, iid)
-            return iid
+            detail = _installment_detail(cur, iid)
+            assert detail is not None
+            return detail
 
 
 def _line_payment_total(principal: float, interest: float | None) -> float:
@@ -911,15 +1157,19 @@ def _seed_installment_lines(
     principal: float,
     interest: float | None,
 ) -> None:
+    """Insert seq 1..N as a single statement using ``generate_series``."""
+    n = int(installment_total)
+    if n <= 0:
+        return
     ptot = _line_payment_total(principal, interest)
-    for seq in range(1, int(installment_total) + 1):
-        cur.execute(
-            """
-            INSERT INTO installment_line (installment_id, seq, principal, interest, payment_total)
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            (installment_id, seq, principal, interest, ptot),
-        )
+    cur.execute(
+        """
+        INSERT INTO installment_line (installment_id, seq, principal, interest, payment_total)
+        SELECT ?, gs, ?, ?, ?
+        FROM generate_series(1, ?) AS gs
+        """,
+        (installment_id, principal, interest, ptot, n),
+    )
 
 
 def list_installment_lines(installment_id: int) -> list[dict[str, Any]]:
@@ -929,41 +1179,36 @@ def list_installment_lines(installment_id: int) -> list[dict[str, Any]]:
 
 
 def _recompute_installment_aggregates(cur: Any, installment_id: int) -> None:
+    """
+    Recompute ``original_total`` / ``remaining`` and (if a line exists at
+    ``installment_current``) the cached ``principal`` / ``interest`` /
+    ``payment_total`` columns. Single SELECT pulls everything we need; a
+    single UPDATE applies it.
+    """
     cur.execute(
-        "SELECT installment_current FROM installment WHERE id = ?",
+        """
+        SELECT
+            (SELECT COALESCE(SUM(principal), 0)
+               FROM installment_line WHERE installment_id = i.id)             AS sum_p,
+            (SELECT COALESCE(SUM(payment_total), 0)
+               FROM installment_line
+               WHERE installment_id = i.id AND seq >= i.installment_current)  AS sum_pt_rem,
+            cl.principal,
+            cl.interest,
+            cl.payment_total,
+            (cl.installment_id IS NOT NULL)                                   AS has_current_line
+        FROM installment i
+        LEFT JOIN installment_line cl
+            ON cl.installment_id = i.id AND cl.seq = i.installment_current
+        WHERE i.id = ?
+        """,
         (installment_id,),
     )
     row = cur.fetchone()
     if not row:
         return
-    current = int(row[0])
-    cur.execute(
-        """
-        SELECT COALESCE(SUM(principal), 0)
-        FROM installment_line WHERE installment_id = ?
-        """,
-        (installment_id,),
-    )
-    orig = float(cur.fetchone()[0])
-    cur.execute(
-        """
-        SELECT COALESCE(SUM(payment_total), 0)
-        FROM installment_line
-        WHERE installment_id = ? AND seq >= ?
-        """,
-        (installment_id, current),
-    )
-    rem = float(cur.fetchone()[0])
-    cur.execute(
-        """
-        SELECT principal, interest, payment_total FROM installment_line
-        WHERE installment_id = ? AND seq = ?
-        """,
-        (installment_id, current),
-    )
-    ln = cur.fetchone()
-    if ln:
-        p, i, pt = ln[0], ln[1], float(ln[2])
+    sum_p, sum_pt_rem, cl_p, cl_i, cl_pt, has_line = row
+    if has_line:
         cur.execute(
             """
             UPDATE installment SET
@@ -974,7 +1219,14 @@ def _recompute_installment_aggregates(cur: Any, installment_id: int) -> None:
                 payment_total = ?
             WHERE id = ?
             """,
-            (orig, rem, p, i, pt, installment_id),
+            (
+                float(sum_p),
+                float(sum_pt_rem),
+                cl_p,
+                cl_i,
+                float(cl_pt),
+                installment_id,
+            ),
         )
     else:
         cur.execute(
@@ -982,7 +1234,7 @@ def _recompute_installment_aggregates(cur: Any, installment_id: int) -> None:
             UPDATE installment SET original_total = ?, remaining = ?
             WHERE id = ?
             """,
-            (orig, rem, installment_id),
+            (float(sum_p), float(sum_pt_rem), installment_id),
         )
 
 
@@ -1017,10 +1269,7 @@ def update_installment_line_and_fetch_detail(
     principal: float,
     interest: float | None,
 ) -> dict[str, Any] | None:
-    """
-    UPDATE line, recompute aggregates, return installment + lines in one transaction.
-    Returns None if the schedule row did not exist (rowcount 0).
-    """
+    """UPDATE line, recompute aggregates, return ``{installment, lines}``."""
     ptot = _line_payment_total(principal, interest)
     with get_connection() as conn:
         with db_cursor(conn) as cur:
@@ -1037,11 +1286,7 @@ def update_installment_line_and_fetch_detail(
             if cur.rowcount == 0:
                 return None
             _recompute_installment_aggregates(cur, installment_id)
-            inst = _installment_row_dict(cur, installment_id)
-            if not inst:
-                return None
-            lines = _installment_lines_rows(cur, installment_id)
-            return {"installment": inst, "lines": lines}
+            return _installment_detail(cur, installment_id)
 
 
 def reorder_installment_lines(
@@ -1069,24 +1314,34 @@ def reorder_installment_lines(
                 return None
             if set(ordered_line_ids) != set(existing_ids):
                 return None
+            # First, push every seq into a non-overlapping range so the second
+            # UPDATE can renumber freely without violating the
+            # ``UNIQUE (installment_id, seq)`` constraint mid-statement. Then
+            # apply the new ordering in a single statement using a VALUES
+            # join.
             cur.execute(
                 "UPDATE installment_line SET seq = id + 1000000 WHERE installment_id = ?",
                 (installment_id,),
             )
+            values_sql = ",".join(
+                ["(?::integer, ?::integer)"] * len(ordered_line_ids)
+            )
+            params: list[Any] = []
             for i, lid in enumerate(ordered_line_ids):
-                cur.execute(
-                    """
-                    UPDATE installment_line SET seq = ?
-                    WHERE installment_id = ? AND id = ?
-                    """,
-                    (i + 1, installment_id, lid),
-                )
+                params.append(int(lid))
+                params.append(i + 1)
+            params.append(installment_id)
+            cur.execute(
+                f"""
+                UPDATE installment_line AS il
+                SET seq = data.new_seq
+                FROM (VALUES {values_sql}) AS data(id, new_seq)
+                WHERE il.installment_id = ? AND il.id = data.id
+                """,
+                params,
+            )
             _recompute_installment_aggregates(cur, installment_id)
-            inst = _installment_row_dict(cur, installment_id)
-            if not inst:
-                return None
-            lines = _installment_lines_rows(cur, installment_id)
-            return {"installment": inst, "lines": lines}
+            return _installment_detail(cur, installment_id)
 
 
 def _resync_installment_lines_on_total_change(
@@ -1096,30 +1351,31 @@ def _resync_installment_lines_on_total_change(
     principal: float,
     interest: float | None,
 ) -> None:
+    """
+    Truncate the schedule to ``new_total`` rows and (re)apply the per-line
+    amounts. Two statements: a DELETE for any rows past the new tail, plus
+    an UPSERT that creates or updates seq 1..new_total in one shot.
+    """
+    n = int(new_total)
     ptot = _line_payment_total(principal, interest)
     cur.execute(
         "DELETE FROM installment_line WHERE installment_id = ? AND seq > ?",
-        (installment_id, new_total),
+        (installment_id, n),
     )
-    for seq in range(1, int(new_total) + 1):
-        cur.execute(
-            """
-            UPDATE installment_line SET
-                principal = ?,
-                interest = ?,
-                payment_total = ?
-            WHERE installment_id = ? AND seq = ?
-            """,
-            (principal, interest, ptot, installment_id, seq),
-        )
-        if cur.rowcount == 0:
-            cur.execute(
-                """
-                INSERT INTO installment_line (installment_id, seq, principal, interest, payment_total)
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                (installment_id, seq, principal, interest, ptot),
-            )
+    if n <= 0:
+        return
+    cur.execute(
+        """
+        INSERT INTO installment_line (installment_id, seq, principal, interest, payment_total)
+        SELECT ?, gs, ?, ?, ?
+        FROM generate_series(1, ?) AS gs
+        ON CONFLICT (installment_id, seq) DO UPDATE SET
+            principal = EXCLUDED.principal,
+            interest = EXCLUDED.interest,
+            payment_total = EXCLUDED.payment_total
+        """,
+        (installment_id, principal, interest, ptot, n),
+    )
 
 
 def update_installment(
@@ -1134,18 +1390,19 @@ def update_installment(
     finish_date: Any,
     remaining: float,
     original_total: float,
-) -> bool:
+) -> dict[str, Any] | None:
+    """Update + (re)seed lines if total changed + return ``{installment, lines}`` (or ``None``)."""
     with get_connection() as conn:
         with db_cursor(conn) as cur:
             cur.execute(
-                "SELECT installment_total FROM installment WHERE id = ?",
-                (installment_id,),
-            )
-            old = cur.fetchone()
-            old_total = int(old[0]) if old else 0
-            cur.execute(
                 """
-                UPDATE installment SET
+                WITH old AS (
+                    SELECT installment_total AS old_total,
+                           (SELECT COUNT(*) FROM installment_line
+                              WHERE installment_id = installment.id) AS line_count
+                    FROM installment WHERE id = ?
+                )
+                UPDATE installment AS i SET
                     name = ?,
                     installment_current = ?,
                     installment_total = ?,
@@ -1156,9 +1413,12 @@ def update_installment(
                     finish_date = ?,
                     remaining = ?,
                     original_total = ?
-                WHERE id = ?
+                FROM old
+                WHERE i.id = ?
+                RETURNING old.old_total, old.line_count
                 """,
                 (
+                    installment_id,
                     name,
                     installment_current,
                     installment_total,
@@ -1172,20 +1432,18 @@ def update_installment(
                     installment_id,
                 ),
             )
-            if cur.rowcount == 0:
-                return False
-            cur.execute(
-                "SELECT COUNT(*) FROM installment_line WHERE installment_id = ?",
-                (installment_id,),
-            )
-            has_lines = int(cur.fetchone()[0]) > 0
+            row = cur.fetchone()
+            if not row:
+                return None
+            old_total, line_count = int(row[0] or 0), int(row[1] or 0)
+            has_lines = line_count > 0
             if has_lines and old_total != int(installment_total):
                 _resync_installment_lines_on_total_change(
                     cur, installment_id, installment_total, principal, interest
                 )
             if has_lines:
                 _recompute_installment_aggregates(cur, installment_id)
-            return True
+            return _installment_detail(cur, installment_id)
 
 
 def delete_installment(installment_id: int) -> bool:
@@ -1196,70 +1454,77 @@ def delete_installment(installment_id: int) -> bool:
 
 
 def installment_apply_payment(installment_id: int) -> dict[str, Any] | None:
+    """Advance ``installment_current`` by one and return the refreshed header row.
+
+    Combines the read + line-count + update into a single CTE round trip so
+    the only follow-up is the recompute / fallback ``UPDATE remaining``.
+    """
     with get_connection() as conn:
         with db_cursor(conn) as cur:
             cur.execute(
                 """
-                SELECT id, installment_current, installment_total, payment_total, remaining
-                FROM installment WHERE id = ?
+                WITH src AS (
+                    SELECT id, installment_current, installment_total,
+                           payment_total, remaining,
+                           (SELECT COUNT(*) FROM installment_line il
+                              WHERE il.installment_id = installment.id) AS line_count
+                    FROM installment WHERE id = ?
+                ),
+                upd AS (
+                    UPDATE installment AS i
+                    SET installment_current = i.installment_current + 1
+                    FROM src
+                    WHERE i.id = src.id
+                      AND src.installment_current <= src.installment_total
+                      AND src.remaining > 0
+                    RETURNING src.line_count, src.remaining, src.payment_total
+                )
+                SELECT line_count, remaining, payment_total FROM upd
                 """,
                 (installment_id,),
             )
             row = cur.fetchone()
             if not row:
                 return None
-            _id, cur_n, total_n, pay, rem = row
-            if cur_n > total_n or rem <= 0:
-                return None
-            new_cur = int(cur_n) + 1
-            cur.execute(
-                "SELECT COUNT(*) FROM installment_line WHERE installment_id = ?",
-                (installment_id,),
-            )
-            has_lines = int(cur.fetchone()[0]) > 0
-            cur.execute(
-                """
-                UPDATE installment SET installment_current = ? WHERE id = ?
-                """,
-                (new_cur, installment_id),
-            )
-            if has_lines:
+            line_count, rem, pay = int(row[0] or 0), float(row[1] or 0), float(row[2] or 0)
+            if line_count > 0:
                 _recompute_installment_aggregates(cur, installment_id)
             else:
-                new_rem = max(0.0, float(rem) - float(pay))
+                new_rem = max(0.0, rem - pay)
                 cur.execute(
                     "UPDATE installment SET remaining = ? WHERE id = ?",
                     (new_rem, installment_id),
                 )
-            cur.execute(
-                """
-                SELECT id, name, installment_current, installment_total,
-                       principal, interest, payment_total, start_date, finish_date,
-                       remaining, original_total, created_at
-                FROM installment WHERE id = ?
-                """,
-                (installment_id,),
-            )
-            r2 = cur.fetchone()
-            cols = [d[0] for d in cur.description]
-            return dict(zip(cols, r2))
+            return _installment_row_dict(cur, installment_id)
+
+
+_HOUSE_PAYMENT_SELECT = """
+    SELECT h.id, h.name, h.notes, h.created_at,
+           COALESCE(e.entry_count, 0) AS entry_count,
+           COALESCE(e.total_paid, 0) AS total_paid,
+           e.last_paid_on
+    FROM house_payment h
+    LEFT JOIN (
+        SELECT house_payment_id,
+               COUNT(*) AS entry_count,
+               COALESCE(SUM(amount), 0) AS total_paid,
+               MAX(paid_on) AS last_paid_on
+        FROM house_payment_entry
+        GROUP BY house_payment_id
+    ) AS e ON e.house_payment_id = h.id
+"""
 
 
 def _house_payment_row_dict(
     cur: Any, house_payment_id: int
 ) -> dict[str, Any] | None:
+    """Read one plan including its joined ``entry_count``/``total_paid``/``last_paid_on``."""
     cur.execute(
-        """
-        SELECT id, name, notes, created_at
-        FROM house_payment WHERE id = ?
-        """,
+        f"{_HOUSE_PAYMENT_SELECT} WHERE h.id = ?",
         (house_payment_id,),
     )
     row = cur.fetchone()
-    if not row:
-        return None
-    cols = [d[0] for d in cur.description]
-    return dict(zip(cols, row))
+    return _row_to_dict(cur, row) if row else None
 
 
 def _house_payment_entries_rows(
@@ -1275,26 +1540,55 @@ def _house_payment_entries_rows(
         (house_payment_id,),
     )
     cols = [d[0] for d in cur.description]
-    out: list[dict[str, Any]] = []
-    for r in cur.fetchall():
-        out.append(dict(zip(cols, r)))
-    return out
+    return [dict(zip(cols, r)) for r in cur.fetchall()]
 
 
-def _house_payment_entries_aggregate(
+def _house_payment_detail(
     cur: Any, house_payment_id: int
-) -> tuple[int, float, Any]:
+) -> dict[str, Any] | None:
+    """Plan header (with aggregates) + entries in a single round trip."""
     cur.execute(
         """
-        SELECT COUNT(*), COALESCE(SUM(amount), 0), MAX(paid_on)
-        FROM house_payment_entry WHERE house_payment_id = ?
+        SELECT
+            to_jsonb(hdr) AS house_payment,
+            COALESCE(
+                (SELECT jsonb_agg(
+                            jsonb_build_object(
+                                'id', e.id,
+                                'paid_on', e.paid_on,
+                                'amount', e.amount,
+                                'created_at', e.created_at
+                            )
+                            ORDER BY e.paid_on DESC, e.id DESC
+                        )
+                   FROM house_payment_entry e
+                   WHERE e.house_payment_id = hdr.id),
+                '[]'::jsonb
+            ) AS entries
+        FROM (
+            SELECT h.id, h.name, h.notes, h.created_at,
+                   COALESCE(agg.entry_count, 0) AS entry_count,
+                   COALESCE(agg.total_paid, 0) AS total_paid,
+                   agg.last_paid_on
+            FROM house_payment h
+            LEFT JOIN (
+                SELECT house_payment_id,
+                       COUNT(*) AS entry_count,
+                       COALESCE(SUM(amount), 0) AS total_paid,
+                       MAX(paid_on) AS last_paid_on
+                FROM house_payment_entry
+                WHERE house_payment_id = ?
+                GROUP BY house_payment_id
+            ) AS agg ON agg.house_payment_id = h.id
+            WHERE h.id = ?
+        ) AS hdr
         """,
-        (house_payment_id,),
+        (house_payment_id, house_payment_id),
     )
     row = cur.fetchone()
     if not row:
-        return 0, 0.0, None
-    return int(row[0] or 0), float(row[1] or 0.0), row[2]
+        return None
+    return {"house_payment": row[0], "entries": list(row[1] or [])}
 
 
 def list_house_payments(limit: int = 500) -> list[dict[str, Any]]:
@@ -1302,30 +1596,15 @@ def list_house_payments(limit: int = 500) -> list[dict[str, Any]]:
     with get_connection() as conn:
         with db_cursor(conn) as cur:
             cur.execute(
-                """
-                SELECT h.id, h.name, h.notes, h.created_at,
-                       COALESCE(e.entry_count, 0) AS entry_count,
-                       COALESCE(e.total_paid, 0) AS total_paid,
-                       e.last_paid_on
-                FROM house_payment h
-                LEFT JOIN (
-                    SELECT house_payment_id,
-                           COUNT(*) AS entry_count,
-                           COALESCE(SUM(amount), 0) AS total_paid,
-                           MAX(paid_on) AS last_paid_on
-                    FROM house_payment_entry
-                    GROUP BY house_payment_id
-                ) AS e ON e.house_payment_id = h.id
+                f"""
+                {_HOUSE_PAYMENT_SELECT}
                 ORDER BY h.name ASC, h.id ASC
                 LIMIT ?
                 """,
                 (limit,),
             )
             cols = [d[0] for d in cur.description]
-            out: list[dict[str, Any]] = []
-            for r in cur.fetchall():
-                out.append(dict(zip(cols, r)))
-            return out
+            return [dict(zip(cols, r)) for r in cur.fetchall()]
 
 
 def get_house_payment(house_payment_id: int) -> dict[str, Any] | None:
@@ -1339,46 +1618,45 @@ def fetch_house_payment_with_entries(
 ) -> dict[str, Any] | None:
     with get_connection() as conn:
         with db_cursor(conn) as cur:
-            row = _house_payment_row_dict(cur, house_payment_id)
-            if not row:
-                return None
-            entries = _house_payment_entries_rows(cur, house_payment_id)
-            count, total_paid, last_paid_on = _house_payment_entries_aggregate(
-                cur, house_payment_id
-            )
-            row["entry_count"] = count
-            row["total_paid"] = total_paid
-            row["last_paid_on"] = last_paid_on
-            return {"house_payment": row, "entries": entries}
+            return _house_payment_detail(cur, house_payment_id)
 
 
-def insert_house_payment(name: str, notes: str | None) -> int:
+def insert_house_payment(name: str, notes: str | None) -> dict[str, Any]:
+    """Insert a plan and return the full row (zero-aggregated)."""
     with get_connection() as conn:
         with db_cursor(conn) as cur:
             cur.execute(
                 """
                 INSERT INTO house_payment (name, notes)
                 VALUES (?, ?)
-                RETURNING id
+                RETURNING id, name, notes, created_at
                 """,
                 (name, notes),
             )
-            return int(cur.fetchone()[0])
+            row = _row_to_dict(cur, cur.fetchone())
+            row["entry_count"] = 0
+            row["total_paid"] = 0.0
+            row["last_paid_on"] = None
+            return row
 
 
 def update_house_payment(
     house_payment_id: int, name: str, notes: str | None
-) -> bool:
+) -> dict[str, Any] | None:
+    """Update the plan and return the full row (or ``None`` if not found)."""
     with get_connection() as conn:
         with db_cursor(conn) as cur:
             cur.execute(
                 """
                 UPDATE house_payment SET name = ?, notes = ?
                 WHERE id = ?
+                RETURNING id
                 """,
                 (name, notes, house_payment_id),
             )
-            return cur.rowcount > 0
+            if not cur.fetchone():
+                return None
+            return _house_payment_row_dict(cur, house_payment_id)
 
 
 def delete_house_payment(house_payment_id: int) -> bool:
@@ -1392,48 +1670,59 @@ def delete_house_payment(house_payment_id: int) -> bool:
 
 def insert_house_payment_entry(
     house_payment_id: int, paid_on: Any, amount: float
-) -> int | None:
+) -> dict[str, Any] | None:
+    """Insert one payment entry and return the refreshed plan detail (header + entries)."""
     with get_connection() as conn:
         with db_cursor(conn) as cur:
-            if not _house_payment_row_dict(cur, house_payment_id):
-                return None
             cur.execute(
                 """
                 INSERT INTO house_payment_entry (house_payment_id, paid_on, amount)
-                VALUES (?, ?, ?)
+                SELECT ?, ?, ? WHERE EXISTS (SELECT 1 FROM house_payment WHERE id = ?)
                 RETURNING id
                 """,
-                (house_payment_id, paid_on, amount),
+                (house_payment_id, paid_on, amount, house_payment_id),
             )
-            return int(cur.fetchone()[0])
+            if not cur.fetchone():
+                return None
+            return _house_payment_detail(cur, house_payment_id)
 
 
 def update_house_payment_entry(
     house_payment_id: int, entry_id: int, paid_on: Any, amount: float
-) -> bool:
+) -> dict[str, Any] | None:
+    """Update one entry and return the refreshed plan detail."""
     with get_connection() as conn:
         with db_cursor(conn) as cur:
             cur.execute(
                 """
                 UPDATE house_payment_entry SET paid_on = ?, amount = ?
                 WHERE id = ? AND house_payment_id = ?
+                RETURNING id
                 """,
                 (paid_on, amount, entry_id, house_payment_id),
             )
-            return cur.rowcount > 0
+            if not cur.fetchone():
+                return None
+            return _house_payment_detail(cur, house_payment_id)
 
 
-def delete_house_payment_entry(house_payment_id: int, entry_id: int) -> bool:
+def delete_house_payment_entry(
+    house_payment_id: int, entry_id: int
+) -> dict[str, Any] | None:
+    """Delete one entry and return the refreshed plan detail (or ``None``)."""
     with get_connection() as conn:
         with db_cursor(conn) as cur:
             cur.execute(
                 """
                 DELETE FROM house_payment_entry
                 WHERE id = ? AND house_payment_id = ?
+                RETURNING id
                 """,
                 (entry_id, house_payment_id),
             )
-            return cur.rowcount > 0
+            if not cur.fetchone():
+                return None
+            return _house_payment_detail(cur, house_payment_id)
 
 
 def check_connection() -> bool:

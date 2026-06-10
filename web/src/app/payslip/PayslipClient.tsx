@@ -1,11 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FloatingAddButton } from "@/components/FloatingAddButton";
 import {
   createPayslip,
   deletePayslip,
-  getPayslip,
   getPayslips,
   updatePayslip,
   type PayslipCreateBody,
@@ -19,10 +18,10 @@ import {
   stashPayslipModalDraft,
 } from "./payslipDraft";
 import {
+  buildPayslipIndex,
   detailPayslipNeighbors,
   rowsForSlot,
-  unscheduledRows,
-  yearsToShow,
+  yearSlotsFromIndex,
 } from "./payslipAggregates";
 import { fmtNum } from "./payslipDisplay";
 import {
@@ -126,6 +125,27 @@ export default function PayslipClient() {
     }
   }, []);
 
+  /**
+   * Patch the in-memory ``rows`` list instead of re-fetching all 2000 rows
+   * after every save. Updates keep their current array position; new rows
+   * are prepended (matches the server's newest-first ordering for fresh
+   * inserts). Callers should pass the row exactly as the server returned
+   * it, including its server-set ``created_at``.
+   */
+  const upsertRow = useCallback((row: PayslipRow) => {
+    setRows((rs) => {
+      const i = rs.findIndex((r) => r.id === row.id);
+      if (i === -1) return [row, ...rs];
+      const out = rs.slice();
+      out[i] = row;
+      return out;
+    });
+  }, []);
+
+  const removeRow = useCallback((id: number) => {
+    setRows((rs) => rs.filter((r) => r.id !== id));
+  }, []);
+
   const scheduledSlotFromBody = (
     body: PayslipCreateBody,
   ): { year: number; month: number; half: 1 | 2 } | null => {
@@ -157,23 +177,6 @@ export default function PayslipClient() {
     void load();
   }, [load]);
 
-  useEffect(() => {
-    if (!nav) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
-      if (
-        nav.screen === "edit" ||
-        nav.screen === "add" ||
-        nav.screen === "manual"
-      ) {
-        stashPayslipModalDraft(nav, modalFormRef.current);
-      }
-      setNav(null);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [nav]);
-
   const saveManualAdd = async () => {
     if (nav?.screen !== "manual") return;
     setSaving(true);
@@ -182,17 +185,16 @@ export default function PayslipClient() {
       const body = formToCreateBody(modalForm);
       const existing = existingScheduledRowForBody(body);
       if (existing) {
-        await updatePayslip(existing.id, body);
+        const updated = await updatePayslip(existing.id, body);
+        upsertRow(updated);
         clearPayslipModalDraft(nav);
-        const updated = await getPayslip(existing.id);
-        await load();
         setNav({ screen: "detail", row: updated });
         return;
       }
-      await createPayslip(body);
+      const fresh = await createPayslip(body);
+      upsertRow(fresh);
       clearPayslipModalDraft(nav);
       setNav(null);
-      await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Save failed");
     } finally {
@@ -248,12 +250,12 @@ export default function PayslipClient() {
     setError(null);
     try {
       await deletePayslip(id);
+      removeRow(id);
       setNav((n) => {
         if (n?.screen === "detail" && n.row.id === id) return null;
         if (n?.screen === "edit" && n.row.id === id) return null;
         return n;
       });
-      await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Delete failed");
     } finally {
@@ -267,10 +269,9 @@ export default function PayslipClient() {
     setSaving(true);
     setError(null);
     try {
-      await updatePayslip(id, formToCreateBody(modalForm));
+      const updated = await updatePayslip(id, formToCreateBody(modalForm));
+      upsertRow(updated);
       clearPayslipModalDraft(nav);
-      const updated = await getPayslip(id);
-      await load();
       setNav({ screen: "detail", row: updated });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Update failed");
@@ -287,16 +288,15 @@ export default function PayslipClient() {
       const body = formToCreateBody(modalForm);
       const existing = rowsForSlot(rows, nav.year, nav.month, nav.half)[0];
       if (existing) {
-        await updatePayslip(existing.id, body);
+        const updated = await updatePayslip(existing.id, body);
+        upsertRow(updated);
         clearPayslipModalDraft(nav);
-        const updated = await getPayslip(existing.id);
-        await load();
         setNav({ screen: "detail", row: updated });
         return;
       }
-      await createPayslip(body);
+      const fresh = await createPayslip(body);
+      upsertRow(fresh);
       clearPayslipModalDraft(nav);
-      await load();
       setNav({
         screen: "slot",
         year: nav.year,
@@ -391,8 +391,9 @@ export default function PayslipClient() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [nav, rows]);
 
-  const years = yearsToShow(rows);
-  const unsorted = unscheduledRows(rows);
+  const index = useMemo(() => buildPayslipIndex(rows), [rows]);
+  const years = index.years;
+  const unsorted = index.unscheduled;
 
   return (
     <div className="box-border flex w-full min-w-0 flex-col gap-12 px-4 pb-28 pt-10 sm:px-6 lg:px-8">
@@ -436,7 +437,7 @@ export default function PayslipClient() {
           </button>
         </div>
 
-        {!loading && <PayslipYearStatsSection rows={rows} />}
+        {!loading && <PayslipYearStatsSection index={index} />}
 
         {!loading && (
           <div className="grid grid-cols-1 gap-x-6 gap-y-10 sm:grid-cols-2 lg:grid-cols-3">
@@ -444,7 +445,7 @@ export default function PayslipClient() {
               <div key={year} className="min-w-0">
                 <YearPayslipBlock
                   year={year}
-                  rows={rows}
+                  yearSlots={yearSlotsFromIndex(index, year)}
                   saving={saving}
                   showGross={showGross}
                   onOpenSlot={openSlot}

@@ -8,8 +8,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
+from app.deps import require_db
 from app.schemas.house_payment import (
     HousePaymentCreate,
     HousePaymentEntryCreate,
@@ -21,7 +22,6 @@ from app.services.house_payment_service import (
     serialize_house_payment_row,
 )
 from db import (
-    database_url,
     delete_house_payment,
     delete_house_payment_entry,
     fetch_house_payment_with_entries,
@@ -32,7 +32,7 @@ from db import (
     update_house_payment_entry,
 )
 
-router = APIRouter(tags=["house_payment"])
+router = APIRouter(tags=["house_payment"], dependencies=[Depends(require_db)])
 
 
 def _clean_notes(notes: str | None) -> str | None:
@@ -42,12 +42,17 @@ def _clean_notes(notes: str | None) -> str | None:
     return trimmed or None
 
 
+def _serialize_detail(detail: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "house_payment": serialize_house_payment_row(detail["house_payment"]),
+        "entries": [serialize_house_payment_entry(e) for e in detail["entries"]],
+    }
+
+
 @router.get("/api/house-payment")
 def house_payment_list(
     limit: int = Query(default=500, ge=1, le=2000),
 ) -> dict[str, Any]:
-    if not database_url():
-        raise HTTPException(status_code=503, detail="DATABASE_URL is not set.")
     rows = list_house_payments(limit=limit)
     return {
         "house_payments": [serialize_house_payment_row(r) for r in rows],
@@ -57,43 +62,32 @@ def house_payment_list(
 
 @router.post("/api/house-payment")
 def house_payment_create(body: HousePaymentCreate) -> dict[str, Any]:
-    if not database_url():
-        raise HTTPException(status_code=503, detail="DATABASE_URL is not set.")
-    hid = insert_house_payment(body.name.strip(), _clean_notes(body.notes))
-    return {"id": hid}
+    row = insert_house_payment(body.name.strip(), _clean_notes(body.notes))
+    return serialize_house_payment_row(row)
 
 
 @router.get("/api/house-payment/{house_payment_id}")
 def house_payment_one(house_payment_id: int) -> dict[str, Any]:
-    if not database_url():
-        raise HTTPException(status_code=503, detail="DATABASE_URL is not set.")
     detail = fetch_house_payment_with_entries(house_payment_id)
     if not detail:
         raise HTTPException(status_code=404, detail="House payment not found.")
-    return {
-        "house_payment": serialize_house_payment_row(detail["house_payment"]),
-        "entries": [serialize_house_payment_entry(e) for e in detail["entries"]],
-    }
+    return _serialize_detail(detail)
 
 
 @router.put("/api/house-payment/{house_payment_id}")
 def house_payment_replace(
     house_payment_id: int, body: HousePaymentCreate
 ) -> dict[str, Any]:
-    if not database_url():
-        raise HTTPException(status_code=503, detail="DATABASE_URL is not set.")
-    ok = update_house_payment(
+    row = update_house_payment(
         house_payment_id, body.name.strip(), _clean_notes(body.notes)
     )
-    if not ok:
+    if row is None:
         raise HTTPException(status_code=404, detail="House payment not found.")
-    return {"id": house_payment_id}
+    return serialize_house_payment_row(row)
 
 
 @router.delete("/api/house-payment/{house_payment_id}")
 def house_payment_remove(house_payment_id: int) -> dict[str, Any]:
-    if not database_url():
-        raise HTTPException(status_code=503, detail="DATABASE_URL is not set.")
     if not delete_house_payment(house_payment_id):
         raise HTTPException(status_code=404, detail="House payment not found.")
     return {"ok": True}
@@ -103,14 +97,12 @@ def house_payment_remove(house_payment_id: int) -> dict[str, Any]:
 def house_payment_entry_create(
     house_payment_id: int, body: HousePaymentEntryCreate
 ) -> dict[str, Any]:
-    if not database_url():
-        raise HTTPException(status_code=503, detail="DATABASE_URL is not set.")
-    entry_id = insert_house_payment_entry(
+    detail = insert_house_payment_entry(
         house_payment_id, body.paid_on, body.amount
     )
-    if entry_id is None:
+    if detail is None:
         raise HTTPException(status_code=404, detail="House payment not found.")
-    return {"id": entry_id}
+    return _serialize_detail(detail)
 
 
 @router.put("/api/house-payment/{house_payment_id}/entry/{entry_id}")
@@ -119,22 +111,19 @@ def house_payment_entry_update(
     entry_id: int,
     body: HousePaymentEntryUpdate,
 ) -> dict[str, Any]:
-    if not database_url():
-        raise HTTPException(status_code=503, detail="DATABASE_URL is not set.")
-    ok = update_house_payment_entry(
+    detail = update_house_payment_entry(
         house_payment_id, entry_id, body.paid_on, body.amount
     )
-    if not ok:
+    if detail is None:
         raise HTTPException(status_code=404, detail="Payment entry not found.")
-    return {"id": entry_id}
+    return _serialize_detail(detail)
 
 
 @router.delete("/api/house-payment/{house_payment_id}/entry/{entry_id}")
 def house_payment_entry_remove(
     house_payment_id: int, entry_id: int
 ) -> dict[str, Any]:
-    if not database_url():
-        raise HTTPException(status_code=503, detail="DATABASE_URL is not set.")
-    if not delete_house_payment_entry(house_payment_id, entry_id):
+    detail = delete_house_payment_entry(house_payment_id, entry_id)
+    if detail is None:
         raise HTTPException(status_code=404, detail="Payment entry not found.")
-    return {"ok": True}
+    return _serialize_detail(detail)

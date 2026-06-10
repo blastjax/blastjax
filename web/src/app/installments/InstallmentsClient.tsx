@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { FloatingAddButton } from "@/components/FloatingAddButton";
+import { Modal } from "@/components/Modal";
 import {
   createInstallment,
   deleteInstallment,
@@ -11,10 +12,10 @@ import {
   reorderInstallmentLines,
   updateInstallment,
   updateInstallmentLine,
+  type InstallmentCreateBody,
   type InstallmentDetailResponse,
   type InstallmentLineRow,
   type InstallmentRow,
-  type InstallmentSummary,
 } from "@/lib/api";
 import { parseFormNumber } from "@/lib/parseFormNumber";
 import { InstallmentFieldGrid } from "./installmentFieldGrid";
@@ -147,7 +148,6 @@ const emptyForm = {
 
 export default function InstallmentsClient() {
   const [rows, setRows] = useState<InstallmentRow[]>([]);
-  const [summary, setSummary] = useState<InstallmentSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -169,31 +169,56 @@ export default function InstallmentsClient() {
     try {
       const r = await getInstallments(500);
       setRows(r.installments);
-      setSummary(r.summary);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load");
       setRows([]);
-      setSummary(null);
     } finally {
       setLoading(false);
     }
+  }, []);
+
+  /**
+   * Mirrors the server's ``installment_summary`` so saves can patch the
+   * in-memory ``rows`` list and skip the full ``getInstallments`` round
+   * trip. The "due this month" calculation matches ``isDueThisMonth``
+   * (CC-style: due month = ``start_date`` + ``installment_current``).
+   */
+  const summary = useMemo(() => {
+    let sum_original_total = 0;
+    let sum_remaining = 0;
+    let due_this_month = 0;
+    for (const r of rows) {
+      sum_original_total += r.original_total || 0;
+      sum_remaining += r.remaining || 0;
+      if (r.remaining > 0 && isDueThisMonth(r)) {
+        due_this_month += r.due_payment ?? r.payment_total ?? 0;
+      }
+    }
+    return { sum_original_total, sum_remaining, due_this_month };
+  }, [rows]);
+
+  const upsertRow = useCallback((row: InstallmentRow) => {
+    setRows((rs) => {
+      const i = rs.findIndex((r) => r.id === row.id);
+      if (i === -1) return [row, ...rs];
+      const out = rs.slice();
+      out[i] = row;
+      return out;
+    });
+  }, []);
+
+  const removeRow = useCallback((id: number) => {
+    setRows((rs) => rs.filter((r) => r.id !== id));
   }, []);
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  useEffect(() => {
-    if (!addModalOpen) return;
-    const onKey = (ev: KeyboardEvent) => {
-      if (ev.key === "Escape") {
-        setAddModalOpen(false);
-        setForm(emptyForm);
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [addModalOpen]);
+  const closeAddModal = useCallback(() => {
+    setAddModalOpen(false);
+    setForm(emptyForm);
+  }, []);
 
   useEffect(() => {
     if (!detail) {
@@ -333,31 +358,23 @@ export default function InstallmentsClient() {
           interest,
         });
       }
-      if (last) setDetail(last);
-      await load();
+      const finalDetail = last ?? working;
+      setDetail(finalDetail);
+      // Each detail response includes the updated installment row (with
+      // recomputed aggregates), so patch the page list in place rather
+      // than re-fetching every plan.
+      upsertRow(finalDetail.installment);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Save failed");
     } finally {
       setSavingSchedule(false);
     }
-  }, [detail, lineEdits, lineOrderIds, load]);
+  }, [detail, lineEdits, lineOrderIds, upsertRow]);
 
-  useEffect(() => {
-    if (scheduleModalId == null) return;
-    const onKey = (ev: KeyboardEvent) => {
-      if (ev.key === "Escape") {
-        setScheduleModalId(null);
-        setDetail(null);
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [scheduleModalId]);
-
-  const closeScheduleModal = () => {
+  const closeScheduleModal = useCallback(() => {
     setScheduleModalId(null);
     setDetail(null);
-  };
+  }, []);
 
   const openDetail = async (id: number) => {
     setScheduleModalId(id);
@@ -388,7 +405,7 @@ export default function InstallmentsClient() {
           "Start and finish must be valid months (use yyyy-mm or mm-yyyy).",
         );
       }
-      const body = {
+      const body: InstallmentCreateBody = {
         name: form.name.trim(),
         installment_current: parseFormNumber(form.installment_current) ?? NaN,
         installment_total: parseFormNumber(form.installment_total) ?? NaN,
@@ -407,15 +424,14 @@ export default function InstallmentsClient() {
             ? null
             : parseFormNumber(form.original_total),
       };
-      if (editingId != null) {
-        await updateInstallment(editingId, body);
-        setEditingId(null);
-      } else {
-        await createInstallment(body);
-        setAddModalOpen(false);
-      }
+      const fresh =
+        editingId != null
+          ? await updateInstallment(editingId, body)
+          : await createInstallment(body);
+      if (editingId != null) setEditingId(null);
+      else setAddModalOpen(false);
       setForm(emptyForm);
-      await load();
+      upsertRow(fresh.installment);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Save failed");
     } finally {
@@ -450,8 +466,8 @@ export default function InstallmentsClient() {
     setSaving(true);
     setError(null);
     try {
-      await recordInstallmentPayment(id);
-      await load();
+      const fresh = await recordInstallmentPayment(id);
+      upsertRow(fresh.installment);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not record payment");
     } finally {
@@ -466,7 +482,7 @@ export default function InstallmentsClient() {
     try {
       await deleteInstallment(id);
       if (editingId === id) cancelEdit();
-      await load();
+      removeRow(id);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Delete failed");
     } finally {
@@ -499,7 +515,7 @@ export default function InstallmentsClient() {
         </div>
       )}
 
-      {summary && !loading && (
+      {!loading && (
         <section className="grid gap-3 sm:grid-cols-3">
           <div className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
             <p className="text-xs font-medium uppercase text-zinc-500">
@@ -563,75 +579,47 @@ export default function InstallmentsClient() {
         </section>
       )}
 
-      {addModalOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4 sm:items-center sm:p-6"
-          role="presentation"
-          onMouseDown={(e) => {
-            if (e.target === e.currentTarget) {
-              setAddModalOpen(false);
-              setForm(emptyForm);
-            }
-          }}
-        >
-          <div
-            className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl border border-zinc-200 bg-white p-5 shadow-xl dark:border-zinc-700 dark:bg-zinc-950"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="installment-add-title"
-            onMouseDown={(e) => e.stopPropagation()}
+      <Modal
+        open={addModalOpen}
+        onClose={closeAddModal}
+        ariaLabelledBy="installment-add-title"
+      >
+        <div className="mb-4 flex items-start justify-between gap-2">
+          <h2
+            id="installment-add-title"
+            className="text-lg font-semibold text-zinc-900 dark:text-zinc-50"
           >
-            <div className="mb-4 flex items-start justify-between gap-2">
-              <h2
-                id="installment-add-title"
-                className="text-lg font-semibold text-zinc-900 dark:text-zinc-50"
-              >
-                Add installment
-              </h2>
-              <button
-                type="button"
-                className="rounded border border-zinc-200 px-2 py-1 text-xs dark:border-zinc-700"
-                onClick={() => {
-                  setAddModalOpen(false);
-                  setForm(emptyForm);
-                }}
-              >
-                Close
-              </button>
-            </div>
-            <form
-              onSubmit={submitCreate}
-              className="grid gap-4 sm:grid-cols-2"
-            >
-              <InstallmentFieldGrid
-                form={form}
-                setForm={setForm}
-                saving={saving}
-              />
-              <div className="flex flex-wrap gap-2 sm:col-span-2">
-                <button
-                  type="submit"
-                  disabled={saving}
-                  className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
-                >
-                  {saving ? "Saving…" : "Add"}
-                </button>
-                <button
-                  type="button"
-                  disabled={saving}
-                  className="rounded-md border border-zinc-300 px-4 py-2 text-sm dark:border-zinc-600"
-                  onClick={() => {
-                    setAddModalOpen(false);
-                    setForm(emptyForm);
-                  }}
-                >
-                  Cancel
-                </button>
-              </div>
-            </form>
-          </div>
+            Add installment
+          </h2>
+          <button
+            type="button"
+            className="rounded border border-zinc-200 px-2 py-1 text-xs dark:border-zinc-700"
+            onClick={closeAddModal}
+          >
+            Close
+          </button>
         </div>
-      )}
+        <form onSubmit={submitCreate} className="grid gap-4 sm:grid-cols-2">
+          <InstallmentFieldGrid form={form} setForm={setForm} saving={saving} />
+          <div className="flex flex-wrap gap-2 sm:col-span-2">
+            <button
+              type="submit"
+              disabled={saving}
+              className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+            >
+              {saving ? "Saving…" : "Add"}
+            </button>
+            <button
+              type="button"
+              disabled={saving}
+              className="rounded-md border border-zinc-300 px-4 py-2 text-sm dark:border-zinc-600"
+              onClick={closeAddModal}
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
+      </Modal>
 
       <section>
         <h2 className="text-lg font-medium text-zinc-900 dark:text-zinc-50">
@@ -784,20 +772,13 @@ export default function InstallmentsClient() {
         </ul>
       </section>
 
-      {scheduleModalId != null && (
-        <div
-          className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4 sm:items-center"
-          role="presentation"
-          onMouseDown={(e) => {
-            if (e.target === e.currentTarget) closeScheduleModal();
-          }}
-        >
-          <div
-            className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-xl dark:border-zinc-700 dark:bg-zinc-950"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="schedule-title"
-          >
+      <Modal
+        open={scheduleModalId != null}
+        onClose={closeScheduleModal}
+        ariaLabelledBy="schedule-title"
+        backdropClassName="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4 sm:items-center"
+        dialogClassName="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-xl dark:border-zinc-700 dark:bg-zinc-950"
+      >
             <div className="flex shrink-0 items-start justify-between gap-2 border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
               <h2
                 id="schedule-title"
@@ -993,9 +974,7 @@ export default function InstallmentsClient() {
                 </button>
               </div>
             )}
-          </div>
-        </div>
-      )}
+      </Modal>
       <FloatingAddButton
         hidden={addModalOpen || scheduleModalId != null}
         onClick={() => {

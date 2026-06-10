@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { FloatingAddButton } from "@/components/FloatingAddButton";
+import { Modal } from "@/components/Modal";
 import {
   createHousePayment,
   createHousePaymentEntry,
@@ -14,7 +15,6 @@ import {
   type HousePaymentDetailResponse,
   type HousePaymentEntry,
   type HousePaymentRow,
-  type HousePaymentSummary,
 } from "@/lib/api";
 import { parseFormNumber } from "@/lib/parseFormNumber";
 
@@ -51,7 +51,6 @@ const emptyEntryForm = (): EntryForm => ({ paid_on: todayIso(), amount: "" });
 
 export default function HousePaymentsClient() {
   const [rows, setRows] = useState<HousePaymentRow[]>([]);
-  const [summary, setSummary] = useState<HousePaymentSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -73,48 +72,59 @@ export default function HousePaymentsClient() {
     try {
       const r = await getHousePayments(500);
       setRows(r.house_payments);
-      setSummary(r.summary);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load");
       setRows([]);
-      setSummary(null);
     } finally {
       setLoading(false);
     }
+  }, []);
+
+  /**
+   * Summary card values derive directly from ``rows`` so we don't have
+   * to re-fetch the whole list (and its server-side aggregates) after
+   * every save. ``rows`` is patched in place by the create / update /
+   * delete handlers below.
+   */
+  const summary = useMemo(
+    () => ({
+      sum_total_paid: rows.reduce((s, r) => s + (r.total_paid || 0), 0),
+      total_entries: rows.reduce((s, r) => s + (r.entry_count || 0), 0),
+      plan_count: rows.length,
+    }),
+    [rows],
+  );
+
+  const upsertRow = useCallback((row: HousePaymentRow) => {
+    setRows((rs) => {
+      const i = rs.findIndex((r) => r.id === row.id);
+      if (i === -1) return [row, ...rs];
+      const out = rs.slice();
+      out[i] = row;
+      return out;
+    });
+  }, []);
+
+  const removeRow = useCallback((id: number) => {
+    setRows((rs) => rs.filter((r) => r.id !== id));
   }, []);
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  useEffect(() => {
-    if (!planModalOpen) return;
-    const onKey = (ev: KeyboardEvent) => {
-      if (ev.key === "Escape") {
-        setPlanModalOpen(false);
-        setEditingPlanId(null);
-        setPlanForm(emptyPlanForm);
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [planModalOpen]);
+  const closePlanModal = useCallback(() => {
+    setPlanModalOpen(false);
+    setEditingPlanId(null);
+    setPlanForm(emptyPlanForm);
+  }, []);
 
-  useEffect(() => {
-    if (entriesModalId == null) return;
-    const onKey = (ev: KeyboardEvent) => {
-      if (ev.key === "Escape") closeEntriesModal();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [entriesModalId]);
-
-  const closeEntriesModal = () => {
+  const closeEntriesModal = useCallback(() => {
     setEntriesModalId(null);
     setDetail(null);
     setEntryForm(emptyEntryForm());
     setEditingEntryId(null);
-  };
+  }, []);
 
   const openEntries = async (id: number) => {
     setEntriesModalId(id);
@@ -135,15 +145,14 @@ export default function HousePaymentsClient() {
     }
   };
 
-  const refreshDetail = async () => {
-    if (entriesModalId == null) return;
-    try {
-      const d = await getHousePayment(entriesModalId);
+  /** Apply a fresh detail response to the modal + the matching list row. */
+  const applyDetail = useCallback(
+    (d: HousePaymentDetailResponse) => {
       setDetail(d);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to reload entries");
-    }
-  };
+      upsertRow(d.house_payment);
+    },
+    [upsertRow],
+  );
 
   const submitPlan = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -156,15 +165,14 @@ export default function HousePaymentsClient() {
         name,
         notes: planForm.notes.trim() === "" ? null : planForm.notes.trim(),
       };
-      if (editingPlanId != null) {
-        await updateHousePayment(editingPlanId, body);
-      } else {
-        await createHousePayment(body);
-      }
+      const fresh =
+        editingPlanId != null
+          ? await updateHousePayment(editingPlanId, body)
+          : await createHousePayment(body);
+      upsertRow(fresh);
       setPlanModalOpen(false);
       setEditingPlanId(null);
       setPlanForm(emptyPlanForm);
-      await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Save failed");
     } finally {
@@ -185,7 +193,7 @@ export default function HousePaymentsClient() {
     try {
       await deleteHousePayment(id);
       if (entriesModalId === id) closeEntriesModal();
-      await load();
+      removeRow(id);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Delete failed");
     } finally {
@@ -208,15 +216,13 @@ export default function HousePaymentsClient() {
         throw new Error("Date must be a valid yyyy-mm-dd value.");
       }
       const body = { paid_on, amount: amt };
-      if (editingEntryId != null) {
-        await updateHousePaymentEntry(entriesModalId, editingEntryId, body);
-      } else {
-        await createHousePaymentEntry(entriesModalId, body);
-      }
+      const fresh =
+        editingEntryId != null
+          ? await updateHousePaymentEntry(entriesModalId, editingEntryId, body)
+          : await createHousePaymentEntry(entriesModalId, body);
+      applyDetail(fresh);
       setEntryForm(emptyEntryForm());
       setEditingEntryId(null);
-      await refreshDetail();
-      await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Save failed");
     } finally {
@@ -243,10 +249,9 @@ export default function HousePaymentsClient() {
     setSavingEntry(true);
     setError(null);
     try {
-      await deleteHousePaymentEntry(entriesModalId, entryId);
+      const fresh = await deleteHousePaymentEntry(entriesModalId, entryId);
       if (editingEntryId === entryId) cancelEntryEdit();
-      await refreshDetail();
-      await load();
+      applyDetail(fresh);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Delete failed");
     } finally {
@@ -279,7 +284,7 @@ export default function HousePaymentsClient() {
         </div>
       )}
 
-      {summary && !loading && (
+      {!loading && (
         <section>
           <div className="rounded-xl border border-emerald-200 bg-emerald-50/80 p-4 shadow-sm dark:border-emerald-900/50 dark:bg-emerald-950/30">
             <p className="text-xs font-medium uppercase text-emerald-800 dark:text-emerald-200">
@@ -298,94 +303,73 @@ export default function HousePaymentsClient() {
         </section>
       )}
 
-      {planModalOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4 sm:items-center sm:p-6"
-          role="presentation"
-          onMouseDown={(e) => {
-            if (e.target === e.currentTarget) {
-              setPlanModalOpen(false);
-              setEditingPlanId(null);
-              setPlanForm(emptyPlanForm);
-            }
-          }}
-        >
-          <div
-            className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-xl border border-zinc-200 bg-white p-5 shadow-xl dark:border-zinc-700 dark:bg-zinc-950"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="house-plan-title"
-            onMouseDown={(e) => e.stopPropagation()}
+      <Modal
+        open={planModalOpen}
+        onClose={closePlanModal}
+        ariaLabelledBy="house-plan-title"
+        dialogClassName="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-xl border border-zinc-200 bg-white p-5 shadow-xl dark:border-zinc-700 dark:bg-zinc-950"
+      >
+        <div className="mb-4 flex items-start justify-between gap-2">
+          <h2
+            id="house-plan-title"
+            className="text-lg font-semibold text-zinc-900 dark:text-zinc-50"
           >
-            <div className="mb-4 flex items-start justify-between gap-2">
-              <h2
-                id="house-plan-title"
-                className="text-lg font-semibold text-zinc-900 dark:text-zinc-50"
-              >
-                {editingPlanId != null ? "Edit house payment" : "Add house payment"}
-              </h2>
-              <button
-                type="button"
-                className="rounded border border-zinc-200 px-2 py-1 text-xs dark:border-zinc-700"
-                onClick={() => {
-                  setPlanModalOpen(false);
-                  setEditingPlanId(null);
-                  setPlanForm(emptyPlanForm);
-                }}
-              >
-                Close
-              </button>
-            </div>
-            <form onSubmit={submitPlan} className="grid gap-4">
-              <label className="flex flex-col gap-1 text-sm">
-                <span className="text-zinc-600 dark:text-zinc-400">Name</span>
-                <input
-                  required
-                  className="rounded-md border border-zinc-300 bg-white px-3 py-2 dark:border-zinc-700 dark:bg-zinc-950"
-                  value={planForm.name}
-                  onChange={(e) =>
-                    setPlanForm((f) => ({ ...f, name: e.target.value }))
-                  }
-                  disabled={saving}
-                />
-              </label>
-              <label className="flex flex-col gap-1 text-sm">
-                <span className="text-zinc-600 dark:text-zinc-400">Notes (optional)</span>
-                <textarea
-                  rows={3}
-                  className="rounded-md border border-zinc-300 bg-white px-3 py-2 dark:border-zinc-700 dark:bg-zinc-950"
-                  value={planForm.notes}
-                  onChange={(e) =>
-                    setPlanForm((f) => ({ ...f, notes: e.target.value }))
-                  }
-                  disabled={saving}
-                />
-              </label>
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="submit"
-                  disabled={saving}
-                  className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
-                >
-                  {saving ? "Saving…" : editingPlanId != null ? "Update" : "Add"}
-                </button>
-                <button
-                  type="button"
-                  disabled={saving}
-                  className="rounded-md border border-zinc-300 px-4 py-2 text-sm dark:border-zinc-600"
-                  onClick={() => {
-                    setPlanModalOpen(false);
-                    setEditingPlanId(null);
-                    setPlanForm(emptyPlanForm);
-                  }}
-                >
-                  Cancel
-                </button>
-              </div>
-            </form>
-          </div>
+            {editingPlanId != null ? "Edit house payment" : "Add house payment"}
+          </h2>
+          <button
+            type="button"
+            className="rounded border border-zinc-200 px-2 py-1 text-xs dark:border-zinc-700"
+            onClick={closePlanModal}
+          >
+            Close
+          </button>
         </div>
-      )}
+        <form onSubmit={submitPlan} className="grid gap-4">
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="text-zinc-600 dark:text-zinc-400">Name</span>
+            <input
+              required
+              className="rounded-md border border-zinc-300 bg-white px-3 py-2 dark:border-zinc-700 dark:bg-zinc-950"
+              value={planForm.name}
+              onChange={(e) =>
+                setPlanForm((f) => ({ ...f, name: e.target.value }))
+              }
+              disabled={saving}
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="text-zinc-600 dark:text-zinc-400">
+              Notes (optional)
+            </span>
+            <textarea
+              rows={3}
+              className="rounded-md border border-zinc-300 bg-white px-3 py-2 dark:border-zinc-700 dark:bg-zinc-950"
+              value={planForm.notes}
+              onChange={(e) =>
+                setPlanForm((f) => ({ ...f, notes: e.target.value }))
+              }
+              disabled={saving}
+            />
+          </label>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="submit"
+              disabled={saving}
+              className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+            >
+              {saving ? "Saving…" : editingPlanId != null ? "Update" : "Add"}
+            </button>
+            <button
+              type="button"
+              disabled={saving}
+              className="rounded-md border border-zinc-300 px-4 py-2 text-sm dark:border-zinc-600"
+              onClick={closePlanModal}
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
+      </Modal>
 
       <section>
         <h2 className="text-lg font-medium text-zinc-900 dark:text-zinc-50">Plans</h2>
@@ -477,20 +461,13 @@ export default function HousePaymentsClient() {
         </ul>
       </section>
 
-      {entriesModalId != null && (
-        <div
-          className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4 sm:items-center"
-          role="presentation"
-          onMouseDown={(e) => {
-            if (e.target === e.currentTarget) closeEntriesModal();
-          }}
-        >
-          <div
-            className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-xl dark:border-zinc-700 dark:bg-zinc-950"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="house-entries-title"
-          >
+      <Modal
+        open={entriesModalId != null}
+        onClose={closeEntriesModal}
+        ariaLabelledBy="house-entries-title"
+        backdropClassName="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4 sm:items-center"
+        dialogClassName="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-xl dark:border-zinc-700 dark:bg-zinc-950"
+      >
             <div className="flex shrink-0 items-start justify-between gap-2 border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
               <div className="min-w-0">
                 <h2
@@ -646,9 +623,7 @@ export default function HousePaymentsClient() {
                 </>
               )}
             </div>
-          </div>
-        </div>
-      )}
+      </Modal>
 
       <FloatingAddButton
         hidden={planModalOpen || entriesModalId != null}

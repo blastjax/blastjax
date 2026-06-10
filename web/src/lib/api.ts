@@ -48,6 +48,38 @@ async function j<T>(res: Response): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+const JSON_HEADERS = { "Content-Type": "application/json" } as const;
+
+function qs(params: Record<string, string | number | undefined>): string {
+  const p = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) {
+    if (v != null) p.set(k, String(v));
+  }
+  const s = p.toString();
+  return s ? `?${s}` : "";
+}
+
+async function getJson<T>(path: string, query?: Record<string, string | number | undefined>) {
+  return j<T>(
+    await apiFetch(`${dataApiBase()}${path}${query ? qs(query) : ""}`, {
+      cache: "no-store",
+    }),
+  );
+}
+
+async function sendJson<T>(
+  method: "POST" | "PUT" | "DELETE",
+  path: string,
+  body?: unknown,
+) {
+  const init: RequestInit = { method };
+  if (body !== undefined) {
+    init.headers = JSON_HEADERS;
+    init.body = JSON.stringify(body);
+  }
+  return j<T>(await apiFetch(`${dataApiBase()}${path}`, init));
+}
+
 export type PayslipRow = {
   id: number;
   total: number | null;
@@ -91,44 +123,23 @@ export type PayslipCreateBody = {
 };
 
 export async function getPayslips(limit?: number) {
-  const p = new URLSearchParams();
-  if (limit != null) p.set("limit", String(limit));
-  const qs = p.toString();
-  return j<{ payslips: PayslipRow[] }>(
-    await apiFetch(`${dataApiBase()}/api/payslip${qs ? `?${qs}` : ""}`, { cache: "no-store" }),
-  );
+  return getJson<{ payslips: PayslipRow[] }>("/api/payslip", { limit });
 }
 
 export async function createPayslip(body: PayslipCreateBody) {
-  return j<{ id: number }>(
-    await apiFetch(`${dataApiBase()}/api/payslip`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    }),
-  );
+  return sendJson<PayslipRow>("POST", "/api/payslip", body);
 }
 
 export async function getPayslip(id: number) {
-  return j<PayslipRow>(
-    await apiFetch(`${dataApiBase()}/api/payslip/${id}`, { cache: "no-store" }),
-  );
+  return getJson<PayslipRow>(`/api/payslip/${id}`);
 }
 
 export async function updatePayslip(id: number, body: PayslipCreateBody) {
-  return j<{ id: number }>(
-    await apiFetch(`${dataApiBase()}/api/payslip/${id}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    }),
-  );
+  return sendJson<PayslipRow>("PUT", `/api/payslip/${id}`, body);
 }
 
 export async function deletePayslip(id: number) {
-  return j<{ ok: boolean }>(
-    await apiFetch(`${dataApiBase()}/api/payslip/${id}`, { method: "DELETE" }),
-  );
+  return sendJson<{ ok: boolean }>("DELETE", `/api/payslip/${id}`);
 }
 
 export async function uploadPayslipExcel(file: File) {
@@ -140,12 +151,10 @@ export async function uploadPayslipExcel(file: File) {
 }
 
 export async function importPayslipJson(data: Record<string, unknown>) {
-  return j<{ filename: string; inserted: number; ids: number[] }>(
-    await apiFetch(`${dataApiBase()}/api/payslip/import-json`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(data),
-    }),
+  return sendJson<{ filename: string; inserted: number; ids: number[] }>(
+    "POST",
+    "/api/payslip/import-json",
+    data,
   );
 }
 
@@ -198,51 +207,32 @@ export type InstallmentCreateBody = {
 };
 
 export async function getInstallments(limit?: number) {
-  const p = new URLSearchParams();
-  if (limit != null) p.set("limit", String(limit));
-  const qs = p.toString();
-  return j<{ installments: InstallmentRow[]; summary: InstallmentSummary }>(
-    await apiFetch(`${dataApiBase()}/api/installment${qs ? `?${qs}` : ""}`, {
-      cache: "no-store",
-    }),
+  return getJson<{ installments: InstallmentRow[]; summary: InstallmentSummary }>(
+    "/api/installment",
+    { limit },
   );
 }
 
 export async function getInstallment(id: number) {
-  return j<InstallmentDetailResponse>(
-    await apiFetch(`${dataApiBase()}/api/installment/${id}`, { cache: "no-store" }),
-  );
+  return getJson<InstallmentDetailResponse>(`/api/installment/${id}`);
 }
 
 export async function createInstallment(body: InstallmentCreateBody) {
-  return j<{ id: number }>(
-    await apiFetch(`${dataApiBase()}/api/installment`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    }),
-  );
+  return sendJson<InstallmentDetailResponse>("POST", "/api/installment", body);
 }
 
 export async function updateInstallment(id: number, body: InstallmentCreateBody) {
-  return j<{ id: number }>(
-    await apiFetch(`${dataApiBase()}/api/installment/${id}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    }),
-  );
+  return sendJson<InstallmentDetailResponse>("PUT", `/api/installment/${id}`, body);
 }
 
 export async function deleteInstallment(id: number) {
-  return j<{ ok: boolean }>(
-    await apiFetch(`${dataApiBase()}/api/installment/${id}`, { method: "DELETE" }),
-  );
+  return sendJson<{ ok: boolean }>("DELETE", `/api/installment/${id}`);
 }
 
 export async function recordInstallmentPayment(id: number) {
-  return j<{ installment: InstallmentRow }>(
-    await apiFetch(`${dataApiBase()}/api/installment/${id}/pay`, { method: "POST" }),
+  return sendJson<{ installment: InstallmentRow }>(
+    "POST",
+    `/api/installment/${id}/pay`,
   );
 }
 
@@ -251,22 +241,18 @@ export async function updateInstallmentLine(
   seq: number,
   body: { principal: number; interest: number | null },
 ) {
-  return j<InstallmentDetailResponse>(
-    await apiFetch(`${dataApiBase()}/api/installment/${installmentId}/line/${seq}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    }),
+  return sendJson<InstallmentDetailResponse>(
+    "PUT",
+    `/api/installment/${installmentId}/line/${seq}`,
+    body,
   );
 }
 
 export async function reorderInstallmentLines(installmentId: number, lineIds: number[]) {
-  return j<InstallmentDetailResponse>(
-    await apiFetch(`${dataApiBase()}/api/installment/${installmentId}/lines/reorder`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ line_ids: lineIds }),
-    }),
+  return sendJson<InstallmentDetailResponse>(
+    "PUT",
+    `/api/installment/${installmentId}/lines/reorder`,
+    { line_ids: lineIds },
   );
 }
 
@@ -309,58 +295,36 @@ export type HousePaymentEntryBody = {
 };
 
 export async function getHousePayments(limit?: number) {
-  const p = new URLSearchParams();
-  if (limit != null) p.set("limit", String(limit));
-  const qs = p.toString();
-  return j<{ house_payments: HousePaymentRow[]; summary: HousePaymentSummary }>(
-    await apiFetch(`${dataApiBase()}/api/house-payment${qs ? `?${qs}` : ""}`, {
-      cache: "no-store",
-    }),
+  return getJson<{ house_payments: HousePaymentRow[]; summary: HousePaymentSummary }>(
+    "/api/house-payment",
+    { limit },
   );
 }
 
 export async function getHousePayment(id: number) {
-  return j<HousePaymentDetailResponse>(
-    await apiFetch(`${dataApiBase()}/api/house-payment/${id}`, { cache: "no-store" }),
-  );
+  return getJson<HousePaymentDetailResponse>(`/api/house-payment/${id}`);
 }
 
 export async function createHousePayment(body: HousePaymentCreateBody) {
-  return j<{ id: number }>(
-    await apiFetch(`${dataApiBase()}/api/house-payment`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    }),
-  );
+  return sendJson<HousePaymentRow>("POST", "/api/house-payment", body);
 }
 
 export async function updateHousePayment(id: number, body: HousePaymentCreateBody) {
-  return j<{ id: number }>(
-    await apiFetch(`${dataApiBase()}/api/house-payment/${id}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    }),
-  );
+  return sendJson<HousePaymentRow>("PUT", `/api/house-payment/${id}`, body);
 }
 
 export async function deleteHousePayment(id: number) {
-  return j<{ ok: boolean }>(
-    await apiFetch(`${dataApiBase()}/api/house-payment/${id}`, { method: "DELETE" }),
-  );
+  return sendJson<{ ok: boolean }>("DELETE", `/api/house-payment/${id}`);
 }
 
 export async function createHousePaymentEntry(
   housePaymentId: number,
   body: HousePaymentEntryBody,
 ) {
-  return j<{ id: number }>(
-    await apiFetch(`${dataApiBase()}/api/house-payment/${housePaymentId}/entry`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    }),
+  return sendJson<HousePaymentDetailResponse>(
+    "POST",
+    `/api/house-payment/${housePaymentId}/entry`,
+    body,
   );
 }
 
@@ -369,15 +333,10 @@ export async function updateHousePaymentEntry(
   entryId: number,
   body: HousePaymentEntryBody,
 ) {
-  return j<{ id: number }>(
-    await apiFetch(
-      `${dataApiBase()}/api/house-payment/${housePaymentId}/entry/${entryId}`,
-      {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      },
-    ),
+  return sendJson<HousePaymentDetailResponse>(
+    "PUT",
+    `/api/house-payment/${housePaymentId}/entry/${entryId}`,
+    body,
   );
 }
 
@@ -385,10 +344,8 @@ export async function deleteHousePaymentEntry(
   housePaymentId: number,
   entryId: number,
 ) {
-  return j<{ ok: boolean }>(
-    await apiFetch(
-      `${dataApiBase()}/api/house-payment/${housePaymentId}/entry/${entryId}`,
-      { method: "DELETE" },
-    ),
+  return sendJson<HousePaymentDetailResponse>(
+    "DELETE",
+    `/api/house-payment/${housePaymentId}/entry/${entryId}`,
   );
 }

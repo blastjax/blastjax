@@ -1,12 +1,19 @@
 """Installment / loan schedules."""
 from __future__ import annotations
 from typing import Any
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
-from app.schemas.installment import InstallmentCreate, InstallmentLineUpdate, InstallmentLinesReorder
-from app.services.installment_service import installment_summary, serialize_installment_row
+from app.deps import require_db
+from app.schemas.installment import (
+    InstallmentCreate,
+    InstallmentLineUpdate,
+    InstallmentLinesReorder,
+)
+from app.services.installment_service import (
+    installment_summary,
+    serialize_installment_row,
+)
 from db import (
-    database_url,
     delete_installment,
     fetch_installment_with_lines,
     get_installment,
@@ -18,26 +25,17 @@ from db import (
     update_installment_line_and_fetch_detail,
 )
 
-router = APIRouter(tags=["installment"])
+router = APIRouter(tags=["installment"], dependencies=[Depends(require_db)])
 
-@router.get("/api/installment")
-def installment_list(
-    limit: int = Query(default=500, ge=1, le=2000),
-) -> dict[str, Any]:
-    if not database_url():
-        raise HTTPException(status_code=503, detail="DATABASE_URL is not set.")
-    rows = list_installments(limit=limit)
-    serialized = [serialize_installment_row(r) for r in rows]
+
+def _serialize_detail(detail: dict[str, Any]) -> dict[str, Any]:
     return {
-        "installments": serialized,
-        "summary": installment_summary(rows),
+        "installment": serialize_installment_row(detail["installment"]),
+        "lines": detail["lines"],
     }
 
 
-@router.post("/api/installment")
-def installment_create(body: InstallmentCreate) -> dict[str, Any]:
-    if not database_url():
-        raise HTTPException(status_code=503, detail="DATABASE_URL is not set.")
+def _validate_installment_body(body: InstallmentCreate) -> tuple[float, float]:
     if body.installment_current > body.installment_total + 1:
         raise HTTPException(
             status_code=400,
@@ -58,7 +56,24 @@ def installment_create(body: InstallmentCreate) -> dict[str, Any]:
     )
     if rem < 0:
         raise HTTPException(status_code=400, detail="remaining cannot be negative.")
-    pid = insert_installment(
+    return rem, orig
+
+
+@router.get("/api/installment")
+def installment_list(
+    limit: int = Query(default=500, ge=1, le=2000),
+) -> dict[str, Any]:
+    rows = list_installments(limit=limit)
+    return {
+        "installments": [serialize_installment_row(r) for r in rows],
+        "summary": installment_summary(rows),
+    }
+
+
+@router.post("/api/installment")
+def installment_create(body: InstallmentCreate) -> dict[str, Any]:
+    rem, orig = _validate_installment_body(body)
+    detail = insert_installment(
         body.name.strip(),
         body.installment_current,
         body.installment_total,
@@ -70,20 +85,15 @@ def installment_create(body: InstallmentCreate) -> dict[str, Any]:
         rem,
         orig,
     )
-    return {"id": pid}
+    return _serialize_detail(detail)
 
 
 @router.get("/api/installment/{installment_id}")
 def installment_one(installment_id: int) -> dict[str, Any]:
-    if not database_url():
-        raise HTTPException(status_code=503, detail="DATABASE_URL is not set.")
     detail = fetch_installment_with_lines(installment_id)
     if not detail:
         raise HTTPException(status_code=404, detail="Installment not found.")
-    return {
-        "installment": serialize_installment_row(detail["installment"]),
-        "lines": detail["lines"],
-    }
+    return _serialize_detail(detail)
 
 
 @router.put("/api/installment/{installment_id}/line/{seq}")
@@ -92,8 +102,6 @@ def installment_line_update(
     seq: int,
     body: InstallmentLineUpdate,
 ) -> dict[str, Any]:
-    if not database_url():
-        raise HTTPException(status_code=503, detail="DATABASE_URL is not set.")
     if seq < 1:
         raise HTTPException(status_code=400, detail="seq must be >= 1.")
     row = get_installment(installment_id)
@@ -109,10 +117,7 @@ def installment_line_update(
     )
     if not detail:
         raise HTTPException(status_code=404, detail="Schedule line not found.")
-    return {
-        "installment": serialize_installment_row(detail["installment"]),
-        "lines": detail["lines"],
-    }
+    return _serialize_detail(detail)
 
 
 @router.put("/api/installment/{installment_id}/lines/reorder")
@@ -121,8 +126,6 @@ def installment_lines_reorder(
     body: InstallmentLinesReorder,
 ) -> dict[str, Any]:
     """Reorder schedule rows (month order); renumbers ``seq`` and recomputes aggregates."""
-    if not database_url():
-        raise HTTPException(status_code=503, detail="DATABASE_URL is not set.")
     if not get_installment(installment_id):
         raise HTTPException(status_code=404, detail="Installment not found.")
     detail = reorder_installment_lines(installment_id, body.line_ids)
@@ -131,37 +134,13 @@ def installment_lines_reorder(
             status_code=400,
             detail="line_ids must list every schedule row id for this installment exactly once.",
         )
-    return {
-        "installment": serialize_installment_row(detail["installment"]),
-        "lines": detail["lines"],
-    }
+    return _serialize_detail(detail)
 
 
 @router.put("/api/installment/{installment_id}")
 def installment_replace(installment_id: int, body: InstallmentCreate) -> dict[str, Any]:
-    if not database_url():
-        raise HTTPException(status_code=503, detail="DATABASE_URL is not set.")
-    if body.installment_current > body.installment_total + 1:
-        raise HTTPException(
-            status_code=400,
-            detail="installment_current cannot exceed installment_total + 1.",
-        )
-    payments_left = body.installment_total - body.installment_current + 1
-    if payments_left < 0:
-        raise HTTPException(status_code=400, detail="Invalid installment counts.")
-    rem = (
-        body.remaining
-        if body.remaining is not None
-        else payments_left * body.payment_total
-    )
-    orig = (
-        body.original_total
-        if body.original_total is not None
-        else float(body.installment_total) * float(body.principal)
-    )
-    if rem < 0:
-        raise HTTPException(status_code=400, detail="remaining cannot be negative.")
-    ok = update_installment(
+    rem, orig = _validate_installment_body(body)
+    detail = update_installment(
         installment_id,
         body.name.strip(),
         body.installment_current,
@@ -174,15 +153,13 @@ def installment_replace(installment_id: int, body: InstallmentCreate) -> dict[st
         rem,
         orig,
     )
-    if not ok:
+    if detail is None:
         raise HTTPException(status_code=404, detail="Installment not found.")
-    return {"id": installment_id}
+    return _serialize_detail(detail)
 
 
 @router.delete("/api/installment/{installment_id}")
 def installment_remove(installment_id: int) -> dict[str, Any]:
-    if not database_url():
-        raise HTTPException(status_code=503, detail="DATABASE_URL is not set.")
     if not delete_installment(installment_id):
         raise HTTPException(status_code=404, detail="Installment not found.")
     return {"ok": True}
@@ -191,8 +168,6 @@ def installment_remove(installment_id: int) -> dict[str, Any]:
 @router.post("/api/installment/{installment_id}/pay")
 def installment_pay(installment_id: int) -> dict[str, Any]:
     """Record one payment: reduces remaining and advances installment_current."""
-    if not database_url():
-        raise HTTPException(status_code=503, detail="DATABASE_URL is not set.")
     row = installment_apply_payment(installment_id)
     if not row:
         raise HTTPException(

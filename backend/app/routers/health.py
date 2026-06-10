@@ -6,16 +6,17 @@ from db import check_connection, database_url, storage_kind
 
 router = APIRouter(tags=["health"])
 
+
 @router.get("/api/health")
 def health() -> dict[str, Any]:
     sk = storage_kind()
+    has_db = bool(database_url())
     out: dict[str, Any] = {
-        "status": "ok",
+        "status": "ok" if has_db else "degraded",
         "storage": sk if sk != "none" else "none",
-        "database": "up" if database_url() and check_connection() else "down",
+        "database": "up" if has_db and check_connection() else "down",
     }
-    if not database_url():
-        out["status"] = "degraded"
+    if not has_db:
         out["detail"] = "DATABASE_URL (or DB_*) missing in .env"
     return out
 

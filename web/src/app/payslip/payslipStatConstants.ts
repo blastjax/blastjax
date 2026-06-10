@@ -22,8 +22,6 @@ export const DEFAULT_STAT_CARD_ORDER: DraggableStatId[] = [
   "months_remaining",
 ];
 
-export const LS_PAYSLIP_STAT_ORDER = "budgetapp:payslip:statCardOrder";
-
 export const DRAGGABLE_FIELD: Record<
   Exclude<DraggableStatId, "months_remaining" | "basic">,
   | "total"
@@ -150,38 +148,6 @@ export const STAT_THEMES: Record<DraggableStatId, StatTheme> = {
     barFill: "bg-emerald-600 dark:bg-emerald-500",
   },
 };
-
-export function isDraggableStatId(x: unknown): x is DraggableStatId {
-  return (
-    x === "total" ||
-    x === "basic" ||
-    x === "reimbursement" ||
-    x === "others" ||
-    x === "allowances" ||
-    x === "commission" ||
-    x === "thirteenth_month" ||
-    x === "months_remaining"
-  );
-}
-
-export function sanitizeStatOrder(parsed: unknown): DraggableStatId[] {
-  if (!Array.isArray(parsed)) return [...DEFAULT_STAT_CARD_ORDER];
-  const ids = parsed
-    .filter((item) => item !== "medical" && item !== "mp2")
-    .filter(isDraggableStatId);
-  const seen = new Set<DraggableStatId>();
-  const out: DraggableStatId[] = [];
-  for (const id of ids) {
-    if (!seen.has(id)) {
-      seen.add(id);
-      out.push(id);
-    }
-  }
-  for (const id of DEFAULT_STAT_CARD_ORDER) {
-    if (!seen.has(id)) out.push(id);
-  }
-  return out.slice(0, DEFAULT_STAT_CARD_ORDER.length);
-}
 
 /** Shared shell: stretch with grid row height (match tallest card in the row). */
 export const PAYSLIP_STAT_CARD_SHELL =
