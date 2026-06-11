@@ -142,14 +142,6 @@ export async function deletePayslip(id: number) {
   return sendJson<{ ok: boolean }>("DELETE", `/api/payslip/${id}`);
 }
 
-export async function uploadPayslipExcel(file: File) {
-  const fd = new FormData();
-  fd.append("file", file);
-  return j<{ filename: string; inserted: number; ids: number[] }>(
-    await apiFetch(`${dataApiBase()}/api/payslip/upload`, { method: "POST", body: fd }),
-  );
-}
-
 export async function importPayslipJson(data: Record<string, unknown>) {
   return sendJson<{ filename: string; inserted: number; ids: number[] }>(
     "POST",

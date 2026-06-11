@@ -55,42 +55,6 @@ function emptyTotals<K extends keyof PayslipRow>(
   return o;
 }
 
-function addTotals<K extends keyof PayslipRow>(
-  acc: Record<K, number>,
-  r: PayslipRow,
-  keys: readonly K[],
-): Record<K, number> {
-  const next = { ...acc };
-  for (const k of keys) {
-    const v = r[k];
-    if (typeof v === "number" && Number.isFinite(v)) next[k] += v;
-  }
-  return next;
-}
-
-/** Calendar year for a row (scheduled period or created_at year). */
-function calendarYearForRow(r: PayslipRow): number | null {
-  const py = r.period_year;
-  const pm = r.period_month;
-  if (
-    py != null &&
-    Number.isFinite(py) &&
-    pm != null &&
-    pm >= 1 &&
-    pm <= 12 &&
-    r.period_half != null &&
-    r.period_half >= 1 &&
-    r.period_half <= 2
-  ) {
-    return Math.trunc(py);
-  }
-  if (r.created_at) {
-    const d = new Date(r.created_at);
-    if (!Number.isNaN(d.getTime())) return d.getFullYear();
-  }
-  return null;
-}
-
 /** Calendar month { y, m } for aggregation (1–12). */
 function calendarMonthForRow(r: PayslipRow): { y: number; m: number } | null {
   const py = r.period_year;
@@ -158,41 +122,51 @@ function monthsBetweenInclusive(startKey: string, endKey: string): string[] {
   return out;
 }
 
-function aggregateYear<K extends keyof PayslipRow>(
-  rows: PayslipRow[],
-  year: number,
-  keys: readonly K[],
-): Record<K, number> {
-  let acc = emptyTotals(keys);
-  for (const r of rows) {
-    if (calendarYearForRow(r) !== year) continue;
-    acc = addTotals(acc, r, keys);
-  }
-  return acc;
+type LineTotals = Record<LineSeriesKey, number>;
+
+interface StatsIndex {
+  /** YYYY-MM key → per-category sums across all line series. */
+  byMonth: Map<string, LineTotals>;
+  /** Calendar year → per-category sums across all line series. */
+  byYear: Map<number, LineTotals>;
 }
 
-function aggregateMonth<K extends keyof PayslipRow>(
-  rows: PayslipRow[],
-  year: number,
-  month: number,
-  keys: readonly K[],
-): Record<K, number> {
-  let acc = emptyTotals(keys);
+/**
+ * Single O(rows) pass that buckets every row into its calendar month and year,
+ * summing all line-series categories at once.
+ *
+ * Replaces the previous design where the pie (year + deductions) and the line
+ * chart each re-scanned the full `rows` array per period — the line chart did
+ * one full scan *per month* in the selected range and cloned a fresh
+ * accumulator object for every matching row, making a multi-year range over
+ * 2000 rows O(months × rows). Lookups below are now O(1) per period.
+ */
+function buildStatsIndex(rows: PayslipRow[]): StatsIndex {
+  const byMonth = new Map<string, LineTotals>();
+  const byYear = new Map<number, LineTotals>();
   for (const r of rows) {
     const cm = calendarMonthForRow(r);
-    if (!cm || cm.y !== year || cm.m !== month) continue;
-    acc = addTotals(acc, r, keys);
+    if (!cm) continue;
+    const mk = monthKey(cm.y, cm.m);
+    let mTot = byMonth.get(mk);
+    if (!mTot) {
+      mTot = emptyTotals(LINE_SERIES_KEYS);
+      byMonth.set(mk, mTot);
+    }
+    let yTot = byYear.get(cm.y);
+    if (!yTot) {
+      yTot = emptyTotals(LINE_SERIES_KEYS);
+      byYear.set(cm.y, yTot);
+    }
+    for (const k of LINE_SERIES_KEYS) {
+      const v = r[k];
+      if (typeof v === "number" && Number.isFinite(v)) {
+        mTot[k] += v;
+        yTot[k] += v;
+      }
+    }
   }
-  return acc;
-}
-
-function aggregateRowsForMonthKey(
-  rows: PayslipRow[],
-  key: string,
-): Record<LineSeriesKey, number> {
-  const p = parseMonthKey(key);
-  if (!p) return emptyTotals(LINE_SERIES_KEYS);
-  return aggregateMonth(rows, p.y, p.m, LINE_SERIES_KEYS);
+  return { byMonth, byYear };
 }
 
 function sumDeductionKeys(
@@ -477,55 +451,49 @@ export default function SalaryStatsClient() {
     setLineInitialized(true);
   }, [rows, lineInitialized]);
 
-  const pieSlices = useMemo(() => {
-    const sums =
-      pieMode === "year"
-        ? aggregateYear(rows, pieYear, PIE_SERIES_KEYS)
-        : (() => {
-            const p = parseMonthKey(pieMonthStr);
-            return p
-              ? aggregateMonth(rows, p.y, p.m, PIE_SERIES_KEYS)
-              : emptyTotals(PIE_SERIES_KEYS);
-          })();
+  const statsIndex = useMemo(() => buildStatsIndex(rows), [rows]);
 
+  /** Per-category totals for the pie's selected period (year or month); undefined when empty. */
+  const periodTotals = useMemo<LineTotals | undefined>(() => {
+    if (pieMode === "year") return statsIndex.byYear.get(pieYear);
+    const p = parseMonthKey(pieMonthStr);
+    return p ? statsIndex.byMonth.get(monthKey(p.y, p.m)) : undefined;
+  }, [statsIndex, pieMode, pieYear, pieMonthStr]);
+
+  const pieSlices = useMemo(() => {
     const list: { name: string; key: PieSeriesKey; value: number }[] = [];
     for (const k of PIE_SERIES_KEYS) {
       list.push({
         key: k,
         name: CHART_SERIES_LABEL[k],
-        value: sums[k],
+        value: periodTotals?.[k] ?? 0,
       });
     }
     return list.filter((x) => x.value > 0);
-  }, [rows, pieMode, pieYear, pieMonthStr]);
+  }, [periodTotals]);
 
   const piePeriodDeductions = useMemo(() => {
-    const sums =
-      pieMode === "year"
-        ? aggregateYear(rows, pieYear, DEDUCTION_KEYS)
-        : (() => {
-            const p = parseMonthKey(pieMonthStr);
-            return p
-              ? aggregateMonth(rows, p.y, p.m, DEDUCTION_KEYS)
-              : emptyTotals(DEDUCTION_KEYS);
-          })();
+    const sums = emptyTotals(DEDUCTION_KEYS);
+    if (periodTotals) {
+      for (const k of DEDUCTION_KEYS) sums[k] = periodTotals[k];
+    }
     return { sums, total: sumDeductionKeys(sums) };
-  }, [rows, pieMode, pieYear, pieMonthStr]);
+  }, [periodTotals]);
 
   const linePoints = useMemo(() => {
     const keys = monthsBetweenInclusive(lineStart, lineEnd);
     return keys.map((mk) => {
-      const sums = aggregateRowsForMonthKey(rows, mk);
+      const sums = statsIndex.byMonth.get(mk);
       const point: Record<string, string | number> = {
         monthKey: mk,
         label: mk,
       };
       for (const k of LINE_SERIES_KEYS) {
-        point[k] = sums[k];
+        point[k] = sums?.[k] ?? 0;
       }
       return point;
     });
-  }, [rows, lineStart, lineEnd]);
+  }, [statsIndex, lineStart, lineEnd]);
 
   const lineRangeDeductionsTotal = useMemo(() => {
     if (!lineStart || !lineEnd || compareMonthKeys(lineStart, lineEnd) > 0) {

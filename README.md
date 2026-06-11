@@ -1,6 +1,6 @@
 # Budget manager
 
-Personal budget workbook app: import transactions from Excel, browse and edit them in a web UI, with calendar views, category stats, accounts, installments, and payslip helpers. The **API reads from PostgreSQL**; Excel is used for upload/import only.
+Personal budget app: browse and edit transactions in a web UI, with calendar views, category stats, accounts, installments, and payslip helpers. The **API reads from PostgreSQL**; payslips can be bulk-imported from nested JSON (`POST /api/payslip/import-json`).
 
 ## Stack
 
@@ -102,7 +102,6 @@ This starts the backend and web (uses `venv` under the project root when present
 | `NEXT_PUBLIC_API_URL` | Optional; override API base URL for the web app (default `http://127.0.0.1:8000`). Omit or leave blank to keep the default. |
 | `NEXT_PUBLIC_BASE_PATH` | Optional; set at **build** time with `STATIC_EXPORT=1` when the app is served under a subpath. |
 | `BUDGET_CORS_ORIGINS` | Optional; comma-separated extra browser origins allowed by the API. |
-| `BUDGET_EXCEL_PATH` / upload | Excel import paths are documented in backend config as used |
 
 ## Project layout
 

@@ -876,6 +876,53 @@ def insert_payslip(
             return _row_to_dict(cur, cur.fetchone())
 
 
+_PAYSLIP_INSERT_COLS: tuple[str, ...] = (
+    "total",
+    "commission",
+    "reimbursement",
+    "medical_reimbursement",
+    "others",
+    "mp2",
+    "allowances",
+    "thirteenth_month",
+    "basic_salary",
+    "period_year",
+    "period_month",
+    "period_half",
+    "notes",
+    "withholding_tax",
+    "sss_contribution",
+    "philhealth",
+    "pag_ibig",
+)
+
+
+def insert_payslips_bulk(records: list[dict[str, Any]]) -> list[int]:
+    """Insert many payslips in a single transaction; returns the new ids in order.
+
+    Used by the JSON import so a multi-row file is all-or-nothing: if any row
+    fails, ``get_connection`` rolls the whole batch back instead of leaving a
+    partial import committed. One ``INSERT ... VALUES (...), (...)`` round trip
+    replaces the previous per-row connect + insert loop.
+    """
+    if not records:
+        return []
+    placeholders = "(" + ", ".join(["?"] * len(_PAYSLIP_INSERT_COLS)) + ")"
+    values_sql = ", ".join([placeholders] * len(records))
+    params: list[Any] = []
+    for rec in records:
+        for col in _PAYSLIP_INSERT_COLS:
+            params.append(rec.get(col))
+    sql = (
+        f"INSERT INTO payslip ({', '.join(_PAYSLIP_INSERT_COLS)}) "
+        f"VALUES {values_sql} RETURNING id"
+    )
+    with get_connection() as conn:
+        with db_cursor(conn) as cur:
+            cur.execute(sql, params)
+            return [int(r[0]) for r in cur.fetchall()]
+
+
 def list_payslips(limit: int = 200) -> list[dict[str, Any]]:
     limit = max(1, min(limit, 2000))
     with get_connection() as conn:
