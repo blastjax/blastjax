@@ -76,8 +76,10 @@ def create_app() -> FastAPI:
         background push hasn't finished. No-op unless ``LOCAL_DB_*`` + cloud are
         both set. Blocking DB I/O runs in worker threads, off the event loop.
         """
-        active = request.url.path.startswith("/api/") and db_sync.sync_enabled()
-        is_write = request.method in _WRITE_METHODS
+        path = request.url.path
+        active = path.startswith("/api/") and db_sync.sync_enabled()
+        # /api/sync already mirrors local -> cloud itself; don't double-push.
+        is_write = request.method in _WRITE_METHODS and path != "/api/sync"
         if active and not is_write:
             await run_in_threadpool(db_sync.pull_before_request)
         response = await call_next(request)
@@ -96,6 +98,7 @@ def create_app() -> FastAPI:
         house_payment,
         installment,
         payslip,
+        sync,
     )
 
     for router in (
@@ -104,6 +107,7 @@ def create_app() -> FastAPI:
         installment.router,
         house_payment.router,
         blood_pressure.router,
+        sync.router,
     ):
         app.include_router(router)
 

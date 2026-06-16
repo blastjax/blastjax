@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { ChartColorsSettingsPanel } from "./ChartColorsSettingsPanel";
+import { CloudSyncPanel } from "./CloudSyncPanel";
 import { PayslipDefaultsPanel } from "./PayslipDefaultsPanel";
 
 type SettingsTab = "payslip" | "charts";
@@ -55,6 +56,8 @@ export default function SettingsClient() {
 
       {tab === "payslip" && <PayslipDefaultsPanel />}
       {tab === "charts" && <ChartColorsSettingsPanel />}
+
+      <CloudSyncPanel />
     </div>
   );
 }

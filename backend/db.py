@@ -599,7 +599,7 @@ def _init_schema_minimal_stmts() -> list[str]:
                 AND installment_current >= 1
                 AND installment_current <= installment_total + 1
             ),
-            CONSTRAINT chk_installment_amounts CHECK (payment_total > 0 AND remaining >= 0)
+            CONSTRAINT chk_installment_amounts CHECK (payment_total >= 0 AND remaining >= 0)
         )
         """,
         """
@@ -791,6 +791,40 @@ def _migrate_installment_repair_constraints(cur: Any) -> None:
     )
 
 
+def _migrate_installment_relax_payment_total(cur: Any) -> None:
+    """
+    Allow amount-less plans (``payment_total = 0``). The Add form no longer
+    requires a per-payment total — it's filled in later via the schedule
+    editor — but older DBs enforced ``payment_total > 0``. Rebuild the check
+    with ``>= 0`` (existing rows already satisfy the looser bound).
+    """
+    cur.execute(
+        "ALTER TABLE installment DROP CONSTRAINT IF EXISTS chk_installment_amounts"
+    )
+    cur.execute(
+        """
+        ALTER TABLE installment
+          ADD CONSTRAINT chk_installment_amounts
+          CHECK (payment_total >= 0 AND remaining >= 0)
+        """
+    )
+
+
+def _migrate_installment_recompute_aggregates(cur: Any) -> None:
+    """
+    Recompute every plan's cached ``remaining`` / ``original_total`` (and the
+    current-line principal/interest/payment_total) from its schedule lines, so
+    ``remaining`` always equals the sum of the unpaid scheduled payments.
+
+    Repairs rows whose cached ``remaining`` went stale — e.g. a manually entered
+    balance left over from before the per-line schedule existed, or lines
+    backfilled by a migration without a follow-up recompute.
+    """
+    cur.execute("SELECT id FROM installment")
+    for (iid,) in cur.fetchall():
+        _recompute_installment_aggregates(cur, iid)
+
+
 def _migrate_aux_created_at_defaults(cur: Any) -> None:
     """
     Ensure non-payslip tables created before ``created_at`` had a default
@@ -842,7 +876,7 @@ def _migrate_house_payment_simplify(cur: Any) -> None:
 # Bump this whenever the DDL or migrations below change. ``init_schema()``
 # uses it to skip the entire migration block on warm starts (very common
 # on Neon, where containers cold-start often).
-_SCHEMA_VERSION = 5
+_SCHEMA_VERSION = 7
 
 
 def init_schema() -> None:
@@ -903,6 +937,8 @@ def _init_schema_on(conn_factory: Any) -> None:
             _migrate_house_payment_simplify(cur)
             _migrate_aux_created_at_defaults(cur)
             _migrate_installment_repair_constraints(cur)
+            _migrate_installment_relax_payment_total(cur)
+            _migrate_installment_recompute_aggregates(cur)
             cur.execute(
                 """
                 INSERT INTO _app_meta (key, value)

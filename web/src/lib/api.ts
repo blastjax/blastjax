@@ -386,3 +386,10 @@ export async function updateBloodPressure(
 export async function deleteBloodPressure(id: number) {
   return sendJson<{ ok: boolean }>("DELETE", `/api/blood-pressure/${id}`);
 }
+
+export async function syncToCloud() {
+  return sendJson<{ ok: boolean; synced: boolean; detail?: string }>(
+    "POST",
+    "/api/sync",
+  );
+}

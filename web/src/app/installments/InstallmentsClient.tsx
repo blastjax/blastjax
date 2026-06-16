@@ -141,6 +141,21 @@ function fmtPct2(pct: number): string {
   });
 }
 
+const MONTH_ABBR = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+] as const;
+
 const emptyForm = {
   name: "",
   installment_current: "1",
@@ -171,6 +186,11 @@ export default function InstallmentsClient() {
   /** Line ids in display order (drag to reorder; saved with Save changes). */
   const [lineOrderIds, setLineOrderIds] = useState<number[]>([]);
   const [savingSchedule, setSavingSchedule] = useState(false);
+  const [paymentsModalOpen, setPaymentsModalOpen] = useState(false);
+  const [paymentsLoading, setPaymentsLoading] = useState(false);
+  const [paymentsDetails, setPaymentsDetails] = useState<
+    InstallmentDetailResponse[]
+  >([]);
 
   const load = useCallback(async () => {
     setError(null);
@@ -384,6 +404,109 @@ export default function InstallmentsClient() {
     setDetail(null);
   }, []);
 
+  const openPayments = async () => {
+    setPaymentsModalOpen(true);
+    setPaymentsLoading(true);
+    setPaymentsDetails([]);
+    setError(null);
+    try {
+      const details = await Promise.all(rows.map((r) => getInstallment(r.id)));
+      setPaymentsDetails(details);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load payments");
+      setPaymentsModalOpen(false);
+    } finally {
+      setPaymentsLoading(false);
+    }
+  };
+
+  const closePayments = useCallback(() => {
+    setPaymentsModalOpen(false);
+    setPaymentsDetails([]);
+  }, []);
+
+  /**
+   * Every scheduled payment across all plans, bucketed by its due month.
+   * Due month for payment #seq is start + seq (credit-card style, matching
+   * the schedule view); a payment is "done" once its seq is below the plan's
+   * current (next-to-pay) position.
+   */
+  const paymentsByMonth = useMemo(() => {
+    type Item = {
+      planId: number;
+      planName: string;
+      seq: number;
+      amount: number;
+      paid: boolean;
+    };
+    type Group = {
+      key: number;
+      label: string;
+      items: Item[];
+      subtotal: number;
+      doneTotal: number;
+      toPayTotal: number;
+    };
+    const map = new Map<number, Group>();
+    let grandTotal = 0;
+    let grandDone = 0;
+    let grandToPay = 0;
+    for (const d of paymentsDetails) {
+      const start = d.installment.start_date;
+      const current = d.installment.installment_current;
+      for (const ln of d.lines) {
+        const due = dueMonthForSeq(start, ln.seq);
+        if (Number.isNaN(due.getTime())) continue;
+        const key = due.getFullYear() * 12 + due.getMonth();
+        let g = map.get(key);
+        if (!g) {
+          g = {
+            key,
+            label: fmtMonthYearFromDate(due),
+            items: [],
+            subtotal: 0,
+            doneTotal: 0,
+            toPayTotal: 0,
+          };
+          map.set(key, g);
+        }
+        const amount = Number(ln.payment_total) || 0;
+        const paid = ln.seq < current;
+        g.items.push({
+          planId: d.installment.id,
+          planName: d.installment.name,
+          seq: ln.seq,
+          amount,
+          paid,
+        });
+        g.subtotal += amount;
+        grandTotal += amount;
+        if (paid) {
+          g.doneTotal += amount;
+          grandDone += amount;
+        } else {
+          g.toPayTotal += amount;
+          grandToPay += amount;
+        }
+      }
+    }
+    for (const g of map.values()) {
+      g.items.sort(
+        (a, b) => a.planName.localeCompare(b.planName) || a.seq - b.seq,
+      );
+    }
+    // Continuous year range so the calendar shows every month (incl. empty
+    // ones) from the first to the last scheduled payment.
+    const keys = [...map.keys()];
+    const years: number[] = [];
+    if (keys.length > 0) {
+      const minYear = Math.floor(Math.min(...keys) / 12);
+      const maxYear = Math.floor(Math.max(...keys) / 12);
+      for (let y = minYear; y <= maxYear; y++) years.push(y);
+    }
+    return { map, years, grandTotal, grandDone, grandToPay };
+  }, [paymentsDetails]);
+
   const openDetail = async (id: number) => {
     setScheduleModalId(id);
     setDetail(null);
@@ -526,10 +649,18 @@ export default function InstallmentsClient() {
 
   return (
     <div className="relative mx-auto flex w-full min-w-0 max-w-6xl flex-col gap-8 px-4 pb-28 py-8 sm:px-6">
-      <header className="border-b border-zinc-200 pb-6 dark:border-zinc-800">
+      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-200 pb-6 dark:border-zinc-800">
         <h1 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
           Installments
         </h1>
+        <button
+          type="button"
+          disabled={loading || rows.length === 0}
+          className="rounded-md border border-indigo-300 bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-700 hover:bg-indigo-100 disabled:opacity-50 dark:border-indigo-800 dark:bg-indigo-950/40 dark:text-indigo-200 dark:hover:bg-indigo-900/40"
+          onClick={() => void openPayments()}
+        >
+          Payments by month
+        </button>
       </header>
 
       {error && (
@@ -1006,8 +1137,139 @@ export default function InstallmentsClient() {
               </div>
             )}
       </Modal>
+
+      <Modal
+        open={paymentsModalOpen}
+        onClose={closePayments}
+        ariaLabelledBy="payments-title"
+        backdropClassName="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4 sm:items-center"
+        dialogClassName="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-xl dark:border-zinc-700 dark:bg-zinc-950"
+      >
+        <div className="flex shrink-0 items-start justify-between gap-2 border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
+          <h2
+            id="payments-title"
+            className="text-lg font-semibold text-zinc-900 dark:text-zinc-50"
+          >
+            Payments by month
+          </h2>
+          <button
+            type="button"
+            className="rounded border border-zinc-200 px-2 py-1 text-xs text-zinc-600 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-900"
+            onClick={closePayments}
+          >
+            Close
+          </button>
+        </div>
+
+        {!paymentsLoading && (
+          <div className="grid shrink-0 grid-cols-3 gap-2 border-b border-zinc-200 px-4 py-3 text-center dark:border-zinc-800">
+            <div>
+              <p className="text-[11px] font-medium uppercase text-zinc-500">Done</p>
+              <p className="mt-0.5 text-base font-semibold tabular-nums text-emerald-600 dark:text-emerald-400">
+                {fmtMoney(paymentsByMonth.grandDone)}
+              </p>
+            </div>
+            <div>
+              <p className="text-[11px] font-medium uppercase text-zinc-500">
+                To be made
+              </p>
+              <p className="mt-0.5 text-base font-semibold tabular-nums text-amber-700 dark:text-amber-300">
+                {fmtMoney(paymentsByMonth.grandToPay)}
+              </p>
+            </div>
+            <div>
+              <p className="text-[11px] font-medium uppercase text-zinc-500">Total</p>
+              <p className="mt-0.5 text-base font-semibold tabular-nums text-zinc-900 dark:text-zinc-50">
+                {fmtMoney(paymentsByMonth.grandTotal)}
+              </p>
+            </div>
+          </div>
+        )}
+
+        <div className="min-h-0 flex-1 overflow-auto p-4">
+          {paymentsLoading && (
+            <p className="text-sm text-zinc-800 dark:text-zinc-200">
+              Loading payments…
+            </p>
+          )}
+          {!paymentsLoading && paymentsByMonth.years.length === 0 && (
+            <p className="text-sm text-zinc-800 dark:text-zinc-200">
+              No scheduled payments.
+            </p>
+          )}
+          {!paymentsLoading && paymentsByMonth.years.length > 0 && (
+            <div className="flex flex-col gap-6">
+              {paymentsByMonth.years.map((year) => (
+                <div key={year}>
+                  <h3 className="mb-2 text-sm font-semibold tabular-nums text-zinc-900 dark:text-zinc-50">
+                    {year}
+                  </h3>
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
+                    {MONTH_ABBR.map((abbr, m) => {
+                      const g = paymentsByMonth.map.get(year * 12 + m);
+                      if (!g) {
+                        return (
+                          <div
+                            key={m}
+                            className="flex min-h-[5rem] flex-col rounded-lg border border-dashed border-zinc-200 px-2 py-2 text-zinc-400 dark:border-zinc-800 dark:text-zinc-600"
+                          >
+                            <span className="text-xs font-medium">{abbr}</span>
+                          </div>
+                        );
+                      }
+                      const allDone = g.toPayTotal <= 0;
+                      return (
+                        <div
+                          key={m}
+                          className={`flex min-h-[5rem] flex-col rounded-lg border px-2 py-2 ${
+                            allDone
+                              ? "border-emerald-200 bg-emerald-50/60 dark:border-emerald-900/60 dark:bg-emerald-950/20"
+                              : "border-amber-200 bg-amber-50/60 dark:border-amber-900/60 dark:bg-amber-950/20"
+                          }`}
+                        >
+                          <div className="flex items-baseline justify-between gap-1">
+                            <span className="text-xs font-semibold text-zinc-700 dark:text-zinc-200">
+                              {abbr}
+                            </span>
+                            <span className="text-xs font-semibold tabular-nums text-zinc-900 dark:text-zinc-50">
+                              {fmtMoney(g.subtotal)}
+                            </span>
+                          </div>
+                          <ul className="mt-1 flex flex-col gap-0.5">
+                            {g.items.map((it) => (
+                              <li
+                                key={`${it.planId}-${it.seq}`}
+                                className="flex items-center justify-between gap-1 text-[11px] leading-tight"
+                                title={`${it.planName} #${it.seq} — ${it.paid ? "Done" : "To pay"}`}
+                              >
+                                <span
+                                  className={`min-w-0 truncate ${
+                                    it.paid
+                                      ? "text-emerald-700 line-through dark:text-emerald-400"
+                                      : "text-amber-800 dark:text-amber-300"
+                                  }`}
+                                >
+                                  {it.planName}
+                                </span>
+                                <span className="shrink-0 tabular-nums text-zinc-700 dark:text-zinc-300">
+                                  {fmtMoney(it.amount)}
+                                </span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </Modal>
+
       <FloatingAddButton
-        hidden={addModalOpen || scheduleModalId != null}
+        hidden={addModalOpen || scheduleModalId != null || paymentsModalOpen}
         onClick={() => {
           setEditingId(null);
           setForm(emptyForm);

@@ -242,3 +242,39 @@ def push_after_write() -> None:
             _set_state("local_dirty", "1")
         except Exception:
             pass
+
+
+def force_push_to_cloud() -> dict[str, Any]:
+    """
+    Manually mirror local -> cloud right now (used by the settings "Sync"
+    button). Unlike :func:`push_after_write`, it copies regardless of the
+    change fingerprint, so it works as an explicit "make the cloud match local"
+    action. Returns a small status dict for the API to surface.
+    """
+    if not sync_enabled():
+        return {"ok": False, "synced": False, "detail": "Mirror not configured."}
+    if not cloud_reachable():
+        try:
+            _set_state("local_dirty", "1")
+        except Exception:
+            pass
+        return {"ok": False, "synced": False, "detail": "Cloud is unreachable."}
+    try:
+        with _recon_lock:
+            with get_connection() as local, db_cursor(local) as lcur, (
+                get_cloud_connection()
+            ) as cloud, db_cursor(cloud) as ccur:
+                _copy_all(lcur, ccur)
+                cloud_fp = _fingerprint(ccur)
+                local_fp = _fingerprint(lcur)
+            _set_state("cloud_fp", cloud_fp)
+            _set_state("local_fp", local_fp)
+            _set_state("local_dirty", "0")
+        return {"ok": True, "synced": True}
+    except Exception as e:  # noqa: BLE001
+        _log.warning("manual local->cloud sync failed: %s", e)
+        try:
+            _set_state("local_dirty", "1")
+        except Exception:
+            pass
+        return {"ok": False, "synced": False, "detail": str(e)}
