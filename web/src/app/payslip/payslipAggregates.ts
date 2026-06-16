@@ -140,11 +140,11 @@ export function grossTotalFromRow(r: PayslipRow): number {
   return (
     num(r.basic_salary) +
     num(r.commission) +
-    num(r.allowances) +
-    num(r.reimbursement) +
-    num(r.others) +
-    num(r.thirteenth_month) +
-    num(r.medical_reimbursement)
+    // num(r.allowances) +
+    // num(r.reimbursement) +
+    num(r.others)
+    // num(r.thirteenth_month) +
+    // num(r.medical_reimbursement)
   );
 }
 
