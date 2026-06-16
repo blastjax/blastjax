@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from fastapi import HTTPException
 
-from db import database_url
+from db import primary_database_url
 
 
 def require_db() -> None:
-    """Reject requests when ``DATABASE_URL`` (or ``DB_*``) is not configured.
+    """Reject requests when no database (local mirror or cloud) is configured.
 
     Used as a route dependency so each router doesn't have to repeat the
     same precondition check::
@@ -16,5 +16,5 @@ def require_db() -> None:
         @router.get("/api/foo", dependencies=[Depends(require_db)])
         def foo(): ...
     """
-    if not database_url():
+    if not primary_database_url():
         raise HTTPException(status_code=503, detail="DATABASE_URL is not set.")

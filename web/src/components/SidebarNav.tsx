@@ -14,6 +14,7 @@ const LINKS = [
   { href: "/house-payments", label: "House Payments" },
   { href: "/salary-stats", label: "Salary Stats" },
   { href: "/payslip", label: "Payslip" },
+  { href: "/blood-pressure", label: "Blood Pressure" },
   { href: "/settings", label: "Settings" },
 ] as const;
 

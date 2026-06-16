@@ -133,8 +133,8 @@ def _database_url_from_db_parts() -> str | None:
 
 def database_url() -> str | None:
     """
-    Resolve Postgres URL. When ``DB_HOST`` and ``DB_NAME`` (and other DB_* parts) are set,
-    those win over ``DATABASE_URL`` so a machine-level ``DATABASE_URL`` cannot silently
+    Resolve the *cloud* Postgres URL. When ``DB_HOST`` and ``DB_NAME`` (and other DB_* parts)
+    are set, those win over ``DATABASE_URL`` so a machine-level ``DATABASE_URL`` cannot silently
     override Neon's ``DB_*`` from the project ``.env``.
     """
     from_parts = _database_url_from_db_parts()
@@ -144,6 +144,56 @@ def database_url() -> str | None:
     if direct:
         return direct
     return None
+
+
+def cloud_database_url() -> str | None:
+    """The remote/source-of-truth database (Neon ``DB_*`` / ``DATABASE_URL``)."""
+    return database_url()
+
+
+def local_database_url() -> str | None:
+    """
+    Resolve the local mirror DB from ``LOCAL_DB_*``. When set, the app reads from and
+    writes to this database; changes are pushed up to :func:`cloud_database_url` and the
+    cloud is mirrored back down on reads (see ``db_sync``).
+    """
+    host = (os.environ.get("LOCAL_DB_HOST") or "").strip()
+    dbname = (os.environ.get("LOCAL_DB_NAME") or "").strip()
+    if not host or not dbname:
+        return None
+    user = (os.environ.get("LOCAL_DB_USER") or "").strip()
+    password = os.environ.get("LOCAL_DB_PASSWORD") or ""
+    port = (os.environ.get("LOCAL_DB_PORT") or "5432").strip() or "5432"
+    # In Docker, ``localhost`` points at the api container itself; the local mirror
+    # Postgres is the Compose ``db`` service, reachable as ``db:5432`` on the
+    # internal network (host-mapped to 5433, but that mapping doesn't apply here).
+    if Path("/.dockerenv").exists() and host.lower() in ("localhost", "127.0.0.1"):
+        host = "db"
+        port = "5432"
+    path = quote(dbname, safe="")
+    if user and password:
+        return (
+            f"postgresql://{quote_plus(user)}:{quote_plus(password)}"
+            f"@{host}:{port}/{path}"
+        )
+    if user:
+        return f"postgresql://{quote_plus(user)}@{host}:{port}/{path}"
+    if password:
+        return f"postgresql://:{quote_plus(password)}@{host}:{port}/{path}"
+    return f"postgresql://{host}:{port}/{path}"
+
+
+def primary_database_url() -> str | None:
+    """
+    The database the app actually serves from: the local mirror when ``LOCAL_DB_*`` is
+    configured, otherwise the cloud DB. ``get_connection`` uses this.
+    """
+    return local_database_url() or cloud_database_url()
+
+
+def sync_configured() -> bool:
+    """True when both a local mirror and a cloud DB are configured (mirroring is active)."""
+    return bool(local_database_url()) and bool(cloud_database_url())
 
 
 _LIBPQ_DEFAULT_PARAMS: tuple[tuple[str, str], ...] = (
@@ -157,6 +207,9 @@ _LIBPQ_DEFAULT_PARAMS: tuple[tuple[str, str], ...] = (
     # Tag connections so they're easy to spot in pg_stat_activity. Allowed by
     # Neon's pooler (which has a strict allow-list for startup parameters).
     ("application_name", "budgetapp"),
+    # Fail fast when the cloud DB is unreachable so the mirror can fall back to
+    # local instead of blocking the request on a long TCP connect.
+    ("connect_timeout", "8"),
 )
 
 
@@ -186,7 +239,7 @@ def _postgres_connect_url(url: str) -> str:
 
 
 def storage_kind() -> str:
-    u = (database_url() or "").strip().lower()
+    u = (primary_database_url() or "").strip().lower()
     if u.startswith("postgresql:") or u.startswith("postgres:"):
         return "postgres"
     return "none"
@@ -196,7 +249,10 @@ def use_database() -> bool:
     return storage_kind() == "postgres"
 
 
-_pg_pool: pool.ThreadedConnectionPool | None = None
+# One pool per distinct DSN. With a local mirror configured there are two:
+# the local (primary) pool the app serves from and the cloud pool used by the
+# reconciler in ``db_sync``.
+_pg_pools: dict[str, pool.ThreadedConnectionPool] = {}
 
 
 def _pool_bounds() -> tuple[int, int]:
@@ -207,27 +263,35 @@ def _pool_bounds() -> tuple[int, int]:
     return mn, mx
 
 
-def _ensure_pool() -> pool.ThreadedConnectionPool:
-    """Lazy pool: reuse TCP/TLS sessions to Postgres (Neon) instead of connecting per request."""
-    global _pg_pool
-    if _pg_pool is not None:
-        return _pg_pool
-    url = (database_url() or "").strip()
-    if storage_kind() != "postgres":
+def _is_postgres_url(url: str | None) -> bool:
+    u = (url or "").strip().lower()
+    return u.startswith("postgresql:") or u.startswith("postgres:")
+
+
+def _ensure_pool(url: str) -> pool.ThreadedConnectionPool:
+    """Lazy per-DSN pool: reuse TCP/TLS sessions instead of connecting per request."""
+    url = (url or "").strip()
+    existing = _pg_pools.get(url)
+    if existing is not None:
+        return existing
+    if not _is_postgres_url(url):
         raise RuntimeError(
             "DATABASE_URL must be a postgresql://... URL (or set DB_HOST, DB_NAME, …).",
         )
     mn, mx = _pool_bounds()
-    _pg_pool = pool.ThreadedConnectionPool(mn, mx, dsn=_postgres_connect_url(url))
-    return _pg_pool
+    p = pool.ThreadedConnectionPool(mn, mx, dsn=_postgres_connect_url(url))
+    _pg_pools[url] = p
+    return p
 
 
 def close_connection_pool() -> None:
     """Release pooled connections on process shutdown (e.g. uvicorn reload)."""
-    global _pg_pool
-    if _pg_pool is not None:
-        _pg_pool.closeall()
-        _pg_pool = None
+    for p in _pg_pools.values():
+        try:
+            p.closeall()
+        except Exception:
+            pass
+    _pg_pools.clear()
     _conn_last_seen.clear()
     _conn_initialized.clear()
 
@@ -326,12 +390,12 @@ def _drop_conn_state(conn: Any) -> None:
 
 
 @contextmanager
-def get_connection():
-    if storage_kind() != "postgres":
+def _connection_for(url: str | None):
+    if not _is_postgres_url(url):
         raise RuntimeError(
             "DATABASE_URL must be a postgresql://... URL (or set DB_HOST, DB_NAME, …).",
         )
-    p = _ensure_pool()
+    p = _ensure_pool(url or "")
     conn = _acquire_live_connection(p)
     broken = False
     try:
@@ -366,6 +430,20 @@ def get_connection():
             p.putconn(conn, close=broken)
         except Exception:
             pass
+
+
+@contextmanager
+def get_connection():
+    """Connection to the primary DB (local mirror when configured, else cloud)."""
+    with _connection_for(primary_database_url()) as conn:
+        yield conn
+
+
+@contextmanager
+def get_cloud_connection():
+    """Connection to the cloud (source-of-truth) DB, used by the mirror reconciler."""
+    with _connection_for(cloud_database_url()) as conn:
+        yield conn
 
 
 _MINIMAL_PERF_INDEX_DDL = """
@@ -567,6 +645,23 @@ def _init_schema_minimal_stmts() -> list[str]:
         CREATE INDEX IF NOT EXISTS idx_house_payment_entry_parent
             ON house_payment_entry (house_payment_id, paid_on DESC)
         """,
+        """
+        CREATE TABLE IF NOT EXISTS blood_pressure (
+            id SERIAL PRIMARY KEY,
+            systolic INTEGER NOT NULL,
+            diastolic INTEGER NOT NULL,
+            pulse INTEGER NOT NULL,
+            notes TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() AT TIME ZONE 'UTC'),
+            CONSTRAINT chk_blood_pressure_values CHECK (
+                systolic > 0 AND diastolic > 0 AND pulse > 0
+            )
+        )
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_blood_pressure_created
+            ON blood_pressure (created_at DESC)
+        """,
     ]
 
 
@@ -747,7 +842,7 @@ def _migrate_house_payment_simplify(cur: Any) -> None:
 # Bump this whenever the DDL or migrations below change. ``init_schema()``
 # uses it to skip the entire migration block on warm starts (very common
 # on Neon, where containers cold-start often).
-_SCHEMA_VERSION = 4
+_SCHEMA_VERSION = 5
 
 
 def init_schema() -> None:
@@ -760,7 +855,19 @@ def init_schema() -> None:
     """
     if not use_database():
         return
-    with get_connection() as conn:
+    # Bring the primary (local mirror when configured) up to date first; the app
+    # serves from it. Then try the cloud so the first push has tables to target —
+    # but don't fail startup if the cloud is unreachable (offline-friendly).
+    _init_schema_on(get_connection)
+    if sync_configured():
+        try:
+            _init_schema_on(get_cloud_connection)
+        except Exception as e:  # noqa: BLE001 - offline cloud must not block startup
+            _log.warning("Could not initialize cloud schema (offline?): %s", e)
+
+
+def _init_schema_on(conn_factory: Any) -> None:
+    with conn_factory() as conn:
         with db_cursor(conn) as cur:
             cur.execute(
                 """
@@ -1770,6 +1877,66 @@ def delete_house_payment_entry(
             if not cur.fetchone():
                 return None
             return _house_payment_detail(cur, house_payment_id)
+
+
+_BLOOD_PRESSURE_COLS = "id, systolic, diastolic, pulse, notes, created_at"
+
+
+def list_blood_pressures(limit: int = 500) -> list[dict[str, Any]]:
+    limit = max(1, min(limit, 2000))
+    with get_connection() as conn:
+        with db_cursor(conn) as cur:
+            cur.execute(
+                f"""
+                SELECT {_BLOOD_PRESSURE_COLS} FROM blood_pressure
+                ORDER BY created_at DESC, id DESC
+                LIMIT ?
+                """,
+                (limit,),
+            )
+            return [_row_to_dict(cur, r) for r in cur.fetchall()]
+
+
+def insert_blood_pressure(
+    systolic: int, diastolic: int, pulse: int, notes: str | None
+) -> dict[str, Any]:
+    """Insert one reading (timestamped now) and return the full row."""
+    with get_connection() as conn:
+        with db_cursor(conn) as cur:
+            cur.execute(
+                f"""
+                INSERT INTO blood_pressure (systolic, diastolic, pulse, notes)
+                VALUES (?, ?, ?, ?)
+                RETURNING {_BLOOD_PRESSURE_COLS}
+                """,
+                (systolic, diastolic, pulse, notes),
+            )
+            return _row_to_dict(cur, cur.fetchone())
+
+
+def update_blood_pressure(
+    reading_id: int, systolic: int, diastolic: int, pulse: int, notes: str | None
+) -> dict[str, Any] | None:
+    with get_connection() as conn:
+        with db_cursor(conn) as cur:
+            cur.execute(
+                f"""
+                UPDATE blood_pressure
+                SET systolic = ?, diastolic = ?, pulse = ?, notes = ?
+                WHERE id = ?
+                RETURNING {_BLOOD_PRESSURE_COLS}
+                """,
+                (systolic, diastolic, pulse, notes, reading_id),
+            )
+            row = cur.fetchone()
+            return _row_to_dict(cur, row) if row else None
+
+
+def delete_blood_pressure(reading_id: int) -> bool:
+    with get_connection() as conn:
+        with db_cursor(conn) as cur:
+            cur.execute("DELETE FROM blood_pressure WHERE id = ?", (reading_id,))
+            return cur.rowcount > 0
 
 
 def check_connection() -> bool:

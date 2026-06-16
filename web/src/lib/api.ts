@@ -341,3 +341,48 @@ export async function deleteHousePaymentEntry(
     `/api/house-payment/${housePaymentId}/entry/${entryId}`,
   );
 }
+
+export type BloodPressureRow = {
+  id: number;
+  systolic: number;
+  diastolic: number;
+  pulse: number;
+  notes: string | null;
+  created_at: string;
+};
+
+export type BloodPressureCreateBody = {
+  systolic: number;
+  diastolic: number;
+  pulse: number;
+  notes?: string | null;
+};
+
+export async function getBloodPressures(limit?: number) {
+  return getJson<{ readings: BloodPressureRow[] }>("/api/blood-pressure", {
+    limit,
+  });
+}
+
+export async function createBloodPressure(body: BloodPressureCreateBody) {
+  return sendJson<{ reading: BloodPressureRow }>(
+    "POST",
+    "/api/blood-pressure",
+    body,
+  );
+}
+
+export async function updateBloodPressure(
+  id: number,
+  body: BloodPressureCreateBody,
+) {
+  return sendJson<{ reading: BloodPressureRow }>(
+    "PUT",
+    `/api/blood-pressure/${id}`,
+    body,
+  );
+}
+
+export async function deleteBloodPressure(id: number) {
+  return sendJson<{ ok: boolean }>("DELETE", `/api/blood-pressure/${id}`);
+}
