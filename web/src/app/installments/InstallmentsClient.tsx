@@ -104,6 +104,14 @@ function monthToApiDate(ym: string): string {
   return "";
 }
 
+/** Add ``months`` to a YYYY-MM-DD API date, returning first-of-month YYYY-MM-DD. */
+function addMonthsToApiDate(apiDate: string, months: number): string {
+  const [y, m] = apiDate.slice(0, 7).split("-").map(Number);
+  if (!y || !m) return "";
+  const d = addMonths(new Date(y, m - 1, 1), months);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`;
+}
+
 function isDueThisMonth(r: InstallmentRow): boolean {
   if (r.installment_current > r.installment_total || r.remaining <= 0) return false;
   const due = nextDueDate(r);
@@ -399,22 +407,40 @@ export default function InstallmentsClient() {
     setError(null);
     try {
       const sd = monthToApiDate(form.start_date);
-      const fd = monthToApiDate(form.finish_date);
-      if (!sd || !fd) {
+      if (!sd) {
         throw new Error(
-          "Start and finish must be valid months (use yyyy-mm or mm-yyyy).",
+          "Start must be a valid month (use yyyy-mm or mm-yyyy).",
         );
       }
+      const total = parseFormNumber(form.installment_total) ?? NaN;
+      // Finish defaults to start + total installments (CC-style: payment #n
+      // is due n months after start).
+      let fd = monthToApiDate(form.finish_date);
+      if (!fd) {
+        if (!Number.isFinite(total) || total < 1) {
+          throw new Error(
+            "Enter total installments so the finish date can be computed.",
+          );
+        }
+        fd = addMonthsToApiDate(sd, total);
+      }
+      const principalVal = parseFormNumber(form.principal) ?? 0;
+      const interestVal =
+        form.interest.trim() === ""
+          ? null
+          : (parseFormNumber(form.interest) ?? NaN);
+      // Per-payment total defaults to principal + interest when left blank.
+      const paymentTotal =
+        form.payment_total.trim() === ""
+          ? principalVal + (interestVal ?? 0)
+          : (parseFormNumber(form.payment_total) ?? NaN);
       const body: InstallmentCreateBody = {
         name: form.name.trim(),
         installment_current: parseFormNumber(form.installment_current) ?? NaN,
-        installment_total: parseFormNumber(form.installment_total) ?? NaN,
-        principal: parseFormNumber(form.principal) ?? 0,
-        interest:
-          form.interest.trim() === ""
-            ? null
-            : (parseFormNumber(form.interest) ?? NaN),
-        payment_total: parseFormNumber(form.payment_total) ?? NaN,
+        installment_total: total,
+        principal: principalVal,
+        interest: interestVal,
+        payment_total: paymentTotal,
         start_date: sd,
         finish_date: fd,
         remaining:
@@ -600,7 +626,12 @@ export default function InstallmentsClient() {
           </button>
         </div>
         <form onSubmit={submitCreate} className="grid gap-4 sm:grid-cols-2">
-          <InstallmentFieldGrid form={form} setForm={setForm} saving={saving} />
+          <InstallmentFieldGrid
+            form={form}
+            setForm={setForm}
+            saving={saving}
+            hideAmounts
+          />
           <div className="flex flex-wrap gap-2 sm:col-span-2">
             <button
               type="submit"

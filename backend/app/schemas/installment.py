@@ -13,7 +13,7 @@ class InstallmentCreate(BaseModel):
     installment_total: int = Field(ge=1)
     principal: float = Field(ge=0)
     interest: float | None = Field(default=None, ge=0)
-    payment_total: float = Field(gt=0)
+    payment_total: float = Field(ge=0)
     start_date: dt.date
     finish_date: dt.date
     remaining: float | None = None

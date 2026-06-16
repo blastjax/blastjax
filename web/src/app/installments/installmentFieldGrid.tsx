@@ -19,10 +19,13 @@ export function InstallmentFieldGrid({
   form,
   setForm,
   saving,
+  hideAmounts = false,
 }: {
   form: InstallmentFormState;
   setForm: Dispatch<SetStateAction<InstallmentFormState>>;
   saving: boolean;
+  /** Hide principal / interest / per-payment total / remaining (filled later via the schedule editor). */
+  hideAmounts?: boolean;
 }) {
   return (
     <>
@@ -68,50 +71,54 @@ export function InstallmentFieldGrid({
           disabled={saving}
         />
       </label>
-      <label className="flex flex-col gap-1 text-sm">
-        <span className="text-zinc-600 dark:text-zinc-400">Principal</span>
-        <input
-          type="text"
-          inputMode="decimal"
-          className="rounded-md border border-zinc-300 bg-white px-3 py-2 dark:border-zinc-700 dark:bg-zinc-950"
-          value={form.principal}
-          onChange={(e) =>
-            setForm((f) => ({ ...f, principal: e.target.value }))
-          }
-          disabled={saving}
-        />
-      </label>
-      <label className="flex flex-col gap-1 text-sm">
-        <span className="text-zinc-600 dark:text-zinc-400">
-          Interest (optional)
-        </span>
-        <input
-          type="text"
-          inputMode="decimal"
-          className="rounded-md border border-zinc-300 bg-white px-3 py-2 dark:border-zinc-700 dark:bg-zinc-950"
-          value={form.interest}
-          onChange={(e) =>
-            setForm((f) => ({ ...f, interest: e.target.value }))
-          }
-          disabled={saving}
-        />
-      </label>
-      <label className="flex flex-col gap-1 text-sm">
-        <span className="text-zinc-600 dark:text-zinc-400">
-          Total (per payment)
-        </span>
-        <input
-          required
-          type="text"
-          inputMode="decimal"
-          className="rounded-md border border-zinc-300 bg-white px-3 py-2 dark:border-zinc-700 dark:bg-zinc-950"
-          value={form.payment_total}
-          onChange={(e) =>
-            setForm((f) => ({ ...f, payment_total: e.target.value }))
-          }
-          disabled={saving}
-        />
-      </label>
+      {!hideAmounts && (
+        <>
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="text-zinc-600 dark:text-zinc-400">Principal</span>
+            <input
+              type="text"
+              inputMode="decimal"
+              className="rounded-md border border-zinc-300 bg-white px-3 py-2 dark:border-zinc-700 dark:bg-zinc-950"
+              value={form.principal}
+              onChange={(e) =>
+                setForm((f) => ({ ...f, principal: e.target.value }))
+              }
+              disabled={saving}
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="text-zinc-600 dark:text-zinc-400">
+              Interest (optional)
+            </span>
+            <input
+              type="text"
+              inputMode="decimal"
+              className="rounded-md border border-zinc-300 bg-white px-3 py-2 dark:border-zinc-700 dark:bg-zinc-950"
+              value={form.interest}
+              onChange={(e) =>
+                setForm((f) => ({ ...f, interest: e.target.value }))
+              }
+              disabled={saving}
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="text-zinc-600 dark:text-zinc-400">
+              Total (per payment, optional)
+            </span>
+            <input
+              type="text"
+              inputMode="decimal"
+              placeholder="Auto: principal + interest"
+              className="rounded-md border border-zinc-300 bg-white px-3 py-2 dark:border-zinc-700 dark:bg-zinc-950"
+              value={form.payment_total}
+              onChange={(e) =>
+                setForm((f) => ({ ...f, payment_total: e.target.value }))
+              }
+              disabled={saving}
+            />
+          </label>
+        </>
+      )}
       <label className="flex flex-col gap-1 text-sm">
         <span className="text-zinc-600 dark:text-zinc-400">Start (mm-yyyy)</span>
         <input
@@ -126,10 +133,12 @@ export function InstallmentFieldGrid({
         />
       </label>
       <label className="flex flex-col gap-1 text-sm">
-        <span className="text-zinc-600 dark:text-zinc-400">Finish (mm-yyyy)</span>
+        <span className="text-zinc-600 dark:text-zinc-400">
+          Finish (mm-yyyy, optional)
+        </span>
         <input
-          required
           type="month"
+          placeholder="Auto: start + total installments"
           className="rounded-md border border-zinc-300 bg-white px-3 py-2 dark:border-zinc-700 dark:bg-zinc-950"
           value={form.finish_date}
           onChange={(e) =>
@@ -138,38 +147,42 @@ export function InstallmentFieldGrid({
           disabled={saving}
         />
       </label>
-      <label className="flex flex-col gap-1 text-sm">
-        <span className="text-zinc-600 dark:text-zinc-400">
-          Remaining (optional)
-        </span>
-        <input
-          type="text"
-          inputMode="decimal"
-          placeholder="Auto: payments left × per payment"
-          className="rounded-md border border-zinc-300 bg-white px-3 py-2 dark:border-zinc-700 dark:bg-zinc-950"
-          value={form.remaining}
-          onChange={(e) =>
-            setForm((f) => ({ ...f, remaining: e.target.value }))
-          }
-          disabled={saving}
-        />
-      </label>
-      <label className="flex flex-col gap-1 text-sm">
-        <span className="text-zinc-600 dark:text-zinc-400">
-          Original total (optional)
-        </span>
-        <input
-          type="text"
-          inputMode="decimal"
-          placeholder="Auto: n × per payment"
-          className="rounded-md border border-zinc-300 bg-white px-3 py-2 dark:border-zinc-700 dark:bg-zinc-950"
-          value={form.original_total}
-          onChange={(e) =>
-            setForm((f) => ({ ...f, original_total: e.target.value }))
-          }
-          disabled={saving}
-        />
-      </label>
+      {!hideAmounts && (
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="text-zinc-600 dark:text-zinc-400">
+            Remaining (optional)
+          </span>
+          <input
+            type="text"
+            inputMode="decimal"
+            placeholder="Auto: payments left × per payment"
+            className="rounded-md border border-zinc-300 bg-white px-3 py-2 dark:border-zinc-700 dark:bg-zinc-950"
+            value={form.remaining}
+            onChange={(e) =>
+              setForm((f) => ({ ...f, remaining: e.target.value }))
+            }
+            disabled={saving}
+          />
+        </label>
+      )}
+      {!hideAmounts && (
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="text-zinc-600 dark:text-zinc-400">
+            Original total (optional)
+          </span>
+          <input
+            type="text"
+            inputMode="decimal"
+            placeholder="Auto: n × per payment"
+            className="rounded-md border border-zinc-300 bg-white px-3 py-2 dark:border-zinc-700 dark:bg-zinc-950"
+            value={form.original_total}
+            onChange={(e) =>
+              setForm((f) => ({ ...f, original_total: e.target.value }))
+            }
+            disabled={saving}
+          />
+        </label>
+      )}
     </>
   );
 }
