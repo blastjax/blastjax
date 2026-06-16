@@ -20,6 +20,7 @@ from db import (
     insert_installment,
     installment_apply_payment,
     list_installments,
+    list_installments_with_lines,
     reorder_installment_lines,
     update_installment,
     update_installment_line_and_fetch_detail,
@@ -67,6 +68,23 @@ def installment_list(
     return {
         "installments": [serialize_installment_row(r) for r in rows],
         "summary": installment_summary(rows),
+    }
+
+
+@router.get("/api/installment-schedules")
+def installment_schedules(
+    limit: int = Query(default=500, ge=1, le=2000),
+) -> dict[str, Any]:
+    """All plans with their schedule lines in one response (payments-by-month view)."""
+    items = list_installments_with_lines(limit=limit)
+    return {
+        "schedules": [
+            {
+                "installment": serialize_installment_row(it["installment"]),
+                "lines": it["lines"],
+            }
+            for it in items
+        ]
     }
 
 

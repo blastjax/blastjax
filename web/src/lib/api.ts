@@ -209,6 +209,13 @@ export async function getInstallment(id: number) {
   return getJson<InstallmentDetailResponse>(`/api/installment/${id}`);
 }
 
+export async function getInstallmentSchedules(limit?: number) {
+  return getJson<{ schedules: InstallmentDetailResponse[] }>(
+    "/api/installment-schedules",
+    { limit },
+  );
+}
+
 export async function createInstallment(body: InstallmentCreateBody) {
   return sendJson<InstallmentDetailResponse>("POST", "/api/installment", body);
 }

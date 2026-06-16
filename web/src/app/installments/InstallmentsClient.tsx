@@ -8,6 +8,7 @@ import {
   deleteInstallment,
   getInstallment,
   getInstallments,
+  getInstallmentSchedules,
   recordInstallmentPayment,
   reorderInstallmentLines,
   updateInstallment,
@@ -410,8 +411,10 @@ export default function InstallmentsClient() {
     setPaymentsDetails([]);
     setError(null);
     try {
-      const details = await Promise.all(rows.map((r) => getInstallment(r.id)));
-      setPaymentsDetails(details);
+      // One request returns every plan with its schedule lines — far faster than
+      // a per-plan detail call (each of which would trigger its own cloud check).
+      const res = await getInstallmentSchedules(2000);
+      setPaymentsDetails(res.schedules);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load payments");
       setPaymentsModalOpen(false);

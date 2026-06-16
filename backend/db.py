@@ -1200,6 +1200,55 @@ def list_installments(limit: int = 500) -> list[dict[str, Any]]:
             return out
 
 
+def list_installments_with_lines(limit: int = 500) -> list[dict[str, Any]]:
+    """
+    All plans with their schedule lines, fetched in two queries (header list +
+    all lines) and grouped in Python. Lets the UI build a payments-by-month view
+    in a single request instead of one ``GET /{id}`` detail call per plan.
+    """
+    limit = max(1, min(limit, 2000))
+    with get_connection() as conn:
+        with db_cursor(conn) as cur:
+            cur.execute(
+                """
+                SELECT i.id, i.name, i.installment_current, i.installment_total,
+                       i.principal, i.interest, i.payment_total, i.start_date, i.finish_date,
+                       i.remaining, i.original_total, i.created_at,
+                       COALESCE(il.payment_total, i.payment_total) AS due_payment
+                FROM installment i
+                LEFT JOIN installment_line il
+                    ON il.installment_id = i.id AND il.seq = i.installment_current
+                ORDER BY i.finish_date ASC, i.name ASC
+                LIMIT ?
+                """,
+                (limit,),
+            )
+            cols = [d[0] for d in cur.description]
+            headers = [dict(zip(cols, r)) for r in cur.fetchall()]
+            if not headers:
+                return []
+            ids = [h["id"] for h in headers]
+            cur.execute(
+                """
+                SELECT installment_id, id, seq, principal, interest, payment_total
+                FROM installment_line
+                WHERE installment_id = ANY(?)
+                ORDER BY installment_id ASC, seq ASC
+                """,
+                (ids,),
+            )
+            lcols = [d[0] for d in cur.description]
+            lines_by_iid: dict[int, list[dict[str, Any]]] = {}
+            for r in cur.fetchall():
+                d = dict(zip(lcols, r))
+                iid = d.pop("installment_id")
+                lines_by_iid.setdefault(iid, []).append(d)
+            return [
+                {"installment": h, "lines": lines_by_iid.get(h["id"], [])}
+                for h in headers
+            ]
+
+
 def _installment_row_dict(cur: Any, installment_id: int) -> dict[str, Any] | None:
     """Read one installment header row including the joined ``due_payment`` field."""
     cur.execute(
