@@ -354,6 +354,7 @@ export type BloodPressureRow = {
   systolic: number;
   diastolic: number;
   pulse: number;
+  spo2: number | null;
   notes: string | null;
   created_at: string;
 };
@@ -362,6 +363,7 @@ export type BloodPressureCreateBody = {
   systolic: number;
   diastolic: number;
   pulse: number;
+  spo2?: number | null;
   notes?: string | null;
 };
 

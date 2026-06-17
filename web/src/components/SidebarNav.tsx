@@ -8,15 +8,30 @@ const sidebarNavInactiveHover =
 import { useShellLayout } from "@/lib/shellLayoutContext";
 import { useLgUp } from "@/lib/useLgUp";
 
+type NavLink = { href: string; label: string };
+
 /** Other routes still exist; only these appear in the shell nav. */
-const LINKS = [
-  { href: "/installments", label: "Installments" },
-  { href: "/house-payments", label: "House Payments" },
-  { href: "/salary-stats", label: "Salary Stats" },
-  { href: "/payslip", label: "Payslip" },
-  { href: "/blood-pressure", label: "Blood Pressure" },
-  { href: "/settings", label: "Settings" },
-] as const;
+const NAV_SEGMENTS: readonly { title: string | null; links: readonly NavLink[] }[] = [
+  {
+    title: "Finances",
+    links: [
+      { href: "/payslip", label: "Payslip" },
+      { href: "/salary-stats", label: "Salary Stats" },
+      { href: "/installments", label: "Installments" },
+      { href: "/house-payments", label: "House Payments" },
+    ],
+  },
+  {
+    title: "Health",
+    links: [{ href: "/blood-pressure", label: "Blood Pressure" }],
+  },
+  {
+    title: null,
+    links: [{ href: "/settings", label: "Settings" }],
+  },
+];
+
+const LINKS: readonly NavLink[] = NAV_SEGMENTS.flatMap((s) => s.links);
 
 function matchingNavHref(
   pathname: string,
@@ -69,26 +84,38 @@ export function SidebarNav() {
         </div>
 
         <nav
-          className="mt-4 flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto overflow-x-hidden lg:mt-0"
+          className="mt-4 flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overflow-x-hidden lg:mt-0"
           aria-label="Main"
         >
-          {LINKS.map(({ href, label }) => {
-            const active = activeHref === href;
-            return (
-              <Link
-                key={href}
-                href={href}
-                onClick={closeMobileNav}
-                className={`rounded-lg px-3 py-2.5 text-sm font-medium transition ${
-                  active
-                    ? "bg-indigo-100 text-indigo-900 dark:bg-indigo-950/80 dark:text-indigo-100"
-                    : `text-zinc-700 dark:text-zinc-300 ${sidebarNavInactiveHover}`
-                }`}
-              >
-                {label}
-              </Link>
-            );
-          })}
+          {NAV_SEGMENTS.map((segment, segmentIndex) => (
+            <div
+              key={segment.title ?? `segment-${segmentIndex}`}
+              className="flex flex-col gap-0.5"
+            >
+              {segment.title ? (
+                <h2 className="px-3 pb-1 text-xs font-semibold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
+                  {segment.title}
+                </h2>
+              ) : null}
+              {segment.links.map(({ href, label }) => {
+                const active = activeHref === href;
+                return (
+                  <Link
+                    key={href}
+                    href={href}
+                    onClick={closeMobileNav}
+                    className={`rounded-lg px-3 py-2.5 text-sm font-medium transition ${
+                      active
+                        ? "bg-indigo-100 text-indigo-900 dark:bg-indigo-950/80 dark:text-indigo-100"
+                        : `text-zinc-700 dark:text-zinc-300 ${sidebarNavInactiveHover}`
+                    }`}
+                  >
+                    {label}
+                  </Link>
+                );
+              })}
+            </div>
+          ))}
         </nav>
       </div>
     </aside>

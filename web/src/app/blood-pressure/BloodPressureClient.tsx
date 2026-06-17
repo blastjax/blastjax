@@ -26,16 +26,23 @@ import {
 /**
  * A reading is "healthy" when systolic, diastolic, and pulse all sit in the
  * normal resting range (normal BP < 120/80 but not hypotensive, resting pulse
- * 60–100). Anything outside is flagged "Bad".
+ * 60–100), and — when recorded — SpO2 is at least 95%. Anything outside is
+ * flagged "Bad".
  */
-function isHealthy(r: { systolic: number; diastolic: number; pulse: number }): boolean {
+function isHealthy(r: {
+  systolic: number;
+  diastolic: number;
+  pulse: number;
+  spo2: number | null;
+}): boolean {
   return (
     r.systolic >= 90 &&
     r.systolic < 120 &&
     r.diastolic >= 60 &&
     r.diastolic < 80 &&
     r.pulse >= 60 &&
-    r.pulse <= 100
+    r.pulse <= 100 &&
+    (r.spo2 == null || r.spo2 >= 95)
   );
 }
 
@@ -66,9 +73,10 @@ const SERIES = [
   { key: "systolic", label: "Systolic (mmHg)", color: "#ef4444" },
   { key: "diastolic", label: "Diastolic (mmHg)", color: "#6366f1" },
   { key: "pulse", label: "Pulse (bpm)", color: "#10b981" },
+  { key: "spo2", label: "SpO2 (%)", color: "#0ea5e9" },
 ] as const;
 
-const emptyForm = { systolic: "", diastolic: "", pulse: "", notes: "" };
+const emptyForm = { systolic: "", diastolic: "", pulse: "", spo2: "", notes: "" };
 
 export default function BloodPressureClient() {
   const [rows, setRows] = useState<BloodPressureRow[]>([]);
@@ -121,16 +129,22 @@ export default function BloodPressureClient() {
   const summary = useMemo(() => {
     const n = rows.length;
     if (n === 0) {
-      return { count: 0, avgSys: 0, avgDia: 0, avgPulse: 0, healthy: 0 };
+      return { count: 0, avgSys: 0, avgDia: 0, avgPulse: 0, avgSpo2: NaN, healthy: 0 };
     }
     let sys = 0;
     let dia = 0;
     let pulse = 0;
+    let spo2 = 0;
+    let spo2Count = 0;
     let healthy = 0;
     for (const r of rows) {
       sys += r.systolic;
       dia += r.diastolic;
       pulse += r.pulse;
+      if (r.spo2 != null) {
+        spo2 += r.spo2;
+        spo2Count += 1;
+      }
       if (isHealthy(r)) healthy += 1;
     }
     return {
@@ -138,6 +152,7 @@ export default function BloodPressureClient() {
       avgSys: sys / n,
       avgDia: dia / n,
       avgPulse: pulse / n,
+      avgSpo2: spo2Count > 0 ? spo2 / spo2Count : NaN,
       healthy,
     };
   }, [rows]);
@@ -152,6 +167,7 @@ export default function BloodPressureClient() {
           systolic: r.systolic,
           diastolic: r.diastolic,
           pulse: r.pulse,
+          spo2: r.spo2,
         })),
     [rows],
   );
@@ -168,6 +184,7 @@ export default function BloodPressureClient() {
       systolic: String(r.systolic),
       diastolic: String(r.diastolic),
       pulse: String(r.pulse),
+      spo2: r.spo2 == null ? "" : String(r.spo2),
       notes: r.notes ?? "",
     });
     setModalOpen(true);
@@ -197,10 +214,19 @@ export default function BloodPressureClient() {
       ) {
         throw new Error("Systolic, diastolic, and pulse must be positive whole numbers.");
       }
+      const spo2Raw = form.spo2.trim();
+      let spo2: number | null = null;
+      if (spo2Raw !== "") {
+        spo2 = Number(spo2Raw);
+        if (!Number.isInteger(spo2) || spo2 <= 0 || spo2 > 100) {
+          throw new Error("SpO2 must be a whole number between 1 and 100.");
+        }
+      }
       const body: BloodPressureCreateBody = {
         systolic,
         diastolic,
         pulse,
+        spo2,
         notes: form.notes.trim() === "" ? null : form.notes.trim(),
       };
       const fresh =
@@ -254,7 +280,7 @@ export default function BloodPressureClient() {
       )}
 
       {!loading && (
-        <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
           <div className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
             <p className="text-xs font-medium uppercase text-zinc-500">Readings</p>
             <p className="mt-1 text-2xl font-semibold tabular-nums text-zinc-900 dark:text-zinc-50">
@@ -271,6 +297,12 @@ export default function BloodPressureClient() {
             <p className="text-xs font-medium uppercase text-zinc-500">Avg pulse</p>
             <p className="mt-1 text-2xl font-semibold tabular-nums text-zinc-900 dark:text-zinc-50">
               {fmtNum(summary.avgPulse)}
+            </p>
+          </div>
+          <div className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+            <p className="text-xs font-medium uppercase text-zinc-500">Avg SpO2</p>
+            <p className="mt-1 text-2xl font-semibold tabular-nums text-zinc-900 dark:text-zinc-50">
+              {Number.isFinite(summary.avgSpo2) ? `${fmtNum(summary.avgSpo2)}%` : "—"}
             </p>
           </div>
           <div className="rounded-xl border border-emerald-200 bg-emerald-50/80 p-4 shadow-sm dark:border-emerald-900/50 dark:bg-emerald-950/30">
@@ -292,7 +324,7 @@ export default function BloodPressureClient() {
           Trend
         </h2>
         <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-          Systolic, diastolic, and pulse over time (oldest to newest).
+          Systolic, diastolic, pulse, and SpO2 over time (oldest to newest).
         </p>
         <div className="mt-6 h-[min(24rem,55vh)] w-full min-h-[240px]">
           {chartPoints.length === 0 ? (
@@ -354,6 +386,14 @@ export default function BloodPressureClient() {
                         {r.pulse}{" "}
                         <span className="text-xs font-normal text-zinc-500">bpm</span>
                       </span>
+                      {r.spo2 != null && (
+                        <span className="ml-3 text-zinc-700 dark:text-zinc-300">
+                          {r.spo2}
+                          <span className="text-xs font-normal text-zinc-500">
+                            % SpO2
+                          </span>
+                        </span>
+                      )}
                     </p>
                     <p className="mt-0.5 text-xs text-zinc-500">
                       {fmtDateTime(r.created_at)}
@@ -455,6 +495,18 @@ export default function BloodPressureClient() {
               className="rounded-md border border-zinc-300 bg-white px-3 py-2 dark:border-zinc-700 dark:bg-zinc-950"
               value={form.pulse}
               onChange={(e) => setForm((f) => ({ ...f, pulse: e.target.value }))}
+              disabled={saving}
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="text-zinc-600 dark:text-zinc-400">SpO2 (%, optional)</span>
+            <input
+              type="number"
+              min={1}
+              max={100}
+              className="rounded-md border border-zinc-300 bg-white px-3 py-2 dark:border-zinc-700 dark:bg-zinc-950"
+              value={form.spo2}
+              onChange={(e) => setForm((f) => ({ ...f, spo2: e.target.value }))}
               disabled={saving}
             />
           </label>

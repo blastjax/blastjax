@@ -44,7 +44,7 @@ def blood_pressure_list(
 @router.post("/api/blood-pressure")
 def blood_pressure_create(body: BloodPressureCreate) -> dict[str, Any]:
     row = insert_blood_pressure(
-        body.systolic, body.diastolic, body.pulse, _clean_notes(body.notes)
+        body.systolic, body.diastolic, body.pulse, body.spo2, _clean_notes(body.notes)
     )
     return {"reading": _serialize(row)}
 
@@ -54,7 +54,12 @@ def blood_pressure_replace(
     reading_id: int, body: BloodPressureCreate
 ) -> dict[str, Any]:
     row = update_blood_pressure(
-        reading_id, body.systolic, body.diastolic, body.pulse, _clean_notes(body.notes)
+        reading_id,
+        body.systolic,
+        body.diastolic,
+        body.pulse,
+        body.spo2,
+        _clean_notes(body.notes),
     )
     if row is None:
         raise HTTPException(status_code=404, detail="Reading not found.")

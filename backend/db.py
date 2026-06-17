@@ -651,10 +651,14 @@ def _init_schema_minimal_stmts() -> list[str]:
             systolic INTEGER NOT NULL,
             diastolic INTEGER NOT NULL,
             pulse INTEGER NOT NULL,
+            spo2 INTEGER,
             notes TEXT,
             created_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() AT TIME ZONE 'UTC'),
             CONSTRAINT chk_blood_pressure_values CHECK (
                 systolic > 0 AND diastolic > 0 AND pulse > 0
+            ),
+            CONSTRAINT chk_blood_pressure_spo2 CHECK (
+                spo2 IS NULL OR (spo2 > 0 AND spo2 <= 100)
             )
         )
         """,
@@ -844,6 +848,22 @@ def _migrate_aux_created_at_defaults(cur: Any) -> None:
         )
 
 
+def _migrate_blood_pressure_spo2(cur: Any) -> None:
+    """Add the nullable ``spo2`` (oxygen saturation %) column to existing
+    blood_pressure tables. Idempotent."""
+    cur.execute("ALTER TABLE blood_pressure ADD COLUMN IF NOT EXISTS spo2 INTEGER")
+    cur.execute(
+        "ALTER TABLE blood_pressure DROP CONSTRAINT IF EXISTS chk_blood_pressure_spo2"
+    )
+    cur.execute(
+        """
+        ALTER TABLE blood_pressure ADD CONSTRAINT chk_blood_pressure_spo2 CHECK (
+            spo2 IS NULL OR (spo2 > 0 AND spo2 <= 100)
+        )
+        """
+    )
+
+
 def _migrate_house_payment_simplify(cur: Any) -> None:
     """
     Simplified house-payment model: only ``name`` + ``notes`` on the plan, with
@@ -876,7 +896,7 @@ def _migrate_house_payment_simplify(cur: Any) -> None:
 # Bump this whenever the DDL or migrations below change. ``init_schema()``
 # uses it to skip the entire migration block on warm starts (very common
 # on Neon, where containers cold-start often).
-_SCHEMA_VERSION = 7
+_SCHEMA_VERSION = 8
 
 
 def init_schema() -> None:
@@ -935,6 +955,7 @@ def _init_schema_on(conn_factory: Any) -> None:
             _migrate_payslip_created_at_default(cur)
             _migrate_installment_original_total_from_principal(cur)
             _migrate_house_payment_simplify(cur)
+            _migrate_blood_pressure_spo2(cur)
             _migrate_aux_created_at_defaults(cur)
             _migrate_installment_repair_constraints(cur)
             _migrate_installment_relax_payment_total(cur)
@@ -1964,7 +1985,7 @@ def delete_house_payment_entry(
             return _house_payment_detail(cur, house_payment_id)
 
 
-_BLOOD_PRESSURE_COLS = "id, systolic, diastolic, pulse, notes, created_at"
+_BLOOD_PRESSURE_COLS = "id, systolic, diastolic, pulse, spo2, notes, created_at"
 
 
 def list_blood_pressures(limit: int = 500) -> list[dict[str, Any]]:
@@ -1983,35 +2004,40 @@ def list_blood_pressures(limit: int = 500) -> list[dict[str, Any]]:
 
 
 def insert_blood_pressure(
-    systolic: int, diastolic: int, pulse: int, notes: str | None
+    systolic: int, diastolic: int, pulse: int, spo2: int | None, notes: str | None
 ) -> dict[str, Any]:
     """Insert one reading (timestamped now) and return the full row."""
     with get_connection() as conn:
         with db_cursor(conn) as cur:
             cur.execute(
                 f"""
-                INSERT INTO blood_pressure (systolic, diastolic, pulse, notes)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO blood_pressure (systolic, diastolic, pulse, spo2, notes)
+                VALUES (?, ?, ?, ?, ?)
                 RETURNING {_BLOOD_PRESSURE_COLS}
                 """,
-                (systolic, diastolic, pulse, notes),
+                (systolic, diastolic, pulse, spo2, notes),
             )
             return _row_to_dict(cur, cur.fetchone())
 
 
 def update_blood_pressure(
-    reading_id: int, systolic: int, diastolic: int, pulse: int, notes: str | None
+    reading_id: int,
+    systolic: int,
+    diastolic: int,
+    pulse: int,
+    spo2: int | None,
+    notes: str | None,
 ) -> dict[str, Any] | None:
     with get_connection() as conn:
         with db_cursor(conn) as cur:
             cur.execute(
                 f"""
                 UPDATE blood_pressure
-                SET systolic = ?, diastolic = ?, pulse = ?, notes = ?
+                SET systolic = ?, diastolic = ?, pulse = ?, spo2 = ?, notes = ?
                 WHERE id = ?
                 RETURNING {_BLOOD_PRESSURE_COLS}
                 """,
-                (systolic, diastolic, pulse, notes, reading_id),
+                (systolic, diastolic, pulse, spo2, notes, reading_id),
             )
             row = cur.fetchone()
             return _row_to_dict(cur, row) if row else None
