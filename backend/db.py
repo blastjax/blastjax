@@ -529,6 +529,12 @@ def _migrate_payslip_basic_salary(cur: Any) -> None:
     )
 
 
+def _migrate_payslip_pdf_columns(cur: Any) -> None:
+    """Add the single-PDF attachment columns if missing (existing DBs)."""
+    cur.execute("ALTER TABLE payslip ADD COLUMN IF NOT EXISTS pdf_data BYTEA")
+    cur.execute("ALTER TABLE payslip ADD COLUMN IF NOT EXISTS pdf_filename TEXT")
+
+
 def _migrate_payslip_created_at_default(cur: Any) -> None:
     """Ensure older payslip tables can create rows without explicit timestamps."""
     cur.execute("ALTER TABLE payslip ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ")
@@ -574,6 +580,8 @@ def _init_schema_minimal_stmts() -> list[str]:
             sss_contribution DOUBLE PRECISION,
             philhealth DOUBLE PRECISION,
             pag_ibig DOUBLE PRECISION,
+            pdf_data BYTEA,
+            pdf_filename TEXT,
             created_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() AT TIME ZONE 'UTC')
         )
         """,
@@ -896,7 +904,7 @@ def _migrate_house_payment_simplify(cur: Any) -> None:
 # Bump this whenever the DDL or migrations below change. ``init_schema()``
 # uses it to skip the entire migration block on warm starts (very common
 # on Neon, where containers cold-start often).
-_SCHEMA_VERSION = 8
+_SCHEMA_VERSION = 10
 
 
 def init_schema() -> None:
@@ -952,6 +960,7 @@ def _init_schema_on(conn_factory: Any) -> None:
             _migrate_payslip_deduction_columns(cur)
             _migrate_payslip_thirteenth_month(cur)
             _migrate_payslip_basic_salary(cur)
+            _migrate_payslip_pdf_columns(cur)
             _migrate_payslip_created_at_default(cur)
             _migrate_installment_original_total_from_principal(cur)
             _migrate_house_payment_simplify(cur)
@@ -976,6 +985,7 @@ _PAYSLIP_RETURN_COLS = """
     thirteenth_month, basic_salary,
     period_year, period_month, period_half, notes,
     withholding_tax, sss_contribution, philhealth, pag_ibig,
+    (pdf_data IS NOT NULL) AS has_pdf, pdf_filename,
     created_at
 """
 
@@ -1193,6 +1203,46 @@ def delete_payslip(payslip_id: int) -> bool:
     with get_connection() as conn:
         with db_cursor(conn) as cur:
             cur.execute("DELETE FROM payslip WHERE id = ?", (payslip_id,))
+            return cur.rowcount > 0
+
+
+def set_payslip_pdf(payslip_id: int, data: bytes, filename: str | None) -> bool:
+    """Attach (or replace) the single PDF for a payslip. False if no such row."""
+    with get_connection() as conn:
+        with db_cursor(conn) as cur:
+            cur.execute(
+                "UPDATE payslip SET pdf_data = ?, pdf_filename = ? WHERE id = ?",
+                (psycopg2.Binary(data), filename, payslip_id),
+            )
+            return cur.rowcount > 0
+
+
+def get_payslip_pdf(payslip_id: int) -> tuple[bytes, str | None] | None:
+    """Return (bytes, original filename) for the payslip's PDF, or None if unset."""
+    with get_connection() as conn:
+        with db_cursor(conn) as cur:
+            cur.execute(
+                "SELECT pdf_data, pdf_filename FROM payslip WHERE id = ?",
+                (payslip_id,),
+            )
+            row = cur.fetchone()
+            if not row or row[0] is None:
+                return None
+            data = row[0]
+            # psycopg2 hands bytea back as a memoryview; normalize to bytes.
+            if isinstance(data, memoryview):
+                data = data.tobytes()
+            return bytes(data), row[1]
+
+
+def delete_payslip_pdf(payslip_id: int) -> bool:
+    """Detach the PDF from a payslip. False if no such row."""
+    with get_connection() as conn:
+        with db_cursor(conn) as cur:
+            cur.execute(
+                "UPDATE payslip SET pdf_data = NULL, pdf_filename = NULL WHERE id = ?",
+                (payslip_id,),
+            )
             return cur.rowcount > 0
 
 

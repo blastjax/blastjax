@@ -146,6 +146,13 @@ export default function PayslipClient() {
     setRows((rs) => rs.filter((r) => r.id !== id));
   }, []);
 
+  /** Keep the in-memory row's `has_pdf` flag current after a PDF upload/remove. */
+  const setRowPdfFlag = useCallback((id: number, hasPdf: boolean) => {
+    setRows((rs) =>
+      rs.map((r) => (r.id === id ? { ...r, has_pdf: hasPdf } : r)),
+    );
+  }, []);
+
   const scheduledSlotFromBody = (
     body: PayslipCreateBody,
   ): { year: number; month: number; half: 1 | 2 } | null => {
@@ -518,6 +525,7 @@ export default function PayslipClient() {
           saveAddInModal={saveAddInModal}
           saveManualAdd={saveManualAdd}
           handleDelete={handleDelete}
+          onPdfChange={setRowPdfFlag}
         />
       )}
 

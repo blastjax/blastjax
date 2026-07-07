@@ -4,21 +4,45 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from fastapi import (
+    APIRouter,
+    Body,
+    Depends,
+    File,
+    HTTPException,
+    Query,
+    Response,
+    UploadFile,
+)
 
 from app.deps import require_db
 from app.schemas.payslip import PayslipCreate
 from app.services.payslip_parse import _payslip_records_from_nested_json
 from db import (
     delete_payslip,
+    delete_payslip_pdf,
     get_payslip,
+    get_payslip_pdf,
     insert_payslip,
     insert_payslips_bulk,
     list_payslips,
+    set_payslip_pdf,
     update_payslip,
 )
 
 router = APIRouter(tags=["payslip"], dependencies=[Depends(require_db)])
+
+# Payslip PDFs are single-page statements; cap the upload well below that.
+_MAX_PDF_BYTES = 10 * 1024 * 1024
+
+
+def _sanitize_pdf_filename(name: str | None, payslip_id: int) -> str:
+    """A safe ``Content-Disposition`` filename (no quotes/control chars)."""
+    fallback = f"payslip-{payslip_id}.pdf"
+    if not name:
+        return fallback
+    cleaned = "".join(c for c in name if c.isprintable() and c not in '"\\').strip()
+    return cleaned or fallback
 
 
 def _serialize_payslip(row: dict[str, Any]) -> dict[str, Any]:
@@ -116,3 +140,49 @@ def payslip_remove(payslip_id: int) -> dict[str, Any]:
     if not delete_payslip(payslip_id):
         raise HTTPException(status_code=404, detail="Payslip not found.")
     return {"ok": True}
+
+
+@router.post("/api/payslip/{payslip_id}/pdf")
+async def payslip_upload_pdf(
+    payslip_id: int,
+    file: UploadFile = File(...),
+) -> dict[str, Any]:
+    """Attach (or replace) the one PDF tied to this payslip entry."""
+    if get_payslip(payslip_id) is None:
+        raise HTTPException(status_code=404, detail="Payslip not found.")
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+    if len(data) > _MAX_PDF_BYTES:
+        raise HTTPException(status_code=413, detail="PDF exceeds the 10 MB limit.")
+    content_type = (file.content_type or "").lower()
+    is_pdf = content_type in ("application/pdf", "application/x-pdf") or data.startswith(
+        b"%PDF"
+    )
+    if not is_pdf:
+        raise HTTPException(status_code=400, detail="Only PDF files are accepted.")
+    if not set_payslip_pdf(payslip_id, data, file.filename):
+        raise HTTPException(status_code=404, detail="Payslip not found.")
+    return {"ok": True, "has_pdf": True, "pdf_filename": file.filename}
+
+
+@router.get("/api/payslip/{payslip_id}/pdf")
+def payslip_get_pdf(payslip_id: int) -> Response:
+    """Serve the payslip's PDF inline so the browser can render it."""
+    result = get_payslip_pdf(payslip_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="No PDF attached to this payslip.")
+    data, filename = result
+    disposition = f'inline; filename="{_sanitize_pdf_filename(filename, payslip_id)}"'
+    return Response(
+        content=data,
+        media_type="application/pdf",
+        headers={"Content-Disposition": disposition},
+    )
+
+
+@router.delete("/api/payslip/{payslip_id}/pdf")
+def payslip_delete_pdf(payslip_id: int) -> dict[str, Any]:
+    if not delete_payslip_pdf(payslip_id):
+        raise HTTPException(status_code=404, detail="Payslip not found.")
+    return {"ok": True, "has_pdf": False}

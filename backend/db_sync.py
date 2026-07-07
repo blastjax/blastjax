@@ -53,6 +53,15 @@ _TABLES: tuple[str, ...] = (
     "blood_pressure",
 )
 
+# Subset of _TABLES that carry a ``created_at`` column, used for recency comparison.
+_TIMESTAMPED_TABLES: tuple[str, ...] = (
+    "payslip",
+    "house_payment",
+    "house_payment_entry",
+    "installment",
+    "blood_pressure",
+)
+
 # Tables whose ``id`` must be kept across the mirror: foreign-key targets (so
 # child rows still resolve) plus clean, app-managed tables where preserving the
 # id keeps the UI's references stable. Every other (leaf) table lets the
@@ -140,6 +149,16 @@ def _fingerprint(cur: Any) -> str:
         )
         parts.append(f"{table}={cur.fetchone()[0]}")
     return hashlib.md5("|".join(parts).encode("utf-8")).hexdigest()
+
+
+def _latest_entry_ts(cur: Any) -> Any:
+    """Return the MAX created_at across all timestamped tables, or None if all are empty."""
+    union = " UNION ALL ".join(
+        f"SELECT MAX(created_at) AS ts FROM {t}" for t in _TIMESTAMPED_TABLES
+    )
+    cur.execute(f"SELECT MAX(ts) FROM ({union}) sub")
+    row = cur.fetchone()
+    return row[0] if row else None
 
 
 def _columns(cur: Any, table: str) -> list[str]:
@@ -273,6 +292,59 @@ def force_push_to_cloud() -> dict[str, Any]:
         return {"ok": True, "synced": True}
     except Exception as e:  # noqa: BLE001
         _log.warning("manual local->cloud sync failed: %s", e)
+        try:
+            _set_state("local_dirty", "1")
+        except Exception:
+            pass
+        return {"ok": False, "synced": False, "detail": str(e)}
+
+
+def smart_sync() -> dict[str, Any]:
+    """
+    Bidirectional sync: whichever database has the most recent entry wins and
+    is copied to the other. If local has dirty (unpushed) changes it always
+    pushes regardless of timestamps. Returns a status dict including
+    ``direction`` (``"push"`` or ``"pull"``).
+    """
+    if not sync_enabled():
+        return {"ok": False, "synced": False, "detail": "Mirror not configured."}
+    if not cloud_reachable():
+        try:
+            _set_state("local_dirty", "1")
+        except Exception:
+            pass
+        return {"ok": False, "synced": False, "detail": "Cloud is unreachable."}
+    try:
+        local_dirty = _get_state("local_dirty") == "1"
+        with _recon_lock:
+            with get_connection() as local, db_cursor(local) as lcur, (
+                get_cloud_connection()
+            ) as cloud, db_cursor(cloud) as ccur:
+                if local_dirty:
+                    direction = "push"
+                else:
+                    local_ts = _latest_entry_ts(lcur)
+                    cloud_ts = _latest_entry_ts(ccur)
+                    if cloud_ts is not None and (
+                        local_ts is None or cloud_ts > local_ts
+                    ):
+                        direction = "pull"
+                    else:
+                        direction = "push"
+
+                if direction == "pull":
+                    _copy_all(ccur, lcur)
+                else:
+                    _copy_all(lcur, ccur)
+
+                cloud_fp = _fingerprint(ccur)
+                local_fp = _fingerprint(lcur)
+            _set_state("cloud_fp", cloud_fp)
+            _set_state("local_fp", local_fp)
+            _set_state("local_dirty", "0")
+        return {"ok": True, "synced": True, "direction": direction}
+    except Exception as e:  # noqa: BLE001
+        _log.warning("smart sync failed: %s", e)
         try:
             _set_state("local_dirty", "1")
         except Exception:

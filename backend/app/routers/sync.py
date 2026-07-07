@@ -1,4 +1,4 @@
-"""Manual local -> cloud mirror trigger (the settings "Sync" button)."""
+"""Bidirectional sync trigger (the settings "Sync" button)."""
 
 from __future__ import annotations
 
@@ -13,9 +13,12 @@ router = APIRouter(tags=["sync"], dependencies=[Depends(require_db)])
 
 
 @router.post("/api/sync")
-def sync_to_cloud() -> dict[str, Any]:
-    """Push the local mirror up to the cloud now. 503 if the cloud is unreachable."""
-    result = db_sync.force_push_to_cloud()
+def sync_databases() -> dict[str, Any]:
+    """
+    Sync local and cloud: whichever has the most recent entry wins.
+    503 if the cloud is unreachable.
+    """
+    result = db_sync.smart_sync()
     if not result.get("ok"):
         raise HTTPException(
             status_code=503,

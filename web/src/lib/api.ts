@@ -99,6 +99,8 @@ export type PayslipRow = {
   sss_contribution: number | null;
   philhealth: number | null;
   pag_ibig: number | null;
+  has_pdf?: boolean;
+  pdf_filename?: string | null;
   created_at: string;
 };
 
@@ -147,6 +149,30 @@ export async function importPayslipJson(data: Record<string, unknown>) {
     "POST",
     "/api/payslip/import-json",
     data,
+  );
+}
+
+/** URL that serves the payslip's attached PDF inline (for `<iframe>`/links). */
+export function payslipPdfUrl(id: number): string {
+  return `${dataApiBase()}/api/payslip/${id}/pdf`;
+}
+
+export async function uploadPayslipPdf(id: number, file: File) {
+  const body = new FormData();
+  body.append("file", file);
+  // No JSON headers — the browser sets the multipart boundary itself.
+  return j<{ ok: boolean; has_pdf: boolean; pdf_filename: string | null }>(
+    await apiFetch(`${dataApiBase()}/api/payslip/${id}/pdf`, {
+      method: "POST",
+      body,
+    }),
+  );
+}
+
+export async function deletePayslipPdf(id: number) {
+  return sendJson<{ ok: boolean; has_pdf: boolean }>(
+    "DELETE",
+    `/api/payslip/${id}/pdf`,
   );
 }
 
@@ -397,8 +423,10 @@ export async function deleteBloodPressure(id: number) {
 }
 
 export async function syncToCloud() {
-  return sendJson<{ ok: boolean; synced: boolean; detail?: string }>(
-    "POST",
-    "/api/sync",
-  );
+  return sendJson<{
+    ok: boolean;
+    synced: boolean;
+    direction?: "push" | "pull";
+    detail?: string;
+  }>("POST", "/api/sync");
 }

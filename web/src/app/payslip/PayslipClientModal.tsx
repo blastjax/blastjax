@@ -1,12 +1,20 @@
 "use client";
 
-import type {
-  Dispatch,
-  MutableRefObject,
-  SetStateAction,
+import {
+  useEffect,
+  useRef,
+  useState,
+  type Dispatch,
+  type MutableRefObject,
+  type SetStateAction,
 } from "react";
 import { Modal } from "@/components/Modal";
-import type { PayslipRow } from "@/lib/api";
+import {
+  deletePayslipPdf,
+  payslipPdfUrl,
+  uploadPayslipPdf,
+  type PayslipRow,
+} from "@/lib/api";
 import { PayslipFormFields } from "./PayslipFormFields";
 import {
   clearPayslipModalDraft,
@@ -36,6 +44,7 @@ export function PayslipClientModal({
   saveAddInModal,
   saveManualAdd,
   handleDelete,
+  onPdfChange,
 }: {
   nav: Nav;
   setNav: Dispatch<SetStateAction<Nav | null>>;
@@ -49,6 +58,7 @@ export function PayslipClientModal({
   saveAddInModal: () => void | Promise<void>;
   saveManualAdd: () => void | Promise<void>;
   handleDelete: (id: number) => void | Promise<void>;
+  onPdfChange: (id: number, hasPdf: boolean) => void;
 }) {
   const onCloseDialog = () => {
     if (
@@ -347,6 +357,11 @@ export function PayslipClientModal({
                     </dl>
                   </aside>
                 </div>
+                <PayslipPdfPanel
+                  payslipId={nav.row.id}
+                  initialHasPdf={!!nav.row.has_pdf}
+                  onPdfChange={onPdfChange}
+                />
                 <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
                   <button
                     type="button"
@@ -551,5 +566,154 @@ export function PayslipClientModal({
               </>
             )}
     </Modal>
+  );
+}
+
+const PDF_BTN =
+  "rounded-md border border-zinc-300 px-3 py-2 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-50 disabled:pointer-events-none disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-800";
+
+/**
+ * PDF attachment for a single payslip entry: one PDF per entry. Shows an
+ * upload control when none is attached, and a "Show payslip" toggle that
+ * renders the stored PDF inline once one exists. Keeps its own state so it can
+ * refresh the embedded viewer after an upload/replace without a full reload.
+ */
+function PayslipPdfPanel({
+  payslipId,
+  initialHasPdf,
+  onPdfChange,
+}: {
+  payslipId: number;
+  initialHasPdf: boolean;
+  onPdfChange: (id: number, hasPdf: boolean) => void;
+}) {
+  const [hasPdf, setHasPdf] = useState(initialHasPdf);
+  const [showing, setShowing] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  // Bumped on upload/replace so the `<iframe>` refetches instead of showing a
+  // cached copy of the previous PDF.
+  const [version, setVersion] = useState(0);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  // Reset when the modal navigates to a different payslip.
+  useEffect(() => {
+    setHasPdf(initialHasPdf);
+    setShowing(false);
+    setErr(null);
+    setVersion(0);
+  }, [payslipId, initialHasPdf]);
+
+  const src = `${payslipPdfUrl(payslipId)}?v=${version}`;
+
+  const handleUpload = async (file: File) => {
+    setBusy(true);
+    setErr(null);
+    try {
+      await uploadPayslipPdf(payslipId, file);
+      setHasPdf(true);
+      setVersion((v) => v + 1);
+      setShowing(true);
+      onPdfChange(payslipId, true);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Upload failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleRemove = async () => {
+    if (!confirm("Remove the attached PDF from this payslip?")) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      await deletePayslipPdf(payslipId);
+      setHasPdf(false);
+      setShowing(false);
+      onPdfChange(payslipId, false);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Remove failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="mt-6 border-t border-zinc-200 pt-4 dark:border-zinc-700">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="mr-1 text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+          Payslip PDF
+        </span>
+        {hasPdf ? (
+          <>
+            <button
+              type="button"
+              className="rounded-md bg-indigo-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-indigo-500"
+              onClick={() => setShowing((s) => !s)}
+            >
+              {showing ? "Hide payslip" : "Show payslip"}
+            </button>
+            <a
+              className={PDF_BTN}
+              href={src}
+              target="_blank"
+              rel="noreferrer"
+            >
+              Open in new tab
+            </a>
+            <button
+              type="button"
+              className={PDF_BTN}
+              onClick={() => fileRef.current?.click()}
+              disabled={busy}
+            >
+              {busy ? "Working…" : "Replace"}
+            </button>
+            <button
+              type="button"
+              className="rounded-md border border-red-300 px-3 py-2 text-sm text-red-700 transition-colors hover:bg-red-50 disabled:pointer-events-none disabled:opacity-50 dark:border-red-900 dark:text-red-300 dark:hover:bg-red-950/40"
+              onClick={() => void handleRemove()}
+              disabled={busy}
+            >
+              Remove
+            </button>
+          </>
+        ) : (
+          <button
+            type="button"
+            className={PDF_BTN}
+            onClick={() => fileRef.current?.click()}
+            disabled={busy}
+          >
+            {busy ? "Uploading…" : "Upload payslip PDF"}
+          </button>
+        )}
+        <input
+          ref={fileRef}
+          type="file"
+          accept="application/pdf,.pdf"
+          className="hidden"
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            // Clear so re-picking the same file still fires onChange.
+            e.target.value = "";
+            if (f) void handleUpload(f);
+          }}
+        />
+      </div>
+      {err && (
+        <p className="mt-2 text-xs text-red-600 dark:text-red-400">{err}</p>
+      )}
+      {hasPdf && showing && (
+        <div className="mt-3 overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-700">
+          <iframe
+            key={src}
+            src={src}
+            title="Payslip PDF"
+            className="h-[75vh] w-full bg-white"
+          />
+        </div>
+      )}
+    </div>
   );
 }
