@@ -192,6 +192,7 @@ export default function InstallmentsClient() {
   const [paymentsDetails, setPaymentsDetails] = useState<
     InstallmentDetailResponse[]
   >([]);
+  const [showArchived, setShowArchived] = useState(false);
 
   const load = useCallback(async () => {
     setError(null);
@@ -206,6 +207,16 @@ export default function InstallmentsClient() {
     }
   }, []);
 
+  const activeRows = useMemo(
+    () => rows.filter((r) => r.installment_current <= r.installment_total && r.remaining > 0),
+    [rows],
+  );
+
+  const doneRows = useMemo(
+    () => rows.filter((r) => r.installment_current > r.installment_total || r.remaining <= 0),
+    [rows],
+  );
+
   /**
    * Mirrors the server's ``installment_summary`` so saves can patch the
    * in-memory ``rows`` list and skip the full ``getInstallments`` round
@@ -216,7 +227,7 @@ export default function InstallmentsClient() {
     let sum_original_total = 0;
     let sum_remaining = 0;
     let due_this_month = 0;
-    for (const r of rows) {
+    for (const r of activeRows) {
       sum_original_total += r.original_total || 0;
       sum_remaining += r.remaining || 0;
       if (r.remaining > 0 && isDueThisMonth(r)) {
@@ -224,7 +235,7 @@ export default function InstallmentsClient() {
       }
     }
     return { sum_original_total, sum_remaining, due_this_month };
-  }, [rows]);
+  }, [activeRows]);
 
   const upsertRow = useCallback((row: InstallmentRow) => {
     setRows((rs) => {
@@ -644,11 +655,11 @@ export default function InstallmentsClient() {
 
   const dueIds = useMemo(() => {
     const s = new Set<number>();
-    for (const r of rows) {
+    for (const r of activeRows) {
       if (isDueThisMonth(r)) s.add(r.id);
     }
     return s;
-  }, [rows]);
+  }, [activeRows]);
 
   return (
     <div className="relative mx-auto flex w-full min-w-0 max-w-6xl flex-col gap-8 px-4 pb-28 py-8 sm:px-6">
@@ -656,14 +667,29 @@ export default function InstallmentsClient() {
         <h1 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
           Installments
         </h1>
-        <button
-          type="button"
-          disabled={loading || rows.length === 0}
-          className="rounded-md border border-indigo-300 bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-700 hover:bg-indigo-100 disabled:opacity-50 dark:border-indigo-800 dark:bg-indigo-950/40 dark:text-indigo-200 dark:hover:bg-indigo-900/40"
-          onClick={() => void openPayments()}
-        >
-          Payments by month
-        </button>
+        <div className="flex gap-2">
+          {doneRows.length > 0 && (
+            <button
+              type="button"
+              className={`rounded-md border px-3 py-2 text-sm font-medium transition ${
+                showArchived
+                  ? "border-zinc-400 bg-zinc-200 text-zinc-800 dark:border-zinc-500 dark:bg-zinc-700 dark:text-zinc-100"
+                  : "border-zinc-300 bg-zinc-50 text-zinc-600 hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-800/40 dark:text-zinc-300 dark:hover:bg-zinc-700/40"
+              }`}
+              onClick={() => setShowArchived((v) => !v)}
+            >
+              Archived ({doneRows.length})
+            </button>
+          )}
+          <button
+            type="button"
+            disabled={loading || rows.length === 0}
+            className="rounded-md border border-indigo-300 bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-700 hover:bg-indigo-100 disabled:opacity-50 dark:border-indigo-800 dark:bg-indigo-950/40 dark:text-indigo-200 dark:hover:bg-indigo-900/40"
+            onClick={() => void openPayments()}
+          >
+            Payments by month
+          </button>
+        </div>
       </header>
 
       {error && (
@@ -679,7 +705,7 @@ export default function InstallmentsClient() {
         <section className="grid gap-3 sm:grid-cols-3">
           <div className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
             <p className="text-xs font-medium uppercase text-zinc-500">
-              Total (all plans)
+              Total (active plans)
             </p>
             <p className="mt-1 text-2xl font-semibold tabular-nums text-zinc-900 dark:text-zinc-50">
               {fmtMoney(summary.sum_original_total)}
@@ -792,7 +818,7 @@ export default function InstallmentsClient() {
         </h2>
         <ul className="mt-4 grid grid-cols-3 gap-2 sm:gap-4">
           {!loading &&
-            rows.map((r) => {
+            activeRows.map((r) => {
               const canPay =
                 r.installment_current <= r.installment_total && r.remaining > 0;
               const due = dueIds.has(r.id);
@@ -929,13 +955,120 @@ export default function InstallmentsClient() {
                 </li>
               );
             })}
-          {!loading && rows.length === 0 && (
+          {!loading && activeRows.length === 0 && (
             <li className="col-span-3 rounded-lg border border-dashed border-zinc-300 px-4 py-8 text-center text-sm text-zinc-800 dark:text-zinc-200 dark:border-zinc-700">
-              No installment plans yet.
+              {doneRows.length > 0 ? "All plans are fully paid." : "No installment plans yet."}
             </li>
           )}
         </ul>
       </section>
+
+      {showArchived && doneRows.length > 0 && (
+        <section>
+          <h2 className="text-lg font-medium text-zinc-500 dark:text-zinc-400">
+            Archived — Fully Paid
+          </h2>
+          <ul className="mt-4 grid grid-cols-3 gap-2 sm:gap-4">
+            {doneRows.map((r) => {
+              const orig = Number(r.original_total);
+              const rem = Number(r.remaining);
+              const pct = installmentScheduleProgressPct(r);
+              return (
+                <li
+                  key={`${r.id}-${orig}-${rem}-${r.installment_current}`}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => void openDetail(r.id)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      void openDetail(r.id);
+                    }
+                  }}
+                  className="min-w-0 cursor-pointer rounded-xl border border-zinc-200 bg-zinc-50 p-3 opacity-70 shadow-sm transition hover:opacity-100 hover:ring-2 hover:ring-indigo-300/60 sm:p-4 dark:border-zinc-700 dark:bg-zinc-900 dark:hover:ring-indigo-700/50"
+                >
+                  <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between sm:gap-3">
+                    <div className="min-w-0">
+                      <h3 className="truncate text-sm font-semibold text-zinc-900 sm:text-base dark:text-zinc-50">
+                        {r.name}
+                      </h3>
+                      <p className="mt-1 text-xs text-zinc-500 sm:text-sm dark:text-zinc-400">
+                        {r.installment_total}/{r.installment_total} payments ·{" "}
+                        <span className="rounded bg-zinc-300 px-2 py-0.5 text-xs font-medium text-zinc-700 dark:bg-zinc-700 dark:text-zinc-200">
+                          Paid off
+                        </span>
+                      </p>
+                    </div>
+                    <div className="flex min-w-0 flex-wrap gap-1.5 sm:gap-2">
+                      <button
+                        type="button"
+                        disabled={saving}
+                        className="rounded-md border border-zinc-300 px-2 py-1.5 text-xs dark:border-zinc-600 sm:px-3 sm:text-sm"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          startEdit(r);
+                        }}
+                      >
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        disabled={saving}
+                        className="rounded-md border border-red-200 px-2 py-1.5 text-xs text-red-700 dark:border-red-900 dark:text-red-300 sm:px-3 sm:text-sm"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void onDelete(r.id);
+                        }}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                  <dl className="mt-3 grid gap-2 text-xs sm:mt-4 sm:gap-3 sm:text-sm sm:grid-cols-2 lg:grid-cols-4">
+                    <div>
+                      <dt className="text-xs text-zinc-500">Principal</dt>
+                      <dd className="tabular-nums font-medium">{fmtMoney(r.principal)}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs text-zinc-500">Interest</dt>
+                      <dd className="tabular-nums font-medium">
+                        {r.interest != null ? fmtMoney(r.interest) : "—"}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs text-zinc-500">Total (per payment)</dt>
+                      <dd className="tabular-nums font-medium">
+                        {fmtMoney(r.payment_total)}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs text-zinc-500">Original total</dt>
+                      <dd className="tabular-nums">{fmtMoney(r.original_total)}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs text-zinc-500">Start</dt>
+                      <dd className="tabular-nums">{fmtMonthYear(r.start_date)}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs text-zinc-500">Finish</dt>
+                      <dd className="tabular-nums">{fmtMonthYear(r.finish_date)}</dd>
+                    </div>
+                  </dl>
+                  <div className="mt-3 h-2 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
+                    <div
+                      className="h-full rounded-full bg-zinc-400 transition-all dark:bg-zinc-500"
+                      style={{ width: `${pct}%` }}
+                    />
+                  </div>
+                  <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
+                    {fmtPct2(pct)}% of schedule
+                  </p>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      )}
 
       <Modal
         open={scheduleModalId != null}

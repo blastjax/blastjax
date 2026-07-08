@@ -35,7 +35,7 @@ export function fmtPayPeriod(
   const parts: string[] = [];
   if (m != null && m >= 1 && m <= 12) {
     parts.push(
-      new Date(2000, m - 1, 1).toLocaleString(undefined, { month: "short" }),
+      new Date(2000, m - 1, 1).toLocaleString(undefined, { month: "long" }),
     );
   }
   if (y != null && Number.isFinite(y)) parts.push(String(Math.trunc(y)));

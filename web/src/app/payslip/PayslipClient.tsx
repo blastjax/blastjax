@@ -38,9 +38,31 @@ import type { Nav } from "./payslipNav";
 import { PayslipClientModal } from "./PayslipClientModal";
 import { PayslipYearStatsSection } from "./PayslipYearStatsSection";
 import { YearPayslipBlock } from "./YearPayslipBlock";
+import { Modal } from "@/components/Modal";
+import { PdfBulkUploadClient } from "./pdfs/PdfBulkUploadClient";
 
 /** localStorage key for the show/hide-gross toggle on the calendar. */
 const LS_PAYSLIP_SHOW_GROSS = "budgetapp:payslip:showGross";
+
+function PdfUploadIcon({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden
+    >
+      <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
+      <polyline points="14 2 14 8 20 8" />
+      <path d="M12 18v-6" />
+      <path d="m9 15 3-3 3 3" />
+    </svg>
+  );
+}
 
 /** Outline eye icon (visible state). */
 function EyeIcon({ className = "h-4 w-4" }: { className?: string }) {
@@ -90,6 +112,7 @@ export default function PayslipClient() {
   const [nav, setNav] = useState<Nav | null>(null);
   const [modalForm, setModalForm] = useState<FormState>(emptyForm());
   const [showGross, setShowGross] = useState(true);
+  const [pdfModalOpen, setPdfModalOpen] = useState(false);
   const modalFormRef = useRef(modalForm);
   modalFormRef.current = modalForm;
   const navRef = useRef(nav);
@@ -424,24 +447,34 @@ export default function PayslipClient() {
           <h2 className="text-lg font-medium text-zinc-900 dark:text-zinc-50">
             Pay period calendar
           </h2>
-          <button
-            type="button"
-            onClick={() => setShowGross((v) => !v)}
-            aria-pressed={showGross}
-            aria-label={
-              showGross
-                ? "Hide gross amounts in calendar"
-                : "Show gross amounts in calendar"
-            }
-            title={
-              showGross
-                ? "Hide gross amounts in calendar"
-                : "Show gross amounts in calendar"
-            }
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-zinc-300 bg-white text-zinc-700 shadow-sm transition-colors hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
-          >
-            {showGross ? <EyeIcon /> : <EyeOffIcon />}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setPdfModalOpen(true)}
+              className="flex h-9 items-center gap-1.5 rounded-lg border border-zinc-300 bg-white px-3 text-sm font-medium text-zinc-700 shadow-sm transition-colors hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+            >
+              <PdfUploadIcon className="h-4 w-4" />
+              Upload PDFs
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowGross((v) => !v)}
+              aria-pressed={showGross}
+              aria-label={
+                showGross
+                  ? "Hide gross amounts in calendar"
+                  : "Show gross amounts in calendar"
+              }
+              title={
+                showGross
+                  ? "Hide gross amounts in calendar"
+                  : "Show gross amounts in calendar"
+              }
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-zinc-300 bg-white text-zinc-700 shadow-sm transition-colors hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+            >
+              {showGross ? <EyeIcon /> : <EyeOffIcon />}
+            </button>
+          </div>
         </div>
 
         {!loading && <PayslipYearStatsSection index={index} />}
@@ -527,6 +560,29 @@ export default function PayslipClient() {
           handleDelete={handleDelete}
           onPdfChange={setRowPdfFlag}
         />
+      )}
+
+      {pdfModalOpen && (
+        <Modal
+          open
+          onClose={() => setPdfModalOpen(false)}
+          backdropClassName="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-5 sm:items-center sm:p-6"
+          dialogClassName="max-h-[95vh] w-full max-w-2xl overflow-y-auto rounded-xl border border-zinc-200 bg-white p-6 shadow-xl sm:p-8 dark:border-zinc-700 dark:bg-zinc-950"
+        >
+          <div className="mb-5 flex items-center justify-between gap-2">
+            <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">
+              Upload Payslip PDFs
+            </h2>
+            <button
+              type="button"
+              className="rounded border border-zinc-200 px-2 py-1 text-xs text-zinc-600 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-900"
+              onClick={() => setPdfModalOpen(false)}
+            >
+              Close
+            </button>
+          </div>
+          <PdfBulkUploadClient />
+        </Modal>
       )}
 
       <FloatingAddButton

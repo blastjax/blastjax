@@ -285,7 +285,6 @@ export function PayslipClientModal({
                           ["medical_reimbursement", "Medical reimbursement"],
                           ["others", "Others"],
                           ["allowances", "Allowances"],
-                          ["thirteenth_month", "13th Month"],
                         ] as const
                       ).map(([k, lab]) => (
                         <div key={k}>
@@ -295,6 +294,14 @@ export function PayslipClientModal({
                           </dd>
                         </div>
                       ))}
+                      {nav.row.period_month === 11 && nav.row.period_half === 2 && (
+                        <div>
+                          <dt className="text-xs text-zinc-500">13th Month</dt>
+                          <dd className="tabular-nums text-zinc-900 dark:text-zinc-100">
+                            {fmtNum(nav.row.thirteenth_month)}
+                          </dd>
+                        </div>
+                      )}
                     </dl>
                     {nav.row.notes && (
                       <div className="mt-3">
@@ -704,8 +711,8 @@ function PayslipPdfPanel({
       {err && (
         <p className="mt-2 text-xs text-red-600 dark:text-red-400">{err}</p>
       )}
-      {hasPdf && showing && (
-        <div className="mt-3 overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-700">
+      {hasPdf && (
+        <div className={`mt-3 overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-700${showing ? "" : " hidden"}`}>
           <iframe
             key={src}
             src={src}

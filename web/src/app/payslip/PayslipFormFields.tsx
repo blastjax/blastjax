@@ -160,7 +160,6 @@ export function PayslipFormFields({
             ["medical_reimbursement", "Medical reimbursement"],
             ["others", "Others"],
             ["allowances", "Allowances"],
-            ["thirteenth_month", "13th Month"],
           ] as const
         ).map(([key, label]) => (
           <label key={key} className="flex flex-col gap-1 text-sm">
@@ -177,6 +176,21 @@ export function PayslipFormFields({
             />
           </label>
         ))}
+        {form.period_month === "11" && form.period_half === "2" && (
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="text-zinc-600 dark:text-zinc-400">13th Month</span>
+            <input
+              type="text"
+              inputMode="decimal"
+              className="rounded-md border border-zinc-300 bg-white px-3 py-2 dark:border-zinc-700 dark:bg-zinc-950"
+              value={form.thirteenth_month}
+              onChange={(e) =>
+                setForm((f) => ({ ...f, thirteenth_month: e.target.value }))
+              }
+              disabled={disabled}
+            />
+          </label>
+        )}
         <label className="flex flex-col gap-1 text-sm sm:col-span-2 lg:col-span-3">
           <span className="text-zinc-600 dark:text-zinc-400">Notes</span>
           <textarea

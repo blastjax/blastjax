@@ -51,9 +51,9 @@ function YearPayslipBlockInner({
           const ms = yearSlots.months.get(month);
           const monthSum = ms?.netSum ?? null;
           const monthGross = showGross ? (ms?.grossSum ?? null) : null;
-          const labelShort = new Date(2000, month - 1, 1).toLocaleString(
+          const monthLabel = new Date(2000, month - 1, 1).toLocaleString(
             undefined,
-            { month: "short" },
+            { month: "long" },
           );
           return (
             <div
@@ -62,7 +62,7 @@ function YearPayslipBlockInner({
             >
               <div className="flex min-w-0 items-baseline gap-1.5 border-b border-zinc-100 pb-1.5 dark:border-zinc-800">
                 <span className="shrink-0 whitespace-nowrap text-xs font-semibold leading-tight text-zinc-800 dark:text-zinc-200">
-                  {labelShort}
+                  {monthLabel}
                 </span>
                 {monthGross != null && (
                   <span
@@ -95,7 +95,7 @@ function YearPayslipBlockInner({
                     : (ms?.grossSum2 ?? null);
                   const stGross = showGross ? stGrossRaw : null;
                   const hasRows = rs != null && rs.length > 0;
-                  const label = `${labelShort} ${year} · ${isFirst ? "1st" : "2nd"} half`;
+                  const label = `${monthLabel} ${year} · ${isFirst ? "1st" : "2nd"} half`;
                   const netStr = st != null ? fmtNum(st) : "";
                   const grossStr = stGross != null ? fmtNum(stGross) : "";
                   const ariaLabel =
