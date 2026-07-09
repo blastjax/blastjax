@@ -38,6 +38,7 @@ export function PayslipClientModal({
   modalForm,
   setModalForm,
   saving,
+  error,
   modalFormRef,
   goBack,
   saveEdit,
@@ -52,6 +53,7 @@ export function PayslipClientModal({
   modalForm: FormState;
   setModalForm: Dispatch<SetStateAction<FormState>>;
   saving: boolean;
+  error: string | null;
   modalFormRef: MutableRefObject<FormState>;
   goBack: () => void;
   saveEdit: () => void | Promise<void>;
@@ -177,14 +179,16 @@ export function PayslipClientModal({
               </>
             )}
 
-            {nav.screen === "detail" && (
+            {nav.screen === "detail" && (() => {
+              const row = rows.find((r) => r.id === nav.row.id) ?? nav.row;
+              return (
               <>
                 <div className="mb-4 flex items-start justify-between gap-2">
                   <div className="flex min-w-0 items-center gap-2 sm:gap-3">
                     {(() => {
                       const { older, newer } = detailPayslipNeighbors(
                         rows,
-                        nav.row.id,
+                        row.id,
                       );
                       const btnCls =
                         "flex h-9 min-w-[2.25rem] shrink-0 items-center justify-center rounded-lg border border-zinc-300 bg-white text-sm font-medium text-zinc-700 shadow-sm transition-colors hover:bg-zinc-50 disabled:pointer-events-none disabled:opacity-40 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800";
@@ -231,15 +235,15 @@ export function PayslipClientModal({
                 </div>
                 <p className="mb-4 text-sm text-zinc-600 dark:text-zinc-400">
                   {fmtPayPeriod(
-                    nav.row.period_year,
-                    nav.row.period_month,
-                    nav.row.period_half,
+                    row.period_year,
+                    row.period_month,
+                    row.period_half,
                   )}
                 </p>
                 {(() => {
-                  const y = nav.row.period_year;
-                  const m = nav.row.period_month;
-                  const h = nav.row.period_half;
+                  const y = row.period_year;
+                  const m = row.period_month;
+                  const h = row.period_half;
                   if (
                     y == null ||
                     m == null ||
@@ -263,19 +267,19 @@ export function PayslipClientModal({
                       <div>
                         <dt className="text-xs text-zinc-500">Gross total</dt>
                         <dd className="tabular-nums font-medium text-zinc-900 dark:text-zinc-100">
-                          {fmtNum(grossTotalFromRow(nav.row))}
+                          {fmtNum(grossTotalFromRow(row))}
                         </dd>
                       </div>
                       <div>
                         <dt className="text-xs text-zinc-500">Net total</dt>
                         <dd className="tabular-nums font-medium text-zinc-900 dark:text-zinc-100">
-                          {fmtNum(nav.row.total)}
+                          {fmtNum(row.total)}
                         </dd>
                       </div>
                       <div>
                         <dt className="text-xs text-zinc-500">Basic salary</dt>
                         <dd className="tabular-nums text-zinc-900 dark:text-zinc-100">
-                          {fmtNum(nav.row.basic_salary)}
+                          {fmtNum(row.basic_salary)}
                         </dd>
                       </div>
                       {(
@@ -290,24 +294,24 @@ export function PayslipClientModal({
                         <div key={k}>
                           <dt className="text-xs text-zinc-500">{lab}</dt>
                           <dd className="tabular-nums text-zinc-900 dark:text-zinc-100">
-                            {fmtNum(nav.row[k])}
+                            {fmtNum(row[k])}
                           </dd>
                         </div>
                       ))}
-                      {nav.row.period_month === 11 && nav.row.period_half === 2 && (
+                      {row.period_month === 11 && row.period_half === 2 && (
                         <div>
                           <dt className="text-xs text-zinc-500">13th Month</dt>
                           <dd className="tabular-nums text-zinc-900 dark:text-zinc-100">
-                            {fmtNum(nav.row.thirteenth_month)}
+                            {fmtNum(row.thirteenth_month)}
                           </dd>
                         </div>
                       )}
                     </dl>
-                    {nav.row.notes && (
+                    {row.notes && (
                       <div className="mt-3">
                         <dt className="text-xs text-zinc-500">Notes</dt>
                         <dd className="mt-1 whitespace-pre-wrap text-sm text-zinc-800 dark:text-zinc-200">
-                          {nav.row.notes}
+                          {row.notes}
                         </dd>
                       </div>
                     )}
@@ -322,7 +326,7 @@ export function PayslipClientModal({
                           Withholding tax
                         </dt>
                         <dd className="tabular-nums text-red-600 dark:text-red-400">
-                          {fmtNum(nav.row.withholding_tax)}
+                          {fmtNum(row.withholding_tax)}
                         </dd>
                       </div>
                       <div>
@@ -330,13 +334,13 @@ export function PayslipClientModal({
                           SSS contribution
                         </dt>
                         <dd className="tabular-nums text-red-600 dark:text-red-400">
-                          {fmtNum(nav.row.sss_contribution)}
+                          {fmtNum(row.sss_contribution)}
                         </dd>
                       </div>
                       <div>
                         <dt className="text-xs text-zinc-500">Philhealth</dt>
                         <dd className="tabular-nums text-red-600 dark:text-red-400">
-                          {fmtNum(nav.row.philhealth)}
+                          {fmtNum(row.philhealth)}
                         </dd>
                       </div>
                       <div>
@@ -344,13 +348,13 @@ export function PayslipClientModal({
                           Pag-ibig (Employee HDMF)
                         </dt>
                         <dd className="tabular-nums text-red-600 dark:text-red-400">
-                          {fmtNum(nav.row.pag_ibig)}
+                          {fmtNum(row.pag_ibig)}
                         </dd>
                       </div>
                       <div>
                         <dt className="text-xs text-zinc-500">MP2</dt>
                         <dd className="tabular-nums text-red-600 dark:text-red-400">
-                          {fmtNum(nav.row.mp2)}
+                          {fmtNum(row.mp2)}
                         </dd>
                       </div>
                       <div className="mt-1 border-t border-zinc-200 pt-3 dark:border-zinc-600">
@@ -358,15 +362,15 @@ export function PayslipClientModal({
                           Deductions total
                         </dt>
                         <dd className="mt-0.5 text-sm font-semibold tabular-nums text-red-700 dark:text-red-300">
-                          {fmtNum(deductionsTotalFromRow(nav.row))}
+                          {fmtNum(deductionsTotalFromRow(row))}
                         </dd>
                       </div>
                     </dl>
                   </aside>
                 </div>
                 <PayslipPdfPanel
-                  payslipId={nav.row.id}
-                  initialHasPdf={!!nav.row.has_pdf}
+                  payslipId={row.id}
+                  initialHasPdf={!!row.has_pdf}
                   onPdfChange={onPdfChange}
                 />
                 <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
@@ -374,8 +378,8 @@ export function PayslipClientModal({
                     type="button"
                     className="rounded-md bg-indigo-600 px-3 py-2 text-sm text-white hover:bg-indigo-500"
                     onClick={() => {
-                      setModalForm(formFromRow(nav.row));
-                      setNav({ screen: "edit", row: nav.row });
+                      setModalForm(formFromRow(row));
+                      setNav({ screen: "edit", row });
                     }}
                   >
                     Edit
@@ -383,13 +387,14 @@ export function PayslipClientModal({
                   <button
                     type="button"
                     className="rounded-md border border-red-300 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:text-red-300"
-                    onClick={() => void handleDelete(nav.row.id)}
+                    onClick={() => void handleDelete(row.id)}
                   >
                     Delete
                   </button>
                 </div>
               </>
-            )}
+              );
+            })()}
 
             {nav.screen === "edit" && (
               <>
@@ -458,6 +463,11 @@ export function PayslipClientModal({
                     setForm={setModalForm}
                     disabled={saving}
                   />
+                  {error && (
+                    <p className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
+                      {error}
+                    </p>
+                  )}
                   <div className="mt-4 flex flex-wrap gap-2">
                     <button
                       type="submit"
@@ -508,6 +518,11 @@ export function PayslipClientModal({
                     disabled={saving}
                     lockPeriod
                   />
+                  {error && (
+                    <p className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
+                      {error}
+                    </p>
+                  )}
                   <div className="mt-4 flex flex-wrap gap-2">
                     <button
                       type="submit"
@@ -550,6 +565,11 @@ export function PayslipClientModal({
                     setForm={setModalForm}
                     disabled={saving}
                   />
+                  {error && (
+                    <p className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
+                      {error}
+                    </p>
+                  )}
                   <div className="mt-4 flex flex-wrap gap-2">
                     <button
                       type="submit"

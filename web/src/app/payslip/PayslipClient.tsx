@@ -552,6 +552,7 @@ export default function PayslipClient() {
           modalForm={modalForm}
           setModalForm={setModalForm}
           saving={saving}
+          error={error}
           modalFormRef={modalFormRef}
           goBack={goBack}
           saveEdit={saveEdit}

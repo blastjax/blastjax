@@ -74,9 +74,11 @@ const SERIES = [
   { key: "diastolic", label: "Diastolic (mmHg)", color: "#6366f1" },
   { key: "pulse", label: "Pulse (bpm)", color: "#10b981" },
   { key: "spo2", label: "SpO2 (%)", color: "#0ea5e9" },
+  { key: "temperature", label: "Temperature (°C)", color: "#f97316" },
+  { key: "weight", label: "Weight (kg)", color: "#a855f7" },
 ] as const;
 
-const emptyForm = { systolic: "", diastolic: "", pulse: "", spo2: "", notes: "" };
+const emptyForm = { systolic: "", diastolic: "", pulse: "", spo2: "", temperature: "", weight: "", notes: "" };
 
 export default function BloodPressureClient() {
   const [rows, setRows] = useState<BloodPressureRow[]>([]);
@@ -168,6 +170,8 @@ export default function BloodPressureClient() {
           diastolic: r.diastolic,
           pulse: r.pulse,
           spo2: r.spo2,
+          temperature: r.temperature,
+          weight: r.weight,
         })),
     [rows],
   );
@@ -185,6 +189,8 @@ export default function BloodPressureClient() {
       diastolic: String(r.diastolic),
       pulse: String(r.pulse),
       spo2: r.spo2 == null ? "" : String(r.spo2),
+      temperature: r.temperature == null ? "" : String(r.temperature),
+      weight: r.weight == null ? "" : String(r.weight),
       notes: r.notes ?? "",
     });
     setModalOpen(true);
@@ -222,11 +228,29 @@ export default function BloodPressureClient() {
           throw new Error("SpO2 must be a whole number between 1 and 100.");
         }
       }
+      const tempRaw = form.temperature.trim();
+      let temperature: number | null = null;
+      if (tempRaw !== "") {
+        temperature = Number(tempRaw);
+        if (Number.isNaN(temperature) || temperature <= 25 || temperature > 45) {
+          throw new Error("Temperature must be between 25 and 45 °C.");
+        }
+      }
+      const weightRaw = form.weight.trim();
+      let weight: number | null = null;
+      if (weightRaw !== "") {
+        weight = Number(weightRaw);
+        if (Number.isNaN(weight) || weight <= 0) {
+          throw new Error("Weight must be a positive number.");
+        }
+      }
       const body: BloodPressureCreateBody = {
         systolic,
         diastolic,
         pulse,
         spo2,
+        temperature,
+        weight,
         notes: form.notes.trim() === "" ? null : form.notes.trim(),
       };
       const fresh =
@@ -324,7 +348,7 @@ export default function BloodPressureClient() {
           Trend
         </h2>
         <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-          Systolic, diastolic, pulse, and SpO2 over time (oldest to newest).
+          Systolic, diastolic, pulse, SpO2, temperature, and weight over time (oldest to newest).
         </p>
         <div className="mt-6 h-[min(24rem,55vh)] w-full min-h-[240px]">
           {chartPoints.length === 0 ? (
@@ -391,6 +415,22 @@ export default function BloodPressureClient() {
                           {r.spo2}
                           <span className="text-xs font-normal text-zinc-500">
                             % SpO2
+                          </span>
+                        </span>
+                      )}
+                      {r.temperature != null && (
+                        <span className="ml-3 text-zinc-700 dark:text-zinc-300">
+                          {r.temperature}
+                          <span className="text-xs font-normal text-zinc-500">
+                            °C
+                          </span>
+                        </span>
+                      )}
+                      {r.weight != null && (
+                        <span className="ml-3 text-zinc-700 dark:text-zinc-300">
+                          {r.weight}
+                          <span className="text-xs font-normal text-zinc-500">
+                            {" "}kg
                           </span>
                         </span>
                       )}
@@ -507,6 +547,31 @@ export default function BloodPressureClient() {
               className="rounded-md border border-zinc-300 bg-white px-3 py-2 dark:border-zinc-700 dark:bg-zinc-950"
               value={form.spo2}
               onChange={(e) => setForm((f) => ({ ...f, spo2: e.target.value }))}
+              disabled={saving}
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="text-zinc-600 dark:text-zinc-400">Temperature (°C, optional)</span>
+            <input
+              type="number"
+              min={26}
+              max={45}
+              step={0.1}
+              className="rounded-md border border-zinc-300 bg-white px-3 py-2 dark:border-zinc-700 dark:bg-zinc-950"
+              value={form.temperature}
+              onChange={(e) => setForm((f) => ({ ...f, temperature: e.target.value }))}
+              disabled={saving}
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="text-zinc-600 dark:text-zinc-400">Weight (kg, optional)</span>
+            <input
+              type="number"
+              min={0.1}
+              step={0.1}
+              className="rounded-md border border-zinc-300 bg-white px-3 py-2 dark:border-zinc-700 dark:bg-zinc-950"
+              value={form.weight}
+              onChange={(e) => setForm((f) => ({ ...f, weight: e.target.value }))}
               disabled={saving}
             />
           </label>

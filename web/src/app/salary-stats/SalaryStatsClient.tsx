@@ -25,6 +25,7 @@ import { getPayslips, type PayslipRow } from "@/lib/api";
 
 /** Pie + non-deduction line categories (MP2 is grouped with statutory deductions). */
 const PIE_SERIES_KEYS = [
+  "basic_salary",
   "reimbursement",
   "others",
   "allowances",
@@ -620,7 +621,7 @@ export default function SalaryStatsClient() {
               )}
             </div>
 
-            <div className="mt-6 h-[min(28rem,70vw)] w-full min-h-[260px]">
+            <div className="mt-6 h-[min(40rem,80vw)] w-full min-h-[360px]">
               {pieSlices.length === 0 ? (
                 <p className="py-12 text-center text-sm text-zinc-500">
                   No data in this period for these categories.
@@ -634,8 +635,9 @@ export default function SalaryStatsClient() {
                       nameKey="name"
                       cx="50%"
                       cy="50%"
-                      outerRadius="80%"
-                      labelLine={{ stroke: axisTickFill }}
+                      outerRadius="52%"
+                      paddingAngle={3}
+                      labelLine={{ stroke: axisTickFill, strokeWidth: 1 }}
                       label={({ name, percent }) =>
                         `${name} ${((percent ?? 0) * 100).toLocaleString(undefined, {
                           minimumFractionDigits: 2,

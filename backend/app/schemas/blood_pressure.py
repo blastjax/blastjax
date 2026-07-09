@@ -12,4 +12,10 @@ class BloodPressureCreate(BaseModel):
     spo2: int | None = Field(
         default=None, gt=0, le=100, description="Oxygen saturation (SpO2 %)"
     )
+    temperature: float | None = Field(
+        default=None, gt=25, le=45, description="Body temperature (°C)"
+    )
+    weight: float | None = Field(
+        default=None, gt=0, le=500, description="Body weight (kg)"
+    )
     notes: str | None = None

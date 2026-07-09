@@ -660,6 +660,8 @@ def _init_schema_minimal_stmts() -> list[str]:
             diastolic INTEGER NOT NULL,
             pulse INTEGER NOT NULL,
             spo2 INTEGER,
+            temperature NUMERIC(5,2),
+            weight NUMERIC(6,2),
             notes TEXT,
             created_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() AT TIME ZONE 'UTC'),
             CONSTRAINT chk_blood_pressure_values CHECK (
@@ -667,6 +669,12 @@ def _init_schema_minimal_stmts() -> list[str]:
             ),
             CONSTRAINT chk_blood_pressure_spo2 CHECK (
                 spo2 IS NULL OR (spo2 > 0 AND spo2 <= 100)
+            ),
+            CONSTRAINT chk_blood_pressure_temperature CHECK (
+                temperature IS NULL OR (temperature > 25 AND temperature <= 45)
+            ),
+            CONSTRAINT chk_blood_pressure_weight CHECK (
+                weight IS NULL OR weight > 0
             )
         )
         """,
@@ -872,6 +880,36 @@ def _migrate_blood_pressure_spo2(cur: Any) -> None:
     )
 
 
+def _migrate_blood_pressure_temperature_weight(cur: Any) -> None:
+    """Add nullable ``temperature`` (°C) and ``weight`` (kg) columns. Idempotent."""
+    cur.execute(
+        "ALTER TABLE blood_pressure ADD COLUMN IF NOT EXISTS temperature NUMERIC(5,2)"
+    )
+    cur.execute(
+        "ALTER TABLE blood_pressure ADD COLUMN IF NOT EXISTS weight NUMERIC(6,2)"
+    )
+    cur.execute(
+        "ALTER TABLE blood_pressure DROP CONSTRAINT IF EXISTS chk_blood_pressure_temperature"
+    )
+    cur.execute(
+        """
+        ALTER TABLE blood_pressure ADD CONSTRAINT chk_blood_pressure_temperature CHECK (
+            temperature IS NULL OR (temperature > 25 AND temperature <= 45)
+        )
+        """
+    )
+    cur.execute(
+        "ALTER TABLE blood_pressure DROP CONSTRAINT IF EXISTS chk_blood_pressure_weight"
+    )
+    cur.execute(
+        """
+        ALTER TABLE blood_pressure ADD CONSTRAINT chk_blood_pressure_weight CHECK (
+            weight IS NULL OR weight > 0
+        )
+        """
+    )
+
+
 def _migrate_house_payment_simplify(cur: Any) -> None:
     """
     Simplified house-payment model: only ``name`` + ``notes`` on the plan, with
@@ -904,7 +942,7 @@ def _migrate_house_payment_simplify(cur: Any) -> None:
 # Bump this whenever the DDL or migrations below change. ``init_schema()``
 # uses it to skip the entire migration block on warm starts (very common
 # on Neon, where containers cold-start often).
-_SCHEMA_VERSION = 10
+_SCHEMA_VERSION = 11
 
 
 def init_schema() -> None:
@@ -965,6 +1003,7 @@ def _init_schema_on(conn_factory: Any) -> None:
             _migrate_installment_original_total_from_principal(cur)
             _migrate_house_payment_simplify(cur)
             _migrate_blood_pressure_spo2(cur)
+            _migrate_blood_pressure_temperature_weight(cur)
             _migrate_aux_created_at_defaults(cur)
             _migrate_installment_repair_constraints(cur)
             _migrate_installment_relax_payment_total(cur)
@@ -2035,7 +2074,7 @@ def delete_house_payment_entry(
             return _house_payment_detail(cur, house_payment_id)
 
 
-_BLOOD_PRESSURE_COLS = "id, systolic, diastolic, pulse, spo2, notes, created_at"
+_BLOOD_PRESSURE_COLS = "id, systolic, diastolic, pulse, spo2, temperature, weight, notes, created_at"
 
 
 def list_blood_pressures(limit: int = 500) -> list[dict[str, Any]]:
@@ -2054,18 +2093,24 @@ def list_blood_pressures(limit: int = 500) -> list[dict[str, Any]]:
 
 
 def insert_blood_pressure(
-    systolic: int, diastolic: int, pulse: int, spo2: int | None, notes: str | None
+    systolic: int,
+    diastolic: int,
+    pulse: int,
+    spo2: int | None,
+    temperature: float | None,
+    weight: float | None,
+    notes: str | None,
 ) -> dict[str, Any]:
     """Insert one reading (timestamped now) and return the full row."""
     with get_connection() as conn:
         with db_cursor(conn) as cur:
             cur.execute(
                 f"""
-                INSERT INTO blood_pressure (systolic, diastolic, pulse, spo2, notes)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO blood_pressure (systolic, diastolic, pulse, spo2, temperature, weight, notes)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 RETURNING {_BLOOD_PRESSURE_COLS}
                 """,
-                (systolic, diastolic, pulse, spo2, notes),
+                (systolic, diastolic, pulse, spo2, temperature, weight, notes),
             )
             return _row_to_dict(cur, cur.fetchone())
 
@@ -2076,6 +2121,8 @@ def update_blood_pressure(
     diastolic: int,
     pulse: int,
     spo2: int | None,
+    temperature: float | None,
+    weight: float | None,
     notes: str | None,
 ) -> dict[str, Any] | None:
     with get_connection() as conn:
@@ -2083,11 +2130,12 @@ def update_blood_pressure(
             cur.execute(
                 f"""
                 UPDATE blood_pressure
-                SET systolic = ?, diastolic = ?, pulse = ?, spo2 = ?, notes = ?
+                SET systolic = ?, diastolic = ?, pulse = ?, spo2 = ?,
+                    temperature = ?, weight = ?, notes = ?
                 WHERE id = ?
                 RETURNING {_BLOOD_PRESSURE_COLS}
                 """,
-                (systolic, diastolic, pulse, spo2, notes, reading_id),
+                (systolic, diastolic, pulse, spo2, temperature, weight, notes, reading_id),
             )
             row = cur.fetchone()
             return _row_to_dict(cur, row) if row else None

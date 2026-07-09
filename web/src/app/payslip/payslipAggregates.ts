@@ -133,18 +133,17 @@ export function deductionsTotalFromRow(r: PayslipRow): number {
   );
 }
 
-/** Gross pay: income components before deductions (matches details modal breakdown). */
+/** Gross pay: basic + commission minus statutory deductions (SSS, Philhealth, Pag-ibig). */
 export function grossTotalFromRow(r: PayslipRow): number {
   const num = (v: number | null | undefined) =>
     v != null && Number.isFinite(v) ? v : 0;
   return (
     num(r.basic_salary) +
     num(r.commission) +
-    // num(r.allowances) +
-    // num(r.reimbursement) +
-    num(r.others)
-    // num(r.thirteenth_month) +
-    // num(r.medical_reimbursement)
+    num(r.others) -
+    num(r.sss_contribution) -
+    num(r.philhealth) -
+    num(r.pag_ibig)
   );
 }
 

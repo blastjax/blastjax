@@ -2,6 +2,7 @@ import type { BudgetTheme } from "./theme";
 
 /** Series keys used for pie slices, line/area strokes, and legend swatches. */
 export const CHART_SERIES_COLOR_KEYS = [
+  "basic_salary",
   "reimbursement",
   "others",
   "allowances",
@@ -18,6 +19,7 @@ export const CHART_SERIES_COLOR_KEYS = [
 export type ChartSeriesColorKey = (typeof CHART_SERIES_COLOR_KEYS)[number];
 
 export const CHART_SERIES_LABEL: Record<ChartSeriesColorKey, string> = {
+  basic_salary: "Basic Salary",
   reimbursement: "Reimbursement",
   others: "Others",
   allowances: "Allowances",
@@ -40,6 +42,7 @@ export type ChartPaletteByTheme = Record<
 
 /** Default line + pie colors (light UI). */
 const BUILTIN_LIGHT: Record<ChartSeriesColorKey, string> = {
+  basic_salary: "#ffffff",
   reimbursement: "#3b82f6",
   others: "#8b5cf6",
   allowances: "#64748b",
@@ -55,6 +58,7 @@ const BUILTIN_LIGHT: Record<ChartSeriesColorKey, string> = {
 
 /** Slightly brighter defaults on dark backgrounds for readability. */
 const BUILTIN_DARK: Record<ChartSeriesColorKey, string> = {
+  basic_salary: "#ffffff",
   reimbursement: "#60a5fa",
   others: "#a78bfa",
   allowances: "#94a3b8",
