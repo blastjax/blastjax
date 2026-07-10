@@ -434,3 +434,29 @@ export async function syncToCloud() {
     detail?: string;
   }>("POST", "/api/sync");
 }
+
+export async function syncPushToCloud() {
+  return sendJson<{
+    ok: boolean;
+    synced: boolean;
+    direction: "push";
+    detail?: string;
+  }>("POST", "/api/sync/push");
+}
+
+export async function syncPullFromCloud() {
+  return sendJson<{
+    ok: boolean;
+    synced: boolean;
+    direction: "pull";
+    detail?: string;
+  }>("POST", "/api/sync/pull");
+}
+
+export async function getLatestTransactionTime() {
+  return getJson<{
+    sync_enabled: boolean;
+    local_ts: string | null;
+    cloud_ts: string | null;
+  }>("/api/sync/latest-transaction");
+}
