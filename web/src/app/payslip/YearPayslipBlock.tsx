@@ -60,27 +60,31 @@ function YearPayslipBlockInner({
               key={month}
               className="flex min-w-0 flex-col gap-2 rounded-lg border border-zinc-200 bg-white p-2.5 dark:border-zinc-600 dark:bg-zinc-950/90"
             >
-              <div className="flex min-w-0 items-baseline gap-1.5 border-b border-zinc-100 pb-1.5 dark:border-zinc-800">
-                <span className="shrink-0 whitespace-nowrap text-xs font-semibold leading-tight text-zinc-800 dark:text-zinc-200">
-                  {monthLabel}
-                </span>
-                {monthGross != null && (
-                  <span
-                    className={`ml-auto min-w-0 truncate text-[9px] tabular-nums leading-tight sm:text-[11px] ${GROSS_TEXT_CLASSES}`}
-                    title={`Gross ${fmtNum(monthGross)}`}
-                  >
-                    {fmtNum(monthGross)}
-                  </span>
-                )}
+            <div className="flex min-w-0 items-start justify-between gap-1.5 border-b border-zinc-100 pb-1.5 dark:border-zinc-800">
+            <span className="shrink-0 whitespace-nowrap text-xs font-semibold leading-tight text-zinc-800 dark:text-zinc-200">
+              {monthLabel}
+            </span>
+            {(monthSum != null || monthGross != null) && (
+              <span className="flex min-w-0 flex-col items-end">
                 {monthSum != null && (
                   <span
-                    className={`${monthGross == null ? "ml-auto " : ""}min-w-0 truncate text-[10px] tabular-nums leading-tight sm:text-xs ${NET_TEXT_CLASSES}`}
+                    className={`min-w-0 truncate text-[10px] tabular-nums leading-tight sm:text-xs ${NET_TEXT_CLASSES}`}
                     title={`Net ${fmtNum(monthSum)}`}
                   >
                     {fmtNum(monthSum)}
                   </span>
                 )}
-              </div>
+                {monthGross != null && (
+                  <span
+                    className={`min-w-0 truncate text-[9px] tabular-nums leading-tight sm:text-[11px] ${GROSS_TEXT_CLASSES}`}
+                    title={`Gross ${fmtNum(monthGross)}`}
+                  >
+                    {fmtNum(monthGross)}
+                  </span>
+                )}
+              </span>
+            )}
+          </div>
               <div className="flex flex-col gap-1.5">
                 {[1, 2].map((half) => {
                   const isFirst = half === 1;
