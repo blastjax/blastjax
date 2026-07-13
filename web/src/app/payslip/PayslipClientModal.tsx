@@ -290,7 +290,9 @@ export function PayslipClientModal({
                           ["others", "Others"],
                           ["allowances", "Allowances"],
                         ] as const
-                      ).map(([k, lab]) => (
+                      )
+                      .filter(([k]) => k !== "commission" || row.period_half === 2)
+                      .map(([k, lab]) => (
                         <div key={k}>
                           <dt className="text-xs text-zinc-500">{lab}</dt>
                           <dd className="tabular-nums text-zinc-900 dark:text-zinc-100">
