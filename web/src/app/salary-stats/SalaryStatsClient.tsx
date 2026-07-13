@@ -523,7 +523,7 @@ export default function SalaryStatsClient() {
   const allTimeTotals = useMemo(() => {
     const incomeByKey = emptyTotals(PIE_SERIES_KEYS);
     const deductionsByKey = emptyTotals(DEDUCTION_KEYS);
-    for (const sums of statsIndex.byMonth.values()) {
+    for (const sums of statsIndex.byYear.values()) {
       for (const k of PIE_SERIES_KEYS) incomeByKey[k] += sums[k];
       for (const k of DEDUCTION_KEYS) deductionsByKey[k] += sums[k];
     }
@@ -531,12 +531,25 @@ export default function SalaryStatsClient() {
     for (const k of PIE_SERIES_KEYS) income += incomeByKey[k];
     let deductions = 0;
     for (const k of DEDUCTION_KEYS) deductions += deductionsByKey[k];
-    return { income, incomeByKey, deductions, deductionsByKey };
+    const sortedIncomeKeys = [...PIE_SERIES_KEYS].sort(
+      (a, b) => incomeByKey[b] - incomeByKey[a],
+    );
+    const sortedDeductionKeys = [...DEDUCTION_KEYS].sort(
+      (a, b) => deductionsByKey[b] - deductionsByKey[a],
+    );
+    return { income, incomeByKey, deductions, deductionsByKey, sortedIncomeKeys, sortedDeductionKeys };
   }, [statsIndex]);
 
   const allTimeRange = useMemo(() => {
-    const earliest = earliestMonthKey(rows);
-    const latest = latestMonthKey(rows);
+    let earliest: string | null = null;
+    let latest: string | null = null;
+    for (const r of rows) {
+      const cm = calendarMonthForRow(r);
+      if (!cm) continue;
+      const k = monthKey(cm.y, cm.m);
+      if (!earliest || compareMonthKeys(k, earliest) < 0) earliest = k;
+      if (!latest || compareMonthKeys(k, latest) > 0) latest = k;
+    }
     if (!earliest || !latest) return null;
     return {
       from: formatMonthKeyButtonLabel(earliest),
@@ -899,7 +912,7 @@ export default function SalaryStatsClient() {
                   </span>
                 </div>
                 <div className="mt-3 space-y-1.5 border-t border-emerald-200 pt-3 dark:border-emerald-800">
-                  {[...PIE_SERIES_KEYS].sort((a, b) => allTimeTotals.incomeByKey[b] - allTimeTotals.incomeByKey[a]).map((k) => (
+                  {allTimeTotals.sortedIncomeKeys.map((k) => (
                     <div key={k} className="flex items-center justify-between gap-4 text-sm">
                       <span className="text-zinc-600 dark:text-zinc-400">{CHART_SERIES_LABEL[k]}</span>
                       <span className="tabular-nums font-medium text-emerald-700 dark:text-emerald-300">
@@ -917,7 +930,7 @@ export default function SalaryStatsClient() {
                   {fmtMoney(allTimeTotals.deductions)}
                 </p>
                 <div className="mt-3 space-y-1.5 border-t border-red-200 pt-3 dark:border-red-800">
-                  {[...DEDUCTION_KEYS].sort((a, b) => allTimeTotals.deductionsByKey[b] - allTimeTotals.deductionsByKey[a]).map((k) => (
+                  {allTimeTotals.sortedDeductionKeys.map((k) => (
                     <div key={k} className="flex items-center justify-between gap-4 text-sm">
                       <span className="text-zinc-600 dark:text-zinc-400">{CHART_SERIES_LABEL[k]}</span>
                       <span className="tabular-nums font-medium text-red-600 dark:text-red-400">
