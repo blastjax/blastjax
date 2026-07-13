@@ -76,32 +76,42 @@ function YearPayslipBlockInner({
               <span className="shrink-0 whitespace-nowrap text-xs font-semibold leading-tight text-zinc-800 dark:text-zinc-200">
                 {monthLabel}
               </span>
-              {(monthSum != null || monthGross != null) && (
+              {(monthSum != null || monthGross != null || showGross) && (
                 <span className="flex min-w-0 flex-col items-end">
-                  {monthSum != null && (
+                  {monthSum != null ? (
                     <span
                       className={`min-w-0 truncate text-[10px] tabular-nums leading-tight sm:text-xs ${NET_TEXT_CLASSES}`}
                       title={`Net ${fmtNum(monthSum)}`}
                     >
                       {fmtNum(monthSum)}
                     </span>
-                  )}
-                  {monthGross != null && (
-                    <span
-                      className={`min-w-0 truncate text-[10px] tabular-nums leading-tight sm:text-xs ${GROSS_TEXT_CLASSES}`}
-                      title={`Gross ${fmtNum(monthGross)}`}
-                    >
-                      {fmtNum(monthGross)}
-                    </span>
-                  )}
-                  {monthGross != null && monthSum != null && (
-                    <span
-                      className="min-w-0 truncate text-[10px] tabular-nums leading-tight text-red-500 sm:text-xs dark:text-red-400"
-                      title={`Deductions ${fmtNum(monthGross - monthSum)}`}
-                    >
-                      -{fmtNum(monthGross - monthSum)}
-                    </span>
-                  )}
+                  ) : showGross ? (
+                    <span className="invisible text-[10px] sm:text-xs" aria-hidden>0.00</span>
+                  ) : null}
+                  {showGross ? (
+                    monthGross != null ? (
+                      <span
+                        className={`min-w-0 truncate text-[10px] tabular-nums leading-tight sm:text-xs ${GROSS_TEXT_CLASSES}`}
+                        title={`Gross ${fmtNum(monthGross)}`}
+                      >
+                        {fmtNum(monthGross)}
+                      </span>
+                    ) : (
+                      <span className="invisible text-[10px] sm:text-xs" aria-hidden>0.00</span>
+                    )
+                  ) : null}
+                  {showGross ? (
+                    monthGross != null && monthSum != null ? (
+                      <span
+                        className="min-w-0 truncate text-[10px] tabular-nums leading-tight text-red-500 sm:text-xs dark:text-red-400"
+                        title={`Deductions ${fmtNum(monthGross - monthSum)}`}
+                      >
+                        -{fmtNum(monthGross - monthSum)}
+                      </span>
+                    ) : (
+                      <span className="invisible text-[10px] sm:text-xs" aria-hidden>0.00</span>
+                    )
+                  ) : null}
                 </span>
               )}
             </div>
@@ -149,28 +159,38 @@ function YearPayslipBlockInner({
                       }`}
                     >
                       <span className="flex w-full min-w-0 flex-col items-end gap-0 px-0.5">
-                        {st != null && (
+                        {st != null ? (
                           <span
                             className={`min-w-0 truncate text-right text-[10px] sm:text-sm ${NET_TEXT_CLASSES}`}
                           >
                             {netStr}
                           </span>
-                        )}
-                        {stGross != null && (
-                          <span
-                            className={`min-w-0 truncate text-right text-[10px] sm:text-sm ${GROSS_TEXT_CLASSES}`}
-                          >
-                            {grossStr}
-                          </span>
-                        )}
-                        {stGross != null && st != null && (
-                          <span
-                            className="min-w-0 truncate text-right text-[10px] text-red-500 sm:text-sm dark:text-red-400"
-                            title={`Deductions ${fmtNum(stGrossRaw! - st)}`}
-                          >
-                            -{fmtNum(stGrossRaw! - st)}
-                          </span>
-                        )}
+                        ) : showGross ? (
+                          <span className="invisible text-[10px] sm:text-sm" aria-hidden>0.00</span>
+                        ) : null}
+                        {showGross ? (
+                          stGross != null ? (
+                            <span
+                              className={`min-w-0 truncate text-right text-[10px] sm:text-sm ${GROSS_TEXT_CLASSES}`}
+                            >
+                              {grossStr}
+                            </span>
+                          ) : (
+                            <span className="invisible text-[10px] sm:text-sm" aria-hidden>0.00</span>
+                          )
+                        ) : null}
+                        {showGross ? (
+                          stGross != null && st != null ? (
+                            <span
+                              className="min-w-0 truncate text-right text-[10px] text-red-500 sm:text-sm dark:text-red-400"
+                              title={`Deductions ${fmtNum(stGrossRaw! - st)}`}
+                            >
+                              -{fmtNum(stGrossRaw! - st)}
+                            </span>
+                          ) : (
+                            <span className="invisible text-[10px] sm:text-sm" aria-hidden>0.00</span>
+                          )
+                        ) : null}
                       </span>
                     </button>
                   );

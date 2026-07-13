@@ -888,23 +888,18 @@ export default function SalaryStatsClient() {
               <div className="rounded-lg border border-emerald-200 bg-emerald-50/60 p-4 dark:border-emerald-800 dark:bg-emerald-950/30">
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-400">
                   Total Income
+                  <span className="ml-2 normal-case font-normal tracking-normal text-zinc-400 dark:text-zinc-500">net / gross</span>
                 </p>
-                <div className="mt-2 flex items-end justify-between gap-4">
-                  <div>
-                    <span className="text-xs font-medium text-emerald-700 dark:text-emerald-300">Net</span>
-                    <p className="text-2xl font-bold tabular-nums text-emerald-800 dark:text-emerald-200">
-                      {fmtMoney(allTimeTotals.income)}
-                    </p>
-                  </div>
-                  <div className="text-right">
-                    <span className="text-xs font-medium text-emerald-600/70 dark:text-emerald-400/60">Gross</span>
-                    <p className="text-2xl font-light tabular-nums text-emerald-700/70 dark:text-emerald-300/60">
-                      {fmtMoney(allTimeTotals.income + allTimeTotals.deductions)}
-                    </p>
-                  </div>
+                <div className="mt-2 flex items-baseline justify-between gap-4">
+                  <span className="text-2xl font-bold tabular-nums text-emerald-800 dark:text-emerald-200">
+                    {fmtMoney(allTimeTotals.income)}
+                  </span>
+                  <span className="text-2xl font-light tabular-nums text-emerald-700/70 dark:text-emerald-300/60">
+                    {fmtMoney(allTimeTotals.income + allTimeTotals.deductions)}
+                  </span>
                 </div>
                 <div className="mt-3 space-y-1.5 border-t border-emerald-200 pt-3 dark:border-emerald-800">
-                  {PIE_SERIES_KEYS.map((k) => (
+                  {[...PIE_SERIES_KEYS].sort((a, b) => allTimeTotals.incomeByKey[b] - allTimeTotals.incomeByKey[a]).map((k) => (
                     <div key={k} className="flex items-center justify-between gap-4 text-sm">
                       <span className="text-zinc-600 dark:text-zinc-400">{CHART_SERIES_LABEL[k]}</span>
                       <span className="tabular-nums font-medium text-emerald-700 dark:text-emerald-300">
@@ -922,7 +917,7 @@ export default function SalaryStatsClient() {
                   {fmtMoney(allTimeTotals.deductions)}
                 </p>
                 <div className="mt-3 space-y-1.5 border-t border-red-200 pt-3 dark:border-red-800">
-                  {DEDUCTION_KEYS.map((k) => (
+                  {[...DEDUCTION_KEYS].sort((a, b) => allTimeTotals.deductionsByKey[b] - allTimeTotals.deductionsByKey[a]).map((k) => (
                     <div key={k} className="flex items-center justify-between gap-4 text-sm">
                       <span className="text-zinc-600 dark:text-zinc-400">{CHART_SERIES_LABEL[k]}</span>
                       <span className="tabular-nums font-medium text-red-600 dark:text-red-400">
