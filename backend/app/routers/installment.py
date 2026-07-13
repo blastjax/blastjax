@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 
+import cache
 from app.deps import require_db
 from app.schemas.installment import (
     InstallmentCreate,
@@ -64,11 +65,17 @@ def _validate_installment_body(body: InstallmentCreate) -> tuple[float, float]:
 def installment_list(
     limit: int = Query(default=500, ge=1, le=2000),
 ) -> dict[str, Any]:
+    key = f"installment:list:{limit}"
+    hit = cache.get(key)
+    if hit is not None:
+        return hit
     rows = list_installments(limit=limit)
-    return {
+    result = {
         "installments": [serialize_installment_row(r) for r in rows],
         "summary": installment_summary(rows),
     }
+    cache.set(key, result)
+    return result
 
 
 @router.get("/api/installment-schedules")
@@ -76,8 +83,12 @@ def installment_schedules(
     limit: int = Query(default=500, ge=1, le=2000),
 ) -> dict[str, Any]:
     """All plans with their schedule lines in one response (payments-by-month view)."""
+    key = f"installment:schedules:{limit}"
+    hit = cache.get(key)
+    if hit is not None:
+        return hit
     items = list_installments_with_lines(limit=limit)
-    return {
+    result = {
         "schedules": [
             {
                 "installment": serialize_installment_row(it["installment"]),
@@ -86,6 +97,8 @@ def installment_schedules(
             for it in items
         ]
     }
+    cache.set(key, result)
+    return result
 
 
 @router.post("/api/installment")
@@ -108,10 +121,16 @@ def installment_create(body: InstallmentCreate) -> dict[str, Any]:
 
 @router.get("/api/installment/{installment_id}")
 def installment_one(installment_id: int) -> dict[str, Any]:
+    key = f"installment:{installment_id}"
+    hit = cache.get(key)
+    if hit is not None:
+        return hit
     detail = fetch_installment_with_lines(installment_id)
     if not detail:
         raise HTTPException(status_code=404, detail="Installment not found.")
-    return _serialize_detail(detail)
+    result = _serialize_detail(detail)
+    cache.set(key, result)
+    return result
 
 
 @router.put("/api/installment/{installment_id}/line/{seq}")

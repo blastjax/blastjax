@@ -6,6 +6,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
+import cache
 from app.deps import require_db
 from app.schemas.blood_pressure import BloodPressureCreate
 from db import (
@@ -37,8 +38,14 @@ def _clean_notes(notes: str | None) -> str | None:
 def blood_pressure_list(
     limit: int = Query(default=500, ge=1, le=2000),
 ) -> dict[str, Any]:
+    key = f"bp:list:{limit}"
+    hit = cache.get(key)
+    if hit is not None:
+        return hit
     rows = list_blood_pressures(limit=limit)
-    return {"readings": [_serialize(r) for r in rows]}
+    result = {"readings": [_serialize(r) for r in rows]}
+    cache.set(key, result)
+    return result
 
 
 @router.post("/api/blood-pressure")

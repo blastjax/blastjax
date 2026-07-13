@@ -10,6 +10,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
+import cache
 from app.deps import require_db
 from app.schemas.house_payment import (
     HousePaymentCreate,
@@ -53,11 +54,17 @@ def _serialize_detail(detail: dict[str, Any]) -> dict[str, Any]:
 def house_payment_list(
     limit: int = Query(default=500, ge=1, le=2000),
 ) -> dict[str, Any]:
+    key = f"house_payment:list:{limit}"
+    hit = cache.get(key)
+    if hit is not None:
+        return hit
     rows = list_house_payments(limit=limit)
-    return {
+    result = {
         "house_payments": [serialize_house_payment_row(r) for r in rows],
         "summary": house_payment_summary(rows),
     }
+    cache.set(key, result)
+    return result
 
 
 @router.post("/api/house-payment")
@@ -68,10 +75,16 @@ def house_payment_create(body: HousePaymentCreate) -> dict[str, Any]:
 
 @router.get("/api/house-payment/{house_payment_id}")
 def house_payment_one(house_payment_id: int) -> dict[str, Any]:
+    key = f"house_payment:{house_payment_id}"
+    hit = cache.get(key)
+    if hit is not None:
+        return hit
     detail = fetch_house_payment_with_entries(house_payment_id)
     if not detail:
         raise HTTPException(status_code=404, detail="House payment not found.")
-    return _serialize_detail(detail)
+    result = _serialize_detail(detail)
+    cache.set(key, result)
+    return result
 
 
 @router.put("/api/house-payment/{house_payment_id}")

@@ -189,6 +189,17 @@ function earliestMonthKey(rows: PayslipRow[]): string | null {
   return best;
 }
 
+function latestMonthKey(rows: PayslipRow[]): string | null {
+  let best: string | null = null;
+  for (const r of rows) {
+    const cm = calendarMonthForRow(r);
+    if (!cm) continue;
+    const k = monthKey(cm.y, cm.m);
+    if (!best || compareMonthKeys(k, best) > 0) best = k;
+  }
+  return best;
+}
+
 function currentMonthKey(): string {
   const d = new Date();
   return monthKey(d.getFullYear(), d.getMonth() + 1);
@@ -508,6 +519,30 @@ export default function SalaryStatsClient() {
     }
     return t;
   }, [linePoints, lineStart, lineEnd]);
+
+  const allTimeTotals = useMemo(() => {
+    const incomeByKey = emptyTotals(PIE_SERIES_KEYS);
+    const deductionsByKey = emptyTotals(DEDUCTION_KEYS);
+    for (const sums of statsIndex.byMonth.values()) {
+      for (const k of PIE_SERIES_KEYS) incomeByKey[k] += sums[k];
+      for (const k of DEDUCTION_KEYS) deductionsByKey[k] += sums[k];
+    }
+    let income = 0;
+    for (const k of PIE_SERIES_KEYS) income += incomeByKey[k];
+    let deductions = 0;
+    for (const k of DEDUCTION_KEYS) deductions += deductionsByKey[k];
+    return { income, incomeByKey, deductions, deductionsByKey };
+  }, [statsIndex]);
+
+  const allTimeRange = useMemo(() => {
+    const earliest = earliestMonthKey(rows);
+    const latest = latestMonthKey(rows);
+    if (!earliest || !latest) return null;
+    return {
+      from: formatMonthKeyButtonLabel(earliest),
+      to: formatMonthKeyButtonLabel(latest),
+    };
+  }, [rows]);
 
   const anySeriesVisible = LINE_SERIES_KEYS.some((k) => visibleSeries[k]);
 
@@ -838,6 +873,66 @@ export default function SalaryStatsClient() {
                 </span>
               </div>
             )}
+          </section>
+
+          <section className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950 sm:p-6">
+            <h2 className="text-lg font-medium text-zinc-900 dark:text-zinc-50">
+              All-time Summary
+            </h2>
+            {allTimeRange && (
+              <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
+                Totals from {allTimeRange.from} through {allTimeRange.to}.
+              </p>
+            )}
+            <div className="mt-5 grid gap-4 sm:grid-cols-2">
+              <div className="rounded-lg border border-emerald-200 bg-emerald-50/60 p-4 dark:border-emerald-800 dark:bg-emerald-950/30">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-400">
+                  Total Income
+                </p>
+                <div className="mt-2 flex items-end justify-between gap-4">
+                  <div>
+                    <span className="text-xs font-medium text-emerald-700 dark:text-emerald-300">Net</span>
+                    <p className="text-2xl font-bold tabular-nums text-emerald-800 dark:text-emerald-200">
+                      {fmtMoney(allTimeTotals.income)}
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-xs font-medium text-emerald-600/70 dark:text-emerald-400/60">Gross</span>
+                    <p className="text-2xl font-light tabular-nums text-emerald-700/70 dark:text-emerald-300/60">
+                      {fmtMoney(allTimeTotals.income + allTimeTotals.deductions)}
+                    </p>
+                  </div>
+                </div>
+                <div className="mt-3 space-y-1.5 border-t border-emerald-200 pt-3 dark:border-emerald-800">
+                  {PIE_SERIES_KEYS.map((k) => (
+                    <div key={k} className="flex items-center justify-between gap-4 text-sm">
+                      <span className="text-zinc-600 dark:text-zinc-400">{CHART_SERIES_LABEL[k]}</span>
+                      <span className="tabular-nums font-medium text-emerald-700 dark:text-emerald-300">
+                        {fmtMoney(allTimeTotals.incomeByKey[k])}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="rounded-lg border border-red-200 bg-red-50/60 p-4 dark:border-red-800 dark:bg-red-950/30">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-red-700 dark:text-red-400">
+                  Total Deductions
+                </p>
+                <p className="mt-2 text-2xl font-bold tabular-nums text-red-800 dark:text-red-200">
+                  {fmtMoney(allTimeTotals.deductions)}
+                </p>
+                <div className="mt-3 space-y-1.5 border-t border-red-200 pt-3 dark:border-red-800">
+                  {DEDUCTION_KEYS.map((k) => (
+                    <div key={k} className="flex items-center justify-between gap-4 text-sm">
+                      <span className="text-zinc-600 dark:text-zinc-400">{CHART_SERIES_LABEL[k]}</span>
+                      <span className="tabular-nums font-medium text-red-600 dark:text-red-400">
+                        {fmtMoney(allTimeTotals.deductionsByKey[k])}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
           </section>
           </>
         )}

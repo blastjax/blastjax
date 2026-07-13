@@ -12,6 +12,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.concurrency import run_in_threadpool
 
+import cache
 import db_sync
 from db import close_connection_pool, database_url, init_schema
 
@@ -35,6 +36,21 @@ def _cors_allow_origins() -> list[str]:
     return list(dict.fromkeys(merged))
 
 
+_CACHE_PREFIXES: dict[str, str] = {
+    "/api/payslip": "payslip",
+    "/api/installment": "installment",
+    "/api/house-payment": "house_payment",
+    "/api/blood-pressure": "bp",
+}
+
+
+def _cache_prefix(path: str) -> str | None:
+    for route, prefix in _CACHE_PREFIXES.items():
+        if path.startswith(route):
+            return prefix
+    return None
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     if not database_url():
@@ -42,9 +58,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             "DATABASE_URL (or DB_*) is not set — API requests that need the DB will fail until .env is configured.",
         )
     init_schema()
+    cache.init_cache()
     try:
         yield
     finally:
+        cache.close_cache()
         close_connection_pool()
 
 
@@ -83,13 +101,17 @@ def create_app() -> FastAPI:
         if active and not is_write:
             await run_in_threadpool(db_sync.pull_before_request)
         response = await call_next(request)
-        if active and is_write and response.status_code < 400:
-            # Mark dirty now (cheap, local-only) for safety, then push to the
-            # cloud in the background without delaying the response.
-            await run_in_threadpool(db_sync.mark_local_dirty)
-            task = asyncio.create_task(run_in_threadpool(db_sync.push_after_write))
-            _background_tasks.add(task)
-            task.add_done_callback(_background_tasks.discard)
+        if is_write and response.status_code < 400:
+            ns = _cache_prefix(path)
+            if ns:
+                await run_in_threadpool(cache.invalidate, ns)
+            if active:
+                # Mark dirty now (cheap, local-only) for safety, then push to the
+                # cloud in the background without delaying the response.
+                await run_in_threadpool(db_sync.mark_local_dirty)
+                task = asyncio.create_task(run_in_threadpool(db_sync.push_after_write))
+                _background_tasks.add(task)
+                task.add_done_callback(_background_tasks.discard)
         return response
 
     from app.routers import (

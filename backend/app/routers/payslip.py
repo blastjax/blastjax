@@ -15,6 +15,7 @@ from fastapi import (
     UploadFile,
 )
 
+import cache
 from app.deps import require_db
 from app.schemas.payslip import PayslipCreate
 from app.services.payslip_parse import _payslip_records_from_nested_json
@@ -56,7 +57,13 @@ def _serialize_payslip(row: dict[str, Any]) -> dict[str, Any]:
 def payslip_list(
     limit: int = Query(default=1000, ge=1, le=2000),
 ) -> dict[str, Any]:
-    return {"payslips": [_serialize_payslip(r) for r in list_payslips(limit=limit)]}
+    key = f"payslip:list:{limit}"
+    hit = cache.get(key)
+    if hit is not None:
+        return hit
+    result = {"payslips": [_serialize_payslip(r) for r in list_payslips(limit=limit)]}
+    cache.set(key, result)
+    return result
 
 
 @router.post("/api/payslip")
@@ -102,10 +109,16 @@ def payslip_import_json(body: dict[str, Any] = Body(...)) -> dict[str, Any]:
 
 @router.get("/api/payslip/{payslip_id}")
 def payslip_one(payslip_id: int) -> dict[str, Any]:
+    key = f"payslip:{payslip_id}"
+    hit = cache.get(key)
+    if hit is not None:
+        return hit
     row = get_payslip(payslip_id)
     if not row:
         raise HTTPException(status_code=404, detail="Payslip not found.")
-    return _serialize_payslip(row)
+    result = _serialize_payslip(row)
+    cache.set(key, result)
+    return result
 
 
 @router.put("/api/payslip/{payslip_id}")

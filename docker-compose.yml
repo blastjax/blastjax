@@ -16,6 +16,19 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+  redis:
+    image: redis:7-alpine
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
   api:
     restart: always
     build:
@@ -27,6 +40,8 @@ services:
       - .env
     depends_on:
       db:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     healthcheck:
       test:
@@ -53,3 +68,4 @@ services:
 
 volumes:
   pgdata:
+  redisdata:
