@@ -17,6 +17,7 @@ const NAV_SEGMENTS: readonly { title: string | null; links: readonly NavLink[] }
     links: [
       { href: "/payslip", label: "Payslip" },
       { href: "/salary-stats", label: "Salary Stats" },
+      { href: "/commission", label: "Commission" },
       { href: "/installments", label: "Installments" },
       { href: "/house-payments", label: "House Payments" },
     ],
