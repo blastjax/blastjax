@@ -37,15 +37,6 @@ router = APIRouter(tags=["payslip"], dependencies=[Depends(require_db)])
 _MAX_PDF_BYTES = 10 * 1024 * 1024
 
 
-def _sanitize_pdf_filename(name: str | None, payslip_id: int) -> str:
-    """A safe ``Content-Disposition`` filename (no quotes/control chars)."""
-    fallback = f"payslip-{payslip_id}.pdf"
-    if not name:
-        return fallback
-    cleaned = "".join(c for c in name if c.isprintable() and c not in '"\\').strip()
-    return cleaned or fallback
-
-
 def _serialize_payslip(row: dict[str, Any]) -> dict[str, Any]:
     ca = row.get("created_at")
     if hasattr(ca, "isoformat"):
@@ -174,19 +165,18 @@ async def payslip_upload_pdf(
     )
     if not is_pdf:
         raise HTTPException(status_code=400, detail="Only PDF files are accepted.")
-    if not set_payslip_pdf(payslip_id, data, file.filename):
+    if not set_payslip_pdf(payslip_id, data):
         raise HTTPException(status_code=404, detail="Payslip not found.")
-    return {"ok": True, "has_pdf": True, "pdf_filename": file.filename}
+    return {"ok": True, "has_pdf": True}
 
 
 @router.get("/api/payslip/{payslip_id}/pdf")
 def payslip_get_pdf(payslip_id: int) -> Response:
     """Serve the payslip's PDF inline so the browser can render it."""
-    result = get_payslip_pdf(payslip_id)
-    if result is None:
+    data = get_payslip_pdf(payslip_id)
+    if data is None:
         raise HTTPException(status_code=404, detail="No PDF attached to this payslip.")
-    data, filename = result
-    disposition = f'inline; filename="{_sanitize_pdf_filename(filename, payslip_id)}"'
+    disposition = f'inline; filename="payslip-{payslip_id}.pdf"'
     return Response(
         content=data,
         media_type="application/pdf",

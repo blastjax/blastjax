@@ -27,14 +27,15 @@ import {
  * A reading is "healthy" when systolic, diastolic, and pulse all sit in the
  * normal resting range (normal BP < 120/80 but not hypotensive, resting pulse
  * 60–100), and — when recorded — SpO2 is at least 95%. Anything outside is
- * flagged "Bad".
+ * flagged "Bad". Readings with no BP/pulse recorded can't be assessed.
  */
 function isHealthy(r: {
-  systolic: number;
-  diastolic: number;
-  pulse: number;
+  systolic: number | null;
+  diastolic: number | null;
+  pulse: number | null;
   spo2: number | null;
-}): boolean {
+}): boolean | null {
+  if (r.systolic == null || r.diastolic == null || r.pulse == null) return null;
   return (
     r.systolic >= 90 &&
     r.systolic < 120 &&
@@ -70,13 +71,22 @@ function fmtChartLabel(iso: string): string {
 }
 
 const SERIES = [
-  { key: "systolic", label: "Systolic (mmHg)", color: "#ef4444" },
-  { key: "diastolic", label: "Diastolic (mmHg)", color: "#6366f1" },
-  { key: "pulse", label: "Pulse (bpm)", color: "#10b981" },
-  { key: "spo2", label: "SpO2 (%)", color: "#0ea5e9" },
-  { key: "temperature", label: "Temperature (°C)", color: "#f97316" },
-  { key: "weight", label: "Weight (kg)", color: "#a855f7" },
+  { key: "systolic", label: "Systolic (mmHg)", color: "#ef4444", group: "bp" },
+  { key: "diastolic", label: "Diastolic (mmHg)", color: "#6366f1", group: "bp" },
+  { key: "pulse", label: "Pulse (bpm)", color: "#10b981", group: "bp" },
+  { key: "spo2", label: "SpO2 (%)", color: "#0ea5e9", group: "spo2" },
+  { key: "temperature", label: "Temperature (°C)", color: "#f97316", group: "temperature" },
+  { key: "weight", label: "Weight (kg)", color: "#a855f7", group: "weight" },
 ] as const;
+
+const CHART_GROUPS = [
+  { id: "bp", label: "Blood Pressure", color: "#ef4444" },
+  { id: "spo2", label: "SpO2", color: "#0ea5e9" },
+  { id: "temperature", label: "Temperature", color: "#f97316" },
+  { id: "weight", label: "Weight", color: "#a855f7" },
+] as const;
+
+type ChartGroupId = (typeof CHART_GROUPS)[number]["id"];
 
 const emptyForm = { systolic: "", diastolic: "", pulse: "", spo2: "", temperature: "", weight: "", notes: "" };
 
@@ -88,6 +98,13 @@ export default function BloodPressureClient() {
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
+  const [activeGroups, setActiveGroups] = useState<Record<ChartGroupId, boolean>>(() =>
+    Object.fromEntries(CHART_GROUPS.map((g) => [g.id, true])) as Record<ChartGroupId, boolean>,
+  );
+
+  const toggleGroup = (id: ChartGroupId) => {
+    setActiveGroups((g) => ({ ...g, [id]: !g[id] }));
+  };
 
   const { theme } = useTheme();
   const axisTickFill = theme === "dark" ? "#a1a1aa" : "#71717a";
@@ -136,13 +153,17 @@ export default function BloodPressureClient() {
     let sys = 0;
     let dia = 0;
     let pulse = 0;
+    let bpCount = 0;
     let spo2 = 0;
     let spo2Count = 0;
     let healthy = 0;
     for (const r of rows) {
-      sys += r.systolic;
-      dia += r.diastolic;
-      pulse += r.pulse;
+      if (r.systolic != null && r.diastolic != null && r.pulse != null) {
+        sys += r.systolic;
+        dia += r.diastolic;
+        pulse += r.pulse;
+        bpCount += 1;
+      }
       if (r.spo2 != null) {
         spo2 += r.spo2;
         spo2Count += 1;
@@ -151,9 +172,9 @@ export default function BloodPressureClient() {
     }
     return {
       count: n,
-      avgSys: sys / n,
-      avgDia: dia / n,
-      avgPulse: pulse / n,
+      avgSys: bpCount > 0 ? sys / bpCount : NaN,
+      avgDia: bpCount > 0 ? dia / bpCount : NaN,
+      avgPulse: bpCount > 0 ? pulse / bpCount : NaN,
       avgSpo2: spo2Count > 0 ? spo2 / spo2Count : NaN,
       healthy,
     };
@@ -185,9 +206,9 @@ export default function BloodPressureClient() {
   const openEdit = (r: BloodPressureRow) => {
     setEditingId(r.id);
     setForm({
-      systolic: String(r.systolic),
-      diastolic: String(r.diastolic),
-      pulse: String(r.pulse),
+      systolic: r.systolic == null ? "" : String(r.systolic),
+      diastolic: r.diastolic == null ? "" : String(r.diastolic),
+      pulse: r.pulse == null ? "" : String(r.pulse),
       spo2: r.spo2 == null ? "" : String(r.spo2),
       temperature: r.temperature == null ? "" : String(r.temperature),
       weight: r.weight == null ? "" : String(r.weight),
@@ -207,18 +228,32 @@ export default function BloodPressureClient() {
     setSaving(true);
     setError(null);
     try {
-      const systolic = Number(form.systolic);
-      const diastolic = Number(form.diastolic);
-      const pulse = Number(form.pulse);
-      if (
-        !Number.isInteger(systolic) ||
-        !Number.isInteger(diastolic) ||
-        !Number.isInteger(pulse) ||
-        systolic <= 0 ||
-        diastolic <= 0 ||
-        pulse <= 0
-      ) {
-        throw new Error("Systolic, diastolic, and pulse must be positive whole numbers.");
+      const systolicRaw = form.systolic.trim();
+      const diastolicRaw = form.diastolic.trim();
+      const pulseRaw = form.pulse.trim();
+      const bpRawValues = [systolicRaw, diastolicRaw, pulseRaw];
+      const anyBpFilled = bpRawValues.some((v) => v !== "");
+      const allBpFilled = bpRawValues.every((v) => v !== "");
+      if (anyBpFilled && !allBpFilled) {
+        throw new Error("Systolic, diastolic, and pulse must all be filled in together, or all left blank.");
+      }
+      let systolic: number | null = null;
+      let diastolic: number | null = null;
+      let pulse: number | null = null;
+      if (allBpFilled) {
+        systolic = Number(systolicRaw);
+        diastolic = Number(diastolicRaw);
+        pulse = Number(pulseRaw);
+        if (
+          !Number.isInteger(systolic) ||
+          !Number.isInteger(diastolic) ||
+          !Number.isInteger(pulse) ||
+          systolic <= 0 ||
+          diastolic <= 0 ||
+          pulse <= 0
+        ) {
+          throw new Error("Systolic, diastolic, and pulse must be positive whole numbers.");
+        }
       }
       const spo2Raw = form.spo2.trim();
       let spo2: number | null = null;
@@ -244,6 +279,10 @@ export default function BloodPressureClient() {
           throw new Error("Weight must be a positive number.");
         }
       }
+      const notes = form.notes.trim() === "" ? null : form.notes.trim();
+      if (systolic == null && spo2 == null && temperature == null && weight == null && notes == null) {
+        throw new Error("Please fill in at least one field.");
+      }
       const body: BloodPressureCreateBody = {
         systolic,
         diastolic,
@@ -251,7 +290,7 @@ export default function BloodPressureClient() {
         spo2,
         temperature,
         weight,
-        notes: form.notes.trim() === "" ? null : form.notes.trim(),
+        notes,
       };
       const fresh =
         editingId != null
@@ -350,7 +389,23 @@ export default function BloodPressureClient() {
         <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
           Systolic, diastolic, pulse, SpO2, temperature, and weight over time (oldest to newest).
         </p>
-        <div className="mt-6 h-[min(24rem,55vh)] w-full min-h-[240px]">
+        <div className="mt-4 flex flex-wrap gap-x-5 gap-y-2">
+          {CHART_GROUPS.map((g) => (
+            <label
+              key={g.id}
+              className="flex items-center gap-1.5 text-sm text-zinc-700 dark:text-zinc-300"
+            >
+              <input
+                type="checkbox"
+                checked={activeGroups[g.id]}
+                onChange={() => toggleGroup(g.id)}
+                style={{ accentColor: g.color }}
+              />
+              {g.label}
+            </label>
+          ))}
+        </div>
+        <div className="mt-4 h-[min(24rem,55vh)] w-full min-h-[240px]">
           {chartPoints.length === 0 ? (
             <p className="py-10 text-center text-sm text-zinc-500">
               No readings yet — add one to see the trend.
@@ -369,7 +424,7 @@ export default function BloodPressureClient() {
                 <YAxis tick={{ fontSize: 11, fill: axisTickFill }} />
                 <Tooltip contentStyle={tooltipStyle} />
                 <Legend />
-                {SERIES.map((s) => (
+                {SERIES.filter((s) => activeGroups[s.group]).map((s) => (
                   <Area
                     key={s.key}
                     type="monotone"
@@ -404,12 +459,18 @@ export default function BloodPressureClient() {
                 >
                   <div className="min-w-0">
                     <p className="text-sm font-semibold tabular-nums text-zinc-900 dark:text-zinc-50">
-                      {r.systolic}/{r.diastolic}{" "}
-                      <span className="text-xs font-normal text-zinc-500">mmHg</span>
-                      <span className="ml-3 text-zinc-700 dark:text-zinc-300">
-                        {r.pulse}{" "}
-                        <span className="text-xs font-normal text-zinc-500">bpm</span>
-                      </span>
+                      {r.systolic != null && r.diastolic != null && (
+                        <>
+                          {r.systolic}/{r.diastolic}{" "}
+                          <span className="text-xs font-normal text-zinc-500">mmHg</span>
+                        </>
+                      )}
+                      {r.pulse != null && (
+                        <span className="ml-3 text-zinc-700 dark:text-zinc-300">
+                          {r.pulse}{" "}
+                          <span className="text-xs font-normal text-zinc-500">bpm</span>
+                        </span>
+                      )}
                       {r.spo2 != null && (
                         <span className="ml-3 text-zinc-700 dark:text-zinc-300">
                           {r.spo2}
@@ -441,15 +502,17 @@ export default function BloodPressureClient() {
                     </p>
                   </div>
                   <div className="flex items-center gap-3">
-                    <span
-                      className={`text-sm font-semibold ${
-                        healthy
-                          ? "text-emerald-600 dark:text-emerald-400"
-                          : "text-red-600 dark:text-red-400"
-                      }`}
-                    >
-                      {healthy ? "Healthy" : "Bad"}
-                    </span>
+                    {healthy != null && (
+                      <span
+                        className={`text-sm font-semibold ${
+                          healthy
+                            ? "text-emerald-600 dark:text-emerald-400"
+                            : "text-red-600 dark:text-red-400"
+                        }`}
+                      >
+                        {healthy ? "Healthy" : "Bad"}
+                      </span>
+                    )}
                     <button
                       type="button"
                       disabled={saving}
@@ -500,9 +563,8 @@ export default function BloodPressureClient() {
         </div>
         <form onSubmit={submit} className="grid gap-4 sm:grid-cols-2">
           <label className="flex flex-col gap-1 text-sm">
-            <span className="text-zinc-600 dark:text-zinc-400">Systolic (mmHg)</span>
+            <span className="text-zinc-600 dark:text-zinc-400">Systolic (mmHg, optional)</span>
             <input
-              required
               type="number"
               min={1}
               max={400}
@@ -513,9 +575,8 @@ export default function BloodPressureClient() {
             />
           </label>
           <label className="flex flex-col gap-1 text-sm">
-            <span className="text-zinc-600 dark:text-zinc-400">Diastolic (mmHg)</span>
+            <span className="text-zinc-600 dark:text-zinc-400">Diastolic (mmHg, optional)</span>
             <input
-              required
               type="number"
               min={1}
               max={400}
@@ -526,9 +587,8 @@ export default function BloodPressureClient() {
             />
           </label>
           <label className="flex flex-col gap-1 text-sm">
-            <span className="text-zinc-600 dark:text-zinc-400">Pulse (per min)</span>
+            <span className="text-zinc-600 dark:text-zinc-400">Pulse (per min, optional)</span>
             <input
-              required
               type="number"
               min={1}
               max={400}
@@ -538,6 +598,9 @@ export default function BloodPressureClient() {
               disabled={saving}
             />
           </label>
+          <p className="text-xs text-zinc-500 sm:col-span-2">
+            Systolic, diastolic, and pulse must be filled in together, or all left blank.
+          </p>
           <label className="flex flex-col gap-1 text-sm">
             <span className="text-zinc-600 dark:text-zinc-400">SpO2 (%, optional)</span>
             <input

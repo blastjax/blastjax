@@ -530,9 +530,13 @@ def _migrate_payslip_basic_salary(cur: Any) -> None:
 
 
 def _migrate_payslip_pdf_columns(cur: Any) -> None:
-    """Add the single-PDF attachment columns if missing (existing DBs)."""
+    """Add the single-PDF attachment column if missing (existing DBs)."""
     cur.execute("ALTER TABLE payslip ADD COLUMN IF NOT EXISTS pdf_data BYTEA")
-    cur.execute("ALTER TABLE payslip ADD COLUMN IF NOT EXISTS pdf_filename TEXT")
+
+
+def _migrate_payslip_drop_pdf_filename(cur: Any) -> None:
+    """Drop the original-filename column; PDFs are now served under a fixed name."""
+    cur.execute("ALTER TABLE payslip DROP COLUMN IF EXISTS pdf_filename")
 
 
 def _migrate_payslip_created_at_default(cur: Any) -> None:
@@ -581,7 +585,6 @@ def _init_schema_minimal_stmts() -> list[str]:
             philhealth DOUBLE PRECISION,
             pag_ibig DOUBLE PRECISION,
             pdf_data BYTEA,
-            pdf_filename TEXT,
             created_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() AT TIME ZONE 'UTC')
         )
         """,
@@ -656,16 +659,17 @@ def _init_schema_minimal_stmts() -> list[str]:
         """
         CREATE TABLE IF NOT EXISTS blood_pressure (
             id SERIAL PRIMARY KEY,
-            systolic INTEGER NOT NULL,
-            diastolic INTEGER NOT NULL,
-            pulse INTEGER NOT NULL,
+            systolic INTEGER,
+            diastolic INTEGER,
+            pulse INTEGER,
             spo2 INTEGER,
             temperature NUMERIC(5,2),
             weight NUMERIC(6,2),
             notes TEXT,
             created_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() AT TIME ZONE 'UTC'),
             CONSTRAINT chk_blood_pressure_values CHECK (
-                systolic > 0 AND diastolic > 0 AND pulse > 0
+                (systolic IS NULL AND diastolic IS NULL AND pulse IS NULL)
+                OR (systolic > 0 AND diastolic > 0 AND pulse > 0)
             ),
             CONSTRAINT chk_blood_pressure_spo2 CHECK (
                 spo2 IS NULL OR (spo2 > 0 AND spo2 <= 100)
@@ -675,6 +679,11 @@ def _init_schema_minimal_stmts() -> list[str]:
             ),
             CONSTRAINT chk_blood_pressure_weight CHECK (
                 weight IS NULL OR weight > 0
+            ),
+            CONSTRAINT chk_blood_pressure_any_field CHECK (
+                systolic IS NOT NULL OR diastolic IS NOT NULL OR pulse IS NOT NULL
+                OR spo2 IS NOT NULL OR temperature IS NOT NULL OR weight IS NOT NULL
+                OR notes IS NOT NULL
             )
         )
         """,
@@ -910,6 +919,38 @@ def _migrate_blood_pressure_temperature_weight(cur: Any) -> None:
     )
 
 
+def _migrate_blood_pressure_nullable_core(cur: Any) -> None:
+    """Allow systolic/diastolic/pulse to be left blank, as long as they're all
+    blank together (or all set together), and at least one field on the row
+    is populated. Idempotent."""
+    cur.execute("ALTER TABLE blood_pressure ALTER COLUMN systolic DROP NOT NULL")
+    cur.execute("ALTER TABLE blood_pressure ALTER COLUMN diastolic DROP NOT NULL")
+    cur.execute("ALTER TABLE blood_pressure ALTER COLUMN pulse DROP NOT NULL")
+    cur.execute(
+        "ALTER TABLE blood_pressure DROP CONSTRAINT IF EXISTS chk_blood_pressure_values"
+    )
+    cur.execute(
+        """
+        ALTER TABLE blood_pressure ADD CONSTRAINT chk_blood_pressure_values CHECK (
+            (systolic IS NULL AND diastolic IS NULL AND pulse IS NULL)
+            OR (systolic > 0 AND diastolic > 0 AND pulse > 0)
+        )
+        """
+    )
+    cur.execute(
+        "ALTER TABLE blood_pressure DROP CONSTRAINT IF EXISTS chk_blood_pressure_any_field"
+    )
+    cur.execute(
+        """
+        ALTER TABLE blood_pressure ADD CONSTRAINT chk_blood_pressure_any_field CHECK (
+            systolic IS NOT NULL OR diastolic IS NOT NULL OR pulse IS NOT NULL
+            OR spo2 IS NOT NULL OR temperature IS NOT NULL OR weight IS NOT NULL
+            OR notes IS NOT NULL
+        )
+        """
+    )
+
+
 def _migrate_house_payment_simplify(cur: Any) -> None:
     """
     Simplified house-payment model: only ``name`` + ``notes`` on the plan, with
@@ -999,11 +1040,13 @@ def _init_schema_on(conn_factory: Any) -> None:
             _migrate_payslip_thirteenth_month(cur)
             _migrate_payslip_basic_salary(cur)
             _migrate_payslip_pdf_columns(cur)
+            _migrate_payslip_drop_pdf_filename(cur)
             _migrate_payslip_created_at_default(cur)
             _migrate_installment_original_total_from_principal(cur)
             _migrate_house_payment_simplify(cur)
             _migrate_blood_pressure_spo2(cur)
             _migrate_blood_pressure_temperature_weight(cur)
+            _migrate_blood_pressure_nullable_core(cur)
             _migrate_aux_created_at_defaults(cur)
             _migrate_installment_repair_constraints(cur)
             _migrate_installment_relax_payment_total(cur)
@@ -1024,7 +1067,7 @@ _PAYSLIP_RETURN_COLS = """
     thirteenth_month, basic_salary,
     period_year, period_month, period_half, notes,
     withholding_tax, sss_contribution, philhealth, pag_ibig,
-    (pdf_data IS NOT NULL) AS has_pdf, pdf_filename,
+    (pdf_data IS NOT NULL) AS has_pdf,
     created_at
 """
 
@@ -1245,23 +1288,23 @@ def delete_payslip(payslip_id: int) -> bool:
             return cur.rowcount > 0
 
 
-def set_payslip_pdf(payslip_id: int, data: bytes, filename: str | None) -> bool:
+def set_payslip_pdf(payslip_id: int, data: bytes) -> bool:
     """Attach (or replace) the single PDF for a payslip. False if no such row."""
     with get_connection() as conn:
         with db_cursor(conn) as cur:
             cur.execute(
-                "UPDATE payslip SET pdf_data = ?, pdf_filename = ? WHERE id = ?",
-                (psycopg2.Binary(data), filename, payslip_id),
+                "UPDATE payslip SET pdf_data = ? WHERE id = ?",
+                (psycopg2.Binary(data), payslip_id),
             )
             return cur.rowcount > 0
 
 
-def get_payslip_pdf(payslip_id: int) -> tuple[bytes, str | None] | None:
-    """Return (bytes, original filename) for the payslip's PDF, or None if unset."""
+def get_payslip_pdf(payslip_id: int) -> bytes | None:
+    """Return the payslip's PDF bytes, or None if unset."""
     with get_connection() as conn:
         with db_cursor(conn) as cur:
             cur.execute(
-                "SELECT pdf_data, pdf_filename FROM payslip WHERE id = ?",
+                "SELECT pdf_data FROM payslip WHERE id = ?",
                 (payslip_id,),
             )
             row = cur.fetchone()
@@ -1271,7 +1314,7 @@ def get_payslip_pdf(payslip_id: int) -> tuple[bytes, str | None] | None:
             # psycopg2 hands bytea back as a memoryview; normalize to bytes.
             if isinstance(data, memoryview):
                 data = data.tobytes()
-            return bytes(data), row[1]
+            return bytes(data)
 
 
 def delete_payslip_pdf(payslip_id: int) -> bool:
@@ -1279,7 +1322,7 @@ def delete_payslip_pdf(payslip_id: int) -> bool:
     with get_connection() as conn:
         with db_cursor(conn) as cur:
             cur.execute(
-                "UPDATE payslip SET pdf_data = NULL, pdf_filename = NULL WHERE id = ?",
+                "UPDATE payslip SET pdf_data = NULL WHERE id = ?",
                 (payslip_id,),
             )
             return cur.rowcount > 0
@@ -2093,9 +2136,9 @@ def list_blood_pressures(limit: int = 500) -> list[dict[str, Any]]:
 
 
 def insert_blood_pressure(
-    systolic: int,
-    diastolic: int,
-    pulse: int,
+    systolic: int | None,
+    diastolic: int | None,
+    pulse: int | None,
     spo2: int | None,
     temperature: float | None,
     weight: float | None,
@@ -2117,9 +2160,9 @@ def insert_blood_pressure(
 
 def update_blood_pressure(
     reading_id: int,
-    systolic: int,
-    diastolic: int,
-    pulse: int,
+    systolic: int | None,
+    diastolic: int | None,
+    pulse: int | None,
     spo2: int | None,
     temperature: float | None,
     weight: float | None,

@@ -100,7 +100,6 @@ export type PayslipRow = {
   philhealth: number | null;
   pag_ibig: number | null;
   has_pdf?: boolean;
-  pdf_filename?: string | null;
   created_at: string;
 };
 
@@ -161,7 +160,7 @@ export async function uploadPayslipPdf(id: number, file: File) {
   const body = new FormData();
   body.append("file", file);
   // No JSON headers — the browser sets the multipart boundary itself.
-  return j<{ ok: boolean; has_pdf: boolean; pdf_filename: string | null }>(
+  return j<{ ok: boolean; has_pdf: boolean }>(
     await apiFetch(`${dataApiBase()}/api/payslip/${id}/pdf`, {
       method: "POST",
       body,
@@ -377,9 +376,9 @@ export async function deleteHousePaymentEntry(
 
 export type BloodPressureRow = {
   id: number;
-  systolic: number;
-  diastolic: number;
-  pulse: number;
+  systolic: number | null;
+  diastolic: number | null;
+  pulse: number | null;
   spo2: number | null;
   temperature: number | null;
   weight: number | null;
@@ -388,9 +387,9 @@ export type BloodPressureRow = {
 };
 
 export type BloodPressureCreateBody = {
-  systolic: number;
-  diastolic: number;
-  pulse: number;
+  systolic?: number | null;
+  diastolic?: number | null;
+  pulse?: number | null;
   spo2?: number | null;
   temperature?: number | null;
   weight?: number | null;

@@ -85,6 +85,13 @@ function monthKey(y: number, m: number): string {
   return `${y}-${String(m).padStart(2, "0")}`;
 }
 
+/** "YYYY-MM" -> "YY-MM" for chart axis labels. */
+function toYyMm(key: string): string {
+  const p = parseMonthKey(key);
+  if (!p) return key;
+  return `${String(p.y).slice(-2)}-${String(p.m).padStart(2, "0")}`;
+}
+
 function parseMonthKey(s: string): { y: number; m: number } | null {
   const m = /^(\d{4})-(\d{2})$/.exec(s.trim());
   if (!m) return null;
@@ -498,7 +505,7 @@ export default function SalaryStatsClient() {
       const sums = statsIndex.byMonth.get(mk);
       const point: Record<string, string | number> = {
         monthKey: mk,
-        label: mk,
+        label: toYyMm(mk),
       };
       for (const k of LINE_SERIES_KEYS) {
         point[k] = sums?.[k] ?? 0;
@@ -837,6 +844,7 @@ export default function SalaryStatsClient() {
                     <XAxis
                       dataKey="label"
                       tick={{ fontSize: 11, fill: axisTickFill }}
+                      interval={1}
                     />
                     <YAxis
                       tick={{ fontSize: 11, fill: axisTickFill }}
@@ -854,6 +862,12 @@ export default function SalaryStatsClient() {
                     />
                     <Tooltip
                       formatter={(value) => fmtMoney(Number(value ?? 0))}
+                      labelFormatter={(_label, payload) => {
+                        const mk = payload?.[0]?.payload?.monthKey;
+                        return typeof mk === "string"
+                          ? formatMonthKeyButtonLabel(mk)
+                          : _label;
+                      }}
                       contentStyle={chartTooltipStyle}
                     />
                     <Legend />

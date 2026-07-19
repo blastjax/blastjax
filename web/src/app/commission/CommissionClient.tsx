@@ -110,7 +110,7 @@ export default function CommissionClient() {
 
   function formatMonthKeyTick(monthKey: string): string {
     const m = /^(\d{4})-(\d{2})$/.exec(monthKey);
-    return m ? `${m[2]}-${m[1].slice(2)}` : monthKey;
+    return m ? `${m[1].slice(2)}-${m[2]}` : monthKey;
   }
 
   const calendarByYear = useMemo(() => {
