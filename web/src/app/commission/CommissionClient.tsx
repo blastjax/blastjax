@@ -14,6 +14,17 @@ import {
 } from "recharts";
 import { useTheme } from "@/components/ThemeProvider";
 import { getPayslips, type PayslipRow } from "@/lib/api";
+import { getChartTooltipStyle } from "@/lib/chartTooltipStyle";
+import { MONTH_NAMES_FULL, formatMonthYearShortFromKey } from "@/lib/dateFormat";
+import {
+  DASHED_EMPTY_CLASSES,
+  ERROR_ALERT_CLASSES,
+  LOADING_TEXT_CLASSES,
+  SEGMENTED_BUTTON_ACTIVE_CLASSES,
+  SEGMENTED_BUTTON_CLASSES,
+  SEGMENTED_BUTTON_INACTIVE_CLASSES,
+  SEGMENTED_WRAPPER_CLASSES,
+} from "@/lib/ui";
 import { buildCommissionForecast } from "./commissionForecast";
 
 const ACTUAL_COLOR = { light: "#059669", dark: "#34d399" } as const;
@@ -29,10 +40,6 @@ function fmtMoney(n: number): string {
 const HORIZON_OPTIONS = [3, 6, 12] as const;
 type Horizon = (typeof HORIZON_OPTIONS)[number];
 
-const MONTH_FULL_NAMES = Array.from({ length: 12 }, (_, i) =>
-  new Date(2000, i, 1).toLocaleString(undefined, { month: "long" }),
-);
-
 export default function CommissionClient() {
   const [rows, setRows] = useState<PayslipRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -44,25 +51,7 @@ export default function CommissionClient() {
   const forecastColor = FORECAST_COLOR[theme];
   const axisTickFill = theme === "dark" ? "#a1a1aa" : "#71717a";
 
-  const chartTooltipStyle = useMemo(
-    () =>
-      theme === "dark"
-        ? {
-            backgroundColor: "rgba(24, 24, 27, 0.92)",
-            border: "1px solid rgb(63 63 70)",
-            borderRadius: "8px",
-            fontSize: "12px",
-            color: "#fafafa",
-          }
-        : {
-            backgroundColor: "rgba(255, 255, 255, 0.96)",
-            border: "1px solid rgb(228 228 231)",
-            borderRadius: "8px",
-            fontSize: "12px",
-            color: "#18181b",
-          },
-    [theme],
-  );
+  const chartTooltipStyle = useMemo(() => getChartTooltipStyle(theme), [theme]);
 
   const load = useCallback(async () => {
     setError(null);
@@ -109,8 +98,7 @@ export default function CommissionClient() {
   const lastActualMonthKey = forecast.historical[forecast.historical.length - 1]?.monthKey;
 
   function formatMonthKeyTick(monthKey: string): string {
-    const m = /^(\d{4})-(\d{2})$/.exec(monthKey);
-    return m ? `${m[1].slice(2)}-${m[2]}` : monthKey;
+    return formatMonthYearShortFromKey(monthKey);
   }
 
   const calendarByYear = useMemo(() => {
@@ -133,25 +121,25 @@ export default function CommissionClient() {
 
   return (
     <div className="box-border flex w-full min-w-0 flex-col gap-10 px-4 pb-28 pt-10 sm:px-6 lg:px-8">
-      <header className="border-b border-zinc-200 pb-8 dark:border-zinc-800">
+      <header className="border-b border-zinc-200 pb-6 dark:border-zinc-800">
         <h1 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
           Commission
         </h1>
+        <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
+          Track commission earned per month and forecast what&apos;s still to come.
+        </p>
       </header>
 
       {error && (
-        <div
-          className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200"
-          role="alert"
-        >
+        <div className={ERROR_ALERT_CLASSES} role="alert">
           {error}
         </div>
       )}
 
       {loading ? (
-        <p className="text-sm text-zinc-600 dark:text-zinc-400">Loading payslips…</p>
+        <p className={LOADING_TEXT_CLASSES}>Loading payslips…</p>
       ) : forecast.historical.length === 0 ? (
-        <p className="text-sm text-zinc-600 dark:text-zinc-400">
+        <p className={DASHED_EMPTY_CLASSES}>
           No commission history yet — add payslip entries with a commission amount to see a
           forecast here.
         </p>
@@ -170,15 +158,15 @@ export default function CommissionClient() {
 
             <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
               <span className="text-sm text-zinc-600 dark:text-zinc-400">Forecast</span>
-              <div className="flex rounded-lg border border-zinc-200 p-0.5 dark:border-zinc-700">
+              <div className={SEGMENTED_WRAPPER_CLASSES}>
                 {HORIZON_OPTIONS.map((h) => (
                   <button
                     key={h}
                     type="button"
-                    className={`rounded-md px-3 py-1.5 text-sm font-medium ${
+                    className={`${SEGMENTED_BUTTON_CLASSES} ${
                       horizon === h
-                        ? "bg-indigo-600 text-white"
-                        : "text-zinc-700 dark:text-zinc-300"
+                        ? SEGMENTED_BUTTON_ACTIVE_CLASSES
+                        : SEGMENTED_BUTTON_INACTIVE_CLASSES
                     }`}
                     onClick={() => setHorizon(h)}
                   >
@@ -341,7 +329,7 @@ export default function CommissionClient() {
               One commission total per month, most recent year first.
             </p>
             {calendarYears.length === 0 ? (
-              <p className="mt-4 text-sm text-zinc-500">No commission entries recorded yet.</p>
+              <p className={`mt-4 ${DASHED_EMPTY_CLASSES}`}>No commission entries recorded yet.</p>
             ) : (
               <div className="mt-4 grid grid-cols-1 gap-x-6 gap-y-8 sm:grid-cols-2 lg:grid-cols-3">
                 {calendarYears.map((year) => {
@@ -359,7 +347,7 @@ export default function CommissionClient() {
                         </span>
                       </h3>
                       <div className="grid w-full min-w-0 grid-cols-3 gap-2 sm:gap-3">
-                        {MONTH_FULL_NAMES.map((monthName, idx) => {
+                        {MONTH_NAMES_FULL.map((monthName, idx) => {
                           const month = idx + 1;
                           const value = monthMap.get(month);
                           const hasValue = value != null && value > 0;

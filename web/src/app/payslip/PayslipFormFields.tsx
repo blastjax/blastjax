@@ -1,6 +1,7 @@
 "use client";
 
 import type { Dispatch, SetStateAction } from "react";
+import { MONTH_NAMES_FULL } from "@/lib/dateFormat";
 import type { FormState } from "./payslipModalForm";
 import { MONTHS } from "./payslipModalForm";
 
@@ -120,9 +121,7 @@ export function PayslipFormFields({
             <option value="">—</option>
             {MONTHS.map((m) => (
               <option key={m} value={String(m)}>
-                {new Date(2000, m - 1, 1).toLocaleString(undefined, {
-                  month: "long",
-                })}
+                {MONTH_NAMES_FULL[m - 1]}
               </option>
             ))}
           </select>

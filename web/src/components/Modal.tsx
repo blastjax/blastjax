@@ -8,7 +8,7 @@ const DEFAULT_BACKDROP =
 
 /** Default dialog shell: bordered card, scrollable, theme-aware. */
 const DEFAULT_DIALOG =
-  "max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl border border-zinc-200 bg-white p-5 shadow-xl dark:border-zinc-700 dark:bg-zinc-950";
+  "max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl border border-zinc-200 bg-white p-5 shadow-xl dark:border-zinc-800 dark:bg-zinc-950";
 
 export type ModalProps = {
   /** Render only when ``open`` is true. */

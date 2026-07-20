@@ -39,6 +39,7 @@ import { PayslipClientModal } from "./PayslipClientModal";
 import { PayslipYearStatsSection } from "./PayslipYearStatsSection";
 import { YearPayslipBlock } from "./YearPayslipBlock";
 import { Modal } from "@/components/Modal";
+import { CARD_CLASSES, ERROR_ALERT_CLASSES } from "@/lib/ui";
 import { PdfBulkUploadClient } from "./pdfs/PdfBulkUploadClient";
 
 /** localStorage key for the show/hide-gross toggle on the calendar. */
@@ -427,22 +428,22 @@ export default function PayslipClient() {
 
   return (
     <div className="box-border flex w-full min-w-0 flex-col gap-12 px-4 pb-28 pt-10 sm:px-6 lg:px-8">
-      <header className="border-b border-zinc-200 pb-8 dark:border-zinc-800">
+      <header className="border-b border-zinc-200 pb-6 dark:border-zinc-800">
         <h1 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
           Payslip
         </h1>
+        <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
+          Browse payslips by year and month, split by pay period.
+        </p>
       </header>
 
       {error && (
-        <div
-          className="rounded-lg border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-800 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200"
-          role="alert"
-        >
+        <div className={ERROR_ALERT_CLASSES} role="alert">
           {error}
         </div>
       )}
 
-      <section className="rounded-xl border border-zinc-200 bg-white p-6 shadow-sm sm:p-8 dark:border-zinc-800 dark:bg-zinc-950">
+      <section className={CARD_CLASSES}>
         <div className="mb-8 flex items-center justify-between gap-4">
           <h2 className="text-lg font-medium text-zinc-900 dark:text-zinc-50">
             Pay period calendar
@@ -512,7 +513,7 @@ export default function PayslipClient() {
                   <div className="flex gap-2">
                     <button
                       type="button"
-                      className="rounded border border-zinc-300 px-2 py-1 text-xs hover:bg-white dark:border-zinc-600 dark:hover:bg-zinc-800"
+                      className="rounded-md border border-zinc-300 px-2 py-1.5 text-xs hover:bg-white dark:border-zinc-600 sm:px-3 sm:text-sm dark:hover:bg-zinc-800"
                       onClick={() =>
                         setNav({ screen: "detail", row: r })
                       }
@@ -521,7 +522,7 @@ export default function PayslipClient() {
                     </button>
                     <button
                       type="button"
-                      className="rounded border border-zinc-300 px-2 py-1 text-xs hover:bg-white dark:border-zinc-600 dark:hover:bg-zinc-800"
+                      className="rounded-md border border-zinc-300 px-2 py-1.5 text-xs hover:bg-white dark:border-zinc-600 sm:px-3 sm:text-sm dark:hover:bg-zinc-800"
                       onClick={() => {
                         setModalForm(formFromRow(r));
                         setNav({ screen: "edit", row: r });
@@ -531,7 +532,7 @@ export default function PayslipClient() {
                     </button>
                     <button
                       type="button"
-                      className="rounded border border-red-200 px-2 py-1 text-xs text-red-700 hover:bg-red-50 dark:border-red-900 dark:text-red-300 dark:hover:bg-red-950/40"
+                      className="rounded-md border border-red-200 px-2 py-1.5 text-xs text-red-700 hover:bg-red-50 dark:border-red-900 dark:text-red-300 sm:px-3 sm:text-sm dark:hover:bg-red-950/40"
                       onClick={() => void handleDelete(r.id)}
                     >
                       Delete
@@ -568,7 +569,7 @@ export default function PayslipClient() {
           open
           onClose={() => setPdfModalOpen(false)}
           backdropClassName="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-5 sm:items-center sm:p-6"
-          dialogClassName="max-h-[95vh] w-full max-w-2xl overflow-y-auto rounded-xl border border-zinc-200 bg-white p-6 shadow-xl sm:p-8 dark:border-zinc-700 dark:bg-zinc-950"
+          dialogClassName="max-h-[95vh] w-full max-w-2xl overflow-y-auto rounded-xl border border-zinc-200 bg-white p-6 shadow-xl sm:p-8 dark:border-zinc-800 dark:bg-zinc-950"
         >
           <div className="mb-5 flex items-center justify-between gap-2">
             <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">

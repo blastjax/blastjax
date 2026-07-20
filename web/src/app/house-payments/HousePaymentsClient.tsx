@@ -17,6 +17,8 @@ import {
   type HousePaymentRow,
 } from "@/lib/api";
 import { parseFormNumber } from "@/lib/parseFormNumber";
+import { formatDate as fmtDate } from "@/lib/dateFormat";
+import { DASHED_EMPTY_CLASSES, ERROR_ALERT_CLASSES, LOADING_TEXT_CLASSES } from "@/lib/ui";
 
 function fmtMoney(n: number): string {
   if (!Number.isFinite(n)) return "—";
@@ -24,14 +26,6 @@ function fmtMoney(n: number): string {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
-}
-
-/** Display ISO yyyy-MM-dd as `mm-dd-yyyy`. */
-function fmtDate(iso: string | null | undefined): string {
-  if (!iso) return "—";
-  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
-  if (!m) return iso;
-  return `${m[2]}-${m[3]}-${m[1]}`;
 }
 
 /** Today as `yyyy-MM-dd` for default form value. */
@@ -276,10 +270,7 @@ export default function HousePaymentsClient() {
       </header>
 
       {error && (
-        <div
-          className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200"
-          role="alert"
-        >
+        <div className={ERROR_ALERT_CLASSES} role="alert">
           {error}
         </div>
       )}
@@ -307,7 +298,7 @@ export default function HousePaymentsClient() {
         open={planModalOpen}
         onClose={closePlanModal}
         ariaLabelledBy="house-plan-title"
-        dialogClassName="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-xl border border-zinc-200 bg-white p-5 shadow-xl dark:border-zinc-700 dark:bg-zinc-950"
+        dialogClassName="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-xl border border-zinc-200 bg-white p-5 shadow-xl dark:border-zinc-800 dark:bg-zinc-950"
       >
         <div className="mb-4 flex items-start justify-between gap-2">
           <h2
@@ -454,7 +445,7 @@ export default function HousePaymentsClient() {
               </li>
             ))}
           {!loading && rows.length === 0 && (
-            <li className="col-span-full rounded-lg border border-dashed border-zinc-300 px-4 py-8 text-center text-sm text-zinc-800 dark:text-zinc-200 dark:border-zinc-700">
+            <li className={`col-span-full ${DASHED_EMPTY_CLASSES}`}>
               No house payment plans yet.
             </li>
           )}
@@ -466,7 +457,7 @@ export default function HousePaymentsClient() {
         onClose={closeEntriesModal}
         ariaLabelledBy="house-entries-title"
         backdropClassName="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4 sm:items-center"
-        dialogClassName="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-xl dark:border-zinc-700 dark:bg-zinc-950"
+        dialogClassName="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-xl dark:border-zinc-800 dark:bg-zinc-950"
       >
             <div className="flex shrink-0 items-start justify-between gap-2 border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
               <div className="min-w-0">
@@ -497,9 +488,7 @@ export default function HousePaymentsClient() {
 
             <div className="min-h-0 flex-1 overflow-auto p-4">
               {detailLoading && (
-                <p className="text-sm text-zinc-800 dark:text-zinc-200">
-                  Loading payments…
-                </p>
+                <p className={LOADING_TEXT_CLASSES}>Loading payments…</p>
               )}
               {!detailLoading && detail && (
                 <>

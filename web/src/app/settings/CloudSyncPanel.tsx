@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { syncPushToCloud, syncPullFromCloud, getLatestTransactionTime } from "@/lib/api";
+import { CARD_CLASSES, PRIMARY_BUTTON_CLASSES, SECONDARY_BUTTON_CLASSES } from "@/lib/ui";
 
 type ActionState =
   | { kind: "idle" }
@@ -134,7 +135,7 @@ export function CloudSyncPanel() {
   };
 
   return (
-    <section className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950 sm:p-6">
+    <section className={CARD_CLASSES}>
       <h2 className="text-lg font-medium text-zinc-900 dark:text-zinc-50">
         Cloud sync
       </h2>
@@ -150,7 +151,7 @@ export function CloudSyncPanel() {
             type="button"
             onClick={() => void onPush()}
             disabled={pushState.kind === "syncing" || pullState.kind === "syncing"}
-            className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+            className={PRIMARY_BUTTON_CLASSES}
           >
             {pushState.kind === "syncing" ? "Pushing…" : "Sync to Cloud"}
           </button>
@@ -172,7 +173,7 @@ export function CloudSyncPanel() {
             type="button"
             onClick={() => void onPull()}
             disabled={pullState.kind === "syncing" || pushState.kind === "syncing"}
-            className="rounded-md bg-zinc-700 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-600 disabled:opacity-50 dark:bg-zinc-600 dark:hover:bg-zinc-500"
+            className={SECONDARY_BUTTON_CLASSES}
           >
             {pullState.kind === "syncing" ? "Pulling…" : "Sync from Cloud"}
           </button>

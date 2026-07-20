@@ -19,6 +19,13 @@ import {
   type InstallmentRow,
 } from "@/lib/api";
 import { parseFormNumber } from "@/lib/parseFormNumber";
+import { MONTH_NAMES_SHORT, formatMonthYear } from "@/lib/dateFormat";
+import {
+  DASHED_EMPTY_CLASSES,
+  ERROR_ALERT_CLASSES,
+  LOADING_TEXT_CLASSES,
+  PRIMARY_BUTTON_CLASSES,
+} from "@/lib/ui";
 import { InstallmentFieldGrid } from "./installmentFieldGrid";
 
 function fmtMoney(n: number): string {
@@ -58,7 +65,7 @@ function dueMonthForSeq(startIso: string, seq: number): Date {
   return addMonths(start, seq);
 }
 
-/** Display as mm-yyyy (no day). */
+/** Display a stored YYYY-MM(-DD) date as its month + year, e.g. "July 2026". */
 function fmtMonthYear(iso: string): string {
   const ymd = iso.slice(0, 10);
   const parts = ymd.split("-");
@@ -66,12 +73,12 @@ function fmtMonthYear(iso: string): string {
   const y = Number(parts[0]);
   const m = Number(parts[1]);
   if (!Number.isFinite(y) || !Number.isFinite(m)) return "—";
-  return `${String(m).padStart(2, "0")}-${y}`;
+  return formatMonthYear(y, m);
 }
 
 function fmtMonthYearFromDate(d: Date): string {
   if (Number.isNaN(d.getTime())) return "—";
-  return `${String(d.getMonth() + 1).padStart(2, "0")}-${d.getFullYear()}`;
+  return formatMonthYear(d.getFullYear(), d.getMonth() + 1);
 }
 
 /** Value for <input type="month" /> (always yyyy-MM). */
@@ -141,21 +148,6 @@ function fmtPct2(pct: number): string {
     maximumFractionDigits: 2,
   });
 }
-
-const MONTH_ABBR = [
-  "Jan",
-  "Feb",
-  "Mar",
-  "Apr",
-  "May",
-  "Jun",
-  "Jul",
-  "Aug",
-  "Sep",
-  "Oct",
-  "Nov",
-  "Dec",
-] as const;
 
 const emptyForm = {
   name: "",
@@ -663,10 +655,15 @@ export default function InstallmentsClient() {
 
   return (
     <div className="relative mx-auto flex w-full min-w-0 max-w-6xl flex-col gap-8 px-4 pb-28 py-8 sm:px-6">
-      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-200 pb-6 dark:border-zinc-800">
-        <h1 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
-          Installments
-        </h1>
+      <header className="flex flex-wrap items-start justify-between gap-3 border-b border-zinc-200 pb-6 dark:border-zinc-800">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
+            Installments
+          </h1>
+          <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
+            Track scheduled installment plans and record payments as they&apos;re made.
+          </p>
+        </div>
         <div className="flex gap-2">
           {doneRows.length > 0 && (
             <button
@@ -693,10 +690,7 @@ export default function InstallmentsClient() {
       </header>
 
       {error && (
-        <div
-          className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200"
-          role="alert"
-        >
+        <div className={ERROR_ALERT_CLASSES} role="alert">
           {error}
         </div>
       )}
@@ -758,7 +752,7 @@ export default function InstallmentsClient() {
                 className="rounded-md border border-zinc-300 px-4 py-2 text-sm dark:border-zinc-600"
                 onClick={cancelEdit}
               >
-                Cancel edit
+                Cancel
               </button>
             </div>
           </form>
@@ -866,7 +860,7 @@ export default function InstallmentsClient() {
                         <button
                           type="button"
                           disabled={saving}
-                          className="rounded-md bg-emerald-600 px-2 py-1.5 text-xs font-medium text-white hover:bg-emerald-500 disabled:opacity-50 sm:px-3 sm:text-sm"
+                          className="rounded-md bg-indigo-600 px-2 py-1.5 text-xs font-medium text-white hover:bg-indigo-500 disabled:opacity-50 sm:px-3 sm:text-sm"
                           onClick={(e) => {
                             e.stopPropagation();
                             void onPay(r.id);
@@ -956,7 +950,7 @@ export default function InstallmentsClient() {
               );
             })}
           {!loading && activeRows.length === 0 && (
-            <li className="col-span-3 rounded-lg border border-dashed border-zinc-300 px-4 py-8 text-center text-sm text-zinc-800 dark:text-zinc-200 dark:border-zinc-700">
+            <li className={`col-span-3 ${DASHED_EMPTY_CLASSES}`}>
               {doneRows.length > 0 ? "All plans are fully paid." : "No installment plans yet."}
             </li>
           )}
@@ -1075,7 +1069,7 @@ export default function InstallmentsClient() {
         onClose={closeScheduleModal}
         ariaLabelledBy="schedule-title"
         backdropClassName="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4 sm:items-center"
-        dialogClassName="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-xl dark:border-zinc-700 dark:bg-zinc-950"
+        dialogClassName="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-xl dark:border-zinc-800 dark:bg-zinc-950"
       >
             <div className="flex shrink-0 items-start justify-between gap-2 border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
               <h2
@@ -1094,7 +1088,7 @@ export default function InstallmentsClient() {
             </div>
             <div className="min-h-0 flex-1 overflow-auto p-4">
               {detailLoading && (
-                <p className="text-sm text-zinc-800 dark:text-zinc-200">Loading schedule…</p>
+                <p className={LOADING_TEXT_CLASSES}>Loading schedule…</p>
               )}
               {!detailLoading && detail && detail.lines.length === 0 && (
                 <p className="text-sm text-zinc-800 dark:text-zinc-200">
@@ -1110,7 +1104,7 @@ export default function InstallmentsClient() {
                   <thead>
                     <tr className="border-b border-zinc-200 text-xs uppercase text-zinc-500 dark:border-zinc-800">
                       <th className="pb-2 pr-2">#</th>
-                      <th className="pb-2 pr-2">Due (mm-yyyy)</th>
+                      <th className="pb-2 pr-2">Due</th>
                       <th className="pb-2 pr-2">Principal</th>
                       <th className="pb-2 pr-2">Interest</th>
                       <th className="pb-2">Total</th>
@@ -1206,7 +1200,7 @@ export default function InstallmentsClient() {
                               type="text"
                               inputMode="decimal"
                               draggable={false}
-                              className="w-28 cursor-text rounded border border-zinc-300 bg-white px-2 py-1 text-sm dark:border-zinc-600 dark:bg-zinc-900"
+                              className="w-28 cursor-text rounded-md border border-zinc-300 bg-white px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-950"
                               value={
                                 ed?.principal ?? String(ln.principal)
                               }
@@ -1231,7 +1225,7 @@ export default function InstallmentsClient() {
                               inputMode="decimal"
                               placeholder="—"
                               draggable={false}
-                              className="w-24 cursor-text rounded border border-zinc-300 bg-white px-2 py-1 text-sm dark:border-zinc-600 dark:bg-zinc-900"
+                              className="w-24 cursor-text rounded-md border border-zinc-300 bg-white px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-950"
                               value={
                                 ed?.interest ??
                                 (ln.interest != null ? String(ln.interest) : "")
@@ -1261,11 +1255,11 @@ export default function InstallmentsClient() {
               )}
             </div>
             {!detailLoading && detail && detail.lines.length > 0 && (
-              <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-zinc-800 bg-black px-4 py-3 dark:border-zinc-700 dark:bg-black">
+              <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-zinc-200 bg-white px-4 py-3 dark:border-zinc-800 dark:bg-zinc-950">
                 <button
                   type="button"
                   disabled={savingSchedule || !scheduleHasChanges}
-                  className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-500 disabled:opacity-50"
+                  className={`${PRIMARY_BUTTON_CLASSES} shadow-sm`}
                   onClick={() => void saveScheduleEdits()}
                 >
                   {savingSchedule ? "Saving…" : "Save changes"}
@@ -1279,7 +1273,7 @@ export default function InstallmentsClient() {
         onClose={closePayments}
         ariaLabelledBy="payments-title"
         backdropClassName="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4 sm:items-center"
-        dialogClassName="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-xl dark:border-zinc-700 dark:bg-zinc-950"
+        dialogClassName="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-xl dark:border-zinc-800 dark:bg-zinc-950"
       >
         <div className="flex shrink-0 items-start justify-between gap-2 border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
           <h2
@@ -1324,9 +1318,7 @@ export default function InstallmentsClient() {
 
         <div className="min-h-0 flex-1 overflow-auto p-4">
           {paymentsLoading && (
-            <p className="text-sm text-zinc-800 dark:text-zinc-200">
-              Loading payments…
-            </p>
+            <p className={LOADING_TEXT_CLASSES}>Loading payments…</p>
           )}
           {!paymentsLoading && paymentsByMonth.years.length === 0 && (
             <p className="text-sm text-zinc-800 dark:text-zinc-200">
@@ -1341,7 +1333,7 @@ export default function InstallmentsClient() {
                     {year}
                   </h3>
                   <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
-                    {MONTH_ABBR.map((abbr, m) => {
+                    {MONTH_NAMES_SHORT.map((abbr, m) => {
                       const g = paymentsByMonth.map.get(year * 12 + m);
                       if (!g) {
                         return (

@@ -22,6 +22,9 @@ import {
   type BloodPressureCreateBody,
   type BloodPressureRow,
 } from "@/lib/api";
+import { getChartTooltipStyle } from "@/lib/chartTooltipStyle";
+import { formatDateTime, formatMonthDayShort } from "@/lib/dateFormat";
+import { DASHED_EMPTY_CLASSES, ERROR_ALERT_CLASSES, PRIMARY_BUTTON_CLASSES } from "@/lib/ui";
 
 /**
  * A reading is "healthy" when systolic, diastolic, and pulse all sit in the
@@ -52,23 +55,8 @@ function fmtNum(n: number): string {
   return n.toLocaleString(undefined, { maximumFractionDigits: 0 });
 }
 
-function fmtDateTime(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
-function fmtChartLabel(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "";
-  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-}
+const fmtDateTime = formatDateTime;
+const fmtChartLabel = formatMonthDayShort;
 
 const SERIES = [
   { key: "systolic", label: "Systolic (mmHg)", color: "#ef4444", group: "bp" },
@@ -108,25 +96,7 @@ export default function BloodPressureClient() {
 
   const { theme } = useTheme();
   const axisTickFill = theme === "dark" ? "#a1a1aa" : "#71717a";
-  const tooltipStyle = useMemo(
-    () =>
-      theme === "dark"
-        ? {
-            backgroundColor: "rgba(24, 24, 27, 0.92)",
-            border: "1px solid rgb(63 63 70)",
-            borderRadius: "8px",
-            fontSize: "12px",
-            color: "#fafafa",
-          }
-        : {
-            backgroundColor: "rgba(255, 255, 255, 0.96)",
-            border: "1px solid rgb(228 228 231)",
-            borderRadius: "8px",
-            fontSize: "12px",
-            color: "#18181b",
-          },
-    [theme],
-  );
+  const tooltipStyle = useMemo(() => getChartTooltipStyle(theme), [theme]);
 
   const load = useCallback(async () => {
     setError(null);
@@ -331,13 +301,13 @@ export default function BloodPressureClient() {
         <h1 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
           Blood Pressure
         </h1>
+        <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
+          Track readings over time and spot trends before they become a problem.
+        </p>
       </header>
 
       {error && (
-        <div
-          className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200"
-          role="alert"
-        >
+        <div className={ERROR_ALERT_CLASSES} role="alert">
           {error}
         </div>
       )}
@@ -407,7 +377,7 @@ export default function BloodPressureClient() {
         </div>
         <div className="mt-4 h-[min(24rem,55vh)] w-full min-h-[240px]">
           {chartPoints.length === 0 ? (
-            <p className="py-10 text-center text-sm text-zinc-500">
+            <p className={DASHED_EMPTY_CLASSES}>
               No readings yet — add one to see the trend.
             </p>
           ) : (
@@ -498,7 +468,16 @@ export default function BloodPressureClient() {
                     </p>
                     <p className="mt-0.5 text-xs text-zinc-500">
                       {fmtDateTime(r.created_at)}
-                      {r.notes ? ` · ${r.notes}` : ""}
+                      {r.notes ? (
+                        <>
+                          {" · "}
+                          <span className="text-sm font-bold text-zinc-700 dark:text-zinc-300">
+                            {r.notes}
+                          </span>
+                        </>
+                      ) : (
+                        ""
+                      )}
                     </p>
                   </div>
                   <div className="flex items-center gap-3">
@@ -563,7 +542,7 @@ export default function BloodPressureClient() {
         </div>
         <form onSubmit={submit} className="grid gap-4 sm:grid-cols-2">
           <label className="flex flex-col gap-1 text-sm">
-            <span className="text-zinc-600 dark:text-zinc-400">Systolic (mmHg, optional)</span>
+            <span className="text-zinc-600 dark:text-zinc-400">Systolic (mmHg)</span>
             <input
               type="number"
               min={1}
@@ -575,7 +554,7 @@ export default function BloodPressureClient() {
             />
           </label>
           <label className="flex flex-col gap-1 text-sm">
-            <span className="text-zinc-600 dark:text-zinc-400">Diastolic (mmHg, optional)</span>
+            <span className="text-zinc-600 dark:text-zinc-400">Diastolic (mmHg)</span>
             <input
               type="number"
               min={1}
@@ -587,7 +566,7 @@ export default function BloodPressureClient() {
             />
           </label>
           <label className="flex flex-col gap-1 text-sm">
-            <span className="text-zinc-600 dark:text-zinc-400">Pulse (per min, optional)</span>
+            <span className="text-zinc-600 dark:text-zinc-400">Pulse (per min)</span>
             <input
               type="number"
               min={1}
@@ -602,7 +581,7 @@ export default function BloodPressureClient() {
             Systolic, diastolic, and pulse must be filled in together, or all left blank.
           </p>
           <label className="flex flex-col gap-1 text-sm">
-            <span className="text-zinc-600 dark:text-zinc-400">SpO2 (%, optional)</span>
+            <span className="text-zinc-600 dark:text-zinc-400">SpO2 (%)</span>
             <input
               type="number"
               min={1}
@@ -614,7 +593,7 @@ export default function BloodPressureClient() {
             />
           </label>
           <label className="flex flex-col gap-1 text-sm">
-            <span className="text-zinc-600 dark:text-zinc-400">Temperature (°C, optional)</span>
+            <span className="text-zinc-600 dark:text-zinc-400">Temperature (°C)</span>
             <input
               type="number"
               min={26}
@@ -627,7 +606,7 @@ export default function BloodPressureClient() {
             />
           </label>
           <label className="flex flex-col gap-1 text-sm">
-            <span className="text-zinc-600 dark:text-zinc-400">Weight (kg, optional)</span>
+            <span className="text-zinc-600 dark:text-zinc-400">Weight (kg)</span>
             <input
               type="number"
               min={0.1}
@@ -639,7 +618,7 @@ export default function BloodPressureClient() {
             />
           </label>
           <label className="flex flex-col gap-1 text-sm">
-            <span className="text-zinc-600 dark:text-zinc-400">Notes (optional)</span>
+            <span className="text-zinc-600 dark:text-zinc-400">Notes</span>
             <input
               type="text"
               className="rounded-md border border-zinc-300 bg-white px-3 py-2 dark:border-zinc-700 dark:bg-zinc-950"
@@ -652,7 +631,7 @@ export default function BloodPressureClient() {
             <button
               type="submit"
               disabled={saving}
-              className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+              className={PRIMARY_BUTTON_CLASSES}
             >
               {saving ? "Saving…" : editingId != null ? "Update" : "Add"}
             </button>

@@ -1,3 +1,4 @@
+import { formatMonthYearFromKey, monthKey as sharedMonthKey, parseMonthKey as sharedParseMonthKey } from "@/lib/dateFormat";
 import type { PayslipRow } from "@/lib/api";
 
 /** Calendar month { y, m } for aggregation (1-12); mirrors salary-stats bucketing. */
@@ -25,18 +26,8 @@ function calendarMonthForRow(r: PayslipRow): { y: number; m: number } | null {
   return null;
 }
 
-function monthKey(y: number, m: number): string {
-  return `${y}-${String(m).padStart(2, "0")}`;
-}
-
-function parseMonthKey(s: string): { y: number; m: number } | null {
-  const m = /^(\d{4})-(\d{2})$/.exec(s.trim());
-  if (!m) return null;
-  const y = Number(m[1]);
-  const mo = Number(m[2]);
-  if (mo < 1 || mo > 12) return null;
-  return { y, m: mo };
-}
+const monthKey = sharedMonthKey;
+const parseMonthKey = sharedParseMonthKey;
 
 /** Month key shifted by `delta` months (may be negative). */
 function shiftMonthKey(key: string, delta: number): string {
@@ -48,12 +39,7 @@ function shiftMonthKey(key: string, delta: number): string {
   return monthKey(y, m);
 }
 
-function monthLabel(key: string): string {
-  const p = parseMonthKey(key);
-  if (!p) return key;
-  const d = new Date(p.y, p.m - 1, 1);
-  return d.toLocaleString(undefined, { month: "short", year: "numeric" });
-}
+const monthLabel = formatMonthYearFromKey;
 
 export interface MonthlyCommissionPoint {
   monthKey: string;

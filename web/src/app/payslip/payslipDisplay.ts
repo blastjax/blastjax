@@ -20,6 +20,8 @@ export function fmtPctOfTotal(
   return `${s}% of ${ofLabel}`;
 }
 
+import { MONTH_NAMES_FULL, formatMonthYear } from "@/lib/dateFormat";
+
 export function fmtPayPeriod(
   y: number | null | undefined,
   m: number | null | undefined,
@@ -34,9 +36,7 @@ export function fmtPayPeriod(
   }
   const parts: string[] = [];
   if (m != null && m >= 1 && m <= 12) {
-    parts.push(
-      new Date(2000, m - 1, 1).toLocaleString(undefined, { month: "long" }),
-    );
+    parts.push(MONTH_NAMES_FULL[m - 1]);
   }
   if (y != null && Number.isFinite(y)) parts.push(String(Math.trunc(y)));
   let s = parts.join(" ");
@@ -46,7 +46,5 @@ export function fmtPayPeriod(
 }
 
 export function slotTitle(year: number, month: number, half: 1 | 2): string {
-  return `${new Date(2000, month - 1, 1).toLocaleString(undefined, {
-    month: "long",
-  })} ${year} · ${half === 1 ? "1st" : "2nd"} half`;
+  return `${formatMonthYear(year, month)} · ${half === 1 ? "1st" : "2nd"} half`;
 }

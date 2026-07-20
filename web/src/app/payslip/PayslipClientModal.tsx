@@ -77,7 +77,7 @@ export function PayslipClientModal({
       open
       onClose={onCloseDialog}
       backdropClassName="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-5 sm:items-center sm:p-6"
-      dialogClassName="max-h-[95vh] w-full max-w-5xl overflow-y-auto rounded-xl border border-zinc-200 bg-white p-6 shadow-xl sm:p-8 lg:max-w-6xl dark:border-zinc-700 dark:bg-zinc-950"
+      dialogClassName="max-h-[95vh] w-full max-w-5xl overflow-y-auto rounded-xl border border-zinc-200 bg-white p-6 shadow-xl sm:p-8 lg:max-w-6xl dark:border-zinc-800 dark:bg-zinc-950"
     >
             {nav.screen === "slot" && (
               <>

@@ -1,6 +1,7 @@
 "use client";
 
 import { memo } from "react";
+import { MONTH_NAMES_FULL } from "@/lib/dateFormat";
 import { MONTHS } from "./payslipModalForm";
 import { fmtNum } from "./payslipDisplay";
 import type { YearSlots } from "./payslipAggregates";
@@ -8,10 +9,6 @@ import type { YearSlots } from "./payslipAggregates";
 /** Match the year-stats Total card: white-ish for net, muted zinc for gross. */
 const NET_TEXT_CLASSES = "text-slate-950 dark:text-slate-50";
 const GROSS_TEXT_CLASSES = "text-zinc-500 dark:text-zinc-400";
-
-const MONTH_LABELS = Array.from({ length: 12 }, (_, i) =>
-  new Date(2000, i, 1).toLocaleString(undefined, { month: "long" }),
-);
 
 function YearPayslipBlockInner({
   year,
@@ -67,7 +64,7 @@ function YearPayslipBlockInner({
           const ms = yearSlots.months.get(month);
           const monthSum = ms?.netSum ?? null;
           const monthGross = showGross ? (ms?.grossSum ?? null) : null;
-          const monthLabel = MONTH_LABELS[month - 1];
+          const monthLabel = MONTH_NAMES_FULL[month - 1];
           return (
             <div
               key={month}

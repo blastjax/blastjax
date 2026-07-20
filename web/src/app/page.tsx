@@ -25,9 +25,9 @@ export default function Home() {
           <Link
             key={href}
             href={href}
-            className={`flex min-h-[10rem] flex-col items-center justify-center gap-2 rounded-2xl border p-8 text-center shadow-sm transition ${className}`}
+            className={`flex min-h-[10rem] flex-col items-center justify-center gap-2 rounded-xl border p-8 text-center shadow-sm transition ${className}`}
           >
-            <span className="text-2xl font-bold">{title}</span>
+            <span className="text-2xl font-semibold">{title}</span>
             <span className="text-sm opacity-80">{description}</span>
           </Link>
         ))}

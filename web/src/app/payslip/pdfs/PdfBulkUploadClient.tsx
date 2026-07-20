@@ -7,6 +7,8 @@ import {
   type PayslipRow,
 } from "@/lib/api";
 import { rowsForSlot } from "@/app/payslip/payslipAggregates";
+import { slotTitle } from "@/app/payslip/payslipDisplay";
+import { ERROR_ALERT_CLASSES } from "@/lib/ui";
 
 const MONTH_MAP: Record<string, number> = {
   jan: 1, january: 1,
@@ -22,11 +24,6 @@ const MONTH_MAP: Record<string, number> = {
   nov: 11, november: 11,
   dec: 12, december: 12,
 };
-
-const MONTH_NAMES = [
-  "", "January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December",
-];
 
 type ParseStatus = "pending" | "uploading" | "done" | "error" | "no-match" | "parse-error";
 
@@ -58,7 +55,7 @@ function parsePdfFilename(
 }
 
 function periodLabel(p: { year: number; month: number; half: 1 | 2 }) {
-  return `${MONTH_NAMES[p.month] ?? "?"} ${p.year} · ${p.half === 1 ? "1st half" : "2nd half"}`;
+  return slotTitle(p.year, p.month, p.half);
 }
 
 function resolveFileList(
@@ -202,10 +199,7 @@ export function PdfBulkUploadClient() {
     <div className="flex min-w-0 flex-col gap-6">
 
       {loadErr && (
-        <div
-          className="rounded-lg border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-800 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200"
-          role="alert"
-        >
+        <div className={ERROR_ALERT_CLASSES} role="alert">
           {loadErr}
         </div>
       )}
@@ -258,7 +252,7 @@ export function PdfBulkUploadClient() {
                 </span>
               )}
               {doneCount > 0 && (
-                <span className="ml-2 text-green-600 dark:text-green-400">
+                <span className="ml-2 text-emerald-600 dark:text-emerald-400">
                   · {doneCount} uploaded
                 </span>
               )}
@@ -336,7 +330,7 @@ function FileRow({
         );
       case "done":
         return (
-          <span className="rounded-full bg-green-100 px-2 py-0.5 text-xs text-green-700 dark:bg-green-950/60 dark:text-green-300">
+          <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300">
             Uploaded
           </span>
         );

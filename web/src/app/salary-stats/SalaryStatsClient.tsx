@@ -22,6 +22,22 @@ import {
   type ChartSeriesColorKey,
 } from "@/lib/chartPalette";
 import { getPayslips, type PayslipRow } from "@/lib/api";
+import { getChartTooltipStyle } from "@/lib/chartTooltipStyle";
+import {
+  MONTH_NAMES_SHORT,
+  formatMonthYear,
+  formatMonthYearShortFromKey,
+  monthKey as sharedMonthKey,
+  parseMonthKey as sharedParseMonthKey,
+} from "@/lib/dateFormat";
+import {
+  ERROR_ALERT_CLASSES,
+  LOADING_TEXT_CLASSES,
+  SEGMENTED_BUTTON_ACTIVE_CLASSES,
+  SEGMENTED_BUTTON_CLASSES,
+  SEGMENTED_BUTTON_INACTIVE_CLASSES,
+  SEGMENTED_WRAPPER_CLASSES,
+} from "@/lib/ui";
 
 /** Pie + non-deduction line categories (MP2 is grouped with statutory deductions). */
 const PIE_SERIES_KEYS = [
@@ -81,25 +97,11 @@ function calendarMonthForRow(r: PayslipRow): { y: number; m: number } | null {
   return null;
 }
 
-function monthKey(y: number, m: number): string {
-  return `${y}-${String(m).padStart(2, "0")}`;
-}
+const monthKey = sharedMonthKey;
+const parseMonthKey = sharedParseMonthKey;
 
-/** "YYYY-MM" -> "YY-MM" for chart axis labels. */
-function toYyMm(key: string): string {
-  const p = parseMonthKey(key);
-  if (!p) return key;
-  return `${String(p.y).slice(-2)}-${String(p.m).padStart(2, "0")}`;
-}
-
-function parseMonthKey(s: string): { y: number; m: number } | null {
-  const m = /^(\d{4})-(\d{2})$/.exec(s.trim());
-  if (!m) return null;
-  const y = Number(m[1]);
-  const mo = Number(m[2]);
-  if (mo < 1 || mo > 12) return null;
-  return { y, m: mo };
-}
+/** "YYYY-MM" -> "Jul 2026" for chart axis labels. */
+const monthAxisLabel = formatMonthYearShortFromKey;
 
 function compareMonthKeys(a: string, b: string): number {
   const pa = parseMonthKey(a);
@@ -196,17 +198,6 @@ function earliestMonthKey(rows: PayslipRow[]): string | null {
   return best;
 }
 
-function latestMonthKey(rows: PayslipRow[]): string | null {
-  let best: string | null = null;
-  for (const r of rows) {
-    const cm = calendarMonthForRow(r);
-    if (!cm) continue;
-    const k = monthKey(cm.y, cm.m);
-    if (!best || compareMonthKeys(k, best) > 0) best = k;
-  }
-  return best;
-}
-
 function currentMonthKey(): string {
   const d = new Date();
   return monthKey(d.getFullYear(), d.getMonth() + 1);
@@ -222,26 +213,10 @@ function fmtMoney(n: number): string {
 const PICKER_YEAR_MIN = 1900;
 const PICKER_YEAR_MAX = 2200;
 
-const LINE_MONTH_ABBR = [
-  "Jan",
-  "Feb",
-  "Mar",
-  "Apr",
-  "May",
-  "Jun",
-  "Jul",
-  "Aug",
-  "Sep",
-  "Oct",
-  "Nov",
-  "Dec",
-] as const;
-
 function formatMonthKeyButtonLabel(key: string): string {
   const p = parseMonthKey(key);
   if (!p) return "Select month";
-  const d = new Date(p.y, p.m - 1, 1);
-  return d.toLocaleString(undefined, { month: "short", year: "numeric" });
+  return formatMonthYear(p.y, p.m);
 }
 
 const pickerBtnClass =
@@ -361,7 +336,7 @@ function LineRangeMonthPicker({
             className="mt-3 grid grid-cols-4 gap-1.5 sm:gap-2"
             onWheelCapture={(e) => e.stopPropagation()}
           >
-            {LINE_MONTH_ABBR.map((abbr, i) => {
+            {MONTH_NAMES_SHORT.map((abbr, i) => {
               const m = i + 1;
               const mk = monthKey(browseYear, m);
               const selected = value === mk;
@@ -423,25 +398,7 @@ export default function SalaryStatsClient() {
   const chartSeriesColors = chartPalette[theme];
   const axisTickFill = theme === "dark" ? "#a1a1aa" : "#71717a";
 
-  const chartTooltipStyle = useMemo(
-    () =>
-      theme === "dark"
-        ? {
-            backgroundColor: "rgba(24, 24, 27, 0.92)",
-            border: "1px solid rgb(63 63 70)",
-            borderRadius: "8px",
-            fontSize: "12px",
-            color: "#fafafa",
-          }
-        : {
-            backgroundColor: "rgba(255, 255, 255, 0.96)",
-            border: "1px solid rgb(228 228 231)",
-            borderRadius: "8px",
-            fontSize: "12px",
-            color: "#18181b",
-          },
-    [theme],
-  );
+  const chartTooltipStyle = useMemo(() => getChartTooltipStyle(theme), [theme]);
 
   const load = useCallback(async () => {
     setError(null);
@@ -505,7 +462,7 @@ export default function SalaryStatsClient() {
       const sums = statsIndex.byMonth.get(mk);
       const point: Record<string, string | number> = {
         monthKey: mk,
-        label: toYyMm(mk),
+        label: monthAxisLabel(mk),
       };
       for (const k of LINE_SERIES_KEYS) {
         point[k] = sums?.[k] ?? 0;
@@ -582,25 +539,23 @@ export default function SalaryStatsClient() {
 
   return (
     <div className="box-border flex w-full min-w-0 flex-col gap-10 px-4 pb-28 pt-10 sm:px-6 lg:px-8">
-      <header className="border-b border-zinc-200 pb-8 dark:border-zinc-800">
+      <header className="border-b border-zinc-200 pb-6 dark:border-zinc-800">
         <h1 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
           Salary Stats
         </h1>
+        <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
+          Compare income and deductions across months and years.
+        </p>
       </header>
 
       {error && (
-        <div
-          className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200"
-          role="alert"
-        >
+        <div className={ERROR_ALERT_CLASSES} role="alert">
           {error}
         </div>
       )}
 
       {loading ? (
-          <p className="text-sm text-zinc-600 dark:text-zinc-400">
-            Loading payslips…
-          </p>
+          <p className={LOADING_TEXT_CLASSES}>Loading payslips…</p>
         ) : (
           <>
           <section className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950 sm:p-6">
@@ -609,13 +564,13 @@ export default function SalaryStatsClient() {
             </h2>
 
             <div className="mt-4 flex flex-wrap items-center justify-center gap-3">
-              <div className="flex rounded-lg border border-zinc-200 p-0.5 dark:border-zinc-700">
+              <div className={SEGMENTED_WRAPPER_CLASSES}>
                 <button
                   type="button"
-                  className={`rounded-md px-3 py-1.5 text-sm font-medium ${
+                  className={`${SEGMENTED_BUTTON_CLASSES} ${
                     pieMode === "year"
-                      ? "bg-indigo-600 text-white"
-                      : "text-zinc-700 dark:text-zinc-300"
+                      ? SEGMENTED_BUTTON_ACTIVE_CLASSES
+                      : SEGMENTED_BUTTON_INACTIVE_CLASSES
                   }`}
                   onClick={() => setPieMode("year")}
                 >
@@ -623,10 +578,10 @@ export default function SalaryStatsClient() {
                 </button>
                 <button
                   type="button"
-                  className={`rounded-md px-3 py-1.5 text-sm font-medium ${
+                  className={`${SEGMENTED_BUTTON_CLASSES} ${
                     pieMode === "month"
-                      ? "bg-indigo-600 text-white"
-                      : "text-zinc-700 dark:text-zinc-300"
+                      ? SEGMENTED_BUTTON_ACTIVE_CLASSES
+                      : SEGMENTED_BUTTON_INACTIVE_CLASSES
                   }`}
                   onClick={() => setPieMode("month")}
                 >
@@ -668,7 +623,7 @@ export default function SalaryStatsClient() {
                   <span className="text-zinc-600 dark:text-zinc-400">Month</span>
                   <input
                     type="month"
-                    className="rounded-md border border-zinc-300 bg-white px-2 py-1.5 dark:border-zinc-600 dark:bg-zinc-900"
+                    className="rounded-md border border-zinc-300 bg-white px-2 py-1.5 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 dark:border-zinc-700 dark:bg-zinc-950"
                     value={pieMonthStr}
                     onChange={(e) => setPieMonthStr(e.target.value)}
                   />
