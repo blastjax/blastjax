@@ -51,6 +51,7 @@ _TABLES: tuple[str, ...] = (
     "installment",
     "installment_line",
     "blood_pressure",
+    "fixed_expense",
 )
 
 # Subset of _TABLES that carry a ``created_at`` column, used for recency comparison.
@@ -60,6 +61,7 @@ _TIMESTAMPED_TABLES: tuple[str, ...] = (
     "house_payment_entry",
     "installment",
     "blood_pressure",
+    "fixed_expense",
 )
 
 # Tables whose ``id`` must be kept across the mirror: foreign-key targets (so

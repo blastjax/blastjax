@@ -41,6 +41,7 @@ _CACHE_PREFIXES: dict[str, str] = {
     "/api/installment": "installment",
     "/api/house-payment": "house_payment",
     "/api/blood-pressure": "bp",
+    "/api/fixed-expense": "fixed_expense",
 }
 
 
@@ -116,6 +117,7 @@ def create_app() -> FastAPI:
 
     from app.routers import (
         blood_pressure,
+        fixed_expense,
         health,
         house_payment,
         installment,
@@ -129,6 +131,7 @@ def create_app() -> FastAPI:
         installment.router,
         house_payment.router,
         blood_pressure.router,
+        fixed_expense.router,
         sync.router,
     ):
         app.include_router(router)

@@ -452,6 +452,34 @@ export async function syncPullFromCloud() {
   }>("POST", "/api/sync/pull");
 }
 
+export type FixedExpenseRow = {
+  id: number;
+  period_half: number;
+  amount: number;
+  description: string | null;
+  created_at: string;
+};
+
+export type FixedExpenseCreateBody = {
+  period_half: 1 | 2;
+  amount: number;
+  description?: string | null;
+};
+
+export async function getFixedExpenses(periodHalf?: 1 | 2) {
+  return getJson<{ expenses: FixedExpenseRow[] }>("/api/fixed-expense", {
+    period_half: periodHalf,
+  });
+}
+
+export async function createFixedExpense(body: FixedExpenseCreateBody) {
+  return sendJson<{ expense: FixedExpenseRow }>("POST", "/api/fixed-expense", body);
+}
+
+export async function deleteFixedExpense(id: number) {
+  return sendJson<{ ok: boolean }>("DELETE", `/api/fixed-expense/${id}`);
+}
+
 export async function getLatestTransactionTime() {
   return getJson<{
     sync_enabled: boolean;

@@ -691,6 +691,21 @@ def _init_schema_minimal_stmts() -> list[str]:
         CREATE INDEX IF NOT EXISTS idx_blood_pressure_created
             ON blood_pressure (created_at DESC)
         """,
+        """
+        CREATE TABLE IF NOT EXISTS fixed_expense (
+            id SERIAL PRIMARY KEY,
+            period_half INTEGER NOT NULL,
+            amount DOUBLE PRECISION NOT NULL,
+            description TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() AT TIME ZONE 'UTC'),
+            CONSTRAINT chk_fixed_expense_half CHECK (period_half IN (1, 2)),
+            CONSTRAINT chk_fixed_expense_amount CHECK (amount > 0)
+        )
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_fixed_expense_half
+            ON fixed_expense (period_half, created_at DESC)
+        """,
     ]
 
 
@@ -983,7 +998,7 @@ def _migrate_house_payment_simplify(cur: Any) -> None:
 # Bump this whenever the DDL or migrations below change. ``init_schema()``
 # uses it to skip the entire migration block on warm starts (very common
 # on Neon, where containers cold-start often).
-_SCHEMA_VERSION = 11
+_SCHEMA_VERSION = 12
 
 
 def init_schema() -> None:
@@ -2188,6 +2203,58 @@ def delete_blood_pressure(reading_id: int) -> bool:
     with get_connection() as conn:
         with db_cursor(conn) as cur:
             cur.execute("DELETE FROM blood_pressure WHERE id = ?", (reading_id,))
+            return cur.rowcount > 0
+
+
+_FIXED_EXPENSE_COLS = "id, period_half, amount, description, created_at"
+
+
+def list_fixed_expenses(period_half: int | None = None, limit: int = 500) -> list[dict[str, Any]]:
+    limit = max(1, min(limit, 2000))
+    with get_connection() as conn:
+        with db_cursor(conn) as cur:
+            if period_half is None:
+                cur.execute(
+                    f"""
+                    SELECT {_FIXED_EXPENSE_COLS} FROM fixed_expense
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT ?
+                    """,
+                    (limit,),
+                )
+            else:
+                cur.execute(
+                    f"""
+                    SELECT {_FIXED_EXPENSE_COLS} FROM fixed_expense
+                    WHERE period_half = ?
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT ?
+                    """,
+                    (period_half, limit),
+                )
+            return [_row_to_dict(cur, r) for r in cur.fetchall()]
+
+
+def insert_fixed_expense(
+    period_half: int, amount: float, description: str | None
+) -> dict[str, Any]:
+    with get_connection() as conn:
+        with db_cursor(conn) as cur:
+            cur.execute(
+                f"""
+                INSERT INTO fixed_expense (period_half, amount, description)
+                VALUES (?, ?, ?)
+                RETURNING {_FIXED_EXPENSE_COLS}
+                """,
+                (period_half, amount, description),
+            )
+            return _row_to_dict(cur, cur.fetchone())
+
+
+def delete_fixed_expense(expense_id: int) -> bool:
+    with get_connection() as conn:
+        with db_cursor(conn) as cur:
+            cur.execute("DELETE FROM fixed_expense WHERE id = ?", (expense_id,))
             return cur.rowcount > 0
 
 
