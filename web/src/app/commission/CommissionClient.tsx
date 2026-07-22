@@ -25,10 +25,20 @@ import {
   SEGMENTED_BUTTON_INACTIVE_CLASSES,
   SEGMENTED_WRAPPER_CLASSES,
 } from "@/lib/ui";
-import { buildCommissionForecast } from "./commissionForecast";
+import { buildCommissionForecast, type CalculationSegment } from "./commissionForecast";
 
 const ACTUAL_COLOR = { light: "#059669", dark: "#34d399" } as const;
 const FORECAST_COLOR = { light: "#9ca3af", dark: "#9ca3af" } as const;
+
+const CALCULATION_SEGMENT_COLOR_CLASSES: Record<
+  NonNullable<CalculationSegment["color"]>,
+  string
+> = {
+  date: "text-orange-600 dark:text-orange-400",
+  years: "text-purple-600 dark:text-purple-400",
+  positive: "text-emerald-600 dark:text-emerald-400",
+  negative: "text-red-600 dark:text-red-400",
+};
 
 function fmtMoney(n: number): string {
   return n.toLocaleString(undefined, {
@@ -295,11 +305,12 @@ export default function CommissionClient() {
 
             {forecast.forecastPoints.length > 0 && (
               <div className="mt-6 overflow-x-auto">
-                <table className="w-full min-w-[24rem] text-left text-sm">
+                <table className="w-full min-w-[36rem] text-left text-sm">
                   <thead>
                     <tr className="border-b border-zinc-200 text-xs uppercase text-zinc-500 dark:border-zinc-800">
                       <th className="pb-2 pr-2">Month</th>
                       <th className="pb-2 pr-2">Predicted commission</th>
+                      <th className="pb-2 pr-2">How it&apos;s calculated</th>
                       <th className="pb-2">Years used</th>
                     </tr>
                   </thead>
@@ -309,6 +320,28 @@ export default function CommissionClient() {
                         <td className="py-2 pr-2 text-zinc-700 dark:text-zinc-300">{fp.label}</td>
                         <td className="py-2 pr-2 tabular-nums font-medium text-emerald-700 dark:text-emerald-300">
                           {fmtMoney(fp.commissionForecast)}
+                        </td>
+                        <td className="py-2 pr-2 text-xs text-zinc-500 dark:text-zinc-400">
+                          {fp.calculationDetail.map((seg, i) => {
+                            if (seg.break) return <br key={i} />;
+                            const colorClass = seg.color
+                              ? CALCULATION_SEGMENT_COLOR_CLASSES[seg.color]
+                              : undefined;
+                            return seg.bold ? (
+                              <strong
+                                key={i}
+                                className={`font-semibold ${
+                                  colorClass ?? "text-zinc-700 dark:text-zinc-300"
+                                }`}
+                              >
+                                {seg.text}
+                              </strong>
+                            ) : (
+                              <span key={i} className={colorClass}>
+                                {seg.text}
+                              </span>
+                            );
+                          })}
                         </td>
                         <td className="py-2 tabular-nums text-zinc-500 dark:text-zinc-400">
                           {fp.yearsOfHistory}

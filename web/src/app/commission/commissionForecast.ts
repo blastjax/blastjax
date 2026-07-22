@@ -1,4 +1,9 @@
-import { formatMonthYearFromKey, monthKey as sharedMonthKey, parseMonthKey as sharedParseMonthKey } from "@/lib/dateFormat";
+import {
+  formatMonthYearFromKey,
+  formatMonthYearShortFromKey,
+  monthKey as sharedMonthKey,
+  parseMonthKey as sharedParseMonthKey,
+} from "@/lib/dateFormat";
 import type { PayslipRow } from "@/lib/api";
 
 /** Calendar month { y, m } for aggregation (1-12); mirrors salary-stats bucketing. */
@@ -114,6 +119,21 @@ function fitLinearTrend(ys: number[]): LinearFit {
 
 export type ForecastMethod = "seasonal" | "none";
 
+/** One piece of a calculation explanation; `bold` marks the amounts within it, `color`
+ * highlights dates, year counts, and the direction of the trend, and `break` renders as
+ * a line break (its `text` is ignored) instead of inline text. */
+export interface CalculationSegment {
+  text: string;
+  bold?: boolean;
+  color?: "date" | "years" | "positive" | "negative";
+  break?: boolean;
+}
+
+/** A line break segment. */
+function lineBreak(): CalculationSegment {
+  return { text: "", break: true };
+}
+
 export interface ForecastPoint {
   monthKey: string;
   label: string;
@@ -122,6 +142,8 @@ export interface ForecastPoint {
   yearsOfHistory: number;
   /** Actual commission for this same calendar month one year earlier, if known. */
   sameMonthLastYear: number | null;
+  /** Human-readable explanation of how commissionForecast was derived. */
+  calculationDetail: CalculationSegment[];
 }
 
 export interface CommissionForecast {
@@ -152,18 +174,89 @@ function sameMonthHistory(
   return samples;
 }
 
+function formatAmount(n: number): string {
+  return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+/** Short label (e.g. "Jul 2023") for the same calendar month `yearsAgo` years before `targetKey`. */
+function sameMonthLabel(targetKey: string, yearsAgo: number): string {
+  return formatMonthYearShortFromKey(shiftMonthKey(targetKey, -12 * yearsAgo));
+}
+
+interface Prediction {
+  value: number;
+  /** Human-readable explanation of how `value` was derived, with amounts marked bold. */
+  calculationDetail: CalculationSegment[];
+}
+
+/** A bolded amount segment. */
+function amount(n: number): CalculationSegment {
+  return { text: formatAmount(n), bold: true };
+}
+
 /** Predicts one future month from its own same-month history across previous years:
  * a linear trend across those years when 2+ are available, the single prior year's
- * value when only one exists, and the all-time monthly average as a last resort. */
+ * value when only one exists, and the all-time monthly average as a last resort.
+ * Also produces a plain-language explanation of the calculation for display. */
 function predictFromSameMonthHistory(
   samples: { yearsAgo: number; value: number }[],
   fallback: number,
-): number {
-  if (samples.length === 0) return Math.max(0, fallback);
-  if (samples.length === 1) return Math.max(0, samples[0]!.value);
-  const chronological = [...samples].reverse().map((s) => s.value);
-  const { slope, intercept } = fitLinearTrend(chronological);
-  return Math.max(0, intercept + slope * chronological.length);
+  targetKey: string,
+): Prediction {
+  if (samples.length === 0) {
+    return {
+      value: Math.max(0, fallback),
+      calculationDetail: [
+        { text: "No prior years have this month yet, so this uses the all-time monthly average of " },
+        amount(fallback),
+        { text: "." },
+      ],
+    };
+  }
+  if (samples.length === 1) {
+    const s = samples[0]!;
+    return {
+      value: Math.max(0, s.value),
+      calculationDetail: [
+        { text: "Only " },
+        { text: "one prior year", color: "years" },
+        { text: " available (" },
+        { text: sameMonthLabel(targetKey, s.yearsAgo), color: "date" },
+        { text: ": " },
+        amount(s.value),
+        { text: "), so that value is carried forward as-is." },
+      ],
+    };
+  }
+  const chronological = [...samples].reverse();
+  const { slope, intercept } = fitLinearTrend(chronological.map((s) => s.value));
+  const value = Math.max(0, intercept + slope * chronological.length);
+  const breakdown: CalculationSegment[] = [];
+  chronological.forEach((s) => {
+    breakdown.push({ text: sameMonthLabel(targetKey, s.yearsAgo), color: "date" });
+    breakdown.push({ text: ": " });
+    breakdown.push(amount(s.value));
+    breakdown.push(lineBreak());
+  });
+  const sign = slope >= 0 ? "+" : "";
+  return {
+    value,
+    calculationDetail: [
+      { text: "Linear trend fitted across " },
+      { text: `${samples.length} years`, color: "years" },
+      { text: " of this month:" },
+      lineBreak(),
+      ...breakdown,
+      lineBreak(),
+      { text: "extrapolated one year forward at " },
+      {
+        text: `${sign}${formatAmount(slope)}/yr`,
+        bold: true,
+        color: slope >= 0 ? "positive" : "negative",
+      },
+      { text: "." },
+    ],
+  };
 }
 
 /** Builds a monthly commission history plus a forward projection of `horizonMonths`,
@@ -198,7 +291,11 @@ export function buildCommissionForecast(
   for (let i = 0; i < horizonMonths; i++) {
     cur = shiftMonthKey(cur, 1);
     const samples = sameMonthHistory(byMonthKey, cur);
-    const predicted = predictFromSameMonthHistory(samples, allTimeAverage);
+    const { value: predicted, calculationDetail } = predictFromSameMonthHistory(
+      samples,
+      allTimeAverage,
+      cur,
+    );
     horizonTotal += predicted;
     forecastPoints.push({
       monthKey: cur,
@@ -206,6 +303,7 @@ export function buildCommissionForecast(
       commissionForecast: predicted,
       yearsOfHistory: samples.length,
       sameMonthLastYear: samples[0]?.value ?? null,
+      calculationDetail,
     });
   }
 
