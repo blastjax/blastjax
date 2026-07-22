@@ -706,6 +706,15 @@ def _init_schema_minimal_stmts() -> list[str]:
         CREATE INDEX IF NOT EXISTS idx_fixed_expense_half
             ON fixed_expense (period_half, created_at DESC)
         """,
+        """
+        CREATE TABLE IF NOT EXISTS calendar_day_override (
+            id SERIAL PRIMARY KEY,
+            day DATE NOT NULL UNIQUE,
+            amount DOUBLE PRECISION NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() AT TIME ZONE 'UTC'),
+            CONSTRAINT chk_calendar_day_override_amount CHECK (amount >= 0)
+        )
+        """,
     ]
 
 
@@ -998,7 +1007,7 @@ def _migrate_house_payment_simplify(cur: Any) -> None:
 # Bump this whenever the DDL or migrations below change. ``init_schema()``
 # uses it to skip the entire migration block on warm starts (very common
 # on Neon, where containers cold-start often).
-_SCHEMA_VERSION = 12
+_SCHEMA_VERSION = 13
 
 
 def init_schema() -> None:
@@ -2256,6 +2265,39 @@ def delete_fixed_expense(expense_id: int) -> bool:
         with db_cursor(conn) as cur:
             cur.execute("DELETE FROM fixed_expense WHERE id = ?", (expense_id,))
             return cur.rowcount > 0
+
+
+_CALENDAR_DAY_OVERRIDE_COLS = "id, day, amount, created_at"
+
+
+def list_calendar_day_overrides() -> list[dict[str, Any]]:
+    with get_connection() as conn:
+        with db_cursor(conn) as cur:
+            cur.execute(
+                f"SELECT {_CALENDAR_DAY_OVERRIDE_COLS} FROM calendar_day_override ORDER BY day"
+            )
+            return [_row_to_dict(cur, r) for r in cur.fetchall()]
+
+
+def upsert_calendar_day_overrides(
+    overrides: list[tuple[str, float]],
+) -> list[dict[str, Any]]:
+    """Upsert one or more (day, amount) pairs in a single transaction and return the full list."""
+    with get_connection() as conn:
+        with db_cursor(conn) as cur:
+            for day, amount in overrides:
+                cur.execute(
+                    """
+                    INSERT INTO calendar_day_override (day, amount)
+                    VALUES (?, ?)
+                    ON CONFLICT (day) DO UPDATE SET amount = EXCLUDED.amount
+                    """,
+                    (day, amount),
+                )
+            cur.execute(
+                f"SELECT {_CALENDAR_DAY_OVERRIDE_COLS} FROM calendar_day_override ORDER BY day"
+            )
+            return [_row_to_dict(cur, r) for r in cur.fetchall()]
 
 
 def check_connection() -> bool:

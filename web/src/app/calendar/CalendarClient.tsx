@@ -1,10 +1,19 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type DragEvent,
+  type FormEvent,
+} from "react";
 import { Modal } from "@/components/Modal";
 import {
+  bulkUpsertCalendarDayOverrides,
   createFixedExpense,
   deleteFixedExpense,
+  getCalendarDayOverrides,
   getFixedExpenses,
   getPayslips,
   type FixedExpenseRow,
@@ -17,14 +26,28 @@ import {
   INPUT_CLASSES,
   LOADING_TEXT_CLASSES,
   PRIMARY_BUTTON_CLASSES,
+  SECONDARY_BUTTON_CLASSES,
 } from "@/lib/ui";
 
 const WEEKDAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
+
+/** Custom drag-and-drop payload type carrying the source day-of-month. */
+const DAY_DND_MIME = "text/x-calendar-day";
 
 /** Semi-monthly payroll: 1st–15th, then 16th–end of month (13–16 days depending on the month). */
 const FIRST_HALF_DAYS = 15;
 
 type PeriodHalf = 1 | 2;
+
+/**
+ * Payroll here is paid on a half-month lag: the payslip whose period_half is
+ * 2 (16th–end) is the one that actually funds days 1–15 of the *next* month,
+ * and the period_half 1 (1st–15th) payslip funds days 16–end. This maps a
+ * calendar half (which days) to the payslip half (whose money) that funds it.
+ */
+function payslipHalfFor(calendarHalf: PeriodHalf): PeriodHalf {
+  return calendarHalf === 1 ? 2 : 1;
+}
 
 function fmtMoney(n: number): string {
   return n.toLocaleString(undefined, {
@@ -35,6 +58,8 @@ function fmtMoney(n: number): string {
 
 type DayCell = {
   day: number;
+  iso: string;
+  half: PeriodHalf;
   isPast: boolean;
   isToday: boolean;
   dailyBudget: number | null;
@@ -42,6 +67,19 @@ type DayCell = {
 
 type ExpenseForm = { amount: string; description: string };
 const emptyExpenseForm = (): ExpenseForm => ({ amount: "", description: "" });
+
+function dateIso(year: number, month: number, day: number): string {
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+type TransferState = {
+  fromDay: number;
+  toDay: number;
+  fromIso: string;
+  toIso: string;
+  fromAmount: number;
+  toAmount: number;
+};
 
 export default function CalendarClient() {
   const [lastFirstHalfPayslip, setLastFirstHalfPayslip] = useState<PayslipRow | null>(null);
@@ -55,9 +93,22 @@ export default function CalendarClient() {
   const [savingExpense, setSavingExpense] = useState(false);
   const [expenseError, setExpenseError] = useState<string | null>(null);
 
+  const [dayOverrides, setDayOverrides] = useState<Map<string, number>>(new Map());
+  const [dragSourceDay, setDragSourceDay] = useState<number | null>(null);
+  const [dragOverDay, setDragOverDay] = useState<number | null>(null);
+  const [transfer, setTransfer] = useState<TransferState | null>(null);
+  const [transferAmount, setTransferAmount] = useState("");
+  const [savingTransfer, setSavingTransfer] = useState(false);
+  const [transferError, setTransferError] = useState<string | null>(null);
+
   const loadExpenses = useCallback(async () => {
     const r = await getFixedExpenses();
     setFixedExpenses(r.expenses);
+  }, []);
+
+  const loadOverrides = useCallback(async () => {
+    const r = await getCalendarDayOverrides();
+    setDayOverrides(new Map(r.overrides.map((o) => [o.day, o.amount])));
   }, []);
 
   const load = useCallback(async () => {
@@ -79,9 +130,15 @@ export default function CalendarClient() {
       firstError ??= e instanceof Error ? e.message : "Failed to load fixed expenses";
       setFixedExpenses([]);
     }
+    try {
+      await loadOverrides();
+    } catch (e) {
+      firstError ??= e instanceof Error ? e.message : "Failed to load day overrides";
+      setDayOverrides(new Map());
+    }
     setError(firstError);
     setLoading(false);
-  }, [loadExpenses]);
+  }, [loadExpenses, loadOverrides]);
 
   useEffect(() => {
     void load();
@@ -104,13 +161,15 @@ export default function CalendarClient() {
   }, [fixedExpenses]);
 
   const expensesTotal = useCallback(
-    (half: PeriodHalf) => expensesByHalf[half].reduce((s, e) => s + e.amount, 0),
+    (calendarHalf: PeriodHalf) =>
+      expensesByHalf[payslipHalfFor(calendarHalf)].reduce((s, e) => s + e.amount, 0),
     [expensesByHalf],
   );
 
   const netPayFor = useCallback(
-    (half: PeriodHalf): number | null =>
-      (half === 1 ? lastFirstHalfPayslip : lastSecondHalfPayslip)?.total ?? null,
+    (calendarHalf: PeriodHalf): number | null =>
+      (payslipHalfFor(calendarHalf) === 1 ? lastFirstHalfPayslip : lastSecondHalfPayslip)?.total ??
+      null,
     [lastFirstHalfPayslip, lastSecondHalfPayslip],
   );
 
@@ -127,25 +186,123 @@ export default function CalendarClient() {
   const firstHalfBudget = firstHalfNetAfter != null ? firstHalfNetAfter / FIRST_HALF_DAYS : null;
   const secondHalfBudget = secondHalfNetAfter != null ? secondHalfNetAfter / secondHalfDays : null;
 
-  const cells = useMemo(() => {
+  const dayCells = useMemo(() => {
+    const result: DayCell[] = [];
+    for (let day = 1; day <= daysInMonth; day++) {
+      const half: PeriodHalf = day <= FIRST_HALF_DAYS ? 1 : 2;
+      const iso = dateIso(year, month, day);
+      const defaultAmount = half === 1 ? firstHalfBudget : secondHalfBudget;
+      const overrideAmount = dayOverrides.get(iso);
+      result.push({
+        day,
+        iso,
+        half,
+        isPast: day < todayDate,
+        isToday: day === todayDate,
+        dailyBudget: overrideAmount ?? defaultAmount,
+      });
+    }
+    return result;
+  }, [year, month, daysInMonth, todayDate, firstHalfBudget, secondHalfBudget, dayOverrides]);
+
+  const gridCells = useMemo(() => {
     const firstWeekday = new Date(year, month - 1, 1).getDay();
     const totalCells = Math.ceil((firstWeekday + daysInMonth) / 7) * 7;
     const result: (DayCell | null)[] = [];
     for (let i = 0; i < totalCells; i++) {
       const day = i - firstWeekday + 1;
-      if (day < 1 || day > daysInMonth) {
-        result.push(null);
-        continue;
-      }
-      result.push({
-        day,
-        isPast: day < todayDate,
-        isToday: day === todayDate,
-        dailyBudget: day <= FIRST_HALF_DAYS ? firstHalfBudget : secondHalfBudget,
-      });
+      result.push(day >= 1 && day <= daysInMonth ? dayCells[day - 1] : null);
     }
     return result;
-  }, [year, month, daysInMonth, todayDate, firstHalfBudget, secondHalfBudget]);
+  }, [year, month, daysInMonth, dayCells]);
+
+  const handleDayDragStart = useCallback(
+    (e: DragEvent<HTMLDivElement>, day: number) => {
+      e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData(DAY_DND_MIME, String(day));
+      setDragSourceDay(day);
+    },
+    [],
+  );
+
+  const handleDayDragOver = useCallback((e: DragEvent<HTMLDivElement>, day: number) => {
+    e.preventDefault();
+    setDragOverDay(day);
+  }, []);
+
+  const handleDayDragLeave = useCallback((day: number) => {
+    setDragOverDay((prev) => (prev === day ? null : prev));
+  }, []);
+
+  const handleDayDragEnd = useCallback(() => {
+    setDragSourceDay(null);
+    setDragOverDay(null);
+  }, []);
+
+  const handleDayDrop = useCallback(
+    (e: DragEvent<HTMLDivElement>, targetDay: number) => {
+      e.preventDefault();
+      setDragSourceDay(null);
+      setDragOverDay(null);
+      const raw = e.dataTransfer.getData(DAY_DND_MIME);
+      const sourceDay = raw ? Number(raw) : NaN;
+      if (!Number.isFinite(sourceDay) || sourceDay === targetDay) return;
+      const source = dayCells[sourceDay - 1];
+      const target = dayCells[targetDay - 1];
+      if (!source || !target) return;
+      if (source.half !== target.half) {
+        setError("You can only move budget between days within the same pay period.");
+        return;
+      }
+      if (source.dailyBudget == null || target.dailyBudget == null) return;
+      setTransferError(null);
+      setTransferAmount("");
+      setTransfer({
+        fromDay: source.day,
+        toDay: target.day,
+        fromIso: source.iso,
+        toIso: target.iso,
+        fromAmount: source.dailyBudget,
+        toAmount: target.dailyBudget,
+      });
+    },
+    [dayCells],
+  );
+
+  const closeTransferModal = useCallback(() => {
+    setTransfer(null);
+  }, []);
+
+  const submitTransfer = useCallback(
+    async (e: FormEvent) => {
+      e.preventDefault();
+      if (!transfer) return;
+      const amount = parseFormNumber(transferAmount);
+      if (amount == null || amount <= 0) {
+        setTransferError("Enter a valid amount greater than zero.");
+        return;
+      }
+      if (amount > transfer.fromAmount) {
+        setTransferError(`Cannot move more than ${fmtMoney(transfer.fromAmount)}.`);
+        return;
+      }
+      setTransferError(null);
+      setSavingTransfer(true);
+      try {
+        const r = await bulkUpsertCalendarDayOverrides([
+          { day: transfer.fromIso, amount: transfer.fromAmount - amount },
+          { day: transfer.toIso, amount: transfer.toAmount + amount },
+        ]);
+        setDayOverrides(new Map(r.overrides.map((o) => [o.day, o.amount])));
+        setTransfer(null);
+      } catch (err) {
+        setTransferError(err instanceof Error ? err.message : "Failed to move budget");
+      } finally {
+        setSavingTransfer(false);
+      }
+    },
+    [transfer, transferAmount],
+  );
 
   const openExpenseModal = useCallback((half: PeriodHalf) => {
     setExpenseError(null);
@@ -170,7 +327,7 @@ export default function CalendarClient() {
       setSavingExpense(true);
       try {
         await createFixedExpense({
-          period_half: expenseModalHalf,
+          period_half: payslipHalfFor(expenseModalHalf),
           amount,
           description: expenseForm.description.trim() || null,
         });
@@ -198,7 +355,8 @@ export default function CalendarClient() {
     [loadExpenses],
   );
 
-  const modalExpenses = expenseModalHalf != null ? expensesByHalf[expenseModalHalf] : [];
+  const modalExpenses =
+    expenseModalHalf != null ? expensesByHalf[payslipHalfFor(expenseModalHalf)] : [];
   const modalNetPay = expenseModalHalf != null ? netPayFor(expenseModalHalf) : null;
   const modalExpensesTotal = expenseModalHalf != null ? expensesTotal(expenseModalHalf) : 0;
   const modalNetAfter = expenseModalHalf != null ? netAfterExpenses(expenseModalHalf) : null;
@@ -235,7 +393,8 @@ export default function CalendarClient() {
             </p>
             <div className="mt-5 grid gap-4 sm:grid-cols-2">
               {([1, 2] as const).map((half) => {
-                const payslip = half === 1 ? lastFirstHalfPayslip : lastSecondHalfPayslip;
+                const payslip =
+                  payslipHalfFor(half) === 1 ? lastFirstHalfPayslip : lastSecondHalfPayslip;
                 const netAfter = half === 1 ? firstHalfNetAfter : secondHalfNetAfter;
                 const total = expensesTotal(half);
                 return (
@@ -305,7 +464,8 @@ export default function CalendarClient() {
               {formatMonthYear(year, month)}
             </h2>
             <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-              Past days are greyed out; today is highlighted.
+              Past days are greyed out; today is highlighted. Drag a day onto another (same pay
+              period) to move budget between them.
             </p>
 
             <div className="mt-5 grid grid-cols-7 gap-1.5 sm:gap-2">
@@ -319,21 +479,34 @@ export default function CalendarClient() {
               ))}
             </div>
             <div className="mt-1.5 grid flex-1 grid-cols-7 gap-1.5 sm:gap-2">
-              {cells.map((cell, idx) => {
+              {gridCells.map((cell, idx) => {
                 if (!cell) {
                   return <div key={`blank-${idx}`} />;
                 }
                 const { day, isPast, isToday, dailyBudget } = cell;
+                const draggable = dailyBudget != null;
+                const isDragSource = dragSourceDay === day;
+                const isDragOverTarget = dragOverDay === day && dragSourceDay !== day;
                 return (
                   <div
                     key={day}
-                    className={`flex min-h-[5rem] min-w-0 flex-col items-center justify-center gap-1 rounded-lg border px-1.5 py-2 text-center sm:min-h-[7rem] ${
-                      isToday
-                        ? "border-indigo-500 bg-indigo-50 ring-2 ring-indigo-500/40 dark:border-indigo-400 dark:bg-indigo-950/50"
-                        : isPast
-                          ? "border-dashed border-zinc-200 bg-zinc-50/60 opacity-60 dark:border-zinc-800 dark:bg-zinc-900/30"
-                          : "border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950"
-                    }`}
+                    draggable={draggable}
+                    onDragStart={draggable ? (e) => handleDayDragStart(e, day) : undefined}
+                    onDragOver={draggable ? (e) => handleDayDragOver(e, day) : undefined}
+                    onDragLeave={draggable ? () => handleDayDragLeave(day) : undefined}
+                    onDrop={draggable ? (e) => handleDayDrop(e, day) : undefined}
+                    onDragEnd={handleDayDragEnd}
+                    className={`flex min-h-[5rem] min-w-0 flex-col items-center justify-center gap-1 rounded-lg border px-1.5 py-2 text-center transition sm:min-h-[7rem] ${
+                      draggable ? "cursor-grab active:cursor-grabbing" : ""
+                    } ${
+                      isDragOverTarget
+                        ? "border-indigo-500 bg-indigo-100 ring-2 ring-indigo-500/60 dark:border-indigo-400 dark:bg-indigo-950/70"
+                        : isToday
+                          ? "border-indigo-500 bg-indigo-50 ring-2 ring-indigo-500/40 dark:border-indigo-400 dark:bg-indigo-950/50"
+                          : isPast
+                            ? "border-dashed border-zinc-200 bg-zinc-50/60 opacity-60 dark:border-zinc-800 dark:bg-zinc-900/30"
+                            : "border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950"
+                    } ${isDragSource ? "opacity-40" : ""}`}
                   >
                     <span
                       className={`text-sm font-semibold tabular-nums ${
@@ -490,6 +663,79 @@ export default function CalendarClient() {
             </table>
           )}
         </div>
+      </Modal>
+
+      <Modal
+        open={transfer != null}
+        onClose={closeTransferModal}
+        ariaLabelledBy="transfer-title"
+        dialogClassName="w-full max-w-sm rounded-xl border border-zinc-200 bg-white p-5 shadow-xl dark:border-zinc-800 dark:bg-zinc-950"
+      >
+        {transfer && (
+          <>
+            <h2
+              id="transfer-title"
+              className="text-lg font-semibold text-zinc-900 dark:text-zinc-50"
+            >
+              Move budget
+            </h2>
+            <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
+              From day {transfer.fromDay} ({fmtMoney(transfer.fromAmount)}) to day{" "}
+              {transfer.toDay} ({fmtMoney(transfer.toAmount)}).
+            </p>
+            <form onSubmit={submitTransfer} className="mt-4 flex flex-col gap-3">
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="text-zinc-600 dark:text-zinc-400">
+                  Amount to move (max {fmtMoney(transfer.fromAmount)})
+                </span>
+                <div className="flex gap-2">
+                  <input
+                    required
+                    type="text"
+                    inputMode="decimal"
+                    autoFocus
+                    className={`flex-1 ${INPUT_CLASSES}`}
+                    value={transferAmount}
+                    onChange={(e) => setTransferAmount(e.target.value)}
+                    disabled={savingTransfer}
+                  />
+                  <button
+                    type="button"
+                    className={SECONDARY_BUTTON_CLASSES}
+                    onClick={() =>
+                      setTransferAmount(String(Math.round(transfer.fromAmount * 100) / 100))
+                    }
+                    disabled={savingTransfer}
+                  >
+                    Max
+                  </button>
+                </div>
+              </label>
+              {transferError && (
+                <div className={ERROR_ALERT_CLASSES} role="alert">
+                  {transferError}
+                </div>
+              )}
+              <div className="mt-1 flex justify-end gap-2">
+                <button
+                  type="button"
+                  className={SECONDARY_BUTTON_CLASSES}
+                  onClick={closeTransferModal}
+                  disabled={savingTransfer}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className={PRIMARY_BUTTON_CLASSES}
+                  disabled={savingTransfer}
+                >
+                  {savingTransfer ? "Moving…" : "Move"}
+                </button>
+              </div>
+            </form>
+          </>
+        )}
       </Modal>
     </div>
   );

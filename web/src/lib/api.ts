@@ -480,6 +480,27 @@ export async function deleteFixedExpense(id: number) {
   return sendJson<{ ok: boolean }>("DELETE", `/api/fixed-expense/${id}`);
 }
 
+export type CalendarDayOverrideRow = {
+  id: number;
+  day: string;
+  amount: number;
+  created_at: string;
+};
+
+export async function getCalendarDayOverrides() {
+  return getJson<{ overrides: CalendarDayOverrideRow[] }>("/api/calendar-day-override");
+}
+
+export async function bulkUpsertCalendarDayOverrides(
+  overrides: { day: string; amount: number }[],
+) {
+  return sendJson<{ overrides: CalendarDayOverrideRow[] }>(
+    "PUT",
+    "/api/calendar-day-override/bulk",
+    { overrides },
+  );
+}
+
 export async function getLatestTransactionTime() {
   return getJson<{
     sync_enabled: boolean;
