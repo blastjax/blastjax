@@ -49,6 +49,11 @@ function payslipHalfFor(calendarHalf: PeriodHalf): PeriodHalf {
   return calendarHalf === 1 ? 2 : 1;
 }
 
+/** Round to the nearest cent — avoids float noise (e.g. 1997.835625) mismatching displayed 2dp amounts. */
+function roundCents(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
 function fmtMoney(n: number): string {
   return n.toLocaleString(undefined, {
     minimumFractionDigits: 2,
@@ -277,21 +282,23 @@ export default function CalendarClient() {
     async (e: FormEvent) => {
       e.preventDefault();
       if (!transfer) return;
-      const amount = parseFormNumber(transferAmount);
-      if (amount == null || amount <= 0) {
+      const rawAmount = parseFormNumber(transferAmount);
+      if (rawAmount == null || rawAmount <= 0) {
         setTransferError("Enter a valid amount greater than zero.");
         return;
       }
-      if (amount > transfer.fromAmount) {
-        setTransferError(`Cannot move more than ${fmtMoney(transfer.fromAmount)}.`);
+      const amount = roundCents(rawAmount);
+      const maxAmount = roundCents(transfer.fromAmount);
+      if (amount > maxAmount) {
+        setTransferError(`Cannot move more than ${fmtMoney(maxAmount)}.`);
         return;
       }
       setTransferError(null);
       setSavingTransfer(true);
       try {
         const r = await bulkUpsertCalendarDayOverrides([
-          { day: transfer.fromIso, amount: transfer.fromAmount - amount },
-          { day: transfer.toIso, amount: transfer.toAmount + amount },
+          { day: transfer.fromIso, amount: Math.max(0, roundCents(transfer.fromAmount - amount)) },
+          { day: transfer.toIso, amount: roundCents(transfer.toAmount + amount) },
         ]);
         setDayOverrides(new Map(r.overrides.map((o) => [o.day, o.amount])));
         setTransfer(null);
@@ -702,9 +709,7 @@ export default function CalendarClient() {
                   <button
                     type="button"
                     className={SECONDARY_BUTTON_CLASSES}
-                    onClick={() =>
-                      setTransferAmount(String(Math.round(transfer.fromAmount * 100) / 100))
-                    }
+                    onClick={() => setTransferAmount(String(roundCents(transfer.fromAmount)))}
                     disabled={savingTransfer}
                   >
                     Max
