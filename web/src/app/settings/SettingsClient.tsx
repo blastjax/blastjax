@@ -8,7 +8,6 @@ import {
   SEGMENTED_WRAPPER_CLASSES,
 } from "@/lib/ui";
 import { ChartColorsSettingsPanel } from "./ChartColorsSettingsPanel";
-import { CloudSyncPanel } from "./CloudSyncPanel";
 import { PayslipDefaultsPanel } from "./PayslipDefaultsPanel";
 
 type SettingsTab = "payslip" | "charts";
@@ -25,7 +24,7 @@ export default function SettingsClient() {
               Settings
             </h1>
             <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-              Manage payslip defaults, chart colors, and cloud sync.
+              Manage payslip defaults and chart colors.
             </p>
           </div>
           <div
@@ -65,8 +64,6 @@ export default function SettingsClient() {
 
       {tab === "payslip" && <PayslipDefaultsPanel />}
       {tab === "charts" && <ChartColorsSettingsPanel />}
-
-      <CloudSyncPanel />
     </div>
   );
 }

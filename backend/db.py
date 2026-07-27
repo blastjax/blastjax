@@ -147,53 +147,8 @@ def database_url() -> str | None:
 
 
 def cloud_database_url() -> str | None:
-    """The remote/source-of-truth database (Neon ``DB_*`` / ``DATABASE_URL``)."""
+    """The database the app always reads from and writes to (Neon ``DB_*`` / ``DATABASE_URL``)."""
     return database_url()
-
-
-def local_database_url() -> str | None:
-    """
-    Resolve the local mirror DB from ``LOCAL_DB_*``. When set, the app reads from and
-    writes to this database; changes are pushed up to :func:`cloud_database_url` and the
-    cloud is mirrored back down on reads (see ``db_sync``).
-    """
-    host = (os.environ.get("LOCAL_DB_HOST") or "").strip()
-    dbname = (os.environ.get("LOCAL_DB_NAME") or "").strip()
-    if not host or not dbname:
-        return None
-    user = (os.environ.get("LOCAL_DB_USER") or "").strip()
-    password = os.environ.get("LOCAL_DB_PASSWORD") or ""
-    port = (os.environ.get("LOCAL_DB_PORT") or "5432").strip() or "5432"
-    # In Docker, ``localhost`` points at the api container itself; the local mirror
-    # Postgres is the Compose ``db`` service, reachable as ``db:5432`` on the
-    # internal network (host-mapped to 5433, but that mapping doesn't apply here).
-    if Path("/.dockerenv").exists() and host.lower() in ("localhost", "127.0.0.1"):
-        host = "db"
-        port = "5432"
-    path = quote(dbname, safe="")
-    if user and password:
-        return (
-            f"postgresql://{quote_plus(user)}:{quote_plus(password)}"
-            f"@{host}:{port}/{path}"
-        )
-    if user:
-        return f"postgresql://{quote_plus(user)}@{host}:{port}/{path}"
-    if password:
-        return f"postgresql://:{quote_plus(password)}@{host}:{port}/{path}"
-    return f"postgresql://{host}:{port}/{path}"
-
-
-def primary_database_url() -> str | None:
-    """
-    The database the app actually serves from: the local mirror when ``LOCAL_DB_*`` is
-    configured, otherwise the cloud DB. ``get_connection`` uses this.
-    """
-    return local_database_url() or cloud_database_url()
-
-
-def sync_configured() -> bool:
-    """True when both a local mirror and a cloud DB are configured (mirroring is active)."""
-    return bool(local_database_url()) and bool(cloud_database_url())
 
 
 _LIBPQ_DEFAULT_PARAMS: tuple[tuple[str, str], ...] = (
@@ -207,8 +162,8 @@ _LIBPQ_DEFAULT_PARAMS: tuple[tuple[str, str], ...] = (
     # Tag connections so they're easy to spot in pg_stat_activity. Allowed by
     # Neon's pooler (which has a strict allow-list for startup parameters).
     ("application_name", "budgetapp"),
-    # Fail fast when the cloud DB is unreachable so the mirror can fall back to
-    # local instead of blocking the request on a long TCP connect.
+    # Fail fast when the cloud DB is unreachable instead of blocking the
+    # request on a long TCP connect.
     ("connect_timeout", "8"),
 )
 
@@ -239,7 +194,7 @@ def _postgres_connect_url(url: str) -> str:
 
 
 def storage_kind() -> str:
-    u = (primary_database_url() or "").strip().lower()
+    u = (cloud_database_url() or "").strip().lower()
     if u.startswith("postgresql:") or u.startswith("postgres:"):
         return "postgres"
     return "none"
@@ -249,9 +204,7 @@ def use_database() -> bool:
     return storage_kind() == "postgres"
 
 
-# One pool per distinct DSN. With a local mirror configured there are two:
-# the local (primary) pool the app serves from and the cloud pool used by the
-# reconciler in ``db_sync``.
+# One pool per distinct DSN (in practice, just the cloud DB).
 _pg_pools: dict[str, pool.ThreadedConnectionPool] = {}
 
 
@@ -434,14 +387,7 @@ def _connection_for(url: str | None):
 
 @contextmanager
 def get_connection():
-    """Connection to the primary DB (local mirror when configured, else cloud)."""
-    with _connection_for(primary_database_url()) as conn:
-        yield conn
-
-
-@contextmanager
-def get_cloud_connection():
-    """Connection to the cloud (source-of-truth) DB, used by the mirror reconciler."""
+    """Connection to the cloud (source-of-truth) DB. The app always reads/writes here."""
     with _connection_for(cloud_database_url()) as conn:
         yield conn
 
@@ -1125,15 +1071,7 @@ def init_schema() -> None:
     """
     if not use_database():
         return
-    # Bring the primary (local mirror when configured) up to date first; the app
-    # serves from it. Then try the cloud so the first push has tables to target —
-    # but don't fail startup if the cloud is unreachable (offline-friendly).
     _init_schema_on(get_connection)
-    if sync_configured():
-        try:
-            _init_schema_on(get_cloud_connection)
-        except Exception as e:  # noqa: BLE001 - offline cloud must not block startup
-            _log.warning("Could not initialize cloud schema (offline?): %s", e)
 
 
 def _init_schema_on(conn_factory: Any) -> None:

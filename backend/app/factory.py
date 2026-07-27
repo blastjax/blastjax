@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
 from collections.abc import AsyncIterator
@@ -13,16 +12,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.concurrency import run_in_threadpool
 
 import cache
-import db_sync
 from db import close_connection_pool, database_url, init_schema
 
 log = logging.getLogger(__name__)
 
 _WRITE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
-
-# Holds references to in-flight background cloud-push tasks so they aren't
-# garbage-collected before they finish (asyncio only keeps weak refs).
-_background_tasks: set[asyncio.Task[None]] = set()
 
 
 def _cors_allow_origins() -> list[str]:
@@ -86,36 +80,15 @@ def create_app() -> FastAPI:
     )
 
     @app.middleware("http")
-    async def mirror_local_db(request: Request, call_next):
-        """
-        Keep the local mirror in sync with the cloud around each API call.
-
-        Reads mirror cloud -> local first so they serve fresh data. Writes are
-        applied to local (the primary) by the endpoint and return immediately —
-        the cloud push runs in the *background* so saves aren't blocked on the
-        cloud round-trip. The local DB is flagged dirty synchronously first, so
-        an unpushed write can never be clobbered by a later pull if the
-        background push hasn't finished. No-op unless ``LOCAL_DB_*`` + cloud are
-        both set. Blocking DB I/O runs in worker threads, off the event loop.
-        """
+    async def invalidate_cache_on_write(request: Request, call_next):
+        """Invalidate the relevant cache namespace after a successful write."""
         path = request.url.path
-        active = path.startswith("/api/") and db_sync.sync_enabled()
-        # /api/sync already mirrors local -> cloud itself; don't double-push.
-        is_write = request.method in _WRITE_METHODS and path != "/api/sync"
-        if active and not is_write:
-            await run_in_threadpool(db_sync.pull_before_request)
+        is_write = request.method in _WRITE_METHODS
         response = await call_next(request)
         if is_write and response.status_code < 400:
             ns = _cache_prefix(path)
             if ns:
                 await run_in_threadpool(cache.invalidate, ns)
-            if active:
-                # Mark dirty now (cheap, local-only) for safety, then push to the
-                # cloud in the background without delaying the response.
-                await run_in_threadpool(db_sync.mark_local_dirty)
-                task = asyncio.create_task(run_in_threadpool(db_sync.push_after_write))
-                _background_tasks.add(task)
-                task.add_done_callback(_background_tasks.discard)
         return response
 
     from app.routers import (
@@ -128,7 +101,6 @@ def create_app() -> FastAPI:
         installment,
         monthly_expense,
         payslip,
-        sync,
     )
 
     for router in (
@@ -141,7 +113,6 @@ def create_app() -> FastAPI:
         monthly_expense.router,
         calendar_day_override.router,
         credit_card.router,
-        sync.router,
     ):
         app.include_router(router)
 

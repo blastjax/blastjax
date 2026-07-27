@@ -427,33 +427,6 @@ export async function deleteBloodPressure(id: number) {
   return sendJson<{ ok: boolean }>("DELETE", `/api/blood-pressure/${id}`);
 }
 
-export async function syncToCloud() {
-  return sendJson<{
-    ok: boolean;
-    synced: boolean;
-    direction?: "push" | "pull";
-    detail?: string;
-  }>("POST", "/api/sync");
-}
-
-export async function syncPushToCloud() {
-  return sendJson<{
-    ok: boolean;
-    synced: boolean;
-    direction: "push";
-    detail?: string;
-  }>("POST", "/api/sync/push");
-}
-
-export async function syncPullFromCloud() {
-  return sendJson<{
-    ok: boolean;
-    synced: boolean;
-    direction: "pull";
-    detail?: string;
-  }>("POST", "/api/sync/pull");
-}
-
 export type FixedExpenseRow = {
   id: number;
   period_half: number;
@@ -535,14 +508,6 @@ export async function bulkUpsertCalendarDayOverrides(
     "/api/calendar-day-override/bulk",
     { overrides },
   );
-}
-
-export async function getLatestTransactionTime() {
-  return getJson<{
-    sync_enabled: boolean;
-    local_ts: string | null;
-    cloud_ts: string | null;
-  }>("/api/sync/latest-transaction");
 }
 
 export type CreditCardRow = {
