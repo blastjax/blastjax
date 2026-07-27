@@ -48,6 +48,8 @@ _TABLES: tuple[str, ...] = (
     "payslip",
     "house_payment",
     "house_payment_entry",
+    "credit_card",
+    "credit_card_payment",
     "installment",
     "installment_line",
     "blood_pressure",
@@ -60,6 +62,8 @@ _TIMESTAMPED_TABLES: tuple[str, ...] = (
     "payslip",
     "house_payment",
     "house_payment_entry",
+    "credit_card",
+    "credit_card_payment",
     "installment",
     "blood_pressure",
     "fixed_expense",
@@ -72,7 +76,7 @@ _TIMESTAMPED_TABLES: tuple[str, ...] = (
 # destination's ``SERIAL`` assign fresh ids, which sidesteps duplicate ids in the
 # dirty cloud data.
 _PRESERVE_ID: frozenset[str] = frozenset(
-    {"installment", "house_payment", "blood_pressure"}
+    {"installment", "house_payment", "blood_pressure", "credit_card"}
 )
 
 _SYNC_STATE_DDL = (
