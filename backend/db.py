@@ -707,6 +707,18 @@ def _init_schema_minimal_stmts() -> list[str]:
             ON fixed_expense (period_half, created_at DESC)
         """,
         """
+        CREATE TABLE IF NOT EXISTS monthly_expense (
+            id SERIAL PRIMARY KEY,
+            name TEXT NOT NULL,
+            description TEXT,
+            amount DOUBLE PRECISION NOT NULL,
+            period_half INTEGER NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() AT TIME ZONE 'UTC'),
+            CONSTRAINT chk_monthly_expense_half CHECK (period_half IN (1, 2)),
+            CONSTRAINT chk_monthly_expense_amount CHECK (amount > 0)
+        )
+        """,
+        """
         CREATE TABLE IF NOT EXISTS calendar_day_override (
             id SERIAL PRIMARY KEY,
             day DATE NOT NULL UNIQUE,
@@ -714,6 +726,39 @@ def _init_schema_minimal_stmts() -> list[str]:
             created_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() AT TIME ZONE 'UTC'),
             CONSTRAINT chk_calendar_day_override_amount CHECK (amount >= 0)
         )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS credit_card (
+            id SERIAL PRIMARY KEY,
+            name TEXT NOT NULL,
+            credit_limit DOUBLE PRECISION NOT NULL,
+            last_statement_balance DOUBLE PRECISION NOT NULL DEFAULT 0,
+            current_balance DOUBLE PRECISION NOT NULL DEFAULT 0,
+            minimum_due DOUBLE PRECISION NOT NULL DEFAULT 0,
+            interest_rate DOUBLE PRECISION NOT NULL DEFAULT 3.5,
+            statement_date TEXT,
+            due_date TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() AT TIME ZONE 'UTC'),
+            CONSTRAINT chk_credit_card_amounts CHECK (
+                credit_limit >= 0 AND last_statement_balance >= 0
+                AND minimum_due >= 0 AND interest_rate >= 0
+            )
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS credit_card_payment (
+            id SERIAL PRIMARY KEY,
+            credit_card_id INTEGER NOT NULL REFERENCES credit_card(id) ON DELETE CASCADE,
+            amount DOUBLE PRECISION NOT NULL,
+            payment_date TEXT NOT NULL,
+            note TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() AT TIME ZONE 'UTC'),
+            CONSTRAINT chk_credit_card_payment_amount CHECK (amount > 0)
+        )
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_credit_card_payment_parent
+            ON credit_card_payment (credit_card_id, payment_date DESC)
         """,
     ]
 
@@ -1004,10 +1049,70 @@ def _migrate_house_payment_simplify(cur: Any) -> None:
         cur.execute(f"ALTER TABLE house_payment DROP COLUMN IF EXISTS {col}")
 
 
+def _migrate_monthly_expense_columns(cur: Any) -> None:
+    """
+    An earlier, abandoned attempt at this feature left a ``monthly_expense``
+    table on some databases without ``name``/``description``. ``CREATE TABLE
+    IF NOT EXISTS`` is a no-op against that table, so add the missing columns
+    explicitly. Idempotent.
+    """
+    cur.execute("ALTER TABLE monthly_expense ADD COLUMN IF NOT EXISTS name TEXT")
+    cur.execute("UPDATE monthly_expense SET name = '' WHERE name IS NULL")
+    cur.execute("ALTER TABLE monthly_expense ALTER COLUMN name SET NOT NULL")
+    cur.execute("ALTER TABLE monthly_expense ADD COLUMN IF NOT EXISTS description TEXT")
+    cur.execute(
+        "ALTER TABLE monthly_expense ADD COLUMN IF NOT EXISTS amount DOUBLE PRECISION"
+    )
+    cur.execute(
+        "ALTER TABLE monthly_expense ADD COLUMN IF NOT EXISTS period_half INTEGER"
+    )
+    cur.execute(
+        "ALTER TABLE monthly_expense DROP CONSTRAINT IF EXISTS chk_monthly_expense_half"
+    )
+    cur.execute(
+        "ALTER TABLE monthly_expense ADD CONSTRAINT chk_monthly_expense_half CHECK (period_half IN (1, 2))"
+    )
+    cur.execute(
+        "ALTER TABLE monthly_expense DROP CONSTRAINT IF EXISTS chk_monthly_expense_amount"
+    )
+    cur.execute(
+        "ALTER TABLE monthly_expense ADD CONSTRAINT chk_monthly_expense_amount CHECK (amount > 0)"
+    )
+    cur.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_monthly_expense_half
+            ON monthly_expense (period_half, created_at DESC)
+        """
+    )
+
+
+def _migrate_installment_credit_card_id(cur: Any) -> None:
+    """
+    Optional link from an installment plan to the (single) credit card it's
+    carried on. Nullable — most installments aren't tied to a card.
+    """
+    cur.execute(
+        "ALTER TABLE installment ADD COLUMN IF NOT EXISTS credit_card_id INTEGER"
+    )
+    cur.execute(
+        """
+        DO $$ BEGIN
+          IF NOT EXISTS (
+            SELECT 1 FROM pg_constraint WHERE conname = 'installment_credit_card_id_fkey'
+          ) THEN
+            ALTER TABLE installment
+              ADD CONSTRAINT installment_credit_card_id_fkey
+              FOREIGN KEY (credit_card_id) REFERENCES credit_card(id) ON DELETE SET NULL;
+          END IF;
+        END $$;
+        """
+    )
+
+
 # Bump this whenever the DDL or migrations below change. ``init_schema()``
 # uses it to skip the entire migration block on warm starts (very common
 # on Neon, where containers cold-start often).
-_SCHEMA_VERSION = 13
+_SCHEMA_VERSION = 15
 
 
 def init_schema() -> None:
@@ -1075,6 +1180,8 @@ def _init_schema_on(conn_factory: Any) -> None:
             _migrate_installment_repair_constraints(cur)
             _migrate_installment_relax_payment_total(cur)
             _migrate_installment_recompute_aggregates(cur)
+            _migrate_monthly_expense_columns(cur)
+            _migrate_installment_credit_card_id(cur)
             cur.execute(
                 """
                 INSERT INTO _app_meta (key, value)
@@ -1352,24 +1459,43 @@ def delete_payslip_pdf(payslip_id: int) -> bool:
             return cur.rowcount > 0
 
 
-def list_installments(limit: int = 500) -> list[dict[str, Any]]:
+def list_installments(
+    limit: int = 500, credit_card_id: int | None = None
+) -> list[dict[str, Any]]:
     limit = max(1, min(limit, 2000))
     with get_connection() as conn:
         with db_cursor(conn) as cur:
-            cur.execute(
-                """
-                SELECT i.id, i.name, i.installment_current, i.installment_total,
-                       i.principal, i.interest, i.payment_total, i.start_date, i.finish_date,
-                       i.remaining, i.original_total, i.created_at,
-                       COALESCE(il.payment_total, i.payment_total) AS due_payment
-                FROM installment i
-                LEFT JOIN installment_line il
-                    ON il.installment_id = i.id AND il.seq = i.installment_current
-                ORDER BY i.finish_date ASC, i.name ASC
-                LIMIT ?
-                """,
-                (limit,),
-            )
+            if credit_card_id is None:
+                cur.execute(
+                    """
+                    SELECT i.id, i.name, i.installment_current, i.installment_total,
+                           i.principal, i.interest, i.payment_total, i.start_date, i.finish_date,
+                           i.remaining, i.original_total, i.credit_card_id, i.created_at,
+                           COALESCE(il.payment_total, i.payment_total) AS due_payment
+                    FROM installment i
+                    LEFT JOIN installment_line il
+                        ON il.installment_id = i.id AND il.seq = i.installment_current
+                    ORDER BY i.finish_date ASC, i.name ASC
+                    LIMIT ?
+                    """,
+                    (limit,),
+                )
+            else:
+                cur.execute(
+                    """
+                    SELECT i.id, i.name, i.installment_current, i.installment_total,
+                           i.principal, i.interest, i.payment_total, i.start_date, i.finish_date,
+                           i.remaining, i.original_total, i.credit_card_id, i.created_at,
+                           COALESCE(il.payment_total, i.payment_total) AS due_payment
+                    FROM installment i
+                    LEFT JOIN installment_line il
+                        ON il.installment_id = i.id AND il.seq = i.installment_current
+                    WHERE i.credit_card_id = ?
+                    ORDER BY i.finish_date ASC, i.name ASC
+                    LIMIT ?
+                    """,
+                    (credit_card_id, limit),
+                )
             cols = [d[0] for d in cur.description]
             out: list[dict[str, Any]] = []
             for r in cur.fetchall():
@@ -1390,7 +1516,7 @@ def list_installments_with_lines(limit: int = 500) -> list[dict[str, Any]]:
                 """
                 SELECT i.id, i.name, i.installment_current, i.installment_total,
                        i.principal, i.interest, i.payment_total, i.start_date, i.finish_date,
-                       i.remaining, i.original_total, i.created_at,
+                       i.remaining, i.original_total, i.credit_card_id, i.created_at,
                        COALESCE(il.payment_total, i.payment_total) AS due_payment
                 FROM installment i
                 LEFT JOIN installment_line il
@@ -1432,7 +1558,7 @@ def _installment_row_dict(cur: Any, installment_id: int) -> dict[str, Any] | Non
         """
         SELECT i.id, i.name, i.installment_current, i.installment_total,
                i.principal, i.interest, i.payment_total, i.start_date, i.finish_date,
-               i.remaining, i.original_total, i.created_at,
+               i.remaining, i.original_total, i.credit_card_id, i.created_at,
                COALESCE(il.payment_total, i.payment_total) AS due_payment
         FROM installment i
         LEFT JOIN installment_line il
@@ -1486,7 +1612,7 @@ def _installment_detail(cur: Any, installment_id: int) -> dict[str, Any] | None:
             SELECT i.id, i.name, i.installment_current, i.installment_total,
                    i.principal, i.interest, i.payment_total,
                    i.start_date, i.finish_date,
-                   i.remaining, i.original_total, i.created_at,
+                   i.remaining, i.original_total, i.credit_card_id, i.created_at,
                    COALESCE(il.payment_total, i.payment_total) AS due_payment
             FROM installment i
             LEFT JOIN installment_line il
@@ -1528,6 +1654,7 @@ def insert_installment(
     finish_date: Any,
     remaining: float,
     original_total: float,
+    credit_card_id: int | None = None,
 ) -> dict[str, Any]:
     """Insert + seed lines + return ``{installment, lines}`` (skips a follow-up GET)."""
     with get_connection() as conn:
@@ -1537,8 +1664,8 @@ def insert_installment(
                 INSERT INTO installment (
                     name, installment_current, installment_total,
                     principal, interest, payment_total,
-                    start_date, finish_date, remaining, original_total
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    start_date, finish_date, remaining, original_total, credit_card_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 RETURNING id
                 """,
                 (
@@ -1552,6 +1679,7 @@ def insert_installment(
                     finish_date,
                     remaining,
                     original_total,
+                    credit_card_id,
                 ),
             )
             iid = int(cur.fetchone()[0])
@@ -1806,6 +1934,7 @@ def update_installment(
     finish_date: Any,
     remaining: float,
     original_total: float,
+    credit_card_id: int | None = None,
 ) -> dict[str, Any] | None:
     """Update + (re)seed lines if total changed + return ``{installment, lines}`` (or ``None``)."""
     with get_connection() as conn:
@@ -1828,7 +1957,8 @@ def update_installment(
                     start_date = ?,
                     finish_date = ?,
                     remaining = ?,
-                    original_total = ?
+                    original_total = ?,
+                    credit_card_id = ?
                 FROM old
                 WHERE i.id = ?
                 RETURNING old.old_total, old.line_count
@@ -1845,6 +1975,7 @@ def update_installment(
                     finish_date,
                     remaining,
                     original_total,
+                    credit_card_id,
                     installment_id,
                 ),
             )
@@ -2265,6 +2396,261 @@ def delete_fixed_expense(expense_id: int) -> bool:
         with db_cursor(conn) as cur:
             cur.execute("DELETE FROM fixed_expense WHERE id = ?", (expense_id,))
             return cur.rowcount > 0
+
+
+_MONTHLY_EXPENSE_COLS = "id, name, description, amount, period_half, created_at"
+
+
+def list_monthly_expenses(period_half: int | None = None, limit: int = 500) -> list[dict[str, Any]]:
+    limit = max(1, min(limit, 2000))
+    with get_connection() as conn:
+        with db_cursor(conn) as cur:
+            if period_half is None:
+                cur.execute(
+                    f"""
+                    SELECT {_MONTHLY_EXPENSE_COLS} FROM monthly_expense
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT ?
+                    """,
+                    (limit,),
+                )
+            else:
+                cur.execute(
+                    f"""
+                    SELECT {_MONTHLY_EXPENSE_COLS} FROM monthly_expense
+                    WHERE period_half = ?
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT ?
+                    """,
+                    (period_half, limit),
+                )
+            return [_row_to_dict(cur, r) for r in cur.fetchall()]
+
+
+def insert_monthly_expense(
+    name: str, description: str | None, amount: float, period_half: int
+) -> dict[str, Any]:
+    with get_connection() as conn:
+        with db_cursor(conn) as cur:
+            cur.execute(
+                f"""
+                INSERT INTO monthly_expense (name, description, amount, period_half)
+                VALUES (?, ?, ?, ?)
+                RETURNING {_MONTHLY_EXPENSE_COLS}
+                """,
+                (name, description, amount, period_half),
+            )
+            return _row_to_dict(cur, cur.fetchone())
+
+
+def update_monthly_expense(
+    expense_id: int, name: str, description: str | None, amount: float, period_half: int
+) -> dict[str, Any] | None:
+    with get_connection() as conn:
+        with db_cursor(conn) as cur:
+            cur.execute(
+                f"""
+                UPDATE monthly_expense
+                SET name = ?, description = ?, amount = ?, period_half = ?
+                WHERE id = ?
+                RETURNING {_MONTHLY_EXPENSE_COLS}
+                """,
+                (name, description, amount, period_half, expense_id),
+            )
+            row = cur.fetchone()
+            return _row_to_dict(cur, row) if row else None
+
+
+def delete_monthly_expense(expense_id: int) -> bool:
+    with get_connection() as conn:
+        with db_cursor(conn) as cur:
+            cur.execute("DELETE FROM monthly_expense WHERE id = ?", (expense_id,))
+            return cur.rowcount > 0
+
+
+_CREDIT_CARD_COLS = (
+    "id, name, credit_limit, last_statement_balance, current_balance, "
+    "minimum_due, interest_rate, statement_date, due_date, created_at"
+)
+
+
+def get_credit_card() -> dict[str, Any] | None:
+    """The single credit card record, if one has been set up."""
+    with get_connection() as conn:
+        with db_cursor(conn) as cur:
+            cur.execute(
+                f"SELECT {_CREDIT_CARD_COLS} FROM credit_card ORDER BY id LIMIT 1"
+            )
+            row = cur.fetchone()
+            return _row_to_dict(cur, row) if row else None
+
+
+def insert_credit_card(
+    name: str,
+    credit_limit: float,
+    last_statement_balance: float,
+    minimum_due: float,
+    interest_rate: float,
+    statement_date: Any,
+    due_date: Any,
+) -> dict[str, Any]:
+    """``current_balance`` starts equal to the statement balance being recorded."""
+    with get_connection() as conn:
+        with db_cursor(conn) as cur:
+            cur.execute(
+                f"""
+                INSERT INTO credit_card (
+                    name, credit_limit, last_statement_balance, current_balance,
+                    minimum_due, interest_rate, statement_date, due_date
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                RETURNING {_CREDIT_CARD_COLS}
+                """,
+                (
+                    name,
+                    credit_limit,
+                    last_statement_balance,
+                    last_statement_balance,
+                    minimum_due,
+                    interest_rate,
+                    statement_date,
+                    due_date,
+                ),
+            )
+            return _row_to_dict(cur, cur.fetchone())
+
+
+def update_credit_card(
+    card_id: int,
+    name: str,
+    credit_limit: float,
+    last_statement_balance: float,
+    minimum_due: float,
+    interest_rate: float,
+    statement_date: Any,
+    due_date: Any,
+) -> dict[str, Any] | None:
+    """Full replace; resets ``current_balance`` to the new statement balance (a fresh cycle)."""
+    with get_connection() as conn:
+        with db_cursor(conn) as cur:
+            cur.execute(
+                f"""
+                UPDATE credit_card SET
+                    name = ?,
+                    credit_limit = ?,
+                    last_statement_balance = ?,
+                    current_balance = ?,
+                    minimum_due = ?,
+                    interest_rate = ?,
+                    statement_date = ?,
+                    due_date = ?
+                WHERE id = ?
+                RETURNING {_CREDIT_CARD_COLS}
+                """,
+                (
+                    name,
+                    credit_limit,
+                    last_statement_balance,
+                    last_statement_balance,
+                    minimum_due,
+                    interest_rate,
+                    statement_date,
+                    due_date,
+                    card_id,
+                ),
+            )
+            row = cur.fetchone()
+            return _row_to_dict(cur, row) if row else None
+
+
+def adjust_credit_card_balance(
+    card_id: int, current_balance: float
+) -> dict[str, Any] | None:
+    """
+    Directly set ``current_balance`` without touching the statement fields.
+
+    Used to reconcile against the bank's real available credit when purchases
+    or other transactions happened that this app never recorded as payments.
+    """
+    with get_connection() as conn:
+        with db_cursor(conn) as cur:
+            cur.execute(
+                f"""
+                UPDATE credit_card SET current_balance = ?
+                WHERE id = ?
+                RETURNING {_CREDIT_CARD_COLS}
+                """,
+                (current_balance, card_id),
+            )
+            row = cur.fetchone()
+            return _row_to_dict(cur, row) if row else None
+
+
+def delete_credit_card(card_id: int) -> bool:
+    with get_connection() as conn:
+        with db_cursor(conn) as cur:
+            cur.execute("DELETE FROM credit_card WHERE id = ?", (card_id,))
+            return cur.rowcount > 0
+
+
+_CREDIT_CARD_PAYMENT_COLS = "id, credit_card_id, amount, payment_date, note, created_at"
+
+
+def list_credit_card_payments(credit_card_id: int) -> list[dict[str, Any]]:
+    with get_connection() as conn:
+        with db_cursor(conn) as cur:
+            cur.execute(
+                f"""
+                SELECT {_CREDIT_CARD_PAYMENT_COLS} FROM credit_card_payment
+                WHERE credit_card_id = ?
+                ORDER BY payment_date DESC, id DESC
+                """,
+                (credit_card_id,),
+            )
+            return [_row_to_dict(cur, r) for r in cur.fetchall()]
+
+
+def insert_credit_card_payment(
+    credit_card_id: int, amount: float, payment_date: Any, note: str | None
+) -> dict[str, Any] | None:
+    """Insert the payment and decrement the card's ``current_balance`` in one transaction."""
+    with get_connection() as conn:
+        with db_cursor(conn) as cur:
+            cur.execute("SELECT 1 FROM credit_card WHERE id = ?", (credit_card_id,))
+            if not cur.fetchone():
+                return None
+            cur.execute(
+                f"""
+                INSERT INTO credit_card_payment (credit_card_id, amount, payment_date, note)
+                VALUES (?, ?, ?, ?)
+                RETURNING {_CREDIT_CARD_PAYMENT_COLS}
+                """,
+                (credit_card_id, amount, payment_date, note),
+            )
+            payment = _row_to_dict(cur, cur.fetchone())
+            cur.execute(
+                "UPDATE credit_card SET current_balance = current_balance - ? WHERE id = ?",
+                (amount, credit_card_id),
+            )
+            return payment
+
+
+def delete_credit_card_payment(payment_id: int) -> bool:
+    """Delete the payment and restore its amount to the card's balance."""
+    with get_connection() as conn:
+        with db_cursor(conn) as cur:
+            cur.execute(
+                "DELETE FROM credit_card_payment WHERE id = ? RETURNING credit_card_id, amount",
+                (payment_id,),
+            )
+            row = cur.fetchone()
+            if not row:
+                return False
+            credit_card_id, amount = row
+            cur.execute(
+                "UPDATE credit_card SET current_balance = current_balance + ? WHERE id = ?",
+                (amount, credit_card_id),
+            )
+            return True
 
 
 _CALENDAR_DAY_OVERRIDE_COLS = "id, day, amount, created_at"

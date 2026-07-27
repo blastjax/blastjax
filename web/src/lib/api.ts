@@ -68,7 +68,7 @@ async function getJson<T>(path: string, query?: Record<string, string | number |
 }
 
 async function sendJson<T>(
-  method: "POST" | "PUT" | "DELETE",
+  method: "POST" | "PUT" | "PATCH" | "DELETE",
   path: string,
   body?: unknown,
 ) {
@@ -187,6 +187,7 @@ export type InstallmentRow = {
   finish_date: string;
   remaining: number;
   original_total: number;
+  credit_card_id: number | null;
   created_at: string;
   due_payment?: number;
 };
@@ -221,6 +222,7 @@ export type InstallmentCreateBody = {
   finish_date: string;
   remaining?: number | null;
   original_total?: number | null;
+  credit_card_id?: number | null;
 };
 
 export async function getInstallments(limit?: number) {
@@ -480,6 +482,40 @@ export async function deleteFixedExpense(id: number) {
   return sendJson<{ ok: boolean }>("DELETE", `/api/fixed-expense/${id}`);
 }
 
+export type MonthlyExpenseRow = {
+  id: number;
+  name: string;
+  description: string | null;
+  amount: number;
+  period_half: number;
+  created_at: string;
+};
+
+export type MonthlyExpenseCreateBody = {
+  name: string;
+  description?: string | null;
+  amount: number;
+  period_half: 1 | 2;
+};
+
+export async function getMonthlyExpenses(periodHalf?: 1 | 2) {
+  return getJson<{ expenses: MonthlyExpenseRow[] }>("/api/monthly-expense", {
+    period_half: periodHalf,
+  });
+}
+
+export async function createMonthlyExpense(body: MonthlyExpenseCreateBody) {
+  return sendJson<{ expense: MonthlyExpenseRow }>("POST", "/api/monthly-expense", body);
+}
+
+export async function updateMonthlyExpense(id: number, body: MonthlyExpenseCreateBody) {
+  return sendJson<{ expense: MonthlyExpenseRow }>("PUT", `/api/monthly-expense/${id}`, body);
+}
+
+export async function deleteMonthlyExpense(id: number) {
+  return sendJson<{ ok: boolean }>("DELETE", `/api/monthly-expense/${id}`);
+}
+
 export type CalendarDayOverrideRow = {
   id: number;
   day: string;
@@ -507,4 +543,91 @@ export async function getLatestTransactionTime() {
     local_ts: string | null;
     cloud_ts: string | null;
   }>("/api/sync/latest-transaction");
+}
+
+export type CreditCardRow = {
+  id: number;
+  name: string;
+  credit_limit: number;
+  last_statement_balance: number;
+  current_balance: number;
+  available_limit: number;
+  minimum_due: number;
+  interest_rate: number;
+  statement_date: string | null;
+  due_date: string | null;
+  monthly_dues: number;
+  created_at: string;
+};
+
+export type CreditCardPaymentRow = {
+  id: number;
+  credit_card_id: number;
+  amount: number;
+  payment_date: string;
+  note: string | null;
+  created_at: string;
+};
+
+export type CreditCardCreateBody = {
+  name: string;
+  credit_limit: number;
+  last_statement_balance: number;
+  minimum_due: number;
+  interest_rate: number;
+  statement_date?: string | null;
+  due_date?: string | null;
+};
+
+export type CreditCardPaymentCreateBody = {
+  amount: number;
+  payment_date: string;
+  note?: string | null;
+};
+
+export type CreditCardResponse = {
+  card: CreditCardRow | null;
+  installments: InstallmentRow[];
+  payments: CreditCardPaymentRow[];
+};
+
+export async function getCreditCard() {
+  return getJson<CreditCardResponse>("/api/credit-card");
+}
+
+export async function createCreditCard(body: CreditCardCreateBody) {
+  return sendJson<{ card: CreditCardRow }>("POST", "/api/credit-card", body);
+}
+
+export async function updateCreditCard(id: number, body: CreditCardCreateBody) {
+  return sendJson<{ card: CreditCardRow }>("PUT", `/api/credit-card/${id}`, body);
+}
+
+export async function deleteCreditCard(id: number) {
+  return sendJson<{ ok: boolean }>("DELETE", `/api/credit-card/${id}`);
+}
+
+/** Directly correct available credit, e.g. for purchases this app never recorded. */
+export async function adjustCreditCardBalance(id: number, availableLimit: number) {
+  return sendJson<{ card: CreditCardRow }>("PATCH", `/api/credit-card/${id}/balance`, {
+    available_limit: availableLimit,
+  });
+}
+
+export async function createCreditCardPayment(
+  cardId: number,
+  body: CreditCardPaymentCreateBody,
+) {
+  return sendJson<{ payment: CreditCardPaymentRow; card: CreditCardRow }>(
+    "POST",
+    `/api/credit-card/${cardId}/payments`,
+    body,
+  );
+}
+
+export async function deleteCreditCardPayment(paymentId: number) {
+  return sendJson<{ ok: boolean; card: CreditCardRow | null }>(
+    "DELETE",
+    `/api/credit-card/payments/${paymentId}`,
+  );
 }

@@ -6,6 +6,7 @@ import { Modal } from "@/components/Modal";
 import {
   createInstallment,
   deleteInstallment,
+  getCreditCard,
   getInstallment,
   getInstallments,
   getInstallmentSchedules,
@@ -185,6 +186,8 @@ export default function InstallmentsClient() {
     InstallmentDetailResponse[]
   >([]);
   const [showArchived, setShowArchived] = useState(false);
+  const [cardId, setCardId] = useState<number | null>(null);
+  const [linkToCard, setLinkToCard] = useState(false);
 
   const load = useCallback(async () => {
     setError(null);
@@ -197,6 +200,17 @@ export default function InstallmentsClient() {
     } finally {
       setLoading(false);
     }
+  }, []);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const r = await getCreditCard();
+        setCardId(r.card?.id ?? null);
+      } catch {
+        setCardId(null);
+      }
+    })();
   }, []);
 
   const activeRows = useMemo(
@@ -250,6 +264,7 @@ export default function InstallmentsClient() {
   const closeAddModal = useCallback(() => {
     setAddModalOpen(false);
     setForm(emptyForm);
+    setLinkToCard(false);
   }, []);
 
   useEffect(() => {
@@ -578,6 +593,7 @@ export default function InstallmentsClient() {
           form.original_total.trim() === ""
             ? null
             : parseFormNumber(form.original_total),
+        credit_card_id: linkToCard && cardId != null ? cardId : null,
       };
       const fresh =
         editingId != null
@@ -586,6 +602,7 @@ export default function InstallmentsClient() {
       if (editingId != null) setEditingId(null);
       else setAddModalOpen(false);
       setForm(emptyForm);
+      setLinkToCard(false);
       upsertRow(fresh.installment);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Save failed");
@@ -609,12 +626,14 @@ export default function InstallmentsClient() {
       remaining: String(r.remaining),
       original_total: String(r.original_total),
     });
+    setLinkToCard(r.credit_card_id != null);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   const cancelEdit = () => {
     setEditingId(null);
     setForm(emptyForm);
+    setLinkToCard(false);
   };
 
   const onPay = async (id: number) => {
@@ -738,6 +757,17 @@ export default function InstallmentsClient() {
               setForm={setForm}
               saving={saving}
             />
+            {cardId != null && (
+              <label className="flex items-center gap-2 text-sm sm:col-span-2">
+                <input
+                  type="checkbox"
+                  checked={linkToCard}
+                  onChange={(e) => setLinkToCard(e.target.checked)}
+                  disabled={saving}
+                />
+                <span className="text-zinc-600 dark:text-zinc-400">On my credit card</span>
+              </label>
+            )}
             <div className="flex flex-wrap gap-2 sm:col-span-2">
               <button
                 type="submit"
@@ -786,6 +816,17 @@ export default function InstallmentsClient() {
             saving={saving}
             hideAmounts
           />
+          {cardId != null && (
+            <label className="flex items-center gap-2 text-sm sm:col-span-2">
+              <input
+                type="checkbox"
+                checked={linkToCard}
+                onChange={(e) => setLinkToCard(e.target.checked)}
+                disabled={saving}
+              />
+              <span className="text-zinc-600 dark:text-zinc-400">On my credit card</span>
+            </label>
+          )}
           <div className="flex flex-wrap gap-2 sm:col-span-2">
             <button
               type="submit"

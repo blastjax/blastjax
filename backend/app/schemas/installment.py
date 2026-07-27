@@ -18,6 +18,7 @@ class InstallmentCreate(BaseModel):
     finish_date: dt.date
     remaining: float | None = None
     original_total: float | None = Field(default=None, gt=0)
+    credit_card_id: int | None = None
 
 
 class InstallmentLineUpdate(BaseModel):

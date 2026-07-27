@@ -21,6 +21,8 @@ const NAV_SEGMENTS: readonly { title: string | null; links: readonly NavLink[] }
       { href: "/commission", label: "Commission" },
       { href: "/installments", label: "Installments" },
       { href: "/house-payments", label: "House Payments" },
+      { href: "/monthly-expenses", label: "Monthly Expenses" },
+      { href: "/credit-card", label: "Credit Card" },
     ],
   },
   {

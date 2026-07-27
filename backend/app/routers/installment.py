@@ -115,6 +115,7 @@ def installment_create(body: InstallmentCreate) -> dict[str, Any]:
         body.finish_date,
         rem,
         orig,
+        body.credit_card_id,
     )
     return _serialize_detail(detail)
 
@@ -189,6 +190,7 @@ def installment_replace(installment_id: int, body: InstallmentCreate) -> dict[st
         body.finish_date,
         rem,
         orig,
+        body.credit_card_id,
     )
     if detail is None:
         raise HTTPException(status_code=404, detail="Installment not found.")

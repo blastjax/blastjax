@@ -51,6 +51,20 @@ def _installment_due_this_month(
     return due.year == today.year and due.month == today.month
 
 
+def is_installment_due_this_month(r: dict[str, Any]) -> bool:
+    """Whether ``r``'s next unpaid payment is due this month and still owed."""
+    start = _coerce_date(r.get("start_date"))
+    cur = int(r.get("installment_current") or 0)
+    total = int(r.get("installment_total") or 0)
+    rem = float(r.get("remaining") or 0)
+    return (
+        start is not None
+        and 1 <= cur <= total
+        and rem > 0
+        and _installment_due_this_month(start, cur, total)
+    )
+
+
 def serialize_installment_row(r: dict[str, Any]) -> dict[str, Any]:
     out = dict(r)
     for key in ("start_date", "finish_date", "created_at"):

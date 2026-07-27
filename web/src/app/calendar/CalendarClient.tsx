@@ -8,15 +8,19 @@ import {
   type DragEvent,
   type FormEvent,
 } from "react";
+import Link from "next/link";
 import { Modal } from "@/components/Modal";
 import {
   bulkUpsertCalendarDayOverrides,
   createFixedExpense,
   deleteFixedExpense,
+  deleteMonthlyExpense,
   getCalendarDayOverrides,
   getFixedExpenses,
+  getMonthlyExpenses,
   getPayslips,
   type FixedExpenseRow,
+  type MonthlyExpenseRow,
   type PayslipRow,
 } from "@/lib/api";
 import { formatMonthYear } from "@/lib/dateFormat";
@@ -90,6 +94,7 @@ export default function CalendarClient() {
   const [lastFirstHalfPayslip, setLastFirstHalfPayslip] = useState<PayslipRow | null>(null);
   const [lastSecondHalfPayslip, setLastSecondHalfPayslip] = useState<PayslipRow | null>(null);
   const [fixedExpenses, setFixedExpenses] = useState<FixedExpenseRow[]>([]);
+  const [monthlyExpenses, setMonthlyExpenses] = useState<MonthlyExpenseRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -109,6 +114,11 @@ export default function CalendarClient() {
   const loadExpenses = useCallback(async () => {
     const r = await getFixedExpenses();
     setFixedExpenses(r.expenses);
+  }, []);
+
+  const loadMonthlyExpenses = useCallback(async () => {
+    const r = await getMonthlyExpenses();
+    setMonthlyExpenses(r.expenses);
   }, []);
 
   const loadOverrides = useCallback(async () => {
@@ -136,6 +146,12 @@ export default function CalendarClient() {
       setFixedExpenses([]);
     }
     try {
+      await loadMonthlyExpenses();
+    } catch (e) {
+      firstError ??= e instanceof Error ? e.message : "Failed to load monthly expenses";
+      setMonthlyExpenses([]);
+    }
+    try {
       await loadOverrides();
     } catch (e) {
       firstError ??= e instanceof Error ? e.message : "Failed to load day overrides";
@@ -143,7 +159,7 @@ export default function CalendarClient() {
     }
     setError(firstError);
     setLoading(false);
-  }, [loadExpenses, loadOverrides]);
+  }, [loadExpenses, loadMonthlyExpenses, loadOverrides]);
 
   useEffect(() => {
     void load();
@@ -171,6 +187,25 @@ export default function CalendarClient() {
     [expensesByHalf],
   );
 
+  /**
+   * Unlike fixed expenses (scoped to the payslip half that funds a calendar
+   * half, see payslipHalfFor), monthly expenses are entered directly against
+   * the calendar half they should reduce — no pay-lag conversion.
+   */
+  const monthlyExpensesByHalf = useMemo(() => {
+    const map: Record<PeriodHalf, MonthlyExpenseRow[]> = { 1: [], 2: [] };
+    for (const e of monthlyExpenses) {
+      if (e.period_half === 1 || e.period_half === 2) map[e.period_half].push(e);
+    }
+    return map;
+  }, [monthlyExpenses]);
+
+  const monthlyExpensesTotal = useCallback(
+    (calendarHalf: PeriodHalf) =>
+      monthlyExpensesByHalf[calendarHalf].reduce((s, e) => s + e.amount, 0),
+    [monthlyExpensesByHalf],
+  );
+
   const netPayFor = useCallback(
     (calendarHalf: PeriodHalf): number | null =>
       (payslipHalfFor(calendarHalf) === 1 ? lastFirstHalfPayslip : lastSecondHalfPayslip)?.total ??
@@ -181,9 +216,9 @@ export default function CalendarClient() {
   const netAfterExpenses = useCallback(
     (half: PeriodHalf): number | null => {
       const net = netPayFor(half);
-      return net != null ? net - expensesTotal(half) : null;
+      return net != null ? net - expensesTotal(half) - monthlyExpensesTotal(half) : null;
     },
-    [netPayFor, expensesTotal],
+    [netPayFor, expensesTotal, monthlyExpensesTotal],
   );
 
   const firstHalfNetAfter = netAfterExpenses(1);
@@ -362,10 +397,27 @@ export default function CalendarClient() {
     [loadExpenses],
   );
 
+  const onDeleteMonthlyExpense = useCallback(
+    async (id: number) => {
+      setExpenseError(null);
+      try {
+        await deleteMonthlyExpense(id);
+        await loadMonthlyExpenses();
+      } catch (err) {
+        setExpenseError(err instanceof Error ? err.message : "Failed to delete expense");
+      }
+    },
+    [loadMonthlyExpenses],
+  );
+
   const modalExpenses =
     expenseModalHalf != null ? expensesByHalf[payslipHalfFor(expenseModalHalf)] : [];
+  const modalMonthlyExpenses =
+    expenseModalHalf != null ? monthlyExpensesByHalf[expenseModalHalf] : [];
   const modalNetPay = expenseModalHalf != null ? netPayFor(expenseModalHalf) : null;
   const modalExpensesTotal = expenseModalHalf != null ? expensesTotal(expenseModalHalf) : 0;
+  const modalMonthlyExpensesTotal =
+    expenseModalHalf != null ? monthlyExpensesTotal(expenseModalHalf) : 0;
   const modalNetAfter = expenseModalHalf != null ? netAfterExpenses(expenseModalHalf) : null;
 
   return (
@@ -395,8 +447,8 @@ export default function CalendarClient() {
               Last net pay
             </h2>
             <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-              Most recent recorded payslip total for each pay period, minus any fixed expenses.
-              Click a card to manage its fixed expenses.
+              Most recent recorded payslip total for each pay period, minus any fixed and monthly
+              expenses. Click a card to view its expenses.
             </p>
             <div className="mt-5 grid gap-4 sm:grid-cols-2">
               {([1, 2] as const).map((half) => {
@@ -404,6 +456,7 @@ export default function CalendarClient() {
                   payslipHalfFor(half) === 1 ? lastFirstHalfPayslip : lastSecondHalfPayslip;
                 const netAfter = half === 1 ? firstHalfNetAfter : secondHalfNetAfter;
                 const total = expensesTotal(half);
+                const monthlyTotal = monthlyExpensesTotal(half);
                 return (
                   <button
                     key={half}
@@ -427,8 +480,13 @@ export default function CalendarClient() {
                         −{fmtMoney(total)} fixed expenses
                       </p>
                     )}
+                    {monthlyTotal > 0 && (
+                      <p className="mt-1 text-xs text-red-600 dark:text-red-400">
+                        −{fmtMoney(monthlyTotal)} monthly expenses
+                      </p>
+                    )}
                     <p className="mt-2 text-[11px] font-medium text-emerald-700 group-hover:underline dark:text-emerald-400">
-                      Manage fixed expenses →
+                      View expenses →
                     </p>
                   </button>
                 );
@@ -557,11 +615,12 @@ export default function CalendarClient() {
               id="fixed-expense-title"
               className="truncate text-lg font-semibold text-zinc-900 dark:text-zinc-50"
             >
-              Fixed expenses —{" "}
+              Expenses —{" "}
               {expenseModalHalf === 1 ? `1st–${FIRST_HALF_DAYS}th` : "16th–end of month"}
             </h2>
             <p className="mt-0.5 text-xs text-zinc-600 dark:text-zinc-400">
-              Subtracted from this period&apos;s net pay and its calendar daily budget only.
+              Fixed and monthly expenses subtracted from this period&apos;s net pay and its
+              calendar daily budget.
             </p>
           </div>
           <button
@@ -574,7 +633,7 @@ export default function CalendarClient() {
         </div>
 
         <div className="min-h-0 flex-1 overflow-auto p-4">
-          <div className="mb-4 grid grid-cols-3 gap-3 rounded-lg border border-zinc-200 p-3 text-sm dark:border-zinc-800">
+          <div className="mb-4 grid grid-cols-2 gap-3 rounded-lg border border-zinc-200 p-3 text-sm sm:grid-cols-4 dark:border-zinc-800">
             <div>
               <p className="text-[11px] uppercase text-zinc-500 dark:text-zinc-400">Net pay</p>
               <p className="mt-1 font-semibold tabular-nums text-zinc-800 dark:text-zinc-100">
@@ -582,9 +641,19 @@ export default function CalendarClient() {
               </p>
             </div>
             <div>
-              <p className="text-[11px] uppercase text-zinc-500 dark:text-zinc-400">Expenses</p>
+              <p className="text-[11px] uppercase text-zinc-500 dark:text-zinc-400">
+                Fixed expenses
+              </p>
               <p className="mt-1 font-semibold tabular-nums text-red-600 dark:text-red-400">
                 −{fmtMoney(modalExpensesTotal)}
+              </p>
+            </div>
+            <div>
+              <p className="text-[11px] uppercase text-zinc-500 dark:text-zinc-400">
+                Monthly expenses
+              </p>
+              <p className="mt-1 font-semibold tabular-nums text-red-600 dark:text-red-400">
+                −{fmtMoney(modalMonthlyExpensesTotal)}
               </p>
             </div>
             <div>
@@ -660,6 +729,59 @@ export default function CalendarClient() {
                         type="button"
                         className="rounded-md border border-red-200 px-2 py-1 text-xs text-red-700 dark:border-red-900 dark:text-red-300"
                         onClick={() => void onDeleteExpense(exp.id)}
+                      >
+                        Delete
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+
+          <div className="mt-6 flex items-center justify-between gap-2">
+            <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">
+              Monthly expenses
+            </h3>
+            <Link
+              href="/monthly-expenses"
+              className="text-xs font-medium text-indigo-600 hover:underline dark:text-indigo-400"
+            >
+              Manage monthly expenses →
+            </Link>
+          </div>
+
+          {modalMonthlyExpenses.length === 0 ? (
+            <p className="mt-2 text-sm text-zinc-800 dark:text-zinc-200">
+              No monthly expenses yet for this period.
+            </p>
+          ) : (
+            <table className="mt-2 w-full table-fixed text-left text-sm">
+              <thead>
+                <tr className="border-b border-zinc-200 text-xs uppercase text-zinc-500 dark:border-zinc-800">
+                  <th className="w-1/3 pb-2 pr-2">Name</th>
+                  <th className="w-1/4 pb-2 pr-2">Description</th>
+                  <th className="w-1/5 pb-2 pr-2 text-right">Amount</th>
+                  <th className="w-1/5 pb-2 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {modalMonthlyExpenses.map((exp) => (
+                  <tr key={exp.id} className="border-b border-zinc-100 dark:border-zinc-800">
+                    <td className="py-2 pr-2 text-zinc-800 dark:text-zinc-200">
+                      <span className="block truncate">{exp.name}</span>
+                    </td>
+                    <td className="py-2 pr-2 text-zinc-800 dark:text-zinc-200">
+                      <span className="block truncate">{exp.description || "—"}</span>
+                    </td>
+                    <td className="py-2 pr-2 text-right tabular-nums font-medium">
+                      {fmtMoney(exp.amount)}
+                    </td>
+                    <td className="py-2 text-right">
+                      <button
+                        type="button"
+                        className="rounded-md border border-red-200 px-2 py-1 text-xs text-red-700 dark:border-red-900 dark:text-red-300"
+                        onClick={() => void onDeleteMonthlyExpense(exp.id)}
                       >
                         Delete
                       </button>
