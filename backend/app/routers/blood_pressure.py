@@ -54,6 +54,7 @@ def blood_pressure_create(body: BloodPressureCreate) -> dict[str, Any]:
         body.systolic, body.diastolic, body.pulse, body.spo2,
         body.temperature, body.weight, _clean_notes(body.notes)
     )
+    cache.invalidate("bp")
     return {"reading": _serialize(row)}
 
 
@@ -73,6 +74,7 @@ def blood_pressure_replace(
     )
     if row is None:
         raise HTTPException(status_code=404, detail="Reading not found.")
+    cache.invalidate("bp")
     return {"reading": _serialize(row)}
 
 
@@ -80,4 +82,5 @@ def blood_pressure_replace(
 def blood_pressure_remove(reading_id: int) -> dict[str, Any]:
     if not delete_blood_pressure(reading_id):
         raise HTTPException(status_code=404, detail="Reading not found.")
+    cache.invalidate("bp")
     return {"ok": True}

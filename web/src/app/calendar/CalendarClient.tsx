@@ -467,7 +467,10 @@ export default function CalendarClient() {
                     <p className="text-[11px] font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-400">
                       {half === 1 ? `1st–${FIRST_HALF_DAYS}th` : "16th–end of month"}
                     </p>
-                    <p className="mt-2 text-2xl font-bold tabular-nums text-emerald-800 dark:text-emerald-200">
+                    <p className="mt-2 text-sm font-medium tabular-nums text-emerald-700 dark:text-emerald-300">
+                      {payslip?.total != null ? fmtMoney(payslip.total) : "–"} net pay
+                    </p>
+                    <p className="text-2xl font-bold tabular-nums text-emerald-800 dark:text-emerald-200">
                       {netAfter != null ? fmtMoney(netAfter) : "–"}
                     </p>
                     <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">

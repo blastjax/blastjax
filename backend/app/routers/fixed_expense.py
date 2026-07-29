@@ -46,6 +46,7 @@ def fixed_expense_list(
 @router.post("/api/fixed-expense")
 def fixed_expense_create(body: FixedExpenseCreate) -> dict[str, Any]:
     row = insert_fixed_expense(body.period_half, body.amount, _clean_description(body.description))
+    cache.invalidate("fixed_expense")
     return {"expense": _serialize(row)}
 
 
@@ -53,4 +54,5 @@ def fixed_expense_create(body: FixedExpenseCreate) -> dict[str, Any]:
 def fixed_expense_remove(expense_id: int) -> dict[str, Any]:
     if not delete_fixed_expense(expense_id):
         raise HTTPException(status_code=404, detail="Expense not found.")
+    cache.invalidate("fixed_expense")
     return {"ok": True}

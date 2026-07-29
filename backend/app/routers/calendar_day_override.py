@@ -38,4 +38,5 @@ def calendar_day_override_list() -> dict[str, Any]:
 @router.put("/api/calendar-day-override/bulk")
 def calendar_day_override_bulk(body: CalendarDayOverrideBulkUpsert) -> dict[str, Any]:
     rows = upsert_calendar_day_overrides([(o.day, o.amount) for o in body.overrides])
+    cache.invalidate("calendar_day_override")
     return {"overrides": [_serialize(r) for r in rows]}
