@@ -129,31 +129,36 @@ export default function CalendarClient() {
   const load = useCallback(async () => {
     setError(null);
     setLoading(true);
+    const [payslipResult, expensesResult, monthlyExpensesResult, overridesResult] =
+      await Promise.allSettled([
+        getPayslips(12),
+        loadExpenses(),
+        loadMonthlyExpenses(),
+        loadOverrides(),
+      ]);
     let firstError: string | null = null;
-    try {
-      const r = await getPayslips(12);
+    if (payslipResult.status === "fulfilled") {
+      const r = payslipResult.value;
       setLastFirstHalfPayslip(r.payslips.find((p) => p.period_half === 1) ?? null);
       setLastSecondHalfPayslip(r.payslips.find((p) => p.period_half === 2) ?? null);
-    } catch (e) {
+    } else {
+      const e = payslipResult.reason;
       firstError = e instanceof Error ? e.message : "Failed to load last salary";
       setLastFirstHalfPayslip(null);
       setLastSecondHalfPayslip(null);
     }
-    try {
-      await loadExpenses();
-    } catch (e) {
+    if (expensesResult.status === "rejected") {
+      const e = expensesResult.reason;
       firstError ??= e instanceof Error ? e.message : "Failed to load fixed expenses";
       setFixedExpenses([]);
     }
-    try {
-      await loadMonthlyExpenses();
-    } catch (e) {
+    if (monthlyExpensesResult.status === "rejected") {
+      const e = monthlyExpensesResult.reason;
       firstError ??= e instanceof Error ? e.message : "Failed to load monthly expenses";
       setMonthlyExpenses([]);
     }
-    try {
-      await loadOverrides();
-    } catch (e) {
+    if (overridesResult.status === "rejected") {
+      const e = overridesResult.reason;
       firstError ??= e instanceof Error ? e.message : "Failed to load day overrides";
       setDayOverrides(new Map());
     }

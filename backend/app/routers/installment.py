@@ -118,6 +118,7 @@ def installment_create(body: InstallmentCreate) -> dict[str, Any]:
         body.credit_card_id,
     )
     cache.invalidate("installment")
+    cache.invalidate("credit_card")
     return _serialize_detail(detail)
 
 
@@ -157,6 +158,7 @@ def installment_line_update(
     if not detail:
         raise HTTPException(status_code=404, detail="Schedule line not found.")
     cache.invalidate("installment")
+    cache.invalidate("credit_card")
     return _serialize_detail(detail)
 
 
@@ -175,6 +177,7 @@ def installment_lines_reorder(
             detail="line_ids must list every schedule row id for this installment exactly once.",
         )
     cache.invalidate("installment")
+    cache.invalidate("credit_card")
     return _serialize_detail(detail)
 
 
@@ -198,6 +201,7 @@ def installment_replace(installment_id: int, body: InstallmentCreate) -> dict[st
     if detail is None:
         raise HTTPException(status_code=404, detail="Installment not found.")
     cache.invalidate("installment")
+    cache.invalidate("credit_card")
     return _serialize_detail(detail)
 
 
@@ -206,6 +210,7 @@ def installment_remove(installment_id: int) -> dict[str, Any]:
     if not delete_installment(installment_id):
         raise HTTPException(status_code=404, detail="Installment not found.")
     cache.invalidate("installment")
+    cache.invalidate("credit_card")
     return {"ok": True}
 
 
@@ -219,4 +224,5 @@ def installment_pay(installment_id: int) -> dict[str, Any]:
             detail="Cannot record payment (not found, already complete, or no balance).",
         )
     cache.invalidate("installment")
+    cache.invalidate("credit_card")
     return {"installment": serialize_installment_row(row)}

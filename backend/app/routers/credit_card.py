@@ -6,6 +6,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 
+import cache
 from app.deps import require_db
 from app.schemas.credit_card import (
     CreditCardBalanceAdjust,
@@ -70,18 +71,26 @@ def _monthly_dues(card: dict[str, Any], installments: list[dict[str, Any]]) -> f
 
 @router.get("/api/credit-card")
 def credit_card_get() -> dict[str, Any]:
+    key = "credit_card:get"
+    hit = cache.get(key)
+    if hit is not None:
+        return hit
     card = get_credit_card()
     if not card:
-        return {"card": None, "installments": [], "payments": []}
+        result = {"card": None, "installments": [], "payments": []}
+        cache.set(key, result)
+        return result
     installments = list_installments(limit=2000, credit_card_id=card["id"])
     payments = list_credit_card_payments(card["id"])
     serialized_card = _serialize_card(card)
     serialized_card["monthly_dues"] = _monthly_dues(card, installments)
-    return {
+    result = {
         "card": serialized_card,
         "installments": [serialize_installment_row(r) for r in installments],
         "payments": [_serialize_payment(p) for p in payments],
     }
+    cache.set(key, result)
+    return result
 
 
 @router.post("/api/credit-card")
@@ -97,6 +106,7 @@ def credit_card_create(body: CreditCardCreate) -> dict[str, Any]:
         body.statement_date,
         body.due_date,
     )
+    cache.invalidate("credit_card")
     return {"card": _serialize_card(row)}
 
 
@@ -114,6 +124,7 @@ def credit_card_replace(card_id: int, body: CreditCardCreate) -> dict[str, Any]:
     )
     if row is None:
         raise HTTPException(status_code=404, detail="Credit card not found.")
+    cache.invalidate("credit_card")
     return {"card": _serialize_card(row)}
 
 
@@ -127,6 +138,7 @@ def credit_card_adjust_balance(
     credit_limit = float(card.get("credit_limit") or 0)
     row = adjust_credit_card_balance(card_id, credit_limit - body.available_limit)
     assert row is not None
+    cache.invalidate("credit_card")
     return {"card": _serialize_card(row)}
 
 
@@ -134,6 +146,7 @@ def credit_card_adjust_balance(
 def credit_card_remove(card_id: int) -> dict[str, Any]:
     if not delete_credit_card(card_id):
         raise HTTPException(status_code=404, detail="Credit card not found.")
+    cache.invalidate("credit_card")
     return {"ok": True}
 
 
@@ -148,6 +161,7 @@ def credit_card_payment_create(
         raise HTTPException(status_code=404, detail="Credit card not found.")
     card = get_credit_card()
     assert card is not None
+    cache.invalidate("credit_card")
     return {"payment": _serialize_payment(payment), "card": _serialize_card(card)}
 
 
@@ -156,4 +170,5 @@ def credit_card_payment_remove(payment_id: int) -> dict[str, Any]:
     if not delete_credit_card_payment(payment_id):
         raise HTTPException(status_code=404, detail="Payment not found.")
     card = get_credit_card()
+    cache.invalidate("credit_card")
     return {"ok": True, "card": _serialize_card(card) if card else None}

@@ -1053,12 +1053,18 @@ def _migrate_installment_credit_card_id(cur: Any) -> None:
         END $$;
         """
     )
+    cur.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_installment_credit_card_id
+            ON installment (credit_card_id)
+        """
+    )
 
 
 # Bump this whenever the DDL or migrations below change. ``init_schema()``
 # uses it to skip the entire migration block on warm starts (very common
 # on Neon, where containers cold-start often).
-_SCHEMA_VERSION = 15
+_SCHEMA_VERSION = 16
 
 
 def init_schema() -> None:
