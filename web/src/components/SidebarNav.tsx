@@ -8,7 +8,7 @@ const sidebarNavInactiveHover =
 import { useShellLayout } from "@/lib/shellLayoutContext";
 import { useLgUp } from "@/lib/useLgUp";
 
-type NavLink = { href: string; label: string };
+type NavLink = { href: string; label: string; indent?: boolean };
 
 /** Other routes still exist; only these appear in the shell nav. */
 const NAV_SEGMENTS: readonly { title: string | null; links: readonly NavLink[] }[] = [
@@ -16,18 +16,18 @@ const NAV_SEGMENTS: readonly { title: string | null; links: readonly NavLink[] }
     title: "Finances",
     links: [
       { href: "/calendar", label: "Calendar" },
+      { href: "/monthly-expenses", label: "Monthly Expenses", indent: true },
+      { href: "/credit-card", label: "Credit Card", indent: true },
+      { href: "/installments", label: "Installments", indent: true },
+      { href: "/house-payments", label: "House Payments", indent: true },
       { href: "/payslip", label: "Payslip" },
-      { href: "/salary-stats", label: "Salary Stats" },
-      { href: "/commission", label: "Commission" },
-      { href: "/installments", label: "Installments" },
-      { href: "/house-payments", label: "House Payments" },
-      { href: "/monthly-expenses", label: "Monthly Expenses" },
-      { href: "/credit-card", label: "Credit Card" },
+      { href: "/commission", label: "Commission", indent: true },
+      { href: "/salary-stats", label: "Salary Stats", indent: true },
     ],
   },
   {
     title: "Health",
-    links: [{ href: "/blood-pressure", label: "Blood Pressure" }],
+    links: [{ href: "/blood-pressure", label: "Overall Health" }],
   },
   {
     title: null,
@@ -101,14 +101,16 @@ export function SidebarNav() {
                   {segment.title}
                 </h2>
               ) : null}
-              {segment.links.map(({ href, label }) => {
+              {segment.links.map(({ href, label, indent }) => {
                 const active = activeHref === href;
                 return (
                   <Link
                     key={href}
                     href={href}
                     onClick={closeMobileNav}
-                    className={`rounded-lg px-3 py-2.5 text-sm font-medium transition ${
+                    className={`rounded-lg py-2.5 text-sm font-medium transition ${
+                      indent ? "pl-6 pr-3" : "px-3"
+                    } ${
                       active
                         ? "bg-indigo-100 text-indigo-900 dark:bg-indigo-950/80 dark:text-indigo-100"
                         : `text-zinc-700 dark:text-zinc-300 ${sidebarNavInactiveHover}`

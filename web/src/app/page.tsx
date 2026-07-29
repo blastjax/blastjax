@@ -2,7 +2,7 @@ import Link from "next/link";
 
 const HOME_TILES = [
   {
-    href: "/payslip",
+    href: "/calendar",
     title: "Finances",
     description: "Payslips, salary stats, installments & house payments",
     className:
