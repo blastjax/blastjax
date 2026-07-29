@@ -140,10 +140,10 @@ export function grossTotalFromRow(r: PayslipRow): number {
   return (
     num(r.basic_salary) +
     num(r.commission) +
-    num(r.others) -
-    num(r.sss_contribution) -
-    num(r.philhealth) -
-    num(r.pag_ibig)
+    num(r.allowances) +
+    num(r.medical_reimbursement) +
+    num(r.reimbursement) +
+    num(r.others)
   );
 }
 
