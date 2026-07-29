@@ -3,9 +3,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FloatingAddButton } from "@/components/FloatingAddButton";
 import {
+  apiFetch,
   createPayslip,
   deletePayslip,
   getPayslips,
+  payslipPdfUrl,
   updatePayslip,
   type PayslipCreateBody,
   type PayslipRow,
@@ -207,6 +209,23 @@ export default function PayslipClient() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  /**
+   * Warm each payslip's PDF (browser HTTP cache + backend Redis cache) as
+   * soon as the list loads, so opening a payslip's detail modal later
+   * doesn't wait on the first fetch. Fire-and-forget; dedup by id so
+   * re-renders (e.g. `setRowPdfFlag`) don't re-warm the same PDF.
+   */
+  const warmedPdfIdsRef = useRef<Set<number>>(new Set());
+  useEffect(() => {
+    for (const row of rows) {
+      if (!row.has_pdf || warmedPdfIdsRef.current.has(row.id)) continue;
+      warmedPdfIdsRef.current.add(row.id);
+      void apiFetch(payslipPdfUrl(row.id)).catch(() => {
+        warmedPdfIdsRef.current.delete(row.id);
+      });
+    }
+  }, [rows]);
 
   const saveManualAdd = async () => {
     if (nav?.screen !== "manual") return;

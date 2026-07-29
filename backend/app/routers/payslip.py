@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 from typing import Any
 
 from fastapi import (
@@ -178,9 +179,15 @@ async def payslip_upload_pdf(
 @router.get("/api/payslip/{payslip_id}/pdf")
 def payslip_get_pdf(payslip_id: int) -> Response:
     """Serve the payslip's PDF inline so the browser can render it."""
-    data = get_payslip_pdf(payslip_id)
-    if data is None:
-        raise HTTPException(status_code=404, detail="No PDF attached to this payslip.")
+    key = f"payslip:pdf:{payslip_id}"
+    cached = cache.get(key)
+    if cached is not None:
+        data = base64.b64decode(cached)
+    else:
+        data = get_payslip_pdf(payslip_id)
+        if data is None:
+            raise HTTPException(status_code=404, detail="No PDF attached to this payslip.")
+        cache.set(key, base64.b64encode(data).decode("ascii"))
     disposition = f'inline; filename="payslip-{payslip_id}.pdf"'
     return Response(
         content=data,
