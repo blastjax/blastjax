@@ -37,12 +37,16 @@ def _clean_description(description: str | None) -> str | None:
 @router.get("/api/monthly-expense")
 def monthly_expense_list(
     period_half: int | None = Query(default=None, ge=1, le=2),
+    period_year: int | None = Query(default=None),
+    period_month: int | None = Query(default=None, ge=1, le=12),
 ) -> dict[str, Any]:
-    key = f"monthly_expense:list:{period_half}"
+    key = f"monthly_expense:list:{period_half}:{period_year}:{period_month}"
     hit = cache.get(key)
     if hit is not None:
         return hit
-    rows = list_monthly_expenses(period_half=period_half)
+    rows = list_monthly_expenses(
+        period_half=period_half, period_year=period_year, period_month=period_month
+    )
     result = {"expenses": [_serialize(r) for r in rows]}
     cache.set(key, result)
     return result
@@ -51,7 +55,13 @@ def monthly_expense_list(
 @router.post("/api/monthly-expense")
 def monthly_expense_create(body: MonthlyExpenseCreate) -> dict[str, Any]:
     row = insert_monthly_expense(
-        body.name.strip(), _clean_description(body.description), body.amount, body.period_half
+        body.name.strip(),
+        _clean_description(body.description),
+        body.amount,
+        body.period_half,
+        body.period_year,
+        body.period_month,
+        body.is_recurring,
     )
     cache.invalidate("monthly_expense")
     return {"expense": _serialize(row)}
@@ -65,6 +75,9 @@ def monthly_expense_replace(expense_id: int, body: MonthlyExpenseCreate) -> dict
         _clean_description(body.description),
         body.amount,
         body.period_half,
+        body.period_year,
+        body.period_month,
+        body.is_recurring,
     )
     if row is None:
         raise HTTPException(status_code=404, detail="Expense not found.")

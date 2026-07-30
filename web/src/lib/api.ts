@@ -461,6 +461,9 @@ export type MonthlyExpenseRow = {
   description: string | null;
   amount: number;
   period_half: number;
+  period_year: number;
+  period_month: number;
+  is_recurring: boolean;
   created_at: string;
 };
 
@@ -469,11 +472,20 @@ export type MonthlyExpenseCreateBody = {
   description?: string | null;
   amount: number;
   period_half: 1 | 2;
+  period_year: number;
+  period_month: number;
+  is_recurring?: boolean;
 };
 
-export async function getMonthlyExpenses(periodHalf?: 1 | 2) {
+export async function getMonthlyExpenses(
+  periodHalf?: 1 | 2,
+  periodYear?: number,
+  periodMonth?: number,
+) {
   return getJson<{ expenses: MonthlyExpenseRow[] }>("/api/monthly-expense", {
     period_half: periodHalf,
+    period_year: periodYear,
+    period_month: periodMonth,
   });
 }
 

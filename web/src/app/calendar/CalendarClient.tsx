@@ -53,6 +53,21 @@ function payslipHalfFor(calendarHalf: PeriodHalf): PeriodHalf {
   return calendarHalf === 1 ? 2 : 1;
 }
 
+/**
+ * The specific payslip period (year/month) that funds a calendar half of the
+ * viewed month — days 1–15 are funded by *last* month's 16th–end payslip;
+ * days 16–end are funded by *this* month's 1st–15th payslip. Used to avoid
+ * showing a stale payslip from a different month as if it funded this one.
+ */
+function fundingPeriodFor(
+  calendarHalf: PeriodHalf,
+  year: number,
+  month: number,
+): { year: number; month: number } {
+  if (calendarHalf === 2) return { year, month };
+  return month === 1 ? { year: year - 1, month: 12 } : { year, month: month - 1 };
+}
+
 /** Round to the nearest cent — avoids float noise (e.g. 1997.835625) mismatching displayed 2dp amounts. */
 function roundCents(n: number): number {
   return Math.round(n * 100) / 100;
@@ -91,8 +106,7 @@ type TransferState = {
 };
 
 export default function CalendarClient() {
-  const [lastFirstHalfPayslip, setLastFirstHalfPayslip] = useState<PayslipRow | null>(null);
-  const [lastSecondHalfPayslip, setLastSecondHalfPayslip] = useState<PayslipRow | null>(null);
+  const [payslips, setPayslips] = useState<PayslipRow[]>([]);
   const [fixedExpenses, setFixedExpenses] = useState<FixedExpenseRow[]>([]);
   const [monthlyExpenses, setMonthlyExpenses] = useState<MonthlyExpenseRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -111,15 +125,26 @@ export default function CalendarClient() {
   const [savingTransfer, setSavingTransfer] = useState(false);
   const [transferError, setTransferError] = useState<string | null>(null);
 
+  const today = useMemo(() => new Date(), []);
+  const todayIso = useMemo(
+    () => dateIso(today.getFullYear(), today.getMonth() + 1, today.getDate()),
+    [today],
+  );
+
+  const [viewedYear, setViewedYear] = useState(today.getFullYear());
+  const [viewedMonth, setViewedMonth] = useState(today.getMonth() + 1);
+  const year = viewedYear;
+  const month = viewedMonth;
+
   const loadExpenses = useCallback(async () => {
     const r = await getFixedExpenses();
     setFixedExpenses(r.expenses);
   }, []);
 
   const loadMonthlyExpenses = useCallback(async () => {
-    const r = await getMonthlyExpenses();
+    const r = await getMonthlyExpenses(undefined, viewedYear, viewedMonth);
     setMonthlyExpenses(r.expenses);
-  }, []);
+  }, [viewedYear, viewedMonth]);
 
   const loadOverrides = useCallback(async () => {
     const r = await getCalendarDayOverrides();
@@ -138,14 +163,11 @@ export default function CalendarClient() {
       ]);
     let firstError: string | null = null;
     if (payslipResult.status === "fulfilled") {
-      const r = payslipResult.value;
-      setLastFirstHalfPayslip(r.payslips.find((p) => p.period_half === 1) ?? null);
-      setLastSecondHalfPayslip(r.payslips.find((p) => p.period_half === 2) ?? null);
+      setPayslips(payslipResult.value.payslips);
     } else {
       const e = payslipResult.reason;
       firstError = e instanceof Error ? e.message : "Failed to load last salary";
-      setLastFirstHalfPayslip(null);
-      setLastSecondHalfPayslip(null);
+      setPayslips([]);
     }
     if (expensesResult.status === "rejected") {
       const e = expensesResult.reason;
@@ -170,10 +192,33 @@ export default function CalendarClient() {
     void load();
   }, [load]);
 
-  const today = useMemo(() => new Date(), []);
-  const year = today.getFullYear();
-  const month = today.getMonth() + 1;
-  const todayDate = today.getDate();
+  const goToPrevMonth = useCallback(() => {
+    setViewedMonth((m) => {
+      if (m === 1) {
+        setViewedYear((y) => y - 1);
+        return 12;
+      }
+      return m - 1;
+    });
+  }, []);
+
+  const goToNextMonth = useCallback(() => {
+    setViewedMonth((m) => {
+      if (m === 12) {
+        setViewedYear((y) => y + 1);
+        return 1;
+      }
+      return m + 1;
+    });
+  }, []);
+
+  const goToToday = useCallback(() => {
+    setViewedYear(today.getFullYear());
+    setViewedMonth(today.getMonth() + 1);
+  }, [today]);
+
+  const isViewingCurrentMonth =
+    viewedYear === today.getFullYear() && viewedMonth === today.getMonth() + 1;
 
   const daysInMonth = new Date(year, month, 0).getDate();
   const secondHalfDays = daysInMonth - FIRST_HALF_DAYS;
@@ -211,11 +256,32 @@ export default function CalendarClient() {
     [monthlyExpensesByHalf],
   );
 
+  const payslipFor = useCallback(
+    (periodHalf: PeriodHalf, periodYear: number, periodMonth: number): PayslipRow | null =>
+      payslips.find(
+        (p) =>
+          p.period_half === periodHalf &&
+          p.period_year === periodYear &&
+          p.period_month === periodMonth,
+      ) ?? null,
+    [payslips],
+  );
+
+  const fundingPayslipFor = useCallback(
+    (calendarHalf: PeriodHalf): PayslipRow | null => {
+      const { year: fundingYear, month: fundingMonth } = fundingPeriodFor(
+        calendarHalf,
+        viewedYear,
+        viewedMonth,
+      );
+      return payslipFor(payslipHalfFor(calendarHalf), fundingYear, fundingMonth);
+    },
+    [payslipFor, viewedYear, viewedMonth],
+  );
+
   const netPayFor = useCallback(
-    (calendarHalf: PeriodHalf): number | null =>
-      (payslipHalfFor(calendarHalf) === 1 ? lastFirstHalfPayslip : lastSecondHalfPayslip)?.total ??
-      null,
-    [lastFirstHalfPayslip, lastSecondHalfPayslip],
+    (calendarHalf: PeriodHalf): number | null => fundingPayslipFor(calendarHalf)?.total ?? null,
+    [fundingPayslipFor],
   );
 
   const netAfterExpenses = useCallback(
@@ -242,13 +308,13 @@ export default function CalendarClient() {
         day,
         iso,
         half,
-        isPast: day < todayDate,
-        isToday: day === todayDate,
+        isPast: iso < todayIso,
+        isToday: iso === todayIso,
         dailyBudget: overrideAmount ?? defaultAmount,
       });
     }
     return result;
-  }, [year, month, daysInMonth, todayDate, firstHalfBudget, secondHalfBudget, dayOverrides]);
+  }, [year, month, daysInMonth, todayIso, firstHalfBudget, secondHalfBudget, dayOverrides]);
 
   const gridCells = useMemo(() => {
     const firstWeekday = new Date(year, month - 1, 1).getDay();
@@ -449,16 +515,15 @@ export default function CalendarClient() {
         <>
           <section className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950 sm:p-6">
             <h2 className="text-lg font-medium text-zinc-900 dark:text-zinc-50">
-              Last net pay
+              Net pay — {formatMonthYear(year, month)}
             </h2>
             <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-              Most recent recorded payslip total for each pay period, minus any fixed and monthly
+              The payslip that funds each pay period of this month, minus any fixed and monthly
               expenses. Click a card to view its expenses.
             </p>
             <div className="mt-5 grid gap-4 sm:grid-cols-2">
               {([1, 2] as const).map((half) => {
-                const payslip =
-                  payslipHalfFor(half) === 1 ? lastFirstHalfPayslip : lastSecondHalfPayslip;
+                const payslip = fundingPayslipFor(half);
                 const netAfter = half === 1 ? firstHalfNetAfter : secondHalfNetAfter;
                 const total = expensesTotal(half);
                 const monthlyTotal = monthlyExpensesTotal(half);
@@ -533,9 +598,36 @@ export default function CalendarClient() {
           </section>
 
           <section className="flex min-w-0 flex-1 flex-col rounded-xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950 sm:p-6">
-            <h2 className="text-lg font-medium text-zinc-900 dark:text-zinc-50">
-              {formatMonthYear(year, month)}
-            </h2>
+            <div className="relative flex items-center justify-center gap-3">
+              <button
+                type="button"
+                aria-label="Previous month"
+                onClick={goToPrevMonth}
+                className="flex h-10 w-10 items-center justify-center rounded-md border border-zinc-200 text-2xl leading-none text-zinc-600 transition hover:border-indigo-400 hover:bg-indigo-50 hover:text-indigo-700 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-indigo-500 dark:hover:bg-indigo-950/40 dark:hover:text-indigo-300"
+              >
+                ‹
+              </button>
+              <h2 className="text-lg font-medium text-zinc-900 dark:text-zinc-50">
+                {formatMonthYear(year, month)}
+              </h2>
+              <button
+                type="button"
+                aria-label="Next month"
+                onClick={goToNextMonth}
+                className="flex h-10 w-10 items-center justify-center rounded-md border border-zinc-200 text-2xl leading-none text-zinc-600 transition hover:border-indigo-400 hover:bg-indigo-50 hover:text-indigo-700 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-indigo-500 dark:hover:bg-indigo-950/40 dark:hover:text-indigo-300"
+              >
+                ›
+              </button>
+              {!isViewingCurrentMonth && (
+                <button
+                  type="button"
+                  onClick={goToToday}
+                  className="absolute right-0 rounded-md border border-zinc-200 px-2.5 py-1 text-xs font-medium text-zinc-600 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-900"
+                >
+                  Today
+                </button>
+              )}
+            </div>
             <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
               Past days are greyed out; today is highlighted. Drag a day onto another (same pay
               period) to move budget between them.

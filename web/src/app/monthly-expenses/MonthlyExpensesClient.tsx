@@ -10,6 +10,7 @@ import {
   updateMonthlyExpense,
   type MonthlyExpenseRow,
 } from "@/lib/api";
+import { formatMonthYearShort, monthKey, parseMonthKey } from "@/lib/dateFormat";
 import { parseFormNumber } from "@/lib/parseFormNumber";
 import {
   DASHED_EMPTY_CLASSES,
@@ -37,17 +38,37 @@ function fmtMoney(n: number): string {
   });
 }
 
-type ExpenseForm = { name: string; description: string; amount: string; period_half: PeriodHalf };
-const emptyForm = (): ExpenseForm => ({ name: "", description: "", amount: "", period_half: 1 });
+type ExpenseForm = {
+  name: string;
+  description: string;
+  amount: string;
+  period_half: PeriodHalf;
+  month: string;
+  is_recurring: boolean;
+};
+const emptyForm = (defaultMonth: string): ExpenseForm => ({
+  name: "",
+  description: "",
+  amount: "",
+  period_half: 1,
+  month: defaultMonth,
+  is_recurring: false,
+});
 
 export default function MonthlyExpensesClient() {
+  const today = useMemo(() => new Date(), []);
+  const currentMonthKey = useMemo(
+    () => monthKey(today.getFullYear(), today.getMonth() + 1),
+    [today],
+  );
+
   const [expenses, setExpenses] = useState<MonthlyExpenseRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [form, setForm] = useState<ExpenseForm>(emptyForm());
+  const [form, setForm] = useState<ExpenseForm>(emptyForm(currentMonthKey));
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -84,9 +105,9 @@ export default function MonthlyExpensesClient() {
   const openModal = useCallback(() => {
     setFormError(null);
     setEditingId(null);
-    setForm(emptyForm());
+    setForm(emptyForm(currentMonthKey));
     setModalOpen(true);
-  }, []);
+  }, [currentMonthKey]);
 
   const openEditModal = useCallback((exp: MonthlyExpenseRow) => {
     setFormError(null);
@@ -96,6 +117,8 @@ export default function MonthlyExpensesClient() {
       description: exp.description ?? "",
       amount: String(exp.amount),
       period_half: exp.period_half === 2 ? 2 : 1,
+      month: monthKey(exp.period_year, exp.period_month),
+      is_recurring: exp.is_recurring,
     });
     setModalOpen(true);
   }, []);
@@ -118,6 +141,11 @@ export default function MonthlyExpensesClient() {
         setFormError("Enter a valid amount greater than zero.");
         return;
       }
+      const period = parseMonthKey(form.month);
+      if (!period) {
+        setFormError("Pick a valid month.");
+        return;
+      }
       setFormError(null);
       setSaving(true);
       try {
@@ -126,6 +154,9 @@ export default function MonthlyExpensesClient() {
           description: form.description.trim() || null,
           amount,
           period_half: form.period_half,
+          period_year: period.y,
+          period_month: period.m,
+          is_recurring: form.is_recurring,
         };
         if (editingId != null) {
           await updateMonthlyExpense(editingId, body);
@@ -164,8 +195,8 @@ export default function MonthlyExpensesClient() {
           Monthly Expenses
         </h1>
         <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-          Recurring monthly expenses, split by pay period half. These are subtracted from that
-          half&apos;s total on the calendar page.
+          All monthly expenses, split by pay period half. Each one applies only to the month
+          you pick for it — the calendar page only shows it for that month.
         </p>
       </header>
 
@@ -220,6 +251,11 @@ export default function MonthlyExpensesClient() {
                             {exp.description}
                           </p>
                         )}
+                        <p className="mt-0.5 text-xs text-indigo-600 dark:text-indigo-400">
+                          {exp.is_recurring
+                            ? "Recurring every month"
+                            : formatMonthYearShort(exp.period_year, exp.period_month)}
+                        </p>
                       </div>
                       <div className="flex shrink-0 items-center gap-2">
                         <span className="text-sm font-semibold tabular-nums text-zinc-800 dark:text-zinc-100">
@@ -252,12 +288,14 @@ export default function MonthlyExpensesClient() {
         dialogClassName="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-xl border border-zinc-200 bg-white p-5 shadow-xl dark:border-zinc-800 dark:bg-zinc-950"
       >
         <div className="mb-4 flex items-start justify-between gap-2">
-          <h2
-            id="monthly-expense-title"
-            className="text-lg font-semibold text-zinc-900 dark:text-zinc-50"
-          >
-            {editingId != null ? "Edit monthly expense" : "Add monthly expense"}
-          </h2>
+          <div>
+            <h2
+              id="monthly-expense-title"
+              className="text-lg font-semibold text-zinc-900 dark:text-zinc-50"
+            >
+              {editingId != null ? "Edit monthly expense" : "Add monthly expense"}
+            </h2>
+          </div>
           <button
             type="button"
             className="rounded border border-zinc-200 px-2 py-1 text-xs dark:border-zinc-700"
@@ -299,6 +337,30 @@ export default function MonthlyExpensesClient() {
               value={form.amount}
               onChange={(e) => setForm((f) => ({ ...f, amount: e.target.value }))}
               disabled={saving}
+            />
+          </label>
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={form.is_recurring}
+              onChange={(e) => setForm((f) => ({ ...f, is_recurring: e.target.checked }))}
+              disabled={saving}
+            />
+            <span className="text-zinc-600 dark:text-zinc-400">
+              Recurring — always show in the calendar&apos;s deductions, every month
+            </span>
+          </label>
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="text-zinc-600 dark:text-zinc-400">
+              Month{form.is_recurring ? " (ignored while recurring)" : ""}
+            </span>
+            <input
+              required
+              type="month"
+              className={INPUT_CLASSES}
+              value={form.month}
+              onChange={(e) => setForm((f) => ({ ...f, month: e.target.value }))}
+              disabled={saving || form.is_recurring}
             />
           </label>
           <div className="flex flex-col items-center gap-1 text-sm">

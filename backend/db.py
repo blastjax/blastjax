@@ -659,9 +659,13 @@ def _init_schema_minimal_stmts() -> list[str]:
             description TEXT,
             amount DOUBLE PRECISION NOT NULL,
             period_half INTEGER NOT NULL,
+            period_year INTEGER NOT NULL,
+            period_month INTEGER NOT NULL,
+            is_recurring BOOLEAN NOT NULL DEFAULT FALSE,
             created_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() AT TIME ZONE 'UTC'),
             CONSTRAINT chk_monthly_expense_half CHECK (period_half IN (1, 2)),
-            CONSTRAINT chk_monthly_expense_amount CHECK (amount > 0)
+            CONSTRAINT chk_monthly_expense_amount CHECK (amount > 0),
+            CONSTRAINT chk_monthly_expense_month CHECK (period_month BETWEEN 1 AND 12)
         )
         """,
         """
@@ -1001,6 +1005,12 @@ def _migrate_monthly_expense_columns(cur: Any) -> None:
     table on some databases without ``name``/``description``. ``CREATE TABLE
     IF NOT EXISTS`` is a no-op against that table, so add the missing columns
     explicitly. Idempotent.
+
+    ``period_year``/``period_month`` were added later: monthly expenses used
+    to recur on every calendar month forever, which meant one entry showed up
+    on months it was never meant for. Existing rows are backfilled to the
+    current month so they keep showing up where the user last saw them, and
+    from here on an expense is scoped to the single month it was created for.
     """
     cur.execute("ALTER TABLE monthly_expense ADD COLUMN IF NOT EXISTS name TEXT")
     cur.execute("UPDATE monthly_expense SET name = '' WHERE name IS NULL")
@@ -1012,6 +1022,22 @@ def _migrate_monthly_expense_columns(cur: Any) -> None:
     cur.execute(
         "ALTER TABLE monthly_expense ADD COLUMN IF NOT EXISTS period_half INTEGER"
     )
+    cur.execute(
+        "ALTER TABLE monthly_expense ADD COLUMN IF NOT EXISTS period_year INTEGER"
+    )
+    cur.execute(
+        "ALTER TABLE monthly_expense ADD COLUMN IF NOT EXISTS period_month INTEGER"
+    )
+    cur.execute(
+        """
+        UPDATE monthly_expense
+        SET period_year = EXTRACT(YEAR FROM NOW() AT TIME ZONE 'UTC')::INTEGER,
+            period_month = EXTRACT(MONTH FROM NOW() AT TIME ZONE 'UTC')::INTEGER
+        WHERE period_year IS NULL OR period_month IS NULL
+        """
+    )
+    cur.execute("ALTER TABLE monthly_expense ALTER COLUMN period_year SET NOT NULL")
+    cur.execute("ALTER TABLE monthly_expense ALTER COLUMN period_month SET NOT NULL")
     cur.execute(
         "ALTER TABLE monthly_expense DROP CONSTRAINT IF EXISTS chk_monthly_expense_half"
     )
@@ -1025,11 +1051,25 @@ def _migrate_monthly_expense_columns(cur: Any) -> None:
         "ALTER TABLE monthly_expense ADD CONSTRAINT chk_monthly_expense_amount CHECK (amount > 0)"
     )
     cur.execute(
+        "ALTER TABLE monthly_expense DROP CONSTRAINT IF EXISTS chk_monthly_expense_month"
+    )
+    cur.execute(
+        "ALTER TABLE monthly_expense ADD CONSTRAINT chk_monthly_expense_month "
+        "CHECK (period_month BETWEEN 1 AND 12)"
+    )
+    cur.execute("DROP INDEX IF EXISTS idx_monthly_expense_half")
+    cur.execute(
         """
-        CREATE INDEX IF NOT EXISTS idx_monthly_expense_half
-            ON monthly_expense (period_half, created_at DESC)
+        CREATE INDEX IF NOT EXISTS idx_monthly_expense_period
+            ON monthly_expense (period_year, period_month, period_half, created_at DESC)
         """
     )
+    cur.execute(
+        "ALTER TABLE monthly_expense ADD COLUMN IF NOT EXISTS is_recurring BOOLEAN"
+    )
+    cur.execute("UPDATE monthly_expense SET is_recurring = FALSE WHERE is_recurring IS NULL")
+    cur.execute("ALTER TABLE monthly_expense ALTER COLUMN is_recurring SET NOT NULL")
+    cur.execute("ALTER TABLE monthly_expense ALTER COLUMN is_recurring SET DEFAULT FALSE")
 
 
 def _migrate_installment_credit_card_id(cur: Any) -> None:
@@ -1064,7 +1104,7 @@ def _migrate_installment_credit_card_id(cur: Any) -> None:
 # Bump this whenever the DDL or migrations below change. ``init_schema()``
 # uses it to skip the entire migration block on warm starts (very common
 # on Neon, where containers cold-start often).
-_SCHEMA_VERSION = 16
+_SCHEMA_VERSION = 18
 
 
 def init_schema() -> None:
@@ -2342,64 +2382,109 @@ def delete_fixed_expense(expense_id: int) -> bool:
             return cur.rowcount > 0
 
 
-_MONTHLY_EXPENSE_COLS = "id, name, description, amount, period_half, created_at"
+_MONTHLY_EXPENSE_COLS = (
+    "id, name, description, amount, period_half, period_year, period_month, "
+    "is_recurring, created_at"
+)
 
 
-def list_monthly_expenses(period_half: int | None = None, limit: int = 500) -> list[dict[str, Any]]:
+def list_monthly_expenses(
+    period_half: int | None = None,
+    period_year: int | None = None,
+    period_month: int | None = None,
+    limit: int = 500,
+) -> list[dict[str, Any]]:
+    """
+    ``period_year``/``period_month`` scope the result to a single calendar
+    month (used by the calendar page), but a row with ``is_recurring`` set
+    always matches regardless of its own period, since it's meant to show up
+    every month.
+    """
     limit = max(1, min(limit, 2000))
     with get_connection() as conn:
         with db_cursor(conn) as cur:
-            if period_half is None:
-                cur.execute(
-                    f"""
-                    SELECT {_MONTHLY_EXPENSE_COLS} FROM monthly_expense
-                    ORDER BY created_at DESC, id DESC
-                    LIMIT ?
-                    """,
-                    (limit,),
-                )
-            else:
-                cur.execute(
-                    f"""
-                    SELECT {_MONTHLY_EXPENSE_COLS} FROM monthly_expense
-                    WHERE period_half = ?
-                    ORDER BY created_at DESC, id DESC
-                    LIMIT ?
-                    """,
-                    (period_half, limit),
-                )
+            clauses = []
+            params: list[Any] = []
+            if period_half is not None:
+                clauses.append("period_half = ?")
+                params.append(period_half)
+            if period_year is not None and period_month is not None:
+                clauses.append("(is_recurring = TRUE OR (period_year = ? AND period_month = ?))")
+                params.extend([period_year, period_month])
+            elif period_year is not None:
+                clauses.append("(is_recurring = TRUE OR period_year = ?)")
+                params.append(period_year)
+            elif period_month is not None:
+                clauses.append("(is_recurring = TRUE OR period_month = ?)")
+                params.append(period_month)
+            where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+            params.append(limit)
+            cur.execute(
+                f"""
+                SELECT {_MONTHLY_EXPENSE_COLS} FROM monthly_expense
+                {where}
+                ORDER BY created_at DESC, id DESC
+                LIMIT ?
+                """,
+                tuple(params),
+            )
             return [_row_to_dict(cur, r) for r in cur.fetchall()]
 
 
 def insert_monthly_expense(
-    name: str, description: str | None, amount: float, period_half: int
+    name: str,
+    description: str | None,
+    amount: float,
+    period_half: int,
+    period_year: int,
+    period_month: int,
+    is_recurring: bool = False,
 ) -> dict[str, Any]:
     with get_connection() as conn:
         with db_cursor(conn) as cur:
             cur.execute(
                 f"""
-                INSERT INTO monthly_expense (name, description, amount, period_half)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO monthly_expense
+                    (name, description, amount, period_half, period_year, period_month,
+                     is_recurring)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 RETURNING {_MONTHLY_EXPENSE_COLS}
                 """,
-                (name, description, amount, period_half),
+                (name, description, amount, period_half, period_year, period_month, is_recurring),
             )
             return _row_to_dict(cur, cur.fetchone())
 
 
 def update_monthly_expense(
-    expense_id: int, name: str, description: str | None, amount: float, period_half: int
+    expense_id: int,
+    name: str,
+    description: str | None,
+    amount: float,
+    period_half: int,
+    period_year: int,
+    period_month: int,
+    is_recurring: bool = False,
 ) -> dict[str, Any] | None:
     with get_connection() as conn:
         with db_cursor(conn) as cur:
             cur.execute(
                 f"""
                 UPDATE monthly_expense
-                SET name = ?, description = ?, amount = ?, period_half = ?
+                SET name = ?, description = ?, amount = ?, period_half = ?,
+                    period_year = ?, period_month = ?, is_recurring = ?
                 WHERE id = ?
                 RETURNING {_MONTHLY_EXPENSE_COLS}
                 """,
-                (name, description, amount, period_half, expense_id),
+                (
+                    name,
+                    description,
+                    amount,
+                    period_half,
+                    period_year,
+                    period_month,
+                    is_recurring,
+                    expense_id,
+                ),
             )
             row = cur.fetchone()
             return _row_to_dict(cur, row) if row else None
