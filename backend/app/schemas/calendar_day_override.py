@@ -1,4 +1,4 @@
-"""Calendar day-override API models (drag-to-transfer budget amounts between days)."""
+"""Calendar day-override API models (move budget between days, or spread it across a pay period)."""
 
 from __future__ import annotations
 
@@ -11,4 +11,4 @@ class CalendarDayOverrideItem(BaseModel):
 
 
 class CalendarDayOverrideBulkUpsert(BaseModel):
-    overrides: list[CalendarDayOverrideItem] = Field(..., min_length=2, max_length=2)
+    overrides: list[CalendarDayOverrideItem] = Field(..., min_length=2, max_length=31)

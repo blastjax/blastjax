@@ -24,7 +24,7 @@ import {
   type PayslipRow,
 } from "@/lib/api";
 import { formatMonthYear } from "@/lib/dateFormat";
-import { parseFormNumber } from "@/lib/parseFormNumber";
+import { evaluateAmountExpression, parseFormNumber } from "@/lib/parseFormNumber";
 import {
   ERROR_ALERT_CLASSES,
   INPUT_CLASSES,
@@ -80,6 +80,59 @@ function fmtMoney(n: number): string {
   });
 }
 
+/**
+ * Spreads `deltaCents` evenly across the given day balances (in cents), returning the updated
+ * balances. A positive delta adds evenly, with any leftover cent split one at a time. A negative
+ * delta removes evenly without letting a balance drop below zero — if a day is exhausted before
+ * absorbing its full share, the unclaimed remainder cascades to the days that still have room, so
+ * an overspend is always pulled fully from the other days (short of every one of them hitting zero).
+ */
+function spreadCentsEvenly(
+  order: string[],
+  balances: Map<string, number>,
+  deltaCents: number,
+): Map<string, number> {
+  const result = new Map(balances);
+  if (deltaCents === 0 || order.length === 0) return result;
+  if (deltaCents > 0) {
+    const n = order.length;
+    const base = Math.trunc(deltaCents / n);
+    let leftover = deltaCents - base * n;
+    for (const iso of order) {
+      let share = base;
+      if (leftover > 0) {
+        share += 1;
+        leftover -= 1;
+      }
+      result.set(iso, (result.get(iso) ?? 0) + share);
+    }
+    return result;
+  }
+  let remaining = -deltaCents;
+  let pool = order.filter((iso) => (result.get(iso) ?? 0) > 0);
+  while (remaining > 0 && pool.length > 0) {
+    const share = Math.floor(remaining / pool.length);
+    if (share === 0) {
+      for (const iso of pool) {
+        if (remaining <= 0) break;
+        result.set(iso, (result.get(iso) ?? 0) - 1);
+        remaining -= 1;
+      }
+      break;
+    }
+    const nextPool: string[] = [];
+    for (const iso of pool) {
+      const cur = result.get(iso) ?? 0;
+      const take = Math.min(cur, share);
+      result.set(iso, cur - take);
+      remaining -= take;
+      if (cur - take > 0) nextPool.push(iso);
+    }
+    pool = nextPool;
+  }
+  return result;
+}
+
 type DayCell = {
   day: number;
   iso: string;
@@ -121,9 +174,15 @@ export default function CalendarClient() {
   const [dragSourceDay, setDragSourceDay] = useState<number | null>(null);
   const [dragOverDay, setDragOverDay] = useState<number | null>(null);
   const [transfer, setTransfer] = useState<TransferState | null>(null);
+  const [transferSpent, setTransferSpent] = useState("");
   const [transferAmount, setTransferAmount] = useState("");
   const [savingTransfer, setSavingTransfer] = useState(false);
   const [transferError, setTransferError] = useState<string | null>(null);
+
+  const [spendDay, setSpendDay] = useState<DayCell | null>(null);
+  const [spendAmount, setSpendAmount] = useState("");
+  const [savingSpend, setSavingSpend] = useState(false);
+  const [spendError, setSpendError] = useState<string | null>(null);
 
   const today = useMemo(() => new Date(), []);
   const todayIso = useMemo(
@@ -367,6 +426,7 @@ export default function CalendarClient() {
       }
       if (source.dailyBudget == null || target.dailyBudget == null) return;
       setTransferError(null);
+      setTransferSpent("");
       setTransferAmount("");
       setTransfer({
         fromDay: source.day,
@@ -383,6 +443,21 @@ export default function CalendarClient() {
   const closeTransferModal = useCallback(() => {
     setTransfer(null);
   }, []);
+
+  const handleTransferSpentChange = useCallback(
+    (value: string) => {
+      setTransferSpent(value);
+      if (!transfer) return;
+      const spent = parseFormNumber(value);
+      if (spent == null) {
+        setTransferAmount("");
+        return;
+      }
+      const remaining = roundCents(Math.max(0, Math.min(transfer.fromAmount, transfer.fromAmount - spent)));
+      setTransferAmount(String(remaining));
+    },
+    [transfer],
+  );
 
   const submitTransfer = useCallback(
     async (e: FormEvent) => {
@@ -415,6 +490,60 @@ export default function CalendarClient() {
       }
     },
     [transfer, transferAmount],
+  );
+
+  const openSpendModal = useCallback((cell: DayCell) => {
+    setSpendError(null);
+    setSpendAmount("");
+    setSpendDay(cell);
+  }, []);
+
+  const closeSpendModal = useCallback(() => {
+    setSpendDay(null);
+  }, []);
+
+  const submitSpend = useCallback(
+    async (e: FormEvent) => {
+      e.preventDefault();
+      if (!spendDay || spendDay.dailyBudget == null) return;
+      const evaluated = evaluateAmountExpression(spendAmount);
+      const rawSpent = evaluated != null ? parseFormNumber(evaluated) : null;
+      if (rawSpent == null || rawSpent < 0) {
+        setSpendError("Enter a valid amount (zero or more). You can use + and - to do math.");
+        return;
+      }
+      const spent = roundCents(rawSpent);
+      const otherDays = dayCells.filter(
+        (d) => d.half === spendDay.half && d.day !== spendDay.day && d.dailyBudget != null,
+      );
+      if (otherDays.length === 0) {
+        setSpendError("No other days in this pay period to spread the remainder to.");
+        return;
+      }
+      setSpendError(null);
+      setSavingSpend(true);
+      try {
+        const remainderCents = Math.round((spendDay.dailyBudget - spent) * 100);
+        const order = otherDays.map((d) => d.iso);
+        const balances = new Map(
+          otherDays.map((d) => [d.iso, Math.round((d.dailyBudget ?? 0) * 100)]),
+        );
+        const updated = spreadCentsEvenly(order, balances, remainderCents);
+        const overrides = otherDays.map((d) => ({
+          day: d.iso,
+          amount: (updated.get(d.iso) ?? 0) / 100,
+        }));
+        overrides.push({ day: spendDay.iso, amount: spent });
+        const r = await bulkUpsertCalendarDayOverrides(overrides);
+        setDayOverrides(new Map(r.overrides.map((o) => [o.day, o.amount])));
+        setSpendDay(null);
+      } catch (err) {
+        setSpendError(err instanceof Error ? err.message : "Failed to record spend");
+      } finally {
+        setSavingSpend(false);
+      }
+    },
+    [spendDay, spendAmount, dayCells],
   );
 
   const openExpenseModal = useCallback((half: PeriodHalf) => {
@@ -629,8 +758,9 @@ export default function CalendarClient() {
               )}
             </div>
             <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-              Past days are greyed out; today is highlighted. Drag a day onto another (same pay
-              period) to move budget between them.
+              Past days are greyed out; today is highlighted. Click a day to log what you spent
+              and spread the rest across the other days in that pay period, or drag a day onto
+              another (same pay period) to move budget between them.
             </p>
 
             <div className="mt-5 grid grid-cols-7 gap-1.5 sm:gap-2">
@@ -655,7 +785,20 @@ export default function CalendarClient() {
                 return (
                   <div
                     key={day}
+                    role={draggable ? "button" : undefined}
+                    tabIndex={draggable ? 0 : undefined}
                     draggable={draggable}
+                    onClick={draggable ? () => openSpendModal(cell) : undefined}
+                    onKeyDown={
+                      draggable
+                        ? (e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              openSpendModal(cell);
+                            }
+                          }
+                        : undefined
+                    }
                     onDragStart={draggable ? (e) => handleDayDragStart(e, day) : undefined}
                     onDragOver={draggable ? (e) => handleDayDragOver(e, day) : undefined}
                     onDragLeave={draggable ? () => handleDayDragLeave(day) : undefined}
@@ -915,6 +1058,24 @@ export default function CalendarClient() {
             <form onSubmit={submitTransfer} className="mt-4 flex flex-col gap-3">
               <label className="flex flex-col gap-1 text-sm">
                 <span className="text-zinc-600 dark:text-zinc-400">
+                  Amount spent on day {transfer.fromDay} today
+                </span>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  autoFocus
+                  className={INPUT_CLASSES}
+                  value={transferSpent}
+                  onChange={(e) => handleTransferSpentChange(e.target.value)}
+                  disabled={savingTransfer}
+                  placeholder="0.00"
+                />
+                <span className="text-xs text-zinc-500 dark:text-zinc-400">
+                  Fills in the amount to move below: {fmtMoney(transfer.fromAmount)} budget − spent.
+                </span>
+              </label>
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="text-zinc-600 dark:text-zinc-400">
                   Amount to move (max {fmtMoney(transfer.fromAmount)})
                 </span>
                 <div className="flex gap-2">
@@ -922,7 +1083,6 @@ export default function CalendarClient() {
                     required
                     type="text"
                     inputMode="decimal"
-                    autoFocus
                     className={`flex-1 ${INPUT_CLASSES}`}
                     value={transferAmount}
                     onChange={(e) => setTransferAmount(e.target.value)}
@@ -958,6 +1118,65 @@ export default function CalendarClient() {
                   disabled={savingTransfer}
                 >
                   {savingTransfer ? "Moving…" : "Move"}
+                </button>
+              </div>
+            </form>
+          </>
+        )}
+      </Modal>
+
+      <Modal
+        open={spendDay != null}
+        onClose={closeSpendModal}
+        ariaLabelledBy="spend-title"
+        dialogClassName="w-full max-w-sm rounded-xl border border-zinc-200 bg-white p-5 shadow-xl dark:border-zinc-800 dark:bg-zinc-950"
+      >
+        {spendDay && spendDay.dailyBudget != null && (
+          <>
+            <h2 id="spend-title" className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">
+              Log spend — day {spendDay.day}
+            </h2>
+            <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
+              Budget for this day is {fmtMoney(spendDay.dailyBudget)}. Whatever isn&apos;t spent
+              (or any overspend) is spread evenly across the other days in this pay period.
+            </p>
+            <form onSubmit={submitSpend} className="mt-4 flex flex-col gap-3">
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="text-zinc-600 dark:text-zinc-400">
+                  Amount spent (e.g. 100-10 or 100+10)
+                </span>
+                <input
+                  required
+                  type="text"
+                  inputMode="decimal"
+                  autoFocus
+                  className={INPUT_CLASSES}
+                  value={spendAmount}
+                  onChange={(e) => setSpendAmount(e.target.value)}
+                  onBlur={(e) => {
+                    const evaluated = evaluateAmountExpression(e.target.value);
+                    if (evaluated != null) setSpendAmount(evaluated);
+                  }}
+                  disabled={savingSpend}
+                  placeholder="0.00"
+                />
+              </label>
+              {spendError && (
+                <div className={ERROR_ALERT_CLASSES} role="alert">
+                  {spendError}
+                </div>
+              )}
+              <div className="mt-1 flex justify-end gap-2">
+                <button
+                  type="button"
+                  className={SECONDARY_BUTTON_CLASSES}
+                  onClick={closeSpendModal}
+                  disabled={savingSpend}
+                >
+                  Cancel
+                </button>
+                <button type="submit" className={PRIMARY_BUTTON_CLASSES} disabled={savingSpend}>
+                  {savingSpend ? "Saving…" : "Save"}
                 </button>
               </div>
             </form>

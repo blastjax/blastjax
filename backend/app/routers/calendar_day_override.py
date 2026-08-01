@@ -1,4 +1,4 @@
-"""Per-day calendar budget override endpoints (drag-to-transfer amounts between days)."""
+"""Per-day calendar budget override endpoints (move or spread amounts across days)."""
 
 from __future__ import annotations
 
