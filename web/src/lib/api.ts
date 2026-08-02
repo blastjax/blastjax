@@ -522,6 +522,47 @@ export async function bulkUpsertCalendarDayOverrides(
   );
 }
 
+export type PayPeriodStartOverrideRow = {
+  id: number;
+  period_year: number;
+  period_month: number;
+  period_half: 1 | 2;
+  start_date: string;
+  created_at: string;
+};
+
+export async function getPayPeriodStartOverrides() {
+  return getJson<{ overrides: PayPeriodStartOverrideRow[] }>("/api/pay-period-start-override");
+}
+
+export async function upsertPayPeriodStartOverride(body: {
+  period_year: number;
+  period_month: number;
+  period_half: 1 | 2;
+  start_date: string;
+}) {
+  return sendJson<{ override: PayPeriodStartOverrideRow }>(
+    "PUT",
+    "/api/pay-period-start-override",
+    body,
+  );
+}
+
+export async function deletePayPeriodStartOverride(
+  periodYear: number,
+  periodMonth: number,
+  periodHalf: 1 | 2,
+) {
+  return sendJson<{ ok: boolean }>(
+    "DELETE",
+    `/api/pay-period-start-override${qs({
+      period_year: periodYear,
+      period_month: periodMonth,
+      period_half: periodHalf,
+    })}`,
+  );
+}
+
 export type CreditCardRow = {
   id: number;
   name: string;

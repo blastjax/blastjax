@@ -15,15 +15,18 @@ import {
   createFixedExpense,
   deleteFixedExpense,
   deleteMonthlyExpense,
+  deletePayPeriodStartOverride,
   getCalendarDayOverrides,
   getFixedExpenses,
   getMonthlyExpenses,
+  getPayPeriodStartOverrides,
   getPayslips,
+  upsertPayPeriodStartOverride,
   type FixedExpenseRow,
   type MonthlyExpenseRow,
   type PayslipRow,
 } from "@/lib/api";
-import { formatMonthYear } from "@/lib/dateFormat";
+import { formatMonthDayShort, formatMonthYear } from "@/lib/dateFormat";
 import { evaluateAmountExpression, parseFormNumber } from "@/lib/parseFormNumber";
 import {
   ERROR_ALERT_CLASSES,
@@ -37,9 +40,6 @@ const WEEKDAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as cons
 
 /** Custom drag-and-drop payload type carrying the source day-of-month. */
 const DAY_DND_MIME = "text/x-calendar-day";
-
-/** Semi-monthly payroll: 1st–15th, then 16th–end of month (13–16 days depending on the month). */
-const FIRST_HALF_DAYS = 15;
 
 type PeriodHalf = 1 | 2;
 
@@ -66,6 +66,79 @@ function fundingPeriodFor(
 ): { year: number; month: number } {
   if (calendarHalf === 2) return { year, month };
   return month === 1 ? { year: year - 1, month: 12 } : { year, month: month - 1 };
+}
+
+/** Adds `delta` months to (year, month), wrapping the year as needed. */
+function addMonths(year: number, month: number, delta: number): { year: number; month: number } {
+  const zeroBased = month - 1 + delta;
+  const y = year + Math.floor(zeroBased / 12);
+  const m = (((zeroBased % 12) + 12) % 12) + 1;
+  return { year: y, month: m };
+}
+
+/** Adds `delta` days to a "YYYY-MM-DD" string, returning a new "YYYY-MM-DD" string. */
+function addDaysIso(iso: string, delta: number): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  const d2 = new Date(y, m - 1, d + delta);
+  return dateIso(d2.getFullYear(), d2.getMonth() + 1, d2.getDate());
+}
+
+/** Inclusive day count between two "YYYY-MM-DD" strings (start <= end). */
+function daysBetweenInclusive(startIso: string, endIso: string): number {
+  const [sy, sm, sd] = startIso.split("-").map(Number);
+  const [ey, em, ed] = endIso.split("-").map(Number);
+  const start = new Date(sy, sm - 1, sd).getTime();
+  const end = new Date(ey, em - 1, ed).getTime();
+  return Math.round((end - start) / 86_400_000) + 1;
+}
+
+/** The normal, un-overridden start of a pay period: the 1st, or the 16th. */
+function defaultHalfStartIso(year: number, month: number, half: PeriodHalf): string {
+  return half === 1 ? dateIso(year, month, 1) : dateIso(year, month, 16);
+}
+
+/** Key identifying one specific occurrence of a pay period, e.g. "2026-8-2". */
+function periodKey(year: number, month: number, half: PeriodHalf): string {
+  return `${year}-${month}-${half}`;
+}
+
+/** The start of a pay period, or its override (a payslip that landed earlier than normal). */
+function effectiveHalfStartIso(
+  overrides: Map<string, string>,
+  year: number,
+  month: number,
+  half: PeriodHalf,
+): string {
+  return overrides.get(periodKey(year, month, half)) ?? defaultHalfStartIso(year, month, half);
+}
+
+/**
+ * The end of a pay period is never stored — it's always the day before the
+ * *next* period's start, so periods stay contiguous (no overlaps or gaps)
+ * even as start dates move around. Half-1's end is bounded by the same
+ * month's half-2 start; half-2's end is bounded by next month's half-1 start.
+ */
+function periodEndIso(
+  overrides: Map<string, string>,
+  year: number,
+  month: number,
+  half: PeriodHalf,
+): string {
+  if (half === 1) return addDaysIso(effectiveHalfStartIso(overrides, year, month, 2), -1);
+  const next = addMonths(year, month, 1);
+  return addDaysIso(effectiveHalfStartIso(overrides, next.year, next.month, 1), -1);
+}
+
+function periodDayCount(
+  overrides: Map<string, string>,
+  year: number,
+  month: number,
+  half: PeriodHalf,
+): number {
+  return daysBetweenInclusive(
+    effectiveHalfStartIso(overrides, year, month, half),
+    periodEndIso(overrides, year, month, half),
+  );
 }
 
 /** Round to the nearest cent — avoids float noise (e.g. 1997.835625) mismatching displayed 2dp amounts. */
@@ -136,7 +209,12 @@ function spreadCentsEvenly(
 type DayCell = {
   day: number;
   iso: string;
-  half: PeriodHalf;
+  /** Which specific pay period funds this day — usually the viewed month's own half,
+   *  but a tail day may spill into next month's half-1 if that period's start was
+   *  pulled early enough to reach back into this month. */
+  periodYear: number;
+  periodMonth: number;
+  periodHalf: PeriodHalf;
   isPast: boolean;
   isToday: boolean;
   dailyBudget: number | null;
@@ -162,6 +240,8 @@ export default function CalendarClient() {
   const [payslips, setPayslips] = useState<PayslipRow[]>([]);
   const [fixedExpenses, setFixedExpenses] = useState<FixedExpenseRow[]>([]);
   const [monthlyExpenses, setMonthlyExpenses] = useState<MonthlyExpenseRow[]>([]);
+  const [nextMonthlyExpenses, setNextMonthlyExpenses] = useState<MonthlyExpenseRow[]>([]);
+  const [payPeriodOverrides, setPayPeriodOverrides] = useState<Map<string, string>>(new Map());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -169,6 +249,11 @@ export default function CalendarClient() {
   const [expenseForm, setExpenseForm] = useState<ExpenseForm>(emptyExpenseForm());
   const [savingExpense, setSavingExpense] = useState(false);
   const [expenseError, setExpenseError] = useState<string | null>(null);
+
+  const [payDateModalHalf, setPayDateModalHalf] = useState<PeriodHalf | null>(null);
+  const [payDateForm, setPayDateForm] = useState("");
+  const [savingPayDate, setSavingPayDate] = useState(false);
+  const [payDateError, setPayDateError] = useState<string | null>(null);
 
   const [dayOverrides, setDayOverrides] = useState<Map<string, number>>(new Map());
   const [dragSourceDay, setDragSourceDay] = useState<number | null>(null);
@@ -205,21 +290,44 @@ export default function CalendarClient() {
     setMonthlyExpenses(r.expenses);
   }, [viewedYear, viewedMonth]);
 
+  const loadNextMonthlyExpenses = useCallback(async () => {
+    const next = addMonths(viewedYear, viewedMonth, 1);
+    const r = await getMonthlyExpenses(undefined, next.year, next.month);
+    setNextMonthlyExpenses(r.expenses);
+  }, [viewedYear, viewedMonth]);
+
   const loadOverrides = useCallback(async () => {
     const r = await getCalendarDayOverrides();
     setDayOverrides(new Map(r.overrides.map((o) => [o.day, o.amount])));
   }, []);
 
+  const loadPayPeriodOverrides = useCallback(async () => {
+    const r = await getPayPeriodStartOverrides();
+    setPayPeriodOverrides(
+      new Map(
+        r.overrides.map((o) => [periodKey(o.period_year, o.period_month, o.period_half), o.start_date]),
+      ),
+    );
+  }, []);
+
   const load = useCallback(async () => {
     setError(null);
     setLoading(true);
-    const [payslipResult, expensesResult, monthlyExpensesResult, overridesResult] =
-      await Promise.allSettled([
-        getPayslips(12),
-        loadExpenses(),
-        loadMonthlyExpenses(),
-        loadOverrides(),
-      ]);
+    const [
+      payslipResult,
+      expensesResult,
+      monthlyExpensesResult,
+      nextMonthlyExpensesResult,
+      overridesResult,
+      payPeriodResult,
+    ] = await Promise.allSettled([
+      getPayslips(12),
+      loadExpenses(),
+      loadMonthlyExpenses(),
+      loadNextMonthlyExpenses(),
+      loadOverrides(),
+      loadPayPeriodOverrides(),
+    ]);
     let firstError: string | null = null;
     if (payslipResult.status === "fulfilled") {
       setPayslips(payslipResult.value.payslips);
@@ -238,14 +346,30 @@ export default function CalendarClient() {
       firstError ??= e instanceof Error ? e.message : "Failed to load monthly expenses";
       setMonthlyExpenses([]);
     }
+    if (nextMonthlyExpensesResult.status === "rejected") {
+      const e = nextMonthlyExpensesResult.reason;
+      firstError ??= e instanceof Error ? e.message : "Failed to load next month's monthly expenses";
+      setNextMonthlyExpenses([]);
+    }
     if (overridesResult.status === "rejected") {
       const e = overridesResult.reason;
       firstError ??= e instanceof Error ? e.message : "Failed to load day overrides";
       setDayOverrides(new Map());
     }
+    if (payPeriodResult.status === "rejected") {
+      const e = payPeriodResult.reason;
+      firstError ??= e instanceof Error ? e.message : "Failed to load pay period overrides";
+      setPayPeriodOverrides(new Map());
+    }
     setError(firstError);
     setLoading(false);
-  }, [loadExpenses, loadMonthlyExpenses, loadOverrides]);
+  }, [
+    loadExpenses,
+    loadMonthlyExpenses,
+    loadNextMonthlyExpenses,
+    loadOverrides,
+    loadPayPeriodOverrides,
+  ]);
 
   useEffect(() => {
     void load();
@@ -280,7 +404,33 @@ export default function CalendarClient() {
     viewedYear === today.getFullYear() && viewedMonth === today.getMonth() + 1;
 
   const daysInMonth = new Date(year, month, 0).getDate();
-  const secondHalfDays = daysInMonth - FIRST_HALF_DAYS;
+
+  /**
+   * Effective start/end of this month's two pay periods, plus next month's
+   * half-1 start — needed because a tail day of this month can spill into
+   * next month's half-1 if that period's start was pulled back far enough
+   * (see periodEndIso). Ends are always derived, never stored, so periods
+   * stay contiguous as start dates move.
+   */
+  const periodInfo = useMemo(() => {
+    const next = addMonths(year, month, 1);
+    const p1Start = effectiveHalfStartIso(payPeriodOverrides, year, month, 1);
+    const p2Start = effectiveHalfStartIso(payPeriodOverrides, year, month, 2);
+    const nextP1Start = effectiveHalfStartIso(payPeriodOverrides, next.year, next.month, 1);
+    const p1End = addDaysIso(p2Start, -1);
+    const p2End = addDaysIso(nextP1Start, -1);
+    return {
+      p1Start,
+      p2Start,
+      p1End,
+      p2End,
+      nextYear: next.year,
+      nextMonth: next.month,
+      nextP1Start,
+      firstHalfDays: daysBetweenInclusive(p1Start, p1End),
+      secondHalfDays: daysBetweenInclusive(p2Start, p2End),
+    };
+  }, [payPeriodOverrides, year, month]);
 
   const expensesByHalf = useMemo(() => {
     const map: Record<PeriodHalf, FixedExpenseRow[]> = { 1: [], 2: [] };
@@ -299,20 +449,47 @@ export default function CalendarClient() {
   /**
    * Unlike fixed expenses (scoped to the payslip half that funds a calendar
    * half, see payslipHalfFor), monthly expenses are entered directly against
-   * the calendar half they should reduce — no pay-lag conversion.
+   * the calendar half they should reduce — no pay-lag conversion. Keyed by
+   * the *queried* month, not each row's own stored period_month, since a
+   * recurring row's stored period matches whichever month it was created in,
+   * not every month it shows up in.
    */
-  const monthlyExpensesByHalf = useMemo(() => {
-    const map: Record<PeriodHalf, MonthlyExpenseRow[]> = { 1: [], 2: [] };
-    for (const e of monthlyExpenses) {
-      if (e.period_half === 1 || e.period_half === 2) map[e.period_half].push(e);
-    }
+  const monthlyExpensesByPeriod = useMemo(() => {
+    const map = new Map<string, MonthlyExpenseRow[]>();
+    const addRows = (y: number, m: number, rows: MonthlyExpenseRow[]) => {
+      for (const e of rows) {
+        if (e.period_half !== 1 && e.period_half !== 2) continue;
+        const key = periodKey(y, m, e.period_half as PeriodHalf);
+        const arr = map.get(key);
+        if (arr) arr.push(e);
+        else map.set(key, [e]);
+      }
+    };
+    addRows(viewedYear, viewedMonth, monthlyExpenses);
+    const next = addMonths(viewedYear, viewedMonth, 1);
+    addRows(next.year, next.month, nextMonthlyExpenses);
     return map;
-  }, [monthlyExpenses]);
+  }, [monthlyExpenses, nextMonthlyExpenses, viewedYear, viewedMonth]);
+
+  const monthlyExpensesForPeriod = useCallback(
+    (periodYear: number, periodMonth: number, periodHalf: PeriodHalf) =>
+      monthlyExpensesByPeriod.get(periodKey(periodYear, periodMonth, periodHalf)) ?? [],
+    [monthlyExpensesByPeriod],
+  );
+
+  const monthlyExpensesTotalForPeriod = useCallback(
+    (periodYear: number, periodMonth: number, periodHalf: PeriodHalf) =>
+      monthlyExpensesForPeriod(periodYear, periodMonth, periodHalf).reduce(
+        (s, e) => s + e.amount,
+        0,
+      ),
+    [monthlyExpensesForPeriod],
+  );
 
   const monthlyExpensesTotal = useCallback(
     (calendarHalf: PeriodHalf) =>
-      monthlyExpensesByHalf[calendarHalf].reduce((s, e) => s + e.amount, 0),
-    [monthlyExpensesByHalf],
+      monthlyExpensesTotalForPeriod(viewedYear, viewedMonth, calendarHalf),
+    [monthlyExpensesTotalForPeriod, viewedYear, viewedMonth],
   );
 
   const payslipFor = useCallback(
@@ -326,54 +503,107 @@ export default function CalendarClient() {
     [payslips],
   );
 
-  const fundingPayslipFor = useCallback(
-    (calendarHalf: PeriodHalf): PayslipRow | null => {
+  const fundingPayslipForPeriod = useCallback(
+    (periodYear: number, periodMonth: number, periodHalf: PeriodHalf): PayslipRow | null => {
       const { year: fundingYear, month: fundingMonth } = fundingPeriodFor(
-        calendarHalf,
-        viewedYear,
-        viewedMonth,
+        periodHalf,
+        periodYear,
+        periodMonth,
       );
-      return payslipFor(payslipHalfFor(calendarHalf), fundingYear, fundingMonth);
+      return payslipFor(payslipHalfFor(periodHalf), fundingYear, fundingMonth);
     },
-    [payslipFor, viewedYear, viewedMonth],
+    [payslipFor],
+  );
+
+  const fundingPayslipFor = useCallback(
+    (calendarHalf: PeriodHalf): PayslipRow | null =>
+      fundingPayslipForPeriod(viewedYear, viewedMonth, calendarHalf),
+    [fundingPayslipForPeriod, viewedYear, viewedMonth],
+  );
+
+  const netPayForPeriod = useCallback(
+    (periodYear: number, periodMonth: number, periodHalf: PeriodHalf): number | null =>
+      fundingPayslipForPeriod(periodYear, periodMonth, periodHalf)?.total ?? null,
+    [fundingPayslipForPeriod],
   );
 
   const netPayFor = useCallback(
-    (calendarHalf: PeriodHalf): number | null => fundingPayslipFor(calendarHalf)?.total ?? null,
-    [fundingPayslipFor],
+    (calendarHalf: PeriodHalf): number | null => netPayForPeriod(viewedYear, viewedMonth, calendarHalf),
+    [netPayForPeriod, viewedYear, viewedMonth],
+  );
+
+  const netAfterExpensesForPeriod = useCallback(
+    (periodYear: number, periodMonth: number, periodHalf: PeriodHalf): number | null => {
+      const net = netPayForPeriod(periodYear, periodMonth, periodHalf);
+      return net != null
+        ? net -
+            expensesTotal(periodHalf) -
+            monthlyExpensesTotalForPeriod(periodYear, periodMonth, periodHalf)
+        : null;
+    },
+    [netPayForPeriod, expensesTotal, monthlyExpensesTotalForPeriod],
   );
 
   const netAfterExpenses = useCallback(
-    (half: PeriodHalf): number | null => {
-      const net = netPayFor(half);
-      return net != null ? net - expensesTotal(half) - monthlyExpensesTotal(half) : null;
-    },
-    [netPayFor, expensesTotal, monthlyExpensesTotal],
+    (half: PeriodHalf): number | null => netAfterExpensesForPeriod(viewedYear, viewedMonth, half),
+    [netAfterExpensesForPeriod, viewedYear, viewedMonth],
   );
 
   const firstHalfNetAfter = netAfterExpenses(1);
   const secondHalfNetAfter = netAfterExpenses(2);
-  const firstHalfBudget = firstHalfNetAfter != null ? firstHalfNetAfter / FIRST_HALF_DAYS : null;
-  const secondHalfBudget = secondHalfNetAfter != null ? secondHalfNetAfter / secondHalfDays : null;
+  const firstHalfBudget =
+    firstHalfNetAfter != null ? firstHalfNetAfter / periodInfo.firstHalfDays : null;
+  const secondHalfBudget =
+    secondHalfNetAfter != null ? secondHalfNetAfter / periodInfo.secondHalfDays : null;
+
+  const nextHalf1NetAfter = netAfterExpensesForPeriod(periodInfo.nextYear, periodInfo.nextMonth, 1);
+  const nextHalf1Days = periodDayCount(payPeriodOverrides, periodInfo.nextYear, periodInfo.nextMonth, 1);
+  const nextHalf1Budget = nextHalf1NetAfter != null ? nextHalf1NetAfter / nextHalf1Days : null;
 
   const dayCells = useMemo(() => {
     const result: DayCell[] = [];
     for (let day = 1; day <= daysInMonth; day++) {
-      const half: PeriodHalf = day <= FIRST_HALF_DAYS ? 1 : 2;
       const iso = dateIso(year, month, day);
-      const defaultAmount = half === 1 ? firstHalfBudget : secondHalfBudget;
+      let periodYear = year;
+      let periodMonth = month;
+      let periodHalf: PeriodHalf;
+      let defaultAmount: number | null;
+      if (iso >= periodInfo.nextP1Start) {
+        periodYear = periodInfo.nextYear;
+        periodMonth = periodInfo.nextMonth;
+        periodHalf = 1;
+        defaultAmount = nextHalf1Budget;
+      } else if (iso >= periodInfo.p2Start) {
+        periodHalf = 2;
+        defaultAmount = secondHalfBudget;
+      } else {
+        periodHalf = 1;
+        defaultAmount = firstHalfBudget;
+      }
       const overrideAmount = dayOverrides.get(iso);
       result.push({
         day,
         iso,
-        half,
+        periodYear,
+        periodMonth,
+        periodHalf,
         isPast: iso < todayIso,
         isToday: iso === todayIso,
         dailyBudget: overrideAmount ?? defaultAmount,
       });
     }
     return result;
-  }, [year, month, daysInMonth, todayIso, firstHalfBudget, secondHalfBudget, dayOverrides]);
+  }, [
+    year,
+    month,
+    daysInMonth,
+    todayIso,
+    periodInfo,
+    firstHalfBudget,
+    secondHalfBudget,
+    nextHalf1Budget,
+    dayOverrides,
+  ]);
 
   const gridCells = useMemo(() => {
     const firstWeekday = new Date(year, month - 1, 1).getDay();
@@ -420,7 +650,10 @@ export default function CalendarClient() {
       const source = dayCells[sourceDay - 1];
       const target = dayCells[targetDay - 1];
       if (!source || !target) return;
-      if (source.half !== target.half) {
+      if (
+        periodKey(source.periodYear, source.periodMonth, source.periodHalf) !==
+        periodKey(target.periodYear, target.periodMonth, target.periodHalf)
+      ) {
         setError("You can only move budget between days within the same pay period.");
         return;
       }
@@ -517,8 +750,12 @@ export default function CalendarClient() {
         return;
       }
       const spent = roundCents(rawSpent);
+      const spendPeriodKey = periodKey(spendDay.periodYear, spendDay.periodMonth, spendDay.periodHalf);
       const otherDays = dayCells.filter(
-        (d) => d.half === spendDay.half && d.iso > spendDay.iso && d.dailyBudget != null,
+        (d) =>
+          periodKey(d.periodYear, d.periodMonth, d.periodHalf) === spendPeriodKey &&
+          d.iso > spendDay.iso &&
+          d.dailyBudget != null,
       );
       if (otherDays.length === 0) {
         setSpendError("No days remaining in this pay period to spread the remainder to.");
@@ -617,12 +854,90 @@ export default function CalendarClient() {
   const modalExpenses =
     expenseModalHalf != null ? expensesByHalf[payslipHalfFor(expenseModalHalf)] : [];
   const modalMonthlyExpenses =
-    expenseModalHalf != null ? monthlyExpensesByHalf[expenseModalHalf] : [];
+    expenseModalHalf != null
+      ? monthlyExpensesForPeriod(viewedYear, viewedMonth, expenseModalHalf)
+      : [];
   const modalNetPay = expenseModalHalf != null ? netPayFor(expenseModalHalf) : null;
   const modalExpensesTotal = expenseModalHalf != null ? expensesTotal(expenseModalHalf) : 0;
   const modalMonthlyExpensesTotal =
     expenseModalHalf != null ? monthlyExpensesTotal(expenseModalHalf) : 0;
   const modalNetAfter = expenseModalHalf != null ? netAfterExpenses(expenseModalHalf) : null;
+
+  /** Bounds mirroring the backend's validation, so the date picker rejects obviously-invalid picks. */
+  const payDateBounds = useMemo(() => {
+    const prev = addMonths(year, month, -1);
+    const prevHalf2Start = effectiveHalfStartIso(payPeriodOverrides, prev.year, prev.month, 2);
+    return {
+      1: { min: addDaysIso(prevHalf2Start, 1), max: defaultHalfStartIso(year, month, 1) },
+      2: { min: dateIso(year, month, 2), max: defaultHalfStartIso(year, month, 2) },
+    } as Record<PeriodHalf, { min: string; max: string }>;
+  }, [payPeriodOverrides, year, month]);
+
+  const openPayDateModal = useCallback(
+    (half: PeriodHalf) => {
+      setPayDateError(null);
+      setPayDateForm(half === 1 ? periodInfo.p1Start : periodInfo.p2Start);
+      setPayDateModalHalf(half);
+    },
+    [periodInfo],
+  );
+
+  const closePayDateModal = useCallback(() => {
+    setPayDateModalHalf(null);
+  }, []);
+
+  const submitPayDate = useCallback(
+    async (e: FormEvent) => {
+      e.preventDefault();
+      if (payDateModalHalf == null) return;
+      setPayDateError(null);
+      setSavingPayDate(true);
+      try {
+        const r = await upsertPayPeriodStartOverride({
+          period_year: year,
+          period_month: month,
+          period_half: payDateModalHalf,
+          start_date: payDateForm,
+        });
+        setPayPeriodOverrides((prev) => {
+          const next = new Map(prev);
+          next.set(periodKey(year, month, payDateModalHalf), r.override.start_date);
+          return next;
+        });
+        setPayDateModalHalf(null);
+      } catch (err) {
+        setPayDateError(err instanceof Error ? err.message : "Failed to save pay date");
+      } finally {
+        setSavingPayDate(false);
+      }
+    },
+    [payDateModalHalf, payDateForm, year, month],
+  );
+
+  const resetPayDate = useCallback(async () => {
+    if (payDateModalHalf == null) return;
+    setPayDateError(null);
+    setSavingPayDate(true);
+    try {
+      await deletePayPeriodStartOverride(year, month, payDateModalHalf);
+      setPayPeriodOverrides((prev) => {
+        const next = new Map(prev);
+        next.delete(periodKey(year, month, payDateModalHalf));
+        return next;
+      });
+      setPayDateModalHalf(null);
+    } catch (err) {
+      setPayDateError(err instanceof Error ? err.message : "Failed to reset pay date");
+    } finally {
+      setSavingPayDate(false);
+    }
+  }, [payDateModalHalf, year, month]);
+
+  const formatDayRangeLabel = useCallback(
+    (startIso: string, endIso: string) =>
+      `${formatMonthDayShort(startIso)} – ${formatMonthDayShort(endIso)}`,
+    [],
+  );
 
   return (
     <div className="box-border flex w-full min-w-0 flex-col gap-10 px-4 pb-28 pt-10 sm:px-6 lg:px-8">
@@ -660,41 +975,57 @@ export default function CalendarClient() {
                 const netAfter = half === 1 ? firstHalfNetAfter : secondHalfNetAfter;
                 const total = expensesTotal(half);
                 const monthlyTotal = monthlyExpensesTotal(half);
+                const rangeLabel = formatDayRangeLabel(
+                  half === 1 ? periodInfo.p1Start : periodInfo.p2Start,
+                  half === 1 ? periodInfo.p1End : periodInfo.p2End,
+                );
                 return (
-                  <button
+                  <div
                     key={half}
-                    type="button"
-                    onClick={() => openExpenseModal(half)}
-                    className="group rounded-lg border border-emerald-200 bg-emerald-50/60 p-4 text-left transition hover:border-emerald-400 hover:shadow-md dark:border-emerald-800 dark:bg-emerald-950/30 dark:hover:border-emerald-600"
+                    className="group relative rounded-lg border border-emerald-200 bg-emerald-50/60 p-4 dark:border-emerald-800 dark:bg-emerald-950/30"
                   >
-                    <p className="text-[11px] font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-400">
-                      {half === 1 ? `1st–${FIRST_HALF_DAYS}th` : "16th–end of month"}
-                    </p>
-                    <p className="mt-2 text-sm font-medium tabular-nums text-emerald-700 dark:text-emerald-300">
-                      {payslip?.total != null ? fmtMoney(payslip.total) : "–"} net pay
-                    </p>
-                    <p className="text-2xl font-bold tabular-nums text-emerald-800 dark:text-emerald-200">
-                      {netAfter != null ? fmtMoney(netAfter) : "–"}
-                    </p>
-                    <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-                      {payslip?.period_year != null && payslip?.period_month != null
-                        ? `From ${formatMonthYear(payslip.period_year, payslip.period_month)}`
-                        : "No payslip recorded yet"}
-                    </p>
-                    {total > 0 && (
-                      <p className="mt-1 text-xs text-red-600 dark:text-red-400">
-                        −{fmtMoney(total)} fixed expenses
+                    <button
+                      type="button"
+                      onClick={() => openExpenseModal(half)}
+                      className="block w-full rounded-md text-left transition hover:opacity-90"
+                    >
+                      <p className="pr-16 text-[11px] font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-400">
+                        {rangeLabel}
                       </p>
-                    )}
-                    {monthlyTotal > 0 && (
-                      <p className="mt-1 text-xs text-red-600 dark:text-red-400">
-                        −{fmtMoney(monthlyTotal)} monthly expenses
+                      <p className="mt-2 text-sm font-medium tabular-nums text-emerald-700 dark:text-emerald-300">
+                        {payslip?.total != null ? fmtMoney(payslip.total) : "–"} net pay
                       </p>
-                    )}
-                    <p className="mt-2 text-[11px] font-medium text-emerald-700 group-hover:underline dark:text-emerald-400">
-                      View expenses →
-                    </p>
-                  </button>
+                      <p className="text-2xl font-bold tabular-nums text-emerald-800 dark:text-emerald-200">
+                        {netAfter != null ? fmtMoney(netAfter) : "–"}
+                      </p>
+                      <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                        {payslip?.period_year != null && payslip?.period_month != null
+                          ? `From ${formatMonthYear(payslip.period_year, payslip.period_month)}`
+                          : "No payslip recorded yet"}
+                      </p>
+                      {total > 0 && (
+                        <p className="mt-1 text-xs text-red-600 dark:text-red-400">
+                          −{fmtMoney(total)} fixed expenses
+                        </p>
+                      )}
+                      {monthlyTotal > 0 && (
+                        <p className="mt-1 text-xs text-red-600 dark:text-red-400">
+                          −{fmtMoney(monthlyTotal)} monthly expenses
+                        </p>
+                      )}
+                      <p className="mt-2 text-[11px] font-medium text-emerald-700 group-hover:underline dark:text-emerald-400">
+                        View expenses →
+                      </p>
+                    </button>
+                    <button
+                      type="button"
+                      aria-label="Adjust pay date"
+                      onClick={() => openPayDateModal(half)}
+                      className="absolute right-3 top-3 rounded-md border border-emerald-300 bg-white/80 px-1.5 py-1 text-[11px] font-medium text-emerald-700 hover:bg-white dark:border-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"
+                    >
+                      Edit date
+                    </button>
+                  </div>
                 );
               })}
             </div>
@@ -711,7 +1042,8 @@ export default function CalendarClient() {
             <div className="mt-5 grid gap-4 sm:grid-cols-2">
               <div className="rounded-lg border border-zinc-200 bg-zinc-50/90 p-4 dark:border-zinc-700 dark:bg-zinc-900/50">
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-                  1st–{FIRST_HALF_DAYS}th ({FIRST_HALF_DAYS} days)
+                  {formatDayRangeLabel(periodInfo.p1Start, periodInfo.p1End)} ({periodInfo.firstHalfDays}{" "}
+                  days)
                 </p>
                 <p className="mt-2 text-2xl font-bold tabular-nums text-zinc-800 dark:text-zinc-100">
                   {firstHalfBudget != null ? fmtMoney(firstHalfBudget) : "–"}
@@ -720,7 +1052,8 @@ export default function CalendarClient() {
               </div>
               <div className="rounded-lg border border-zinc-200 bg-zinc-50/90 p-4 dark:border-zinc-700 dark:bg-zinc-900/50">
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-                  16th–{daysInMonth} ({secondHalfDays} days)
+                  {formatDayRangeLabel(periodInfo.p2Start, periodInfo.p2End)} ({periodInfo.secondHalfDays}{" "}
+                  days)
                 </p>
                 <p className="mt-2 text-2xl font-bold tabular-nums text-zinc-800 dark:text-zinc-100">
                   {secondHalfBudget != null ? fmtMoney(secondHalfBudget) : "–"}
@@ -864,7 +1197,9 @@ export default function CalendarClient() {
               className="truncate text-lg font-semibold text-zinc-900 dark:text-zinc-50"
             >
               Expenses —{" "}
-              {expenseModalHalf === 1 ? `1st–${FIRST_HALF_DAYS}th` : "16th–end of month"}
+              {expenseModalHalf === 1
+                ? formatDayRangeLabel(periodInfo.p1Start, periodInfo.p1End)
+                : formatDayRangeLabel(periodInfo.p2Start, periodInfo.p2End)}
             </h2>
             <p className="mt-0.5 text-xs text-zinc-600 dark:text-zinc-400">
               Fixed and monthly expenses subtracted from this period&apos;s net pay and its
@@ -1183,6 +1518,73 @@ export default function CalendarClient() {
                 <button type="submit" className={PRIMARY_BUTTON_CLASSES} disabled={savingSpend}>
                   {savingSpend ? "Saving…" : "Save"}
                 </button>
+              </div>
+            </form>
+          </>
+        )}
+      </Modal>
+
+      <Modal
+        open={payDateModalHalf != null}
+        onClose={closePayDateModal}
+        ariaLabelledBy="pay-date-title"
+        dialogClassName="w-full max-w-sm rounded-xl border border-zinc-200 bg-white p-5 shadow-xl dark:border-zinc-800 dark:bg-zinc-950"
+      >
+        {payDateModalHalf != null && (
+          <>
+            <h2 id="pay-date-title" className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">
+              Adjust pay date —{" "}
+              {payDateModalHalf === 1
+                ? formatDayRangeLabel(periodInfo.p1Start, periodInfo.p1End)
+                : formatDayRangeLabel(periodInfo.p2Start, periodInfo.p2End)}
+            </h2>
+            <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
+              If this paycheck actually lands earlier than the{" "}
+              {payDateModalHalf === 1 ? "1st" : "16th"}, set the real date here. The covered budget
+              period stretches to match, and the neighboring period shortens to keep the calendar
+              contiguous.
+            </p>
+            <form onSubmit={submitPayDate} className="mt-4 flex flex-col gap-3">
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="text-zinc-600 dark:text-zinc-400">Actual pay date</span>
+                <input
+                  required
+                  type="date"
+                  className={INPUT_CLASSES}
+                  value={payDateForm}
+                  min={payDateBounds[payDateModalHalf].min}
+                  max={payDateBounds[payDateModalHalf].max}
+                  onChange={(e) => setPayDateForm(e.target.value)}
+                  disabled={savingPayDate}
+                />
+              </label>
+              {payDateError && (
+                <div className={ERROR_ALERT_CLASSES} role="alert">
+                  {payDateError}
+                </div>
+              )}
+              <div className="mt-1 flex items-center justify-between gap-2">
+                <button
+                  type="button"
+                  className="text-xs font-medium text-zinc-500 hover:underline dark:text-zinc-400"
+                  onClick={() => void resetPayDate()}
+                  disabled={savingPayDate}
+                >
+                  Reset to default
+                </button>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    className={SECONDARY_BUTTON_CLASSES}
+                    onClick={closePayDateModal}
+                    disabled={savingPayDate}
+                  >
+                    Cancel
+                  </button>
+                  <button type="submit" className={PRIMARY_BUTTON_CLASSES} disabled={savingPayDate}>
+                    {savingPayDate ? "Saving…" : "Save"}
+                  </button>
+                </div>
               </div>
             </form>
           </>

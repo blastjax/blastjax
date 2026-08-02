@@ -678,6 +678,26 @@ def _init_schema_minimal_stmts() -> list[str]:
         )
         """,
         """
+        CREATE TABLE IF NOT EXISTS pay_period_start_override (
+            id SERIAL PRIMARY KEY,
+            period_year INTEGER NOT NULL,
+            period_month INTEGER NOT NULL,
+            period_half INTEGER NOT NULL,
+            start_date DATE NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() AT TIME ZONE 'UTC'),
+            CONSTRAINT chk_pp_start_override_half CHECK (period_half IN (1, 2)),
+            CONSTRAINT chk_pp_start_override_month CHECK (period_month BETWEEN 1 AND 12),
+            CONSTRAINT chk_pp_start_override_half1_bound
+                CHECK (period_half <> 1 OR start_date <= make_date(period_year, period_month, 1)),
+            CONSTRAINT chk_pp_start_override_half2_bound
+                CHECK (period_half <> 2 OR (
+                    start_date > make_date(period_year, period_month, 1)
+                    AND start_date <= make_date(period_year, period_month, 16)
+                )),
+            CONSTRAINT uq_pp_start_override UNIQUE (period_year, period_month, period_half)
+        )
+        """,
+        """
         CREATE TABLE IF NOT EXISTS credit_card (
             id SERIAL PRIMARY KEY,
             name TEXT NOT NULL,
@@ -1104,7 +1124,7 @@ def _migrate_installment_credit_card_id(cur: Any) -> None:
 # Bump this whenever the DDL or migrations below change. ``init_schema()``
 # uses it to skip the entire migration block on warm starts (very common
 # on Neon, where containers cold-start often).
-_SCHEMA_VERSION = 18
+_SCHEMA_VERSION = 19
 
 
 def init_schema() -> None:
@@ -2713,6 +2733,72 @@ def upsert_calendar_day_overrides(
                 f"SELECT {_CALENDAR_DAY_OVERRIDE_COLS} FROM calendar_day_override ORDER BY day"
             )
             return [_row_to_dict(cur, r) for r in cur.fetchall()]
+
+
+_PP_START_OVERRIDE_COLS = "id, period_year, period_month, period_half, start_date, created_at"
+
+
+def list_pay_period_start_overrides() -> list[dict[str, Any]]:
+    with get_connection() as conn:
+        with db_cursor(conn) as cur:
+            cur.execute(
+                f"""
+                SELECT {_PP_START_OVERRIDE_COLS} FROM pay_period_start_override
+                ORDER BY period_year, period_month, period_half
+                """
+            )
+            return [_row_to_dict(cur, r) for r in cur.fetchall()]
+
+
+def get_pay_period_start_override(
+    period_year: int, period_month: int, period_half: int
+) -> dict[str, Any] | None:
+    with get_connection() as conn:
+        with db_cursor(conn) as cur:
+            cur.execute(
+                f"""
+                SELECT {_PP_START_OVERRIDE_COLS} FROM pay_period_start_override
+                WHERE period_year = ? AND period_month = ? AND period_half = ?
+                """,
+                (period_year, period_month, period_half),
+            )
+            row = cur.fetchone()
+            return _row_to_dict(cur, row) if row else None
+
+
+def upsert_pay_period_start_override(
+    period_year: int, period_month: int, period_half: int, start_date: str
+) -> dict[str, Any]:
+    with get_connection() as conn:
+        with db_cursor(conn) as cur:
+            cur.execute(
+                f"""
+                INSERT INTO pay_period_start_override
+                    (period_year, period_month, period_half, start_date)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT (period_year, period_month, period_half)
+                    DO UPDATE SET start_date = EXCLUDED.start_date
+                RETURNING {_PP_START_OVERRIDE_COLS}
+                """,
+                (period_year, period_month, period_half, start_date),
+            )
+            return _row_to_dict(cur, cur.fetchone())
+
+
+def delete_pay_period_start_override(
+    period_year: int, period_month: int, period_half: int
+) -> bool:
+    with get_connection() as conn:
+        with db_cursor(conn) as cur:
+            cur.execute(
+                """
+                DELETE FROM pay_period_start_override
+                WHERE period_year = ? AND period_month = ? AND period_half = ?
+                RETURNING id
+                """,
+                (period_year, period_month, period_half),
+            )
+            return cur.fetchone() is not None
 
 
 def check_connection() -> bool:

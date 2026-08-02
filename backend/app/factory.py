@@ -39,6 +39,7 @@ _CACHE_PREFIXES: dict[str, str] = {
     "/api/monthly-expense": "monthly_expense",
     "/api/calendar-day-override": "calendar_day_override",
     "/api/credit-card": "credit_card",
+    "/api/pay-period-start-override": "pay_period_start_override",
 }
 
 
@@ -100,6 +101,7 @@ def create_app() -> FastAPI:
         house_payment,
         installment,
         monthly_expense,
+        pay_period_start_override,
         payslip,
     )
 
@@ -113,6 +115,7 @@ def create_app() -> FastAPI:
         monthly_expense.router,
         calendar_day_override.router,
         credit_card.router,
+        pay_period_start_override.router,
     ):
         app.include_router(router)
 
