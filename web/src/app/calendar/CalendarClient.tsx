@@ -424,6 +424,10 @@ export default function CalendarClient() {
         setError("You can only move budget between days within the same pay period.");
         return;
       }
+      if (target.iso < source.iso) {
+        setError("You can only move budget onto a later day, not an earlier one.");
+        return;
+      }
       if (source.dailyBudget == null || target.dailyBudget == null) return;
       setTransferError(null);
       setTransferSpent("");
@@ -514,10 +518,10 @@ export default function CalendarClient() {
       }
       const spent = roundCents(rawSpent);
       const otherDays = dayCells.filter(
-        (d) => d.half === spendDay.half && d.day !== spendDay.day && d.dailyBudget != null,
+        (d) => d.half === spendDay.half && d.iso > spendDay.iso && d.dailyBudget != null,
       );
       if (otherDays.length === 0) {
-        setSpendError("No other days in this pay period to spread the remainder to.");
+        setSpendError("No days remaining in this pay period to spread the remainder to.");
         return;
       }
       setSpendError(null);
@@ -758,9 +762,10 @@ export default function CalendarClient() {
               )}
             </div>
             <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-              Past days are greyed out; today is highlighted. Click a day to log what you spent
-              and spread the rest across the other days in that pay period, or drag a day onto
-              another (same pay period) to move budget between them.
+              Past days are greyed out; today is highlighted. Click a day to log what you spent —
+              the rest is spread across the following days in that pay period, never the ones
+              before it — or drag a day onto a later day (same pay period) to move budget between
+              them.
             </p>
 
             <div className="mt-5 grid grid-cols-7 gap-1.5 sm:gap-2">
@@ -1138,7 +1143,7 @@ export default function CalendarClient() {
             </h2>
             <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
               Budget for this day is {fmtMoney(spendDay.dailyBudget)}. Whatever isn&apos;t spent
-              (or any overspend) is spread evenly across the other days in this pay period.
+              (or any overspend) is spread evenly across the remaining days in this pay period.
             </p>
             <form onSubmit={submitSpend} className="mt-4 flex flex-col gap-3">
               <label className="flex flex-col gap-1 text-sm">
