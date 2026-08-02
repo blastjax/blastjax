@@ -657,10 +657,6 @@ export default function CalendarClient() {
         setError("You can only move budget between days within the same pay period.");
         return;
       }
-      if (target.iso < source.iso) {
-        setError("You can only move budget onto a later day, not an earlier one.");
-        return;
-      }
       if (source.dailyBudget == null || target.dailyBudget == null) return;
       setTransferError(null);
       setTransferSpent("");
@@ -1097,8 +1093,8 @@ export default function CalendarClient() {
             <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
               Past days are greyed out; today is highlighted. Click a day to log what you spent —
               the rest is spread across the following days in that pay period, never the ones
-              before it — or drag a day onto a later day (same pay period) to move budget between
-              them.
+              before it — or drag a day onto any other day in the same pay period, earlier or
+              later, to move budget between them.
             </p>
 
             <div className="mt-5 grid grid-cols-7 gap-1.5 sm:gap-2">
