@@ -218,6 +218,9 @@ type DayCell = {
   isPast: boolean;
   isToday: boolean;
   dailyBudget: number | null;
+  /** The even-split default for this day's pay period, ignoring any stored override —
+   *  what "auto-divide" resets active days back to. */
+  defaultAmount: number | null;
 };
 
 type ExpenseForm = { amount: string; description: string };
@@ -257,8 +260,8 @@ export default function CalendarClient() {
   const [payDateError, setPayDateError] = useState<string | null>(null);
 
   const [dayOverrides, setDayOverrides] = useState<Map<string, number>>(new Map());
-  const [dragSourceDay, setDragSourceDay] = useState<number | null>(null);
-  const [dragOverDay, setDragOverDay] = useState<number | null>(null);
+  const [dragSourceIso, setDragSourceIso] = useState<string | null>(null);
+  const [dragOverIso, setDragOverIso] = useState<string | null>(null);
   const [transfer, setTransfer] = useState<TransferState | null>(null);
   const [transferSpent, setTransferSpent] = useState("");
   const [transferAmount, setTransferAmount] = useState("");
@@ -269,6 +272,8 @@ export default function CalendarClient() {
   const [spendAmount, setSpendAmount] = useState("");
   const [savingSpend, setSavingSpend] = useState(false);
   const [spendError, setSpendError] = useState<string | null>(null);
+
+  const [autoDividing, setAutoDividing] = useState(false);
 
   const today = useMemo(() => new Date(), []);
   const todayIso = useMemo(
@@ -390,6 +395,36 @@ export default function CalendarClient() {
     void load();
   }, [load]);
 
+  /**
+   * The backend caches fixed/monthly-expense list responses in Redis (see
+   * backend/cache.py), but only for months actually requested. Warm that
+   * cache for the surrounding 24 months (12 back, 12 forward) right after
+   * the initial load so paging through the calendar with prev/next/arrow
+   * keys hits Redis instead of the database. Best-effort and silent — a
+   * failed prefetch just means that month falls back to a live query later.
+   */
+  useEffect(() => {
+    let cancelled = false;
+    const warmCache = async () => {
+      const y0 = today.getFullYear();
+      const m0 = today.getMonth() + 1;
+      for (let i = 1; i <= 12 && !cancelled; i++) {
+        const future = addMonths(y0, m0, i);
+        const past = addMonths(y0, m0, -i);
+        await Promise.allSettled([
+          getFixedExpenses(undefined, future.year, future.month),
+          getMonthlyExpenses(undefined, future.year, future.month),
+          getFixedExpenses(undefined, past.year, past.month),
+          getMonthlyExpenses(undefined, past.year, past.month),
+        ]);
+      }
+    };
+    void warmCache();
+    return () => {
+      cancelled = true;
+    };
+  }, [today]);
+
   const goToPrevMonth = useCallback(() => {
     setViewedMonth((m) => {
       if (m === 1) {
@@ -415,10 +450,33 @@ export default function CalendarClient() {
     setViewedMonth(today.getMonth() + 1);
   }, [today]);
 
+  const anyModalOpen =
+    expenseModalHalf != null || payDateModalHalf != null || transfer != null || spendDay != null;
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (anyModalOpen) return;
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        goToPrevMonth();
+      } else if (e.key === "ArrowRight") {
+        e.preventDefault();
+        goToNextMonth();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [anyModalOpen, goToPrevMonth, goToNextMonth]);
+
   const isViewingCurrentMonth =
     viewedYear === today.getFullYear() && viewedMonth === today.getMonth() + 1;
 
   const daysInMonth = new Date(year, month, 0).getDate();
+  /** Weekday (0=Sun) of this month's 1st — also the number of blank leading
+   *  grid slots available to show spillover days from the previous month. */
+  const firstWeekday = new Date(year, month - 1, 1).getDay();
 
   /**
    * Effective start/end of this month's two pay periods, plus next month's
@@ -634,6 +692,7 @@ export default function CalendarClient() {
         // (even a stored override, which may be stale from before this day's
         // period assignment or funding payslip changed) until there is one.
         dailyBudget: defaultAmount != null ? overrideAmount ?? defaultAmount : null,
+        defaultAmount,
       });
     }
     return result;
@@ -649,16 +708,84 @@ export default function CalendarClient() {
     dayOverrides,
   ]);
 
+  /**
+   * When this month's 1st-half pay period start was pulled back by an
+   * override into the previous month (e.g. payday landing on the 29th
+   * instead of the 1st), those trailing previous-month days belong to this
+   * month's period 1 but live outside `dayCells` (which only covers this
+   * month's own 1..daysInMonth). Surface them so they're visible and
+   * clickable — capped to the number of blank leading slots the grid
+   * already has before day 1, so weekday columns stay aligned.
+   */
+  const leadingOverflowDays = useMemo(() => {
+    const [py, pm] = periodInfo.p1Start.split("-").map(Number);
+    if (py === year && pm === month) return [];
+    const result: DayCell[] = [];
+    const prevMonthLastDay = new Date(py, pm, 0).getDate();
+    for (let d = 1; d <= prevMonthLastDay; d++) {
+      const iso = dateIso(py, pm, d);
+      if (iso < periodInfo.p1Start) continue;
+      const overrideAmount = dayOverrides.get(iso);
+      result.push({
+        day: d,
+        iso,
+        periodYear: year,
+        periodMonth: month,
+        periodHalf: 1,
+        isPast: iso < todayIso,
+        isToday: iso === todayIso,
+        dailyBudget: firstHalfBudget != null ? overrideAmount ?? firstHalfBudget : null,
+        defaultAmount: firstHalfBudget,
+      });
+    }
+    return result.slice(Math.max(0, result.length - firstWeekday));
+  }, [periodInfo.p1Start, year, month, dayOverrides, firstHalfBudget, todayIso, firstWeekday]);
+
+  /** Sum of a half's still-active (today or later) days' current daily budget —
+   *  what's left to spend for the rest of that pay period this month. */
+  const remainingForHalf = useCallback(
+    (half: PeriodHalf) =>
+      roundCents(
+        [...leadingOverflowDays, ...dayCells]
+          .filter(
+            (d) =>
+              d.periodHalf === half &&
+              d.periodYear === year &&
+              d.periodMonth === month &&
+              !d.isPast &&
+              d.dailyBudget != null,
+          )
+          .reduce((s, d) => s + (d.dailyBudget as number), 0),
+      ),
+    [dayCells, leadingOverflowDays, year, month],
+  );
+
+  const remainingFirstHalf = firstHalfBudget != null ? remainingForHalf(1) : null;
+  const remainingSecondHalf = secondHalfBudget != null ? remainingForHalf(2) : null;
+
+  const cellsByIso = useMemo(() => {
+    const map = new Map<string, DayCell>();
+    for (const d of leadingOverflowDays) map.set(d.iso, d);
+    for (const d of dayCells) map.set(d.iso, d);
+    return map;
+  }, [leadingOverflowDays, dayCells]);
+
   const gridCells = useMemo(() => {
-    const firstWeekday = new Date(year, month - 1, 1).getDay();
     const totalCells = Math.ceil((firstWeekday + daysInMonth) / 7) * 7;
     const result: (DayCell | null)[] = [];
     for (let i = 0; i < totalCells; i++) {
       const day = i - firstWeekday + 1;
-      result.push(day >= 1 && day <= daysInMonth ? dayCells[day - 1] : null);
+      if (day >= 1 && day <= daysInMonth) {
+        result.push(dayCells[day - 1]);
+      } else if (day <= 0) {
+        const overflowIdx = leadingOverflowDays.length + day - 1;
+        result.push(overflowIdx >= 0 ? leadingOverflowDays[overflowIdx] : null);
+      } else {
+        result.push(null);
+      }
     }
     return result;
-  }, [year, month, daysInMonth, dayCells]);
+  }, [firstWeekday, daysInMonth, dayCells, leadingOverflowDays]);
 
   /**
    * The full set of days belonging to one specific pay period, independent
@@ -688,6 +815,7 @@ export default function CalendarClient() {
           isPast: iso < todayIso,
           isToday: iso === todayIso,
           dailyBudget: defaultBudget != null ? dayOverrides.get(iso) ?? defaultBudget : null,
+          defaultAmount: defaultBudget,
         });
       }
       return result;
@@ -696,38 +824,37 @@ export default function CalendarClient() {
   );
 
   const handleDayDragStart = useCallback(
-    (e: DragEvent<HTMLDivElement>, day: number) => {
+    (e: DragEvent<HTMLDivElement>, iso: string) => {
       e.dataTransfer.effectAllowed = "move";
-      e.dataTransfer.setData(DAY_DND_MIME, String(day));
-      setDragSourceDay(day);
+      e.dataTransfer.setData(DAY_DND_MIME, iso);
+      setDragSourceIso(iso);
     },
     [],
   );
 
-  const handleDayDragOver = useCallback((e: DragEvent<HTMLDivElement>, day: number) => {
+  const handleDayDragOver = useCallback((e: DragEvent<HTMLDivElement>, iso: string) => {
     e.preventDefault();
-    setDragOverDay(day);
+    setDragOverIso(iso);
   }, []);
 
-  const handleDayDragLeave = useCallback((day: number) => {
-    setDragOverDay((prev) => (prev === day ? null : prev));
+  const handleDayDragLeave = useCallback((iso: string) => {
+    setDragOverIso((prev) => (prev === iso ? null : prev));
   }, []);
 
   const handleDayDragEnd = useCallback(() => {
-    setDragSourceDay(null);
-    setDragOverDay(null);
+    setDragSourceIso(null);
+    setDragOverIso(null);
   }, []);
 
   const handleDayDrop = useCallback(
-    (e: DragEvent<HTMLDivElement>, targetDay: number) => {
+    (e: DragEvent<HTMLDivElement>, targetIso: string) => {
       e.preventDefault();
-      setDragSourceDay(null);
-      setDragOverDay(null);
-      const raw = e.dataTransfer.getData(DAY_DND_MIME);
-      const sourceDay = raw ? Number(raw) : NaN;
-      if (!Number.isFinite(sourceDay) || sourceDay === targetDay) return;
-      const source = dayCells[sourceDay - 1];
-      const target = dayCells[targetDay - 1];
+      setDragSourceIso(null);
+      setDragOverIso(null);
+      const sourceIso = e.dataTransfer.getData(DAY_DND_MIME);
+      if (!sourceIso || sourceIso === targetIso) return;
+      const source = cellsByIso.get(sourceIso);
+      const target = cellsByIso.get(targetIso);
       if (!source || !target) return;
       if (
         periodKey(source.periodYear, source.periodMonth, source.periodHalf) !==
@@ -749,7 +876,7 @@ export default function CalendarClient() {
         toAmount: target.dailyBudget,
       });
     },
-    [dayCells],
+    [cellsByIso],
   );
 
   const closeTransferModal = useCallback(() => {
@@ -869,6 +996,32 @@ export default function CalendarClient() {
     },
     [spendDay, spendAmount, periodDayCells],
   );
+
+  /**
+   * Resets every still-active (today or later) day in the viewed month back
+   * to its pay period's even split — the fix for overrides (from a manual
+   * drag/transfer, or a "log spend" redistribution) going stale once a
+   * monthly expense is added, edited, moved between halves, or deleted.
+   * Past days are left untouched so already-logged history doesn't move.
+   */
+  const autoDivideActiveDays = useCallback(async () => {
+    const targets = dayCells.filter((d) => !d.isPast && d.defaultAmount != null);
+    if (targets.length === 0) return;
+    setError(null);
+    setAutoDividing(true);
+    try {
+      const overrides = targets.map((d) => ({
+        day: d.iso,
+        amount: roundCents(d.defaultAmount as number),
+      }));
+      const r = await bulkUpsertCalendarDayOverrides(overrides);
+      setDayOverrides(new Map(r.overrides.map((o) => [o.day, o.amount])));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to auto-divide budget");
+    } finally {
+      setAutoDividing(false);
+    }
+  }, [dayCells]);
 
   const openExpenseModal = useCallback((half: PeriodHalf) => {
     setExpenseError(null);
@@ -1118,6 +1271,35 @@ export default function CalendarClient() {
 
           <section className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950 sm:p-6">
             <h2 className="text-lg font-medium text-zinc-900 dark:text-zinc-50">
+              Remaining budget
+            </h2>
+            <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
+              What&apos;s left across each pay period&apos;s still-active days (today onward).
+            </p>
+            <div className="mt-5 grid gap-4 sm:grid-cols-2">
+              <div className="rounded-lg border border-zinc-200 bg-zinc-50/90 p-4 dark:border-zinc-700 dark:bg-zinc-900/50">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                  {formatDayRangeLabel(periodInfo.p1Start, periodInfo.p1End)}
+                </p>
+                <p className="mt-2 text-2xl font-bold tabular-nums text-zinc-800 dark:text-zinc-100">
+                  {remainingFirstHalf != null ? fmtMoney(remainingFirstHalf) : "–"}
+                </p>
+                <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">remaining</p>
+              </div>
+              <div className="rounded-lg border border-zinc-200 bg-zinc-50/90 p-4 dark:border-zinc-700 dark:bg-zinc-900/50">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                  {formatDayRangeLabel(periodInfo.p2Start, periodInfo.p2End)}
+                </p>
+                <p className="mt-2 text-2xl font-bold tabular-nums text-zinc-800 dark:text-zinc-100">
+                  {remainingSecondHalf != null ? fmtMoney(remainingSecondHalf) : "–"}
+                </p>
+                <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">remaining</p>
+              </div>
+            </div>
+          </section>
+
+          <section className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950 sm:p-6">
+            <h2 className="text-lg font-medium text-zinc-900 dark:text-zinc-50">
               Semi-monthly daily budget
             </h2>
             <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
@@ -1169,15 +1351,26 @@ export default function CalendarClient() {
               >
                 ›
               </button>
-              {!isViewingCurrentMonth && (
+              <div className="absolute right-0 flex items-center gap-2">
+                {!isViewingCurrentMonth && (
+                  <button
+                    type="button"
+                    onClick={goToToday}
+                    className="rounded-md border-2 border-zinc-200 px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:border-purple-400 hover:text-purple-700 dark:border-zinc-700 dark:text-zinc-300 dark:hover:border-purple-500 dark:hover:text-purple-300"
+                  >
+                    Today
+                  </button>
+                )}
                 <button
                   type="button"
-                  onClick={goToToday}
-                  className="absolute right-0 rounded-md border border-zinc-200 px-2.5 py-1 text-xs font-medium text-zinc-600 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-900"
+                  onClick={() => void autoDivideActiveDays()}
+                  disabled={autoDividing}
+                  title="Reset today and future days this month to an even split of their pay period's budget"
+                  className="rounded-md border-2 border-zinc-200 px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:border-purple-400 hover:text-purple-700 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-700 dark:text-zinc-300 dark:hover:border-purple-500 dark:hover:text-purple-300"
                 >
-                  Today
+                  {autoDividing ? "Dividing…" : "Auto-divide"}
                 </button>
-              )}
+              </div>
             </div>
             <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
               Past days are greyed out; today is highlighted. Click a day to log what you spent —
@@ -1201,10 +1394,10 @@ export default function CalendarClient() {
                 if (!cell) {
                   return <div key={`blank-${idx}`} />;
                 }
-                const { day, periodHalf, isPast, isToday, dailyBudget } = cell;
+                const { day, iso, periodHalf, isPast, isToday, dailyBudget } = cell;
                 const draggable = dailyBudget != null;
-                const isDragSource = dragSourceDay === day;
-                const isDragOverTarget = dragOverDay === day && dragSourceDay !== day;
+                const isDragSource = dragSourceIso === iso;
+                const isDragOverTarget = dragOverIso === iso && dragSourceIso !== iso;
                 /** Orange for the 1st-half pay period, blue for the 2nd — always visible so the
                  *  boundary between periods reads at a glance, even on past/today cells. */
                 const halfBorderClasses =
@@ -1217,7 +1410,7 @@ export default function CalendarClient() {
                     : "bg-blue-50/50 dark:bg-blue-950/20";
                 return (
                   <div
-                    key={day}
+                    key={iso}
                     role={draggable ? "button" : undefined}
                     tabIndex={draggable ? 0 : undefined}
                     draggable={draggable}
@@ -1232,10 +1425,10 @@ export default function CalendarClient() {
                           }
                         : undefined
                     }
-                    onDragStart={draggable ? (e) => handleDayDragStart(e, day) : undefined}
-                    onDragOver={draggable ? (e) => handleDayDragOver(e, day) : undefined}
-                    onDragLeave={draggable ? () => handleDayDragLeave(day) : undefined}
-                    onDrop={draggable ? (e) => handleDayDrop(e, day) : undefined}
+                    onDragStart={draggable ? (e) => handleDayDragStart(e, iso) : undefined}
+                    onDragOver={draggable ? (e) => handleDayDragOver(e, iso) : undefined}
+                    onDragLeave={draggable ? () => handleDayDragLeave(iso) : undefined}
+                    onDrop={draggable ? (e) => handleDayDrop(e, iso) : undefined}
                     onDragEnd={handleDayDragEnd}
                     className={`flex min-h-[5rem] min-w-0 flex-col items-center justify-center gap-1 rounded-lg border-2 px-1.5 py-2 text-center transition sm:min-h-[7rem] ${
                       draggable ? "cursor-grab active:cursor-grabbing" : ""
