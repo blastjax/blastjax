@@ -32,12 +32,16 @@ def _clean_description(description: str | None) -> str | None:
 @router.get("/api/fixed-expense")
 def fixed_expense_list(
     period_half: int | None = Query(default=None, ge=1, le=2),
+    period_year: int | None = Query(default=None),
+    period_month: int | None = Query(default=None, ge=1, le=12),
 ) -> dict[str, Any]:
-    key = f"fixed_expense:list:{period_half}"
+    key = f"fixed_expense:list:{period_half}:{period_year}:{period_month}"
     hit = cache.get(key)
     if hit is not None:
         return hit
-    rows = list_fixed_expenses(period_half=period_half)
+    rows = list_fixed_expenses(
+        period_half=period_half, period_year=period_year, period_month=period_month
+    )
     result = {"expenses": [_serialize(r) for r in rows]}
     cache.set(key, result)
     return result
@@ -45,7 +49,13 @@ def fixed_expense_list(
 
 @router.post("/api/fixed-expense")
 def fixed_expense_create(body: FixedExpenseCreate) -> dict[str, Any]:
-    row = insert_fixed_expense(body.period_half, body.amount, _clean_description(body.description))
+    row = insert_fixed_expense(
+        body.period_half,
+        body.amount,
+        _clean_description(body.description),
+        body.period_year,
+        body.period_month,
+    )
     cache.invalidate("fixed_expense")
     return {"expense": _serialize(row)}
 

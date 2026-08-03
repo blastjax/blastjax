@@ -641,16 +641,15 @@ def _init_schema_minimal_stmts() -> list[str]:
         CREATE TABLE IF NOT EXISTS fixed_expense (
             id SERIAL PRIMARY KEY,
             period_half INTEGER NOT NULL,
+            period_year INTEGER NOT NULL,
+            period_month INTEGER NOT NULL,
             amount DOUBLE PRECISION NOT NULL,
             description TEXT,
             created_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() AT TIME ZONE 'UTC'),
             CONSTRAINT chk_fixed_expense_half CHECK (period_half IN (1, 2)),
-            CONSTRAINT chk_fixed_expense_amount CHECK (amount > 0)
+            CONSTRAINT chk_fixed_expense_amount CHECK (amount > 0),
+            CONSTRAINT chk_fixed_expense_month CHECK (period_month BETWEEN 1 AND 12)
         )
-        """,
-        """
-        CREATE INDEX IF NOT EXISTS idx_fixed_expense_half
-            ON fixed_expense (period_half, created_at DESC)
         """,
         """
         CREATE TABLE IF NOT EXISTS monthly_expense (
@@ -1019,6 +1018,42 @@ def _migrate_house_payment_simplify(cur: Any) -> None:
         cur.execute(f"ALTER TABLE house_payment DROP COLUMN IF EXISTS {col}")
 
 
+def _migrate_fixed_expense_period_columns(cur: Any) -> None:
+    """
+    Fixed expenses used to have no month scoping at all — one row applied to
+    every month's calendar half forever. Add period_year/period_month so a
+    fixed expense (e.g. a one-off savings goal) can be tied to the single
+    month it was actually added for. Existing rows are backfilled to the
+    current month so they keep showing up where the user last saw them.
+    """
+    cur.execute("ALTER TABLE fixed_expense ADD COLUMN IF NOT EXISTS period_year INTEGER")
+    cur.execute("ALTER TABLE fixed_expense ADD COLUMN IF NOT EXISTS period_month INTEGER")
+    cur.execute(
+        """
+        UPDATE fixed_expense
+        SET period_year = EXTRACT(YEAR FROM NOW() AT TIME ZONE 'UTC')::INTEGER,
+            period_month = EXTRACT(MONTH FROM NOW() AT TIME ZONE 'UTC')::INTEGER
+        WHERE period_year IS NULL OR period_month IS NULL
+        """
+    )
+    cur.execute("ALTER TABLE fixed_expense ALTER COLUMN period_year SET NOT NULL")
+    cur.execute("ALTER TABLE fixed_expense ALTER COLUMN period_month SET NOT NULL")
+    cur.execute(
+        "ALTER TABLE fixed_expense DROP CONSTRAINT IF EXISTS chk_fixed_expense_month"
+    )
+    cur.execute(
+        "ALTER TABLE fixed_expense ADD CONSTRAINT chk_fixed_expense_month "
+        "CHECK (period_month BETWEEN 1 AND 12)"
+    )
+    cur.execute("DROP INDEX IF EXISTS idx_fixed_expense_half")
+    cur.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_fixed_expense_period
+            ON fixed_expense (period_year, period_month, period_half, created_at DESC)
+        """
+    )
+
+
 def _migrate_monthly_expense_columns(cur: Any) -> None:
     """
     An earlier, abandoned attempt at this feature left a ``monthly_expense``
@@ -1124,7 +1159,7 @@ def _migrate_installment_credit_card_id(cur: Any) -> None:
 # Bump this whenever the DDL or migrations below change. ``init_schema()``
 # uses it to skip the entire migration block on warm starts (very common
 # on Neon, where containers cold-start often).
-_SCHEMA_VERSION = 19
+_SCHEMA_VERSION = 20
 
 
 def init_schema() -> None:
@@ -1186,6 +1221,7 @@ def _init_schema_on(conn_factory: Any) -> None:
             _migrate_installment_recompute_aggregates(cur)
             _migrate_monthly_expense_columns(cur)
             _migrate_installment_credit_card_id(cur)
+            _migrate_fixed_expense_period_columns(cur)
             cur.execute(
                 """
                 INSERT INTO _app_meta (key, value)
@@ -2350,47 +2386,59 @@ def delete_blood_pressure(reading_id: int) -> bool:
             return cur.rowcount > 0
 
 
-_FIXED_EXPENSE_COLS = "id, period_half, amount, description, created_at"
+_FIXED_EXPENSE_COLS = "id, period_half, period_year, period_month, amount, description, created_at"
 
 
-def list_fixed_expenses(period_half: int | None = None, limit: int = 500) -> list[dict[str, Any]]:
+def list_fixed_expenses(
+    period_half: int | None = None,
+    period_year: int | None = None,
+    period_month: int | None = None,
+    limit: int = 500,
+) -> list[dict[str, Any]]:
     limit = max(1, min(limit, 2000))
     with get_connection() as conn:
         with db_cursor(conn) as cur:
-            if period_half is None:
-                cur.execute(
-                    f"""
-                    SELECT {_FIXED_EXPENSE_COLS} FROM fixed_expense
-                    ORDER BY created_at DESC, id DESC
-                    LIMIT ?
-                    """,
-                    (limit,),
-                )
-            else:
-                cur.execute(
-                    f"""
-                    SELECT {_FIXED_EXPENSE_COLS} FROM fixed_expense
-                    WHERE period_half = ?
-                    ORDER BY created_at DESC, id DESC
-                    LIMIT ?
-                    """,
-                    (period_half, limit),
-                )
+            clauses = []
+            params: list[Any] = []
+            if period_half is not None:
+                clauses.append("period_half = ?")
+                params.append(period_half)
+            if period_year is not None:
+                clauses.append("period_year = ?")
+                params.append(period_year)
+            if period_month is not None:
+                clauses.append("period_month = ?")
+                params.append(period_month)
+            where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+            params.append(limit)
+            cur.execute(
+                f"""
+                SELECT {_FIXED_EXPENSE_COLS} FROM fixed_expense
+                {where}
+                ORDER BY created_at DESC, id DESC
+                LIMIT ?
+                """,
+                params,
+            )
             return [_row_to_dict(cur, r) for r in cur.fetchall()]
 
 
 def insert_fixed_expense(
-    period_half: int, amount: float, description: str | None
+    period_half: int,
+    amount: float,
+    description: str | None,
+    period_year: int,
+    period_month: int,
 ) -> dict[str, Any]:
     with get_connection() as conn:
         with db_cursor(conn) as cur:
             cur.execute(
                 f"""
-                INSERT INTO fixed_expense (period_half, amount, description)
-                VALUES (?, ?, ?)
+                INSERT INTO fixed_expense (period_half, period_year, period_month, amount, description)
+                VALUES (?, ?, ?, ?, ?)
                 RETURNING {_FIXED_EXPENSE_COLS}
                 """,
-                (period_half, amount, description),
+                (period_half, period_year, period_month, amount, description),
             )
             return _row_to_dict(cur, cur.fetchone())
 

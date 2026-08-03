@@ -239,6 +239,7 @@ type TransferState = {
 export default function CalendarClient() {
   const [payslips, setPayslips] = useState<PayslipRow[]>([]);
   const [fixedExpenses, setFixedExpenses] = useState<FixedExpenseRow[]>([]);
+  const [nextFixedExpenses, setNextFixedExpenses] = useState<FixedExpenseRow[]>([]);
   const [monthlyExpenses, setMonthlyExpenses] = useState<MonthlyExpenseRow[]>([]);
   const [nextMonthlyExpenses, setNextMonthlyExpenses] = useState<MonthlyExpenseRow[]>([]);
   const [payPeriodOverrides, setPayPeriodOverrides] = useState<Map<string, string>>(new Map());
@@ -281,9 +282,15 @@ export default function CalendarClient() {
   const month = viewedMonth;
 
   const loadExpenses = useCallback(async () => {
-    const r = await getFixedExpenses();
+    const r = await getFixedExpenses(undefined, viewedYear, viewedMonth);
     setFixedExpenses(r.expenses);
-  }, []);
+  }, [viewedYear, viewedMonth]);
+
+  const loadNextExpenses = useCallback(async () => {
+    const next = addMonths(viewedYear, viewedMonth, 1);
+    const r = await getFixedExpenses(undefined, next.year, next.month);
+    setNextFixedExpenses(r.expenses);
+  }, [viewedYear, viewedMonth]);
 
   const loadMonthlyExpenses = useCallback(async () => {
     const r = await getMonthlyExpenses(undefined, viewedYear, viewedMonth);
@@ -316,6 +323,7 @@ export default function CalendarClient() {
     const [
       payslipResult,
       expensesResult,
+      nextExpensesResult,
       monthlyExpensesResult,
       nextMonthlyExpensesResult,
       overridesResult,
@@ -323,6 +331,7 @@ export default function CalendarClient() {
     ] = await Promise.allSettled([
       getPayslips(12),
       loadExpenses(),
+      loadNextExpenses(),
       loadMonthlyExpenses(),
       loadNextMonthlyExpenses(),
       loadOverrides(),
@@ -340,6 +349,11 @@ export default function CalendarClient() {
       const e = expensesResult.reason;
       firstError ??= e instanceof Error ? e.message : "Failed to load fixed expenses";
       setFixedExpenses([]);
+    }
+    if (nextExpensesResult.status === "rejected") {
+      const e = nextExpensesResult.reason;
+      firstError ??= e instanceof Error ? e.message : "Failed to load next month's fixed expenses";
+      setNextFixedExpenses([]);
     }
     if (monthlyExpensesResult.status === "rejected") {
       const e = monthlyExpensesResult.reason;
@@ -365,6 +379,7 @@ export default function CalendarClient() {
     setLoading(false);
   }, [
     loadExpenses,
+    loadNextExpenses,
     loadMonthlyExpenses,
     loadNextMonthlyExpenses,
     loadOverrides,
@@ -432,18 +447,43 @@ export default function CalendarClient() {
     };
   }, [payPeriodOverrides, year, month]);
 
-  const expensesByHalf = useMemo(() => {
-    const map: Record<PeriodHalf, FixedExpenseRow[]> = { 1: [], 2: [] };
-    for (const e of fixedExpenses) {
-      if (e.period_half === 1 || e.period_half === 2) map[e.period_half].push(e);
-    }
+  /**
+   * Fixed expenses are scoped to the single (period_year, period_month) they
+   * were added for — no recurring flag, unlike monthly expenses — keyed by
+   * the payslip half (see payslipHalfFor) that actually funds a calendar
+   * half, since that's the half a fixed expense is recorded against.
+   */
+  const expensesByPeriod = useMemo(() => {
+    const map = new Map<string, FixedExpenseRow[]>();
+    const addRows = (rows: FixedExpenseRow[]) => {
+      for (const e of rows) {
+        if (e.period_half !== 1 && e.period_half !== 2) continue;
+        const key = periodKey(e.period_year, e.period_month, e.period_half as PeriodHalf);
+        const arr = map.get(key);
+        if (arr) arr.push(e);
+        else map.set(key, [e]);
+      }
+    };
+    addRows(fixedExpenses);
+    addRows(nextFixedExpenses);
     return map;
-  }, [fixedExpenses]);
+  }, [fixedExpenses, nextFixedExpenses]);
+
+  const expensesForPeriod = useCallback(
+    (periodYear: number, periodMonth: number, calendarHalf: PeriodHalf) =>
+      expensesByPeriod.get(periodKey(periodYear, periodMonth, payslipHalfFor(calendarHalf))) ?? [],
+    [expensesByPeriod],
+  );
+
+  const expensesTotalForPeriod = useCallback(
+    (periodYear: number, periodMonth: number, calendarHalf: PeriodHalf) =>
+      expensesForPeriod(periodYear, periodMonth, calendarHalf).reduce((s, e) => s + e.amount, 0),
+    [expensesForPeriod],
+  );
 
   const expensesTotal = useCallback(
-    (calendarHalf: PeriodHalf) =>
-      expensesByHalf[payslipHalfFor(calendarHalf)].reduce((s, e) => s + e.amount, 0),
-    [expensesByHalf],
+    (calendarHalf: PeriodHalf) => expensesTotalForPeriod(viewedYear, viewedMonth, calendarHalf),
+    [expensesTotalForPeriod, viewedYear, viewedMonth],
   );
 
   /**
@@ -537,11 +577,11 @@ export default function CalendarClient() {
       const net = netPayForPeriod(periodYear, periodMonth, periodHalf);
       return net != null
         ? net -
-            expensesTotal(periodHalf) -
+            expensesTotalForPeriod(periodYear, periodMonth, periodHalf) -
             monthlyExpensesTotalForPeriod(periodYear, periodMonth, periodHalf)
         : null;
     },
-    [netPayForPeriod, expensesTotal, monthlyExpensesTotalForPeriod],
+    [netPayForPeriod, expensesTotalForPeriod, monthlyExpensesTotalForPeriod],
   );
 
   const netAfterExpenses = useCallback(
@@ -615,6 +655,41 @@ export default function CalendarClient() {
     }
     return result;
   }, [year, month, daysInMonth, dayCells]);
+
+  /**
+   * The full set of days belonging to one specific pay period, independent
+   * of which month is currently being viewed — a period can span a month
+   * boundary (see periodEndIso), so a day near the end of the viewed month
+   * may need siblings that live in the *next* month's grid, which `dayCells`
+   * never contains since it's scoped to the viewed month only. Used to let
+   * "log spend" redistribute correctly even when logging a day whose period
+   * spills into another month.
+   */
+  const periodDayCells = useCallback(
+    (periodYear: number, periodMonth: number, periodHalf: PeriodHalf): DayCell[] => {
+      const start = effectiveHalfStartIso(payPeriodOverrides, periodYear, periodMonth, periodHalf);
+      const end = periodEndIso(payPeriodOverrides, periodYear, periodMonth, periodHalf);
+      const net = netAfterExpensesForPeriod(periodYear, periodMonth, periodHalf);
+      const dayCount = periodDayCount(payPeriodOverrides, periodYear, periodMonth, periodHalf);
+      const defaultBudget = net != null ? net / dayCount : null;
+      const result: DayCell[] = [];
+      for (let iso = start; iso <= end; iso = addDaysIso(iso, 1)) {
+        const day = Number(iso.slice(8, 10));
+        result.push({
+          day,
+          iso,
+          periodYear,
+          periodMonth,
+          periodHalf,
+          isPast: iso < todayIso,
+          isToday: iso === todayIso,
+          dailyBudget: dayOverrides.get(iso) ?? defaultBudget,
+        });
+      }
+      return result;
+    },
+    [payPeriodOverrides, netAfterExpensesForPeriod, dayOverrides, todayIso],
+  );
 
   const handleDayDragStart = useCallback(
     (e: DragEvent<HTMLDivElement>, day: number) => {
@@ -746,15 +821,23 @@ export default function CalendarClient() {
         return;
       }
       const spent = roundCents(rawSpent);
-      const spendPeriodKey = periodKey(spendDay.periodYear, spendDay.periodMonth, spendDay.periodHalf);
-      const otherDays = dayCells.filter(
-        (d) =>
-          periodKey(d.periodYear, d.periodMonth, d.periodHalf) === spendPeriodKey &&
-          d.iso > spendDay.iso &&
-          d.dailyBudget != null,
-      );
+      /**
+       * The remainder (or overspend) spreads across this period's other
+       * *active* days — today or later, never a day that's already past —
+       * regardless of whether they fall before or after the day being
+       * logged. This lets logging a future day (e.g. the last day of the
+       * period) redistribute to the still-open days leading up to it, not
+       * just days after it (there may be none). Pulled from the full period
+       * (via periodDayCells), not just the viewed month's dayCells, since a
+       * period can spill into an adjacent month.
+       */
+      const otherDays = periodDayCells(
+        spendDay.periodYear,
+        spendDay.periodMonth,
+        spendDay.periodHalf,
+      ).filter((d) => d.iso !== spendDay.iso && !d.isPast && d.dailyBudget != null);
       if (otherDays.length === 0) {
-        setSpendError("No days remaining in this pay period to spread the remainder to.");
+        setSpendError("No active days in this pay period to spread the remainder to.");
         return;
       }
       setSpendError(null);
@@ -780,7 +863,7 @@ export default function CalendarClient() {
         setSavingSpend(false);
       }
     },
-    [spendDay, spendAmount, dayCells],
+    [spendDay, spendAmount, periodDayCells],
   );
 
   const openExpenseModal = useCallback((half: PeriodHalf) => {
@@ -809,6 +892,8 @@ export default function CalendarClient() {
           period_half: payslipHalfFor(expenseModalHalf),
           amount,
           description: expenseForm.description.trim() || null,
+          period_year: viewedYear,
+          period_month: viewedMonth,
         });
         setExpenseForm(emptyExpenseForm());
         await loadExpenses();
@@ -818,7 +903,7 @@ export default function CalendarClient() {
         setSavingExpense(false);
       }
     },
-    [expenseModalHalf, expenseForm, loadExpenses],
+    [expenseModalHalf, expenseForm, loadExpenses, viewedYear, viewedMonth],
   );
 
   const onDeleteExpense = useCallback(
@@ -848,7 +933,7 @@ export default function CalendarClient() {
   );
 
   const modalExpenses =
-    expenseModalHalf != null ? expensesByHalf[payslipHalfFor(expenseModalHalf)] : [];
+    expenseModalHalf != null ? expensesForPeriod(viewedYear, viewedMonth, expenseModalHalf) : [];
   const modalMonthlyExpenses =
     expenseModalHalf != null
       ? monthlyExpensesForPeriod(viewedYear, viewedMonth, expenseModalHalf)
@@ -1092,9 +1177,9 @@ export default function CalendarClient() {
             </div>
             <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
               Past days are greyed out; today is highlighted. Click a day to log what you spent —
-              the rest is spread across the following days in that pay period, never the ones
-              before it — or drag a day onto any other day in the same pay period, earlier or
-              later, to move budget between them.
+              the rest is spread across that pay period&apos;s other active days (today or
+              later), never a day that&apos;s already past — or drag a day onto any other day in
+              the same pay period, earlier or later, to move budget between them.
             </p>
 
             <div className="mt-5 grid grid-cols-7 gap-1.5 sm:gap-2">
@@ -1112,10 +1197,20 @@ export default function CalendarClient() {
                 if (!cell) {
                   return <div key={`blank-${idx}`} />;
                 }
-                const { day, isPast, isToday, dailyBudget } = cell;
+                const { day, periodHalf, isPast, isToday, dailyBudget } = cell;
                 const draggable = dailyBudget != null;
                 const isDragSource = dragSourceDay === day;
                 const isDragOverTarget = dragOverDay === day && dragSourceDay !== day;
+                /** Orange for the 1st-half pay period, blue for the 2nd — always visible so the
+                 *  boundary between periods reads at a glance, even on past/today cells. */
+                const halfBorderClasses =
+                  periodHalf === 1
+                    ? "border-orange-400 dark:border-orange-600"
+                    : "border-blue-400 dark:border-blue-600";
+                const halfBgClasses =
+                  periodHalf === 1
+                    ? "bg-orange-50/50 dark:bg-orange-950/20"
+                    : "bg-blue-50/50 dark:bg-blue-950/20";
                 return (
                   <div
                     key={day}
@@ -1138,16 +1233,16 @@ export default function CalendarClient() {
                     onDragLeave={draggable ? () => handleDayDragLeave(day) : undefined}
                     onDrop={draggable ? (e) => handleDayDrop(e, day) : undefined}
                     onDragEnd={handleDayDragEnd}
-                    className={`flex min-h-[5rem] min-w-0 flex-col items-center justify-center gap-1 rounded-lg border px-1.5 py-2 text-center transition sm:min-h-[7rem] ${
+                    className={`flex min-h-[5rem] min-w-0 flex-col items-center justify-center gap-1 rounded-lg border-2 px-1.5 py-2 text-center transition sm:min-h-[7rem] ${
                       draggable ? "cursor-grab active:cursor-grabbing" : ""
                     } ${
                       isDragOverTarget
                         ? "border-indigo-500 bg-indigo-100 ring-2 ring-indigo-500/60 dark:border-indigo-400 dark:bg-indigo-950/70"
                         : isToday
-                          ? "border-indigo-500 bg-indigo-50 ring-2 ring-indigo-500/40 dark:border-indigo-400 dark:bg-indigo-950/50"
+                          ? `${halfBorderClasses} bg-indigo-50 ring-2 ring-indigo-500/50 dark:bg-indigo-950/50`
                           : isPast
-                            ? "border-dashed border-zinc-200 bg-zinc-50/60 opacity-60 dark:border-zinc-800 dark:bg-zinc-900/30"
-                            : "border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950"
+                            ? `border-dashed ${halfBorderClasses} bg-zinc-50/60 opacity-60 dark:bg-zinc-900/30`
+                            : `${halfBorderClasses} ${halfBgClasses}`
                     } ${isDragSource ? "opacity-40" : ""}`}
                   >
                     <span
@@ -1474,7 +1569,8 @@ export default function CalendarClient() {
             </h2>
             <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
               Budget for this day is {fmtMoney(spendDay.dailyBudget)}. Whatever isn&apos;t spent
-              (or any overspend) is spread evenly across the remaining days in this pay period.
+              (or any overspend) is spread evenly across this pay period&apos;s other active days
+              — today or later, never a day that&apos;s already past.
             </p>
             <form onSubmit={submitSpend} className="mt-4 flex flex-col gap-3">
               <label className="flex flex-col gap-1 text-sm">

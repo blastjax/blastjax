@@ -430,6 +430,8 @@ export async function deleteBloodPressure(id: number) {
 export type FixedExpenseRow = {
   id: number;
   period_half: number;
+  period_year: number;
+  period_month: number;
   amount: number;
   description: string | null;
   created_at: string;
@@ -439,11 +441,19 @@ export type FixedExpenseCreateBody = {
   period_half: 1 | 2;
   amount: number;
   description?: string | null;
+  period_year: number;
+  period_month: number;
 };
 
-export async function getFixedExpenses(periodHalf?: 1 | 2) {
+export async function getFixedExpenses(
+  periodHalf?: 1 | 2,
+  periodYear?: number,
+  periodMonth?: number,
+) {
   return getJson<{ expenses: FixedExpenseRow[] }>("/api/fixed-expense", {
     period_half: periodHalf,
+    period_year: periodYear,
+    period_month: periodMonth,
   });
 }
 
