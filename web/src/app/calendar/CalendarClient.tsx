@@ -629,7 +629,11 @@ export default function CalendarClient() {
         periodHalf,
         isPast: iso < todayIso,
         isToday: iso === todayIso,
-        dailyBudget: overrideAmount ?? defaultAmount,
+        // No payslip recorded for the funding period yet means there's no
+        // confirmed money for this day at all — never show a per-day amount
+        // (even a stored override, which may be stale from before this day's
+        // period assignment or funding payslip changed) until there is one.
+        dailyBudget: defaultAmount != null ? overrideAmount ?? defaultAmount : null,
       });
     }
     return result;
@@ -683,7 +687,7 @@ export default function CalendarClient() {
           periodHalf,
           isPast: iso < todayIso,
           isToday: iso === todayIso,
-          dailyBudget: dayOverrides.get(iso) ?? defaultBudget,
+          dailyBudget: defaultBudget != null ? dayOverrides.get(iso) ?? defaultBudget : null,
         });
       }
       return result;
