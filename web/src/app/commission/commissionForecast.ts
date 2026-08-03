@@ -142,6 +142,9 @@ export interface ForecastPoint {
   yearsOfHistory: number;
   /** Actual commission for this same calendar month one year earlier, if known. */
   sameMonthLastYear: number | null;
+  /** Same-calendar-month actuals from previous years, most recent first; empty when
+   * this month has no prior-year history yet. Powers the per-row trend sparkline. */
+  sameMonthSamples: { yearsAgo: number; value: number }[];
   /** Human-readable explanation of how commissionForecast was derived. */
   calculationDetail: CalculationSegment[];
 }
@@ -303,6 +306,7 @@ export function buildCommissionForecast(
       commissionForecast: predicted,
       yearsOfHistory: samples.length,
       sameMonthLastYear: samples[0]?.value ?? null,
+      sameMonthSamples: samples,
       calculationDetail,
     });
   }

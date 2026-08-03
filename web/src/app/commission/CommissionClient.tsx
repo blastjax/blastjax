@@ -3,19 +3,27 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Area,
+  Bar,
   CartesianGrid,
   ComposedChart,
   Legend,
+  Line,
+  LineChart,
   ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
 } from "recharts";
+import { ToggleLegendList } from "@/components/ToggleLegendList";
 import { useTheme } from "@/components/ThemeProvider";
 import { getPayslips, type PayslipRow } from "@/lib/api";
 import { getChartTooltipStyle } from "@/lib/chartTooltipStyle";
-import { MONTH_NAMES_FULL, formatMonthYearShortFromKey } from "@/lib/dateFormat";
+import {
+  MONTH_NAMES_FULL,
+  MONTH_NAMES_SHORT,
+  formatMonthYearShortFromKey,
+} from "@/lib/dateFormat";
 import {
   DASHED_EMPTY_CLASSES,
   ERROR_ALERT_CLASSES,
@@ -30,6 +38,22 @@ import { buildCommissionForecast, type CalculationSegment } from "./commissionFo
 const ACTUAL_COLOR = { light: "#059669", dark: "#34d399" } as const;
 const FORECAST_COLOR = { light: "#9ca3af", dark: "#9ca3af" } as const;
 
+/** Fixed-order categorical palette for the "one line per year" chart — bold, highly
+ * saturated hues (still validated for CVD-safe adjacent contrast); assign by
+ * ascending year so an existing year keeps its color as later years are appended,
+ * rather than cycling hues on every reassignment. Same hex in both modes (already
+ * bold enough to hold up on both surfaces). */
+const YEAR_LINE_COLORS = [
+  { light: "#2563eb", dark: "#2563eb" },
+  { light: "#ea580c", dark: "#ea580c" },
+  { light: "#0d9488", dark: "#0d9488" },
+  { light: "#d97706", dark: "#d97706" },
+  { light: "#db2777", dark: "#db2777" },
+  { light: "#15803d", dark: "#15803d" },
+  { light: "#7c3aed", dark: "#7c3aed" },
+  { light: "#dc2626", dark: "#dc2626" },
+] as const;
+
 const CALCULATION_SEGMENT_COLOR_CLASSES: Record<
   NonNullable<CalculationSegment["color"]>,
   string
@@ -40,12 +64,72 @@ const CALCULATION_SEGMENT_COLOR_CLASSES: Record<
   negative: "text-red-600 dark:text-red-400",
 };
 
+/** Compact per-row trend: same-month actuals across previous years (green, solid)
+ * bridging into the forecasted month (gray, dashed) — a visual complement to the
+ * "How it's calculated" text next to it. */
+function ForecastTrendSparkline({
+  samples,
+  forecastValue,
+  actualColor,
+  forecastColor,
+}: {
+  samples: { yearsAgo: number; value: number }[];
+  forecastValue: number;
+  actualColor: string;
+  forecastColor: string;
+}) {
+  const chronological = [...samples].reverse();
+  const data: { key: string; actual: number | null; forecast: number | null }[] =
+    chronological.map((s) => ({ key: `-${s.yearsAgo}y`, actual: s.value, forecast: null }));
+  const bridge = data[data.length - 1];
+  if (bridge) bridge.forecast = bridge.actual;
+  data.push({ key: "forecast", actual: null, forecast: forecastValue });
+
+  return (
+    <div className="h-8 w-24">
+      <ResponsiveContainer width="100%" height="100%">
+        <LineChart data={data} margin={{ top: 2, right: 2, bottom: 2, left: 2 }}>
+          <Line
+            type="monotone"
+            dataKey="actual"
+            stroke={actualColor}
+            strokeWidth={2}
+            dot={false}
+            isAnimationActive={false}
+            connectNulls={false}
+          />
+          <Line
+            type="monotone"
+            dataKey="forecast"
+            stroke={forecastColor}
+            strokeWidth={2}
+            strokeDasharray="4 3"
+            dot={{ r: 2 }}
+            isAnimationActive={false}
+            connectNulls={false}
+          />
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
 function fmtMoney(n: number): string {
   return n.toLocaleString(undefined, {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
 }
+
+const MONTHLY_BY_YEAR_TICK_STEP = 25000;
+
+const MONTHLY_CHART_TYPE_OPTIONS = ["line", "bar", "area"] as const;
+type MonthlyChartType = (typeof MONTHLY_CHART_TYPE_OPTIONS)[number];
+const MONTHLY_CHART_TYPE_LABEL: Record<MonthlyChartType, string> = {
+  line: "Line",
+  bar: "Bar",
+  area: "Area",
+};
 
 const HORIZON_OPTIONS = [3, 6, 12] as const;
 type Horizon = (typeof HORIZON_OPTIONS)[number];
@@ -55,6 +139,17 @@ export default function CommissionClient() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [horizon, setHorizon] = useState<Horizon>(6);
+  const [monthlyChartType, setMonthlyChartType] = useState<MonthlyChartType>("line");
+  const [hiddenYears, setHiddenYears] = useState<Set<number>>(() => new Set());
+
+  const toggleYear = useCallback((year: number) => {
+    setHiddenYears((prev) => {
+      const next = new Set(prev);
+      if (next.has(year)) next.delete(year);
+      else next.add(year);
+      return next;
+    });
+  }, []);
 
   const { theme } = useTheme();
   const actualColor = ACTUAL_COLOR[theme];
@@ -129,6 +224,45 @@ export default function CommissionClient() {
     [calendarByYear],
   );
 
+  /** Ascending so an existing year keeps its color slot as later years are appended. */
+  const calendarYearsAsc = useMemo(() => [...calendarYears].sort((a, b) => a - b), [calendarYears]);
+
+  const yearColorForIndex = useCallback(
+    (index: number) => YEAR_LINE_COLORS[index % YEAR_LINE_COLORS.length]![theme],
+    [theme],
+  );
+
+  const monthlyByYearChartData = useMemo(
+    () =>
+      MONTH_NAMES_SHORT.map((name, idx) => {
+        const month = idx + 1;
+        const point: Record<string, string | number | null> = { month: name };
+        for (const year of calendarYearsAsc) {
+          point[String(year)] = calendarByYear.get(year)?.get(month) ?? null;
+        }
+        return point;
+      }),
+    [calendarByYear, calendarYearsAsc],
+  );
+
+  /** Fixed 25k-increment Y ticks, independent of chart height, so a taller chart
+   * doesn't invite Recharts to pick a different (denser) auto tick count. */
+  const monthlyByYearTicks = useMemo(() => {
+    let max = 0;
+    for (const point of monthlyByYearChartData) {
+      for (const year of calendarYearsAsc) {
+        const v = point[String(year)];
+        if (typeof v === "number" && v > max) max = v;
+      }
+    }
+    const top =
+      Math.ceil(Math.max(max, MONTHLY_BY_YEAR_TICK_STEP) / MONTHLY_BY_YEAR_TICK_STEP) *
+      MONTHLY_BY_YEAR_TICK_STEP;
+    const ticks: number[] = [];
+    for (let t = 0; t <= top; t += MONTHLY_BY_YEAR_TICK_STEP) ticks.push(t);
+    return ticks;
+  }, [monthlyByYearChartData, calendarYearsAsc]);
+
   return (
     <div className="box-border flex w-full min-w-0 flex-col gap-10 px-4 pb-28 pt-10 sm:px-6 lg:px-8">
       <header className="border-b border-zinc-200 pb-6 dark:border-zinc-800">
@@ -197,6 +331,7 @@ export default function CommissionClient() {
                     dataKey="monthKey"
                     tick={{ fontSize: 11, fill: axisTickFill }}
                     tickFormatter={formatMonthKeyTick}
+                    interval={1}
                   />
                   <YAxis
                     tick={{ fontSize: 11, fill: axisTickFill }}
@@ -258,6 +393,138 @@ export default function CommissionClient() {
 
           <section className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950 sm:p-6">
             <h2 className="text-lg font-medium text-zinc-900 dark:text-zinc-50">
+              Commission by month
+            </h2>
+            <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
+              The same twelve calendar months, one line per year, so seasonal patterns
+              within a year are easy to compare across years. Click a year below the
+              chart to hide or show it.
+            </p>
+
+            <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+              <span className="text-sm text-zinc-600 dark:text-zinc-400">Chart type</span>
+              <div className={SEGMENTED_WRAPPER_CLASSES}>
+                {MONTHLY_CHART_TYPE_OPTIONS.map((t) => (
+                  <button
+                    key={t}
+                    type="button"
+                    className={`${SEGMENTED_BUTTON_CLASSES} ${
+                      monthlyChartType === t
+                        ? SEGMENTED_BUTTON_ACTIVE_CLASSES
+                        : SEGMENTED_BUTTON_INACTIVE_CLASSES
+                    }`}
+                    onClick={() => setMonthlyChartType(t)}
+                  >
+                    {MONTHLY_CHART_TYPE_LABEL[t]}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="mt-6 h-[min(36rem,75vh)] w-full min-h-[360px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <ComposedChart
+                  data={monthlyByYearChartData}
+                  margin={{ top: 8, right: 8, bottom: 8, left: 8 }}
+                >
+                  <CartesianGrid
+                    strokeDasharray="3 3"
+                    className="stroke-zinc-200 dark:stroke-zinc-700"
+                  />
+                  <XAxis dataKey="month" tick={{ fontSize: 11, fill: axisTickFill }} />
+                  <YAxis
+                    tick={{ fontSize: 11, fill: axisTickFill }}
+                    domain={[0, monthlyByYearTicks[monthlyByYearTicks.length - 1]]}
+                    ticks={monthlyByYearTicks}
+                    tickFormatter={(v) =>
+                      Number(v) >= 1000
+                        ? `${(Number(v) / 1000).toLocaleString(undefined, {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          })}k`
+                        : Number(v).toLocaleString(undefined, {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          })
+                    }
+                  />
+                  <Tooltip
+                    formatter={(value) => fmtMoney(Number(value ?? 0))}
+                    itemSorter={(item) => -Number(item.dataKey)}
+                    contentStyle={chartTooltipStyle}
+                  />
+                  <Legend
+                    content={(props) => (
+                      <ToggleLegendList
+                        items={(props.payload ?? []).map((entry) => {
+                          const year = Number(entry.value);
+                          return {
+                            key: String(entry.value),
+                            label: String(entry.value),
+                            color: entry.color ?? "",
+                            hidden: hiddenYears.has(year),
+                          };
+                        })}
+                        onToggle={(key) => toggleYear(Number(key))}
+                      />
+                    )}
+                  />
+                  {calendarYearsAsc.map((year, idx) => {
+                    const color = yearColorForIndex(idx);
+                    const hidden = hiddenYears.has(year);
+                    const dataKey = String(year);
+                    if (monthlyChartType === "bar") {
+                      return (
+                        <Bar
+                          key={year}
+                          dataKey={dataKey}
+                          name={dataKey}
+                          fill={color}
+                          radius={[4, 4, 0, 0]}
+                          hide={hidden}
+                        />
+                      );
+                    }
+                    if (monthlyChartType === "area") {
+                      return (
+                        <Area
+                          key={year}
+                          type="monotone"
+                          dataKey={dataKey}
+                          name={dataKey}
+                          stroke={color}
+                          strokeWidth={2}
+                          fill={color}
+                          fillOpacity={0.1}
+                          dot={{ r: 3 }}
+                          activeDot={{ r: 5 }}
+                          connectNulls={false}
+                          hide={hidden}
+                        />
+                      );
+                    }
+                    return (
+                      <Line
+                        key={year}
+                        type="monotone"
+                        dataKey={dataKey}
+                        name={dataKey}
+                        stroke={color}
+                        strokeWidth={2}
+                        dot={{ r: 3 }}
+                        activeDot={{ r: 5 }}
+                        connectNulls={false}
+                        hide={hidden}
+                      />
+                    );
+                  })}
+                </ComposedChart>
+              </ResponsiveContainer>
+            </div>
+          </section>
+
+          <section className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950 sm:p-6">
+            <h2 className="text-lg font-medium text-zinc-900 dark:text-zinc-50">
               Forecast summary
             </h2>
             <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
@@ -305,11 +572,12 @@ export default function CommissionClient() {
 
             {forecast.forecastPoints.length > 0 && (
               <div className="mt-6 overflow-x-auto">
-                <table className="w-full min-w-[36rem] text-left text-sm">
+                <table className="w-full min-w-[42rem] text-left text-sm">
                   <thead>
                     <tr className="border-b border-zinc-200 text-xs uppercase text-zinc-500 dark:border-zinc-800">
                       <th className="pb-2 pr-2">Month</th>
                       <th className="pb-2 pr-2">Predicted commission</th>
+                      <th className="pb-2 pr-2">Trend</th>
                       <th className="pb-2 pr-2">How it&apos;s calculated</th>
                       <th className="pb-2">Years used</th>
                     </tr>
@@ -320,6 +588,14 @@ export default function CommissionClient() {
                         <td className="py-2 pr-2 text-zinc-700 dark:text-zinc-300">{fp.label}</td>
                         <td className="py-2 pr-2 tabular-nums font-medium text-emerald-700 dark:text-emerald-300">
                           {fmtMoney(fp.commissionForecast)}
+                        </td>
+                        <td className="py-2 pr-2">
+                          <ForecastTrendSparkline
+                            samples={fp.sameMonthSamples}
+                            forecastValue={fp.commissionForecast}
+                            actualColor={actualColor}
+                            forecastColor={forecastColor}
+                          />
                         </td>
                         <td className="py-2 pr-2 text-xs text-zinc-500 dark:text-zinc-400">
                           {fp.calculationDetail.map((seg, i) => {

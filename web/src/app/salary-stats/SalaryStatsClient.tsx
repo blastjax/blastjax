@@ -15,6 +15,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import { ToggleLegendList } from "@/components/ToggleLegendList";
 import { useTheme } from "@/components/ThemeProvider";
 import {
   CHART_SERIES_LABEL,
@@ -375,6 +376,16 @@ export default function SalaryStatsClient() {
   const [pieMode, setPieMode] = useState<PieMode>("year");
   const [pieYear, setPieYear] = useState(() => new Date().getFullYear());
   const [pieMonthStr, setPieMonthStr] = useState(() => currentMonthKey());
+  const [hiddenPieKeys, setHiddenPieKeys] = useState<Set<PieSeriesKey>>(() => new Set());
+
+  const togglePieKey = useCallback((key: PieSeriesKey) => {
+    setHiddenPieKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
 
   const [lineStart, setLineStart] = useState("");
   const [lineEnd, setLineEnd] = useState(currentMonthKey());
@@ -447,6 +458,14 @@ export default function SalaryStatsClient() {
     }
     return list.filter((x) => x.value > 0);
   }, [periodTotals]);
+
+  /** `pieSlices` minus any category the user hid via the legend below the chart —
+   * recharts computes each slice's `percent` as value / sum(this array), so
+   * hiding a slice here reflows the rest to fill 100% among what's left visible. */
+  const visiblePieSlices = useMemo(
+    () => pieSlices.filter((s) => !hiddenPieKeys.has(s.key)),
+    [pieSlices, hiddenPieKeys],
+  );
 
   const piePeriodDeductions = useMemo(() => {
     const sums = emptyTotals(DEDUCTION_KEYS);
@@ -636,11 +655,15 @@ export default function SalaryStatsClient() {
                 <p className="py-12 text-center text-sm text-zinc-500">
                   No data in this period for these categories.
                 </p>
+              ) : visiblePieSlices.length === 0 ? (
+                <p className="py-12 text-center text-sm text-zinc-500">
+                  All categories hidden — click a legend entry below to show one.
+                </p>
               ) : (
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
                     <Pie
-                      data={pieSlices}
+                      data={visiblePieSlices}
                       dataKey="value"
                       nameKey="name"
                       cx="50%"
@@ -655,7 +678,7 @@ export default function SalaryStatsClient() {
                         })}%`
                       }
                     >
-                      {pieSlices.map((s) => (
+                      {visiblePieSlices.map((s) => (
                         <Cell key={s.key} fill={chartSeriesColors[s.key]} />
                       ))}
                     </Pie>
@@ -665,11 +688,22 @@ export default function SalaryStatsClient() {
                       }
                       contentStyle={chartTooltipStyle}
                     />
-                    <Legend />
                   </PieChart>
                 </ResponsiveContainer>
               )}
             </div>
+
+            {pieSlices.length > 0 && (
+              <ToggleLegendList
+                items={pieSlices.map((s) => ({
+                  key: s.key,
+                  label: s.name,
+                  color: chartSeriesColors[s.key],
+                  hidden: hiddenPieKeys.has(s.key),
+                }))}
+                onToggle={(key) => togglePieKey(key as PieSeriesKey)}
+              />
+            )}
 
             <div className="mt-6 rounded-lg border border-zinc-200 bg-zinc-50/90 p-4 dark:border-zinc-700 dark:bg-zinc-900/50">
               <h3 className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
@@ -756,30 +790,6 @@ export default function SalaryStatsClient() {
               </div>
             </div>
 
-            <div className="mt-2 flex flex-wrap gap-3">
-              {LINE_SERIES_KEYS.map((k) => (
-                <label
-                  key={k}
-                  className="flex cursor-pointer items-center gap-2 text-sm text-zinc-700 dark:text-zinc-300"
-                >
-                  <input
-                    type="checkbox"
-                    className="rounded border-zinc-400"
-                    checked={visibleSeries[k]}
-                    onChange={() =>
-                      setVisibleSeries((prev) => ({ ...prev, [k]: !prev[k] }))
-                    }
-                  />
-                  <span
-                    className="inline-block h-2 w-2 rounded-full"
-                    style={{ backgroundColor: chartSeriesColors[k] }}
-                    aria-hidden
-                  />
-                  {CHART_SERIES_LABEL[k]}
-                </label>
-              ))}
-            </div>
-
             <div className="mt-6 h-[min(24rem,55vh)] w-full min-h-[240px]">
               {!lineStart || !lineEnd || compareMonthKeys(lineStart, lineEnd) > 0 ? (
                 <p className="py-10 text-center text-sm text-zinc-500">
@@ -825,8 +835,28 @@ export default function SalaryStatsClient() {
                       }}
                       contentStyle={chartTooltipStyle}
                     />
-                    <Legend />
-                    {LINE_SERIES_KEYS.filter((k) => visibleSeries[k]).map((k) => (
+                    <Legend
+                      content={(props) => (
+                        <ToggleLegendList
+                          items={(props.payload ?? []).map((entry) => {
+                            const k = entry.dataKey as LineSeriesKey;
+                            return {
+                              key: k,
+                              label: CHART_SERIES_LABEL[k],
+                              color: entry.color ?? "",
+                              hidden: !visibleSeries[k],
+                            };
+                          })}
+                          onToggle={(key) =>
+                            setVisibleSeries((prev) => ({
+                              ...prev,
+                              [key]: !prev[key as LineSeriesKey],
+                            }))
+                          }
+                        />
+                      )}
+                    />
+                    {LINE_SERIES_KEYS.map((k) => (
                       <Area
                         key={k}
                         type="monotone"
@@ -838,6 +868,7 @@ export default function SalaryStatsClient() {
                         fillOpacity={0.22}
                         dot={{ r: 3 }}
                         activeDot={{ r: 5 }}
+                        hide={!visibleSeries[k]}
                       />
                     ))}
                   </ComposedChart>
