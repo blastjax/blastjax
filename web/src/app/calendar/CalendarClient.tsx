@@ -76,6 +76,19 @@ function addMonths(year: number, month: number, delta: number): { year: number; 
   return { year: y, month: m };
 }
 
+/** The period immediately following the given one — half-1 is followed by half-2 of the same
+ *  month; half-2 is followed by half-1 of the next month. Periods stay contiguous, so setting
+ *  a period's end date is the same as setting this adjacent period's start date to end + 1 day. */
+function adjacentPeriodFor(
+  year: number,
+  month: number,
+  half: PeriodHalf,
+): { year: number; month: number; half: PeriodHalf } {
+  if (half === 1) return { year, month, half: 2 };
+  const next = addMonths(year, month, 1);
+  return { year: next.year, month: next.month, half: 1 };
+}
+
 /** Adds `delta` days to a "YYYY-MM-DD" string, returning a new "YYYY-MM-DD" string. */
 function addDaysIso(iso: string, delta: number): string {
   const [y, m, d] = iso.split("-").map(Number);
@@ -256,6 +269,7 @@ export default function CalendarClient() {
 
   const [payDateModalHalf, setPayDateModalHalf] = useState<PeriodHalf | null>(null);
   const [payDateForm, setPayDateForm] = useState("");
+  const [payDateEndForm, setPayDateEndForm] = useState("");
   const [savingPayDate, setSavingPayDate] = useState(false);
   const [payDateError, setPayDateError] = useState<string | null>(null);
 
@@ -1111,10 +1125,21 @@ export default function CalendarClient() {
     } as Record<PeriodHalf, { min: string; max: string }>;
   }, [payPeriodOverrides, year, month]);
 
+  /** Bounds for the optional end date — one day before whatever the adjacent period's own
+   *  start bound is, since setting an end date pushes that adjacent period's start forward. */
+  const payDateEndBounds = useMemo(() => {
+    const next = addMonths(year, month, 1);
+    return {
+      1: { min: payDateForm, max: addDaysIso(defaultHalfStartIso(year, month, 2), -1) },
+      2: { min: payDateForm, max: addDaysIso(defaultHalfStartIso(next.year, next.month, 1), -1) },
+    } as Record<PeriodHalf, { min: string; max: string }>;
+  }, [year, month, payDateForm]);
+
   const openPayDateModal = useCallback(
     (half: PeriodHalf) => {
       setPayDateError(null);
       setPayDateForm(half === 1 ? periodInfo.p1Start : periodInfo.p2Start);
+      setPayDateEndForm("");
       setPayDateModalHalf(half);
     },
     [periodInfo],
@@ -1128,6 +1153,10 @@ export default function CalendarClient() {
     async (e: FormEvent) => {
       e.preventDefault();
       if (payDateModalHalf == null) return;
+      if (payDateEndForm && payDateEndForm < payDateForm) {
+        setPayDateError("End date can't be before the pay date.");
+        return;
+      }
       setPayDateError(null);
       setSavingPayDate(true);
       try {
@@ -1142,6 +1171,25 @@ export default function CalendarClient() {
           next.set(periodKey(year, month, payDateModalHalf), r.override.start_date);
           return next;
         });
+
+        if (payDateEndForm) {
+          const adjacent = adjacentPeriodFor(year, month, payDateModalHalf);
+          const rAdjacent = await upsertPayPeriodStartOverride({
+            period_year: adjacent.year,
+            period_month: adjacent.month,
+            period_half: adjacent.half,
+            start_date: addDaysIso(payDateEndForm, 1),
+          });
+          setPayPeriodOverrides((prev) => {
+            const next = new Map(prev);
+            next.set(
+              periodKey(adjacent.year, adjacent.month, adjacent.half),
+              rAdjacent.override.start_date,
+            );
+            return next;
+          });
+        }
+
         setPayDateModalHalf(null);
       } catch (err) {
         setPayDateError(err instanceof Error ? err.message : "Failed to save pay date");
@@ -1149,7 +1197,7 @@ export default function CalendarClient() {
         setSavingPayDate(false);
       }
     },
-    [payDateModalHalf, payDateForm, year, month],
+    [payDateModalHalf, payDateForm, payDateEndForm, year, month],
   );
 
   const resetPayDate = useCallback(async () => {
@@ -1846,6 +1894,36 @@ export default function CalendarClient() {
                   onChange={(e) => setPayDateForm(e.target.value)}
                   disabled={savingPayDate}
                 />
+              </label>
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="text-zinc-600 dark:text-zinc-400">
+                  End date <span className="text-zinc-400 dark:text-zinc-500">(optional)</span>
+                </span>
+                <div className="flex gap-2">
+                  <input
+                    type="date"
+                    className={INPUT_CLASSES}
+                    value={payDateEndForm}
+                    min={payDateEndBounds[payDateModalHalf].min}
+                    max={payDateEndBounds[payDateModalHalf].max}
+                    onChange={(e) => setPayDateEndForm(e.target.value)}
+                    disabled={savingPayDate}
+                  />
+                  {payDateEndForm && (
+                    <button
+                      type="button"
+                      className="text-xs font-medium text-zinc-500 hover:underline dark:text-zinc-400"
+                      onClick={() => setPayDateEndForm("")}
+                      disabled={savingPayDate}
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+                <span className="text-xs text-zinc-500 dark:text-zinc-400">
+                  Shortens this period to end here and pushes the next period&apos;s start to the
+                  following day, so the calendar stays contiguous.
+                </span>
               </label>
               {payDateError && (
                 <div className={ERROR_ALERT_CLASSES} role="alert">
