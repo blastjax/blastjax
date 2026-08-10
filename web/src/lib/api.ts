@@ -387,6 +387,150 @@ export async function deleteHousePaymentEntry(
   );
 }
 
+export type MosaicCell = { r: number; c: number };
+
+export type MosaicSolveResult = {
+  moves: number[];
+  optimal: boolean;
+  nodeCount: number;
+  /** False only if the time budget cut the search short before a conclusive
+   * answer — i.e. inconclusive, not proven. */
+  proven: boolean;
+};
+
+export async function solveMosaic(
+  grid: number[][],
+  seed: MosaicCell,
+  timeBudgetMs?: number,
+  /** When set, the backend gives up as soon as it's proven no solution of
+   * this length or shorter exists, instead of searching for the true
+   * (possibly much larger) optimum. */
+  maxMoves?: number,
+): Promise<MosaicSolveResult> {
+  const res = await sendJson<{
+    moves: number[];
+    optimal: boolean;
+    node_count: number;
+    proven: boolean;
+  }>("POST", "/api/mosaic/solve", {
+    grid,
+    seed,
+    time_budget_ms: timeBudgetMs,
+    max_moves: maxMoves,
+  });
+  return {
+    moves: res.moves,
+    optimal: res.optimal,
+    nodeCount: res.node_count,
+    proven: res.proven,
+  };
+}
+
+/** A move under the "tap any tile" rule: repaint the blob at (r, c). */
+export type MosaicFreeMove = { r: number; c: number; color: number };
+
+export type MosaicFreeSolveResult = {
+  moves: MosaicFreeMove[];
+  optimal: boolean;
+  nodeCount: number;
+  proven: boolean;
+};
+
+/** Optimal solve where each move may repaint any blob, not just the blob
+ * containing a fixed start tile. */
+export async function solveMosaicFree(
+  grid: number[][],
+  numColors?: number,
+  timeBudgetMs?: number,
+  maxMoves?: number,
+): Promise<MosaicFreeSolveResult> {
+  const res = await sendJson<{
+    moves: MosaicFreeMove[];
+    optimal: boolean;
+    node_count: number;
+    proven: boolean;
+  }>("POST", "/api/mosaic/solve-free", {
+    grid,
+    num_colors: numColors,
+    time_budget_ms: timeBudgetMs,
+    max_moves: maxMoves,
+  });
+  return {
+    moves: res.moves,
+    optimal: res.optimal,
+    nodeCount: res.node_count,
+    proven: res.proven,
+  };
+}
+
+export type MosaicBestStartResult = {
+  seed: MosaicCell;
+  moves: number[];
+  optimal: boolean;
+  regionsTried: number;
+  totalRegions: number;
+};
+
+export async function solveMosaicBestStart(
+  grid: number[][],
+  timeBudgetMs?: number,
+): Promise<MosaicBestStartResult> {
+  const res = await sendJson<{
+    seed: MosaicCell;
+    moves: number[];
+    optimal: boolean;
+    regions_tried: number;
+    total_regions: number;
+  }>("POST", "/api/mosaic/solve-best-start", { grid, time_budget_ms: timeBudgetMs });
+  return {
+    seed: res.seed,
+    moves: res.moves,
+    optimal: res.optimal,
+    regionsTried: res.regions_tried,
+    totalRegions: res.total_regions,
+  };
+}
+
+export type MosaicGenerateResult = {
+  grid: number[][];
+  seed: MosaicCell;
+  moves: number[];
+  optimal: boolean;
+  attempts: number;
+  exactMatch: boolean;
+};
+
+export async function generateMosaicPuzzle(
+  rows: number,
+  cols: number,
+  numColors: number,
+  targetMoves: number,
+  timeBudgetMs?: number,
+): Promise<MosaicGenerateResult> {
+  const res = await sendJson<{
+    grid: number[][];
+    seed: MosaicCell;
+    moves: number[];
+    optimal: boolean;
+    attempts: number;
+    exact_match: boolean;
+  }>("POST", "/api/mosaic/generate", {
+    rows,
+    cols,
+    num_colors: numColors,
+    target_moves: targetMoves,
+    time_budget_ms: timeBudgetMs,
+  });
+  return {
+    grid: res.grid,
+    seed: res.seed,
+    moves: res.moves,
+    optimal: res.optimal,
+    attempts: res.attempts,
+    exactMatch: res.exact_match,
+  };
+}
+
 export type BloodPressureRow = {
   id: number;
   systolic: number | null;

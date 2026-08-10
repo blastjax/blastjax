@@ -126,6 +126,7 @@ def create_app() -> FastAPI:
         house_payment,
         installment,
         monthly_expense,
+        mosaic,
         pay_period_start_override,
         payslip,
     )
@@ -141,6 +142,7 @@ def create_app() -> FastAPI:
         calendar_day_override.router,
         credit_card.router,
         pay_period_start_override.router,
+        mosaic.router,
     ):
         app.include_router(router)
 
