@@ -19,7 +19,7 @@ import {
   type InstallmentLineRow,
   type InstallmentRow,
 } from "@/lib/api";
-import { parseFormNumber } from "@/lib/parseFormNumber";
+import { formatAmountOnBlur, parseFormNumber } from "@/lib/parseFormNumber";
 import { MONTH_NAMES_SHORT, formatMonthYear } from "@/lib/dateFormat";
 import {
   DASHED_EMPTY_CLASSES,
@@ -1258,6 +1258,21 @@ export default function InstallmentsClient() {
                                   },
                                 }))
                               }
+                              onBlur={(e) => {
+                                const formatted = formatAmountOnBlur(e.target.value);
+                                if (formatted == null) return;
+                                setLineEdits((prev) => ({
+                                  ...prev,
+                                  [ln.id]: {
+                                    principal: formatted,
+                                    interest:
+                                      prev[ln.id]?.interest ??
+                                      (ln.interest != null
+                                        ? String(ln.interest)
+                                        : ""),
+                                  },
+                                }));
+                              }}
                             />
                           </td>
                           <td className="cursor-auto py-2 pr-2">
@@ -1282,6 +1297,19 @@ export default function InstallmentsClient() {
                                   },
                                 }))
                               }
+                              onBlur={(e) => {
+                                const formatted = formatAmountOnBlur(e.target.value);
+                                if (formatted == null) return;
+                                setLineEdits((prev) => ({
+                                  ...prev,
+                                  [ln.id]: {
+                                    principal:
+                                      prev[ln.id]?.principal ??
+                                      String(ln.principal),
+                                    interest: formatted,
+                                  },
+                                }));
+                              }}
                             />
                           </td>
                           <td className="py-2 tabular-nums text-zinc-800 dark:text-zinc-100">

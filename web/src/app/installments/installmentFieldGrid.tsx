@@ -1,6 +1,7 @@
 "use client";
 
 import type { Dispatch, SetStateAction } from "react";
+import { formatAmountOnBlur } from "@/lib/parseFormNumber";
 
 export type InstallmentFormState = {
   name: string;
@@ -76,6 +77,7 @@ export function InstallmentFieldGrid({
           <label className="flex flex-col gap-1 text-sm">
             <span className="text-zinc-600 dark:text-zinc-400">Principal</span>
             <input
+              required
               type="text"
               inputMode="decimal"
               className="rounded-md border border-zinc-300 bg-white px-3 py-2 dark:border-zinc-700 dark:bg-zinc-950"
@@ -83,6 +85,10 @@ export function InstallmentFieldGrid({
               onChange={(e) =>
                 setForm((f) => ({ ...f, principal: e.target.value }))
               }
+              onBlur={(e) => {
+                const formatted = formatAmountOnBlur(e.target.value);
+                if (formatted != null) setForm((f) => ({ ...f, principal: formatted }));
+              }}
               disabled={saving}
             />
           </label>
@@ -98,6 +104,10 @@ export function InstallmentFieldGrid({
               onChange={(e) =>
                 setForm((f) => ({ ...f, interest: e.target.value }))
               }
+              onBlur={(e) => {
+                const formatted = formatAmountOnBlur(e.target.value);
+                if (formatted != null) setForm((f) => ({ ...f, interest: formatted }));
+              }}
               disabled={saving}
             />
           </label>

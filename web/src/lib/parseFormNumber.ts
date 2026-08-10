@@ -30,6 +30,17 @@ function formatComputedAmount(n: number): string {
 }
 
 /**
+ * Formats a form amount input as ``n,nnn.nn`` for display once the field
+ * loses focus. Returns null (leave the raw text as-is) when it doesn't
+ * parse to a number.
+ */
+export function formatAmountOnBlur(raw: string): string | null {
+  const n = parseFormNumber(raw);
+  if (n == null) return null;
+  return n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+/**
  * Evaluates amount-like strings using only `+` and `-`, e.g. `100.00-10.00`, `11+1.5`.
  * Commas and spaces are ignored. Returns a display string or null if invalid/incomplete.
  */

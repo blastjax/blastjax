@@ -16,7 +16,7 @@ import {
   type CreditCardRow,
   type InstallmentRow,
 } from "@/lib/api";
-import { parseFormNumber } from "@/lib/parseFormNumber";
+import { formatAmountOnBlur, parseFormNumber } from "@/lib/parseFormNumber";
 import {
   CARD_CLASSES,
   DASHED_EMPTY_CLASSES,
@@ -178,9 +178,12 @@ export default function CreditCardClient() {
     if (card) {
       setCardForm({
         name: card.name,
-        credit_limit: String(card.credit_limit),
-        last_statement_balance: String(card.last_statement_balance),
-        minimum_due: String(card.minimum_due),
+        credit_limit: formatAmountOnBlur(String(card.credit_limit)) ?? String(card.credit_limit),
+        last_statement_balance:
+          formatAmountOnBlur(String(card.last_statement_balance)) ??
+          String(card.last_statement_balance),
+        minimum_due:
+          formatAmountOnBlur(String(card.minimum_due)) ?? String(card.minimum_due),
         interest_rate: String(card.interest_rate),
         statement_date: card.statement_date ? card.statement_date.slice(0, 10) : "",
         due_date: card.due_date ? card.due_date.slice(0, 10) : "",
@@ -321,7 +324,7 @@ export default function CreditCardClient() {
   const openBalanceModal = useCallback(() => {
     if (!card) return;
     setBalanceFormError(null);
-    setBalanceForm(String(card.available_limit));
+    setBalanceForm(formatAmountOnBlur(String(card.available_limit)) ?? String(card.available_limit));
     setBalanceModalOpen(true);
   }, [card]);
 
@@ -871,6 +874,10 @@ export default function CreditCardClient() {
               className={INPUT_CLASSES}
               value={cardForm.credit_limit}
               onChange={(e) => setCardForm((f) => ({ ...f, credit_limit: e.target.value }))}
+              onBlur={(e) => {
+                const formatted = formatAmountOnBlur(e.target.value);
+                if (formatted != null) setCardForm((f) => ({ ...f, credit_limit: formatted }));
+              }}
               disabled={cardSaving}
             />
           </label>
@@ -1067,6 +1074,10 @@ export default function CreditCardClient() {
               className={INPUT_CLASSES}
               value={balanceForm}
               onChange={(e) => setBalanceForm(e.target.value)}
+              onBlur={(e) => {
+                const formatted = formatAmountOnBlur(e.target.value);
+                if (formatted != null) setBalanceForm(formatted);
+              }}
               disabled={balanceSaving}
             />
           </label>
