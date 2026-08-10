@@ -1,21 +1,4 @@
 services:
-  db:
-    image: postgres:16
-    restart: always
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: blast
-      POSTGRES_DB: budgetapp
-    ports:
-      - "5433:5432"
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d budgetapp"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
   redis:
     image: redis:7-alpine
     restart: always
@@ -39,8 +22,6 @@ services:
     env_file:
       - .env
     depends_on:
-      db:
-        condition: service_healthy
       redis:
         condition: service_healthy
     healthcheck:
