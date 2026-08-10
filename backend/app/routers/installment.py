@@ -8,6 +8,7 @@ from app.deps import require_db
 from app.schemas.installment import (
     InstallmentCreate,
     InstallmentLineUpdate,
+    InstallmentLinesBulkUpdate,
     InstallmentLinesReorder,
 )
 from app.services.installment_service import (
@@ -25,6 +26,7 @@ from db import (
     reorder_installment_lines,
     update_installment,
     update_installment_line_and_fetch_detail,
+    update_installment_lines_bulk,
 )
 
 router = APIRouter(tags=["installment"], dependencies=[Depends(require_db)])
@@ -157,6 +159,32 @@ def installment_line_update(
     )
     if not detail:
         raise HTTPException(status_code=404, detail="Schedule line not found.")
+    cache.invalidate("installment")
+    cache.invalidate("credit_card")
+    return _serialize_detail(detail)
+
+
+@router.put("/api/installment/{installment_id}/lines")
+def installment_lines_bulk_update(
+    installment_id: int,
+    body: InstallmentLinesBulkUpdate,
+) -> dict[str, Any]:
+    """Update principal/interest for many schedule rows in a single round trip."""
+    row = get_installment(installment_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Installment not found.")
+    total = int(row.get("installment_total") or 0)
+    for ln in body.lines:
+        if ln.seq > total:
+            raise HTTPException(
+                status_code=400, detail=f"seq {ln.seq} exceeds installment total."
+            )
+    detail = update_installment_lines_bulk(
+        installment_id,
+        [(ln.seq, ln.principal, ln.interest) for ln in body.lines],
+    )
+    if not detail:
+        raise HTTPException(status_code=404, detail="Schedule lines not found.")
     cache.invalidate("installment")
     cache.invalidate("credit_card")
     return _serialize_detail(detail)

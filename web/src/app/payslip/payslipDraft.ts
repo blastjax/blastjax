@@ -1,6 +1,11 @@
 import type { PayslipCreateBody, PayslipRow } from "@/lib/api";
-import { parseFormNumber } from "@/lib/parseFormNumber";
+import { formatAmountNumber, parseFormNumber } from "@/lib/parseFormNumber";
 import type { FormState } from "./payslipModalForm";
+
+/** Formats a stored amount as ``n,nnn.nn`` for display, or "" when absent. */
+function fmtOptAmount(n: number | null | undefined): string {
+  return n != null ? formatAmountNumber(n) : "";
+}
 
 const PAYSLIP_DRAFT_EDIT_PREFIX = "budgetapp:payslip:draft:edit:";
 const PAYSLIP_DRAFT_ADD_PREFIX = "budgetapp:payslip:draft:add:";
@@ -89,26 +94,20 @@ export function formFromRow(r: PayslipRow): FormState {
         : "",
     period_half:
       r.period_half === 1 ? "1" : r.period_half === 2 ? "2" : "",
-    total: r.total != null ? String(r.total) : "",
-    basic_salary:
-      r.basic_salary != null ? String(r.basic_salary) : "",
-    commission: r.commission != null ? String(r.commission) : "",
-    reimbursement: r.reimbursement != null ? String(r.reimbursement) : "",
-    medical_reimbursement:
-      r.medical_reimbursement != null ? String(r.medical_reimbursement) : "",
-    others: r.others != null ? String(r.others) : "",
-    mp2: r.mp2 != null ? String(r.mp2) : "",
-    allowances: r.allowances != null ? String(r.allowances) : "",
-    thirteenth_month:
-      r.thirteenth_month != null ? String(r.thirteenth_month) : "",
+    total: fmtOptAmount(r.total),
+    basic_salary: fmtOptAmount(r.basic_salary),
+    commission: fmtOptAmount(r.commission),
+    reimbursement: fmtOptAmount(r.reimbursement),
+    medical_reimbursement: fmtOptAmount(r.medical_reimbursement),
+    others: fmtOptAmount(r.others),
+    mp2: fmtOptAmount(r.mp2),
+    allowances: fmtOptAmount(r.allowances),
+    thirteenth_month: fmtOptAmount(r.thirteenth_month),
     notes: r.notes ?? "",
-    withholding_tax:
-      r.withholding_tax != null ? String(r.withholding_tax) : "",
-    sss_contribution:
-      r.sss_contribution != null ? String(r.sss_contribution) : "",
-    philhealth: r.philhealth != null ? String(r.philhealth) : "",
-    pag_ibig:
-      r.pag_ibig != null ? String(r.pag_ibig) : "",
+    withholding_tax: fmtOptAmount(r.withholding_tax),
+    sss_contribution: fmtOptAmount(r.sss_contribution),
+    philhealth: fmtOptAmount(r.philhealth),
+    pag_ibig: fmtOptAmount(r.pag_ibig),
   };
 }
 

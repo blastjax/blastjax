@@ -27,7 +27,12 @@ import {
   type PayslipRow,
 } from "@/lib/api";
 import { formatMonthDayShort, formatMonthYear } from "@/lib/dateFormat";
-import { evaluateAmountExpression, parseFormNumber } from "@/lib/parseFormNumber";
+import {
+  evaluateAmountExpression,
+  formatAmountNumber,
+  formatAmountOnBlur,
+  parseFormNumber,
+} from "@/lib/parseFormNumber";
 import {
   ERROR_ALERT_CLASSES,
   INPUT_CLASSES,
@@ -907,7 +912,7 @@ export default function CalendarClient() {
         return;
       }
       const remaining = roundCents(Math.max(0, Math.min(transfer.fromAmount, transfer.fromAmount - spent)));
-      setTransferAmount(String(remaining));
+      setTransferAmount(formatAmountNumber(remaining));
     },
     [transfer],
   );
@@ -1596,6 +1601,10 @@ export default function CalendarClient() {
                 className={INPUT_CLASSES}
                 value={expenseForm.amount}
                 onChange={(e) => setExpenseForm((f) => ({ ...f, amount: e.target.value }))}
+                onBlur={(e) => {
+                  const formatted = formatAmountOnBlur(e.target.value);
+                  if (formatted != null) setExpenseForm((f) => ({ ...f, amount: formatted }));
+                }}
                 disabled={savingExpense}
               />
             </label>
@@ -1743,6 +1752,10 @@ export default function CalendarClient() {
                   className={INPUT_CLASSES}
                   value={transferSpent}
                   onChange={(e) => handleTransferSpentChange(e.target.value)}
+                  onBlur={(e) => {
+                    const formatted = formatAmountOnBlur(e.target.value);
+                    if (formatted != null) setTransferSpent(formatted);
+                  }}
                   disabled={savingTransfer}
                   placeholder="0.00"
                 />
@@ -1762,12 +1775,16 @@ export default function CalendarClient() {
                     className={`flex-1 ${INPUT_CLASSES}`}
                     value={transferAmount}
                     onChange={(e) => setTransferAmount(e.target.value)}
+                    onBlur={(e) => {
+                      const formatted = formatAmountOnBlur(e.target.value);
+                      if (formatted != null) setTransferAmount(formatted);
+                    }}
                     disabled={savingTransfer}
                   />
                   <button
                     type="button"
                     className={SECONDARY_BUTTON_CLASSES}
-                    onClick={() => setTransferAmount(String(roundCents(transfer.fromAmount)))}
+                    onClick={() => setTransferAmount(formatAmountNumber(roundCents(transfer.fromAmount)))}
                     disabled={savingTransfer}
                   >
                     Max

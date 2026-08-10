@@ -82,8 +82,8 @@ export function tryParseFormStateJson(raw: string): FormState | null {
 const LS_PAYSLIP_MODAL_DEFAULTS = "budgetapp:payslip:modalDefaults";
 
 const BUILTIN_MODAL_DEFAULTS: Pick<FormState, "mp2" | "allowances"> = {
-  mp2: "5000",
-  allowances: "1108.30",
+  mp2: "5,000.00",
+  allowances: "1,108.30",
 };
 
 /** Settings toggle / last-selected half (first vs second template). */

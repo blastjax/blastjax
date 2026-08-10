@@ -26,5 +26,15 @@ class InstallmentLineUpdate(BaseModel):
     interest: float | None = Field(default=None, ge=0)
 
 
+class InstallmentLineBulkItem(BaseModel):
+    seq: int = Field(ge=1)
+    principal: float = Field(ge=0)
+    interest: float | None = Field(default=None, ge=0)
+
+
+class InstallmentLinesBulkUpdate(BaseModel):
+    lines: list[InstallmentLineBulkItem] = Field(min_length=1)
+
+
 class InstallmentLinesReorder(BaseModel):
     line_ids: list[int] = Field(min_length=1)

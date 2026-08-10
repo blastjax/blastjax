@@ -25,7 +25,7 @@ export function InstallmentFieldGrid({
   form: InstallmentFormState;
   setForm: Dispatch<SetStateAction<InstallmentFormState>>;
   saving: boolean;
-  /** Hide principal / interest / per-payment total / remaining (filled later via the schedule editor). */
+  /** Hide principal / interest / per-payment total / remaining / original total (set per-row instead). */
   hideAmounts?: boolean;
 }) {
   return (
@@ -124,6 +124,10 @@ export function InstallmentFieldGrid({
               onChange={(e) =>
                 setForm((f) => ({ ...f, payment_total: e.target.value }))
               }
+              onBlur={(e) => {
+                const formatted = formatAmountOnBlur(e.target.value);
+                if (formatted != null) setForm((f) => ({ ...f, payment_total: formatted }));
+              }}
               disabled={saving}
             />
           </label>
@@ -171,6 +175,10 @@ export function InstallmentFieldGrid({
             onChange={(e) =>
               setForm((f) => ({ ...f, remaining: e.target.value }))
             }
+            onBlur={(e) => {
+              const formatted = formatAmountOnBlur(e.target.value);
+              if (formatted != null) setForm((f) => ({ ...f, remaining: formatted }));
+            }}
             disabled={saving}
           />
         </label>
@@ -189,6 +197,10 @@ export function InstallmentFieldGrid({
             onChange={(e) =>
               setForm((f) => ({ ...f, original_total: e.target.value }))
             }
+            onBlur={(e) => {
+              const formatted = formatAmountOnBlur(e.target.value);
+              if (formatted != null) setForm((f) => ({ ...f, original_total: formatted }));
+            }}
             disabled={saving}
           />
         </label>

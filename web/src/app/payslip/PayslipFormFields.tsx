@@ -1,7 +1,8 @@
 "use client";
 
-import type { Dispatch, SetStateAction } from "react";
+import type { Dispatch, FocusEvent, SetStateAction } from "react";
 import { MONTH_NAMES_FULL } from "@/lib/dateFormat";
+import { formatAmountOnBlur } from "@/lib/parseFormNumber";
 import type { FormState } from "./payslipModalForm";
 import { MONTHS } from "./payslipModalForm";
 
@@ -19,6 +20,12 @@ export function PayslipFormFields({
   lockPeriod?: boolean;
   requirePeriodHalf?: boolean;
 }) {
+  const onAmountBlur =
+    (key: keyof FormState) => (e: FocusEvent<HTMLInputElement>) => {
+      const formatted = formatAmountOnBlur(e.target.value);
+      if (formatted != null) setForm((f) => ({ ...f, [key]: formatted }));
+    };
+
   const deductionFields = (
     <>
       <label className="flex flex-col gap-1 text-sm">
@@ -31,6 +38,7 @@ export function PayslipFormFields({
           onChange={(e) =>
             setForm((f) => ({ ...f, withholding_tax: e.target.value }))
           }
+          onBlur={onAmountBlur("withholding_tax")}
           disabled={disabled}
         />
       </label>
@@ -44,6 +52,7 @@ export function PayslipFormFields({
           onChange={(e) =>
             setForm((f) => ({ ...f, sss_contribution: e.target.value }))
           }
+          onBlur={onAmountBlur("sss_contribution")}
           disabled={disabled}
         />
       </label>
@@ -57,6 +66,7 @@ export function PayslipFormFields({
           onChange={(e) =>
             setForm((f) => ({ ...f, philhealth: e.target.value }))
           }
+          onBlur={onAmountBlur("philhealth")}
           disabled={disabled}
         />
       </label>
@@ -72,6 +82,7 @@ export function PayslipFormFields({
           onChange={(e) =>
             setForm((f) => ({ ...f, pag_ibig: e.target.value }))
           }
+          onBlur={onAmountBlur("pag_ibig")}
           disabled={disabled}
         />
       </label>
@@ -85,6 +96,7 @@ export function PayslipFormFields({
           onChange={(e) =>
             setForm((f) => ({ ...f, mp2: e.target.value }))
           }
+          onBlur={onAmountBlur("mp2")}
           disabled={disabled}
         />
       </label>
@@ -171,6 +183,7 @@ export function PayslipFormFields({
               onChange={(e) =>
                 setForm((f) => ({ ...f, [key]: e.target.value }))
               }
+              onBlur={onAmountBlur(key)}
               disabled={disabled}
             />
           </label>
@@ -183,6 +196,7 @@ export function PayslipFormFields({
               inputMode="decimal"
               className="rounded-md border border-zinc-300 bg-white px-3 py-2 dark:border-zinc-700 dark:bg-zinc-950"
               value={form.thirteenth_month}
+              onBlur={onAmountBlur("thirteenth_month")}
               onChange={(e) =>
                 setForm((f) => ({ ...f, thirteenth_month: e.target.value }))
               }

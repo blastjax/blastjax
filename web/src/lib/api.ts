@@ -274,6 +274,17 @@ export async function updateInstallmentLine(
   );
 }
 
+export async function updateInstallmentLinesBulk(
+  installmentId: number,
+  lines: { seq: number; principal: number; interest: number | null }[],
+) {
+  return sendJson<InstallmentDetailResponse>(
+    "PUT",
+    `/api/installment/${installmentId}/lines`,
+    { lines },
+  );
+}
+
 export async function reorderInstallmentLines(installmentId: number, lineIds: number[]) {
   return sendJson<InstallmentDetailResponse>(
     "PUT",

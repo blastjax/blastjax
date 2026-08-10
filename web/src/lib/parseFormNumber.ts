@@ -22,11 +22,15 @@ export function parseFormNumber(raw: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+/** Formats a number as ``n,nnn.nn`` (also rounds away float sum noise like ``1200.4999999999998``). */
+export function formatAmountNumber(n: number): string {
+  return n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
 function formatComputedAmount(n: number): string {
   if (!Number.isFinite(n)) return "";
   const v = Math.round(n * 100) / 100;
-  if (Object.is(v, -0)) return "0";
-  return String(v);
+  return formatAmountNumber(Object.is(v, -0) ? 0 : v);
 }
 
 /**
@@ -37,7 +41,7 @@ function formatComputedAmount(n: number): string {
 export function formatAmountOnBlur(raw: string): string | null {
   const n = parseFormNumber(raw);
   if (n == null) return null;
-  return n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return formatAmountNumber(n);
 }
 
 /**

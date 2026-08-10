@@ -11,7 +11,11 @@ import {
   type MonthlyExpenseRow,
 } from "@/lib/api";
 import { formatMonthYearShort, monthKey, parseMonthKey } from "@/lib/dateFormat";
-import { parseFormNumber } from "@/lib/parseFormNumber";
+import {
+  formatAmountNumber,
+  formatAmountOnBlur,
+  parseFormNumber,
+} from "@/lib/parseFormNumber";
 import {
   DASHED_EMPTY_CLASSES,
   ERROR_ALERT_CLASSES,
@@ -115,7 +119,7 @@ export default function MonthlyExpensesClient() {
     setForm({
       name: exp.name,
       description: exp.description ?? "",
-      amount: String(exp.amount),
+      amount: formatAmountNumber(exp.amount),
       period_half: exp.period_half === 2 ? 2 : 1,
       month: monthKey(exp.period_year, exp.period_month),
       is_recurring: exp.is_recurring,
@@ -336,6 +340,10 @@ export default function MonthlyExpensesClient() {
               className={INPUT_CLASSES}
               value={form.amount}
               onChange={(e) => setForm((f) => ({ ...f, amount: e.target.value }))}
+              onBlur={(e) => {
+                const formatted = formatAmountOnBlur(e.target.value);
+                if (formatted != null) setForm((f) => ({ ...f, amount: formatted }));
+              }}
               disabled={saving}
             />
           </label>

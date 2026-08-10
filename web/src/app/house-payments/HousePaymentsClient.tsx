@@ -16,7 +16,11 @@ import {
   type HousePaymentEntry,
   type HousePaymentRow,
 } from "@/lib/api";
-import { parseFormNumber } from "@/lib/parseFormNumber";
+import {
+  formatAmountNumber,
+  formatAmountOnBlur,
+  parseFormNumber,
+} from "@/lib/parseFormNumber";
 import { formatDate as fmtDate } from "@/lib/dateFormat";
 import { DASHED_EMPTY_CLASSES, ERROR_ALERT_CLASSES, LOADING_TEXT_CLASSES } from "@/lib/ui";
 
@@ -228,7 +232,7 @@ export default function HousePaymentsClient() {
     setEditingEntryId(entry.id);
     setEntryForm({
       paid_on: entry.paid_on.slice(0, 10),
-      amount: String(entry.amount),
+      amount: formatAmountNumber(entry.amount),
     });
   };
 
@@ -522,6 +526,10 @@ export default function HousePaymentsClient() {
                         onChange={(e) =>
                           setEntryForm((f) => ({ ...f, amount: e.target.value }))
                         }
+                        onBlur={(e) => {
+                          const formatted = formatAmountOnBlur(e.target.value);
+                          if (formatted != null) setEntryForm((f) => ({ ...f, amount: formatted }));
+                        }}
                         disabled={savingEntry}
                       />
                     </label>

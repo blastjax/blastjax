@@ -1873,6 +1873,41 @@ def update_installment_line_and_fetch_detail(
             return _installment_detail(cur, installment_id)
 
 
+def update_installment_lines_bulk(
+    installment_id: int,
+    items: list[tuple[int, float, float | None]],
+) -> dict[str, Any] | None:
+    """UPDATE many lines (by seq) in one statement, then recompute aggregates once."""
+    if not items:
+        return None
+    with get_connection() as conn:
+        with db_cursor(conn) as cur:
+            values_sql = ",".join(
+                ["(?::integer, ?::numeric, ?::numeric)"] * len(items)
+            )
+            params: list[Any] = []
+            for seq, principal, interest in items:
+                params.append(int(seq))
+                params.append(principal)
+                params.append(interest)
+            params.append(installment_id)
+            cur.execute(
+                f"""
+                UPDATE installment_line AS il
+                SET principal = data.principal,
+                    interest = data.interest,
+                    payment_total = data.principal + COALESCE(data.interest, 0)
+                FROM (VALUES {values_sql}) AS data(seq, principal, interest)
+                WHERE il.installment_id = ? AND il.seq = data.seq
+                """,
+                params,
+            )
+            if cur.rowcount == 0:
+                return None
+            _recompute_installment_aggregates(cur, installment_id)
+            return _installment_detail(cur, installment_id)
+
+
 def reorder_installment_lines(
     installment_id: int,
     ordered_line_ids: list[int],

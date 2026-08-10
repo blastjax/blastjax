@@ -13,13 +13,17 @@ import {
   recordInstallmentPayment,
   reorderInstallmentLines,
   updateInstallment,
-  updateInstallmentLine,
+  updateInstallmentLinesBulk,
   type InstallmentCreateBody,
   type InstallmentDetailResponse,
   type InstallmentLineRow,
   type InstallmentRow,
 } from "@/lib/api";
-import { formatAmountOnBlur, parseFormNumber } from "@/lib/parseFormNumber";
+import {
+  formatAmountNumber,
+  formatAmountOnBlur,
+  parseFormNumber,
+} from "@/lib/parseFormNumber";
 import { MONTH_NAMES_SHORT, formatMonthYear } from "@/lib/dateFormat";
 import {
   DASHED_EMPTY_CLASSES,
@@ -163,13 +167,27 @@ const emptyForm = {
   original_total: "",
 };
 
+function formFromRow(row: InstallmentRow) {
+  return {
+    name: row.name,
+    installment_current: String(row.installment_current),
+    installment_total: String(row.installment_total),
+    principal: formatAmountNumber(row.principal),
+    interest: row.interest != null ? formatAmountNumber(row.interest) : "",
+    payment_total: formatAmountNumber(row.payment_total),
+    start_date: toInputMonth(row.start_date),
+    finish_date: toInputMonth(row.finish_date),
+    remaining: formatAmountNumber(row.remaining),
+    original_total: formatAmountNumber(row.original_total),
+  };
+}
+
 export default function InstallmentsClient() {
   const [rows, setRows] = useState<InstallmentRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState(emptyForm);
-  const [editingId, setEditingId] = useState<number | null>(null);
   const [addModalOpen, setAddModalOpen] = useState(false);
   const [scheduleModalId, setScheduleModalId] = useState<number | null>(null);
   const [detail, setDetail] = useState<InstallmentDetailResponse | null>(null);
@@ -188,6 +206,30 @@ export default function InstallmentsClient() {
   const [showArchived, setShowArchived] = useState(false);
   const [cardId, setCardId] = useState<number | null>(null);
   const [linkToCard, setLinkToCard] = useState(false);
+  /** Per-payment principal/interest drafts for the Add form, keyed by seq (1..n). */
+  const [lineDrafts, setLineDrafts] = useState<
+    Record<number, { principal: string; interest: string }>
+  >({});
+
+  const draftTotal = useMemo(
+    () => Math.max(0, Math.trunc(parseFormNumber(form.installment_total) ?? 0)),
+    [form.installment_total],
+  );
+
+  const draftSums = useMemo(() => {
+    let principal = 0;
+    let interest = 0;
+    for (let seq = 1; seq <= draftTotal; seq++) {
+      const ld = lineDrafts[seq];
+      const p = parseFormNumber(ld?.principal ?? "");
+      if (p != null) principal += p;
+      if (ld?.interest && ld.interest.trim() !== "") {
+        const iv = parseFormNumber(ld.interest);
+        if (iv != null) interest += iv;
+      }
+    }
+    return { principal, interest, total: principal + interest };
+  }, [lineDrafts, draftTotal]);
 
   const load = useCallback(async () => {
     setError(null);
@@ -265,6 +307,7 @@ export default function InstallmentsClient() {
     setAddModalOpen(false);
     setForm(emptyForm);
     setLinkToCard(false);
+    setLineDrafts({});
   }, []);
 
   useEffect(() => {
@@ -381,7 +424,7 @@ export default function InstallmentsClient() {
         setLineOrderIds(working.lines.map((l) => l.id));
       }
 
-      let last: InstallmentDetailResponse | null = null;
+      const changedLines: { seq: number; principal: number; interest: number | null }[] = [];
       for (const ln of working.lines) {
         const ed = lineEdits[ln.id];
         if (!ed) continue;
@@ -400,16 +443,20 @@ export default function InstallmentsClient() {
           (interest !== null && oi === null) ||
           (interest !== null && oi !== null && interest !== oi);
         if (!changed) continue;
-        last = await updateInstallmentLine(insId, ln.seq, {
-          principal,
-          interest,
-        });
+        changedLines.push({ seq: ln.seq, principal, interest });
       }
-      const finalDetail = last ?? working;
+      // One bulk request updates every dirty row in a single round trip,
+      // instead of a PUT per changed line.
+      const finalDetail =
+        changedLines.length > 0
+          ? await updateInstallmentLinesBulk(insId, changedLines)
+          : working;
       setDetail(finalDetail);
       // Each detail response includes the updated installment row (with
-      // recomputed aggregates), so patch the page list in place rather
-      // than re-fetching every plan.
+      // recomputed aggregates), so patch the page list — and the header
+      // fields shown above the schedule table — in place rather than
+      // re-fetching every plan.
+      setForm(formFromRow(finalDetail.installment));
       upsertRow(finalDetail.installment);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Save failed");
@@ -421,6 +468,8 @@ export default function InstallmentsClient() {
   const closeScheduleModal = useCallback(() => {
     setScheduleModalId(null);
     setDetail(null);
+    setForm(emptyForm);
+    setLinkToCard(false);
   }, []);
 
   const openPayments = async () => {
@@ -533,6 +582,13 @@ export default function InstallmentsClient() {
     setDetail(null);
     setDetailLoading(true);
     setError(null);
+    // Header fields come from the already-loaded row instantly; the
+    // schedule lines below still need their own fetch.
+    const row = rows.find((r) => r.id === id);
+    if (row) {
+      setForm(formFromRow(row));
+      setLinkToCard(row.credit_card_id != null);
+    }
     try {
       const d = await getInstallment(id);
       setDetail(d);
@@ -557,83 +613,114 @@ export default function InstallmentsClient() {
         );
       }
       const total = parseFormNumber(form.installment_total) ?? NaN;
+      if (!Number.isFinite(total) || total < 1) {
+        throw new Error("Enter a valid total installments (n).");
+      }
       // Finish defaults to start + total installments (CC-style: payment #n
       // is due n months after start).
       let fd = monthToApiDate(form.finish_date);
-      if (!fd) {
-        if (!Number.isFinite(total) || total < 1) {
-          throw new Error(
-            "Enter total installments so the finish date can be computed.",
-          );
+      if (!fd) fd = addMonthsToApiDate(sd, total);
+
+      if (scheduleModalId == null) {
+        // Add flow: every payment (1..n) has its own principal/interest,
+        // entered in the per-row table below. Create seeds every row with
+        // payment #1's amount, then one bulk call patches in the rest —
+        // still just two requests total, not one per row.
+        const parsedLines: {
+          seq: number;
+          principal: number;
+          interest: number | null;
+        }[] = [];
+        for (let seq = 1; seq <= total; seq++) {
+          const ld = lineDrafts[seq];
+          const principal = parseFormNumber(ld?.principal ?? "");
+          if (principal == null || principal < 0) {
+            throw new Error(
+              `Payment #${seq}: principal must be a valid non-negative number.`,
+            );
+          }
+          let interest: number | null = null;
+          if (ld?.interest && ld.interest.trim() !== "") {
+            const iv = parseFormNumber(ld.interest);
+            if (iv == null || iv < 0) {
+              throw new Error(
+                `Payment #${seq}: interest must be a valid non-negative number.`,
+              );
+            }
+            interest = iv;
+          }
+          parsedLines.push({ seq, principal, interest });
         }
-        fd = addMonthsToApiDate(sd, total);
-      }
-      const principalVal = parseFormNumber(form.principal) ?? 0;
-      const interestVal =
-        form.interest.trim() === ""
-          ? null
-          : (parseFormNumber(form.interest) ?? NaN);
-      // Per-payment total defaults to principal + interest when left blank.
-      const paymentTotal =
-        form.payment_total.trim() === ""
-          ? principalVal + (interestVal ?? 0)
-          : (parseFormNumber(form.payment_total) ?? NaN);
-      const body: InstallmentCreateBody = {
-        name: form.name.trim(),
-        installment_current: parseFormNumber(form.installment_current) ?? NaN,
-        installment_total: total,
-        principal: principalVal,
-        interest: interestVal,
-        payment_total: paymentTotal,
-        start_date: sd,
-        finish_date: fd,
-        remaining:
-          form.remaining.trim() === "" ? null : parseFormNumber(form.remaining),
-        original_total:
-          form.original_total.trim() === ""
+        const first = parsedLines[0];
+        const body: InstallmentCreateBody = {
+          name: form.name.trim(),
+          installment_current:
+            parseFormNumber(form.installment_current) ?? NaN,
+          installment_total: total,
+          principal: first.principal,
+          interest: first.interest,
+          payment_total: first.principal + (first.interest ?? 0),
+          start_date: sd,
+          finish_date: fd,
+          remaining: null,
+          original_total: null,
+          credit_card_id: linkToCard && cardId != null ? cardId : null,
+        };
+        const created = await createInstallment(body);
+        const fresh = await updateInstallmentLinesBulk(
+          created.installment.id,
+          parsedLines,
+        );
+        setAddModalOpen(false);
+        setForm(emptyForm);
+        setLinkToCard(false);
+        setLineDrafts({});
+        upsertRow(fresh.installment);
+      } else {
+        const principalVal = parseFormNumber(form.principal) ?? 0;
+        const interestVal =
+          form.interest.trim() === ""
             ? null
-            : parseFormNumber(form.original_total),
-        credit_card_id: linkToCard && cardId != null ? cardId : null,
-      };
-      const fresh =
-        editingId != null
-          ? await updateInstallment(editingId, body)
-          : await createInstallment(body);
-      if (editingId != null) setEditingId(null);
-      else setAddModalOpen(false);
-      setForm(emptyForm);
-      setLinkToCard(false);
-      upsertRow(fresh.installment);
+            : (parseFormNumber(form.interest) ?? NaN);
+        // Per-payment total defaults to principal + interest when left blank.
+        const paymentTotal =
+          form.payment_total.trim() === ""
+            ? principalVal + (interestVal ?? 0)
+            : (parseFormNumber(form.payment_total) ?? NaN);
+        const body: InstallmentCreateBody = {
+          name: form.name.trim(),
+          installment_current:
+            parseFormNumber(form.installment_current) ?? NaN,
+          installment_total: total,
+          principal: principalVal,
+          interest: interestVal,
+          payment_total: paymentTotal,
+          start_date: sd,
+          finish_date: fd,
+          remaining:
+            form.remaining.trim() === ""
+              ? null
+              : parseFormNumber(form.remaining),
+          original_total:
+            form.original_total.trim() === ""
+              ? null
+              : parseFormNumber(form.original_total),
+          credit_card_id: linkToCard && cardId != null ? cardId : null,
+        };
+        // The replace endpoint already returns the full detail (header +
+        // lines), so one request refreshes both the schedule modal and the
+        // plans list — no follow-up GET needed.
+        const fresh = await updateInstallment(scheduleModalId, body);
+        setForm(formFromRow(fresh.installment));
+        setLinkToCard(fresh.installment.credit_card_id != null);
+        setDetail(fresh);
+        upsertRow(fresh.installment);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Save failed");
     } finally {
       setSaving(false);
     }
-  };
-
-  const startEdit = (r: InstallmentRow) => {
-    setAddModalOpen(false);
-    setEditingId(r.id);
-    setForm({
-      name: r.name,
-      installment_current: String(r.installment_current),
-      installment_total: String(r.installment_total),
-      principal: String(r.principal),
-      interest: r.interest != null ? String(r.interest) : "",
-      payment_total: String(r.payment_total),
-      start_date: toInputMonth(r.start_date),
-      finish_date: toInputMonth(r.finish_date),
-      remaining: String(r.remaining),
-      original_total: String(r.original_total),
-    });
-    setLinkToCard(r.credit_card_id != null);
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  };
-
-  const cancelEdit = () => {
-    setEditingId(null);
-    setForm(emptyForm);
-    setLinkToCard(false);
   };
 
   const onPay = async (id: number) => {
@@ -655,7 +742,7 @@ export default function InstallmentsClient() {
     setError(null);
     try {
       await deleteInstallment(id);
-      if (editingId === id) cancelEdit();
+      if (scheduleModalId === id) closeScheduleModal();
       removeRow(id);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Delete failed");
@@ -743,56 +830,11 @@ export default function InstallmentsClient() {
         </section>
       )}
 
-      {editingId != null && (
-        <section className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
-          <h2 className="text-lg font-medium text-zinc-900 dark:text-zinc-50">
-            Edit installment
-          </h2>
-          <form
-            onSubmit={submitCreate}
-            className="mt-4 grid gap-4 sm:grid-cols-2"
-          >
-            <InstallmentFieldGrid
-              form={form}
-              setForm={setForm}
-              saving={saving}
-            />
-            {cardId != null && (
-              <label className="flex items-center gap-2 text-sm sm:col-span-2">
-                <input
-                  type="checkbox"
-                  checked={linkToCard}
-                  onChange={(e) => setLinkToCard(e.target.checked)}
-                  disabled={saving}
-                />
-                <span className="text-zinc-600 dark:text-zinc-400">On my credit card</span>
-              </label>
-            )}
-            <div className="flex flex-wrap gap-2 sm:col-span-2">
-              <button
-                type="submit"
-                disabled={saving}
-                className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
-              >
-                {saving ? "Saving…" : "Update"}
-              </button>
-              <button
-                type="button"
-                disabled={saving}
-                className="rounded-md border border-zinc-300 px-4 py-2 text-sm dark:border-zinc-600"
-                onClick={cancelEdit}
-              >
-                Cancel
-              </button>
-            </div>
-          </form>
-        </section>
-      )}
-
       <Modal
         open={addModalOpen}
         onClose={closeAddModal}
         ariaLabelledBy="installment-add-title"
+        dialogClassName="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-xl border border-zinc-200 bg-white p-5 shadow-xl dark:border-zinc-800 dark:bg-zinc-950"
       >
         <div className="mb-4 flex items-start justify-between gap-2">
           <h2
@@ -816,6 +858,130 @@ export default function InstallmentsClient() {
             saving={saving}
             hideAmounts
           />
+          {draftTotal > 0 && (
+            <div className="sm:col-span-2">
+              <p className="mb-2 text-sm font-medium text-zinc-700 dark:text-zinc-300">
+                Per-payment amounts ({draftTotal} row{draftTotal === 1 ? "" : "s"})
+              </p>
+              <div className="max-h-64 overflow-y-auto rounded-md border border-zinc-200 dark:border-zinc-800">
+                <table className="w-full text-left text-sm">
+                  <thead className="sticky top-0 bg-zinc-50 dark:bg-zinc-900">
+                    <tr className="border-b border-zinc-200 text-xs uppercase text-zinc-500 dark:border-zinc-800">
+                      <th className="py-2 pl-2 pr-2">#</th>
+                      <th className="py-2 pr-2">Due</th>
+                      <th className="py-2 pr-2">Principal</th>
+                      <th className="py-2 pr-2">Interest</th>
+                      <th className="py-2 pr-2">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {Array.from({ length: draftTotal }, (_, i) => i + 1).map(
+                      (seq) => {
+                        const ld = lineDrafts[seq] ?? {
+                          principal: "",
+                          interest: "",
+                        };
+                        const sdApi = monthToApiDate(form.start_date);
+                        const due = sdApi
+                          ? dueMonthForSeq(sdApi, seq)
+                          : new Date(NaN);
+                        const p = parseFormNumber(ld.principal);
+                        const iRaw =
+                          ld.interest.trim() !== ""
+                            ? parseFormNumber(ld.interest)
+                            : 0;
+                        const rowTotal = (p ?? 0) + (iRaw ?? 0);
+                        return (
+                          <tr
+                            key={seq}
+                            className="border-b border-zinc-100 last:border-0 dark:border-zinc-800"
+                          >
+                            <td className="py-1.5 pl-2 pr-2 font-mono tabular-nums">
+                              {seq}
+                            </td>
+                            <td className="py-1.5 pr-2 tabular-nums text-zinc-600 dark:text-zinc-400">
+                              {fmtMonthYearFromDate(due)}
+                            </td>
+                            <td className="py-1.5 pr-2">
+                              <input
+                                required
+                                type="text"
+                                inputMode="decimal"
+                                className="w-24 rounded-md border border-zinc-300 bg-white px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+                                value={ld.principal}
+                                onChange={(e) =>
+                                  setLineDrafts((prev) => ({
+                                    ...prev,
+                                    [seq]: {
+                                      principal: e.target.value,
+                                      interest: prev[seq]?.interest ?? "",
+                                    },
+                                  }))
+                                }
+                                onBlur={(e) => {
+                                  const formatted = formatAmountOnBlur(
+                                    e.target.value,
+                                  );
+                                  if (formatted == null) return;
+                                  setLineDrafts((prev) => ({
+                                    ...prev,
+                                    [seq]: {
+                                      principal: formatted,
+                                      interest: prev[seq]?.interest ?? "",
+                                    },
+                                  }));
+                                }}
+                                disabled={saving}
+                              />
+                            </td>
+                            <td className="py-1.5 pr-2">
+                              <input
+                                type="text"
+                                inputMode="decimal"
+                                placeholder="—"
+                                className="w-24 rounded-md border border-zinc-300 bg-white px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+                                value={ld.interest}
+                                onChange={(e) =>
+                                  setLineDrafts((prev) => ({
+                                    ...prev,
+                                    [seq]: {
+                                      principal: prev[seq]?.principal ?? "",
+                                      interest: e.target.value,
+                                    },
+                                  }))
+                                }
+                                onBlur={(e) => {
+                                  const formatted = formatAmountOnBlur(
+                                    e.target.value,
+                                  );
+                                  if (formatted == null) return;
+                                  setLineDrafts((prev) => ({
+                                    ...prev,
+                                    [seq]: {
+                                      principal: prev[seq]?.principal ?? "",
+                                      interest: formatted,
+                                    },
+                                  }));
+                                }}
+                                disabled={saving}
+                              />
+                            </td>
+                            <td className="py-1.5 pr-2 tabular-nums text-zinc-800 dark:text-zinc-100">
+                              {fmtMoney(rowTotal)}
+                            </td>
+                          </tr>
+                        );
+                      },
+                    )}
+                  </tbody>
+                </table>
+              </div>
+              <p className="mt-2 text-xs text-zinc-600 dark:text-zinc-400">
+                Sum: principal {fmtMoney(draftSums.principal)} + interest{" "}
+                {fmtMoney(draftSums.interest)} = {fmtMoney(draftSums.total)}
+              </p>
+            </div>
+          )}
           {cardId != null && (
             <label className="flex items-center gap-2 text-sm sm:col-span-2">
               <input
@@ -910,17 +1076,6 @@ export default function InstallmentsClient() {
                           Record payment
                         </button>
                       )}
-                      <button
-                        type="button"
-                        disabled={saving}
-                        className="rounded-md border border-zinc-300 px-2 py-1.5 text-xs dark:border-zinc-600 sm:px-3 sm:text-sm"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          startEdit(r);
-                        }}
-                      >
-                        Edit
-                      </button>
                       <button
                         type="button"
                         disabled={saving}
@@ -1038,17 +1193,6 @@ export default function InstallmentsClient() {
                       <button
                         type="button"
                         disabled={saving}
-                        className="rounded-md border border-zinc-300 px-2 py-1.5 text-xs dark:border-zinc-600 sm:px-3 sm:text-sm"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          startEdit(r);
-                        }}
-                      >
-                        Edit
-                      </button>
-                      <button
-                        type="button"
-                        disabled={saving}
                         className="rounded-md border border-red-200 px-2 py-1.5 text-xs text-red-700 dark:border-red-900 dark:text-red-300 sm:px-3 sm:text-sm"
                         onClick={(e) => {
                           e.stopPropagation();
@@ -1117,7 +1261,7 @@ export default function InstallmentsClient() {
                 id="schedule-title"
                 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50"
               >
-                {detail?.installment.name ?? "Payment schedule"}
+                {form.name.trim() || "Edit installment"}
               </h2>
               <button
                 type="button"
@@ -1128,6 +1272,39 @@ export default function InstallmentsClient() {
               </button>
             </div>
             <div className="min-h-0 flex-1 overflow-auto p-4">
+              <form
+                onSubmit={submitCreate}
+                className="grid gap-4 border-b border-zinc-200 pb-5 sm:grid-cols-2 dark:border-zinc-800"
+              >
+                <InstallmentFieldGrid
+                  form={form}
+                  setForm={setForm}
+                  saving={saving}
+                />
+                {cardId != null && (
+                  <label className="flex items-center gap-2 text-sm sm:col-span-2">
+                    <input
+                      type="checkbox"
+                      checked={linkToCard}
+                      onChange={(e) => setLinkToCard(e.target.checked)}
+                      disabled={saving}
+                    />
+                    <span className="text-zinc-600 dark:text-zinc-400">
+                      On my credit card
+                    </span>
+                  </label>
+                )}
+                <div className="sm:col-span-2">
+                  <button
+                    type="submit"
+                    disabled={saving}
+                    className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+                  >
+                    {saving ? "Saving…" : "Update"}
+                  </button>
+                </div>
+              </form>
+              <div className="mt-5">
               {detailLoading && (
                 <p className={LOADING_TEXT_CLASSES}>Loading schedule…</p>
               )}
@@ -1322,6 +1499,7 @@ export default function InstallmentsClient() {
                 </table>
                 </div>
               )}
+              </div>
             </div>
             {!detailLoading && detail && detail.lines.length > 0 && (
               <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-zinc-200 bg-white px-4 py-3 dark:border-zinc-800 dark:bg-zinc-950">
@@ -1468,8 +1646,8 @@ export default function InstallmentsClient() {
       <FloatingAddButton
         hidden={addModalOpen || scheduleModalId != null || paymentsModalOpen}
         onClick={() => {
-          setEditingId(null);
           setForm(emptyForm);
+          setLineDrafts({});
           setAddModalOpen(true);
         }}
         ariaLabel="Add installment"
