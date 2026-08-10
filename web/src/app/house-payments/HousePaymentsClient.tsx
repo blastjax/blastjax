@@ -22,15 +22,10 @@ import {
   parseFormNumber,
 } from "@/lib/parseFormNumber";
 import { formatDate as fmtDate } from "@/lib/dateFormat";
+import { fmtAmountOrDash, fmtCount } from "@/lib/formatNumber";
 import { DASHED_EMPTY_CLASSES, ERROR_ALERT_CLASSES, LOADING_TEXT_CLASSES } from "@/lib/ui";
 
-function fmtMoney(n: number): string {
-  if (!Number.isFinite(n)) return "—";
-  return n.toLocaleString(undefined, {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-}
+const fmtMoney = fmtAmountOrDash;
 
 /** Today as `yyyy-MM-dd` for default form value. */
 function todayIso(): string {
@@ -289,9 +284,9 @@ export default function HousePaymentsClient() {
               {fmtMoney(summary.sum_total_paid)}
             </p>
             <p className="mt-1 text-xs text-emerald-800/80 dark:text-emerald-200/80">
-              Across {summary.plan_count.toLocaleString()} plan
+              Across {fmtCount(summary.plan_count)} plan
               {summary.plan_count === 1 ? "" : "s"} ·{" "}
-              {summary.total_entries.toLocaleString()} payment
+              {fmtCount(summary.total_entries)} payment
               {summary.total_entries === 1 ? "" : "s"} recorded
             </p>
           </div>

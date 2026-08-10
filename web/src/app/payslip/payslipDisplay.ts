@@ -1,9 +1,9 @@
+import { MONTH_NAMES_FULL, formatMonthYear } from "@/lib/dateFormat";
+import { fmtAmount } from "@/lib/formatNumber";
+
 export function fmtNum(n: number | null | undefined): string {
   if (n === null || n === undefined || !Number.isFinite(n)) return "0.00";
-  return n.toLocaleString(undefined, {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
+  return fmtAmount(n);
 }
 
 export function fmtPctOfTotal(
@@ -12,15 +12,8 @@ export function fmtPctOfTotal(
   ofLabel: "gross" | "net" = "gross",
 ): string {
   if (!(totalSum > 0)) return "—";
-  const pct = (amount / totalSum) * 100;
-  const s = pct.toLocaleString(undefined, {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-  return `${s}% of ${ofLabel}`;
+  return `${fmtAmount((amount / totalSum) * 100)}% of ${ofLabel}`;
 }
-
-import { MONTH_NAMES_FULL, formatMonthYear } from "@/lib/dateFormat";
 
 export function fmtPayPeriod(
   y: number | null | undefined,

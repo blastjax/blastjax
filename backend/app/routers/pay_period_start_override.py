@@ -88,7 +88,6 @@ def pay_period_start_override_upsert(body: PayPeriodStartOverrideUpsert) -> dict
     row = upsert_pay_period_start_override(
         body.period_year, body.period_month, body.period_half, body.start_date
     )
-    cache.invalidate("pay_period_start_override")
     return {"override": _serialize(row)}
 
 
@@ -99,5 +98,4 @@ def pay_period_start_override_remove(
     period_half: int = Query(..., ge=1, le=2),
 ) -> dict[str, Any]:
     ok = delete_pay_period_start_override(period_year, period_month, period_half)
-    cache.invalidate("pay_period_start_override")
     return {"ok": ok}

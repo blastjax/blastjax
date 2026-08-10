@@ -24,6 +24,7 @@ import {
 } from "@/lib/api";
 import { getChartTooltipStyle } from "@/lib/chartTooltipStyle";
 import { formatDateTime, formatMonthDayShort } from "@/lib/dateFormat";
+import { fmtIntegerOrDash } from "@/lib/formatNumber";
 import { DASHED_EMPTY_CLASSES, ERROR_ALERT_CLASSES, PRIMARY_BUTTON_CLASSES } from "@/lib/ui";
 
 /**
@@ -50,10 +51,7 @@ function isHealthy(r: {
   );
 }
 
-function fmtNum(n: number): string {
-  if (!Number.isFinite(n)) return "—";
-  return n.toLocaleString(undefined, { maximumFractionDigits: 0 });
-}
+const fmtNum = fmtIntegerOrDash;
 
 const fmtDateTime = formatDateTime;
 const fmtChartLabel = formatMonthDayShort;

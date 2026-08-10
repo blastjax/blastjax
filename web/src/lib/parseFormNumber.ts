@@ -1,3 +1,5 @@
+import { fmtAmountEnUs } from "@/lib/formatNumber";
+
 // Hoisted regexes so `parseFormNumber` / `evaluateAmountExpression` don't
 // recompile per call, and a fast-path that skips ``replace`` when no
 // thousands separators are present in the input.
@@ -24,7 +26,7 @@ export function parseFormNumber(raw: string): number | null {
 
 /** Formats a number as ``n,nnn.nn`` (also rounds away float sum noise like ``1200.4999999999998``). */
 export function formatAmountNumber(n: number): string {
-  return n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return fmtAmountEnUs(n);
 }
 
 function formatComputedAmount(n: number): string {

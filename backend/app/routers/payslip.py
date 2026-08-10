@@ -79,7 +79,6 @@ def payslip_create(body: PayslipCreate) -> dict[str, Any]:
         body.philhealth,
         body.pag_ibig,
     )
-    cache.invalidate("payslip")
     return _serialize_payslip(row)
 
 
@@ -97,7 +96,6 @@ def payslip_import_json(body: dict[str, Any] = Body(...)) -> dict[str, Any]:
         )
     # One transaction for the whole import: all rows commit together or none do.
     ids = insert_payslips_bulk(recs)
-    cache.invalidate("payslip")
     return {"filename": "payslip-import.json", "inserted": len(ids), "ids": ids}
 
 
@@ -139,7 +137,6 @@ def payslip_replace(payslip_id: int, body: PayslipCreate) -> dict[str, Any]:
     )
     if row is None:
         raise HTTPException(status_code=404, detail="Payslip not found.")
-    cache.invalidate("payslip")
     return _serialize_payslip(row)
 
 
@@ -147,7 +144,6 @@ def payslip_replace(payslip_id: int, body: PayslipCreate) -> dict[str, Any]:
 def payslip_remove(payslip_id: int) -> dict[str, Any]:
     if not delete_payslip(payslip_id):
         raise HTTPException(status_code=404, detail="Payslip not found.")
-    cache.invalidate("payslip")
     return {"ok": True}
 
 
@@ -172,7 +168,6 @@ async def payslip_upload_pdf(
         raise HTTPException(status_code=400, detail="Only PDF files are accepted.")
     if not set_payslip_pdf(payslip_id, data):
         raise HTTPException(status_code=404, detail="Payslip not found.")
-    cache.invalidate("payslip")
     return {"ok": True, "has_pdf": True}
 
 
@@ -200,5 +195,4 @@ def payslip_get_pdf(payslip_id: int) -> Response:
 def payslip_delete_pdf(payslip_id: int) -> dict[str, Any]:
     if not delete_payslip_pdf(payslip_id):
         raise HTTPException(status_code=404, detail="Payslip not found.")
-    cache.invalidate("payslip")
     return {"ok": True, "has_pdf": False}

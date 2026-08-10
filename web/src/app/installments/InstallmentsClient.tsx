@@ -25,6 +25,7 @@ import {
   parseFormNumber,
 } from "@/lib/parseFormNumber";
 import { MONTH_NAMES_SHORT, formatMonthYear } from "@/lib/dateFormat";
+import { fmtAmount, fmtAmountOrDash } from "@/lib/formatNumber";
 import {
   DASHED_EMPTY_CLASSES,
   ERROR_ALERT_CLASSES,
@@ -33,13 +34,7 @@ import {
 } from "@/lib/ui";
 import { InstallmentFieldGrid } from "./installmentFieldGrid";
 
-function fmtMoney(n: number): string {
-  if (!Number.isFinite(n)) return "—";
-  return n.toLocaleString(undefined, {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-}
+const fmtMoney = fmtAmountOrDash;
 
 function addMonths(d: Date, months: number): Date {
   const x = new Date(d.getFullYear(), d.getMonth(), 1);
@@ -147,12 +142,7 @@ function installmentScheduleProgressPct(r: InstallmentRow): number {
   );
 }
 
-function fmtPct2(pct: number): string {
-  return pct.toLocaleString(undefined, {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-}
+const fmtPct2 = fmtAmount;
 
 const emptyForm = {
   name: "",

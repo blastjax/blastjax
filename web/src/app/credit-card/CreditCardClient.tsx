@@ -21,6 +21,8 @@ import {
   formatAmountOnBlur,
   parseFormNumber,
 } from "@/lib/parseFormNumber";
+import { formatDate } from "@/lib/dateFormat";
+import { fmtAmountOrDash } from "@/lib/formatNumber";
 import {
   CARD_CLASSES,
   DASHED_EMPTY_CLASSES,
@@ -35,20 +37,15 @@ import {
   SEGMENTED_WRAPPER_CLASSES,
 } from "@/lib/ui";
 
-function fmtMoney(n: number): string {
-  if (!Number.isFinite(n)) return "—";
-  return n.toLocaleString(undefined, {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-}
+const fmtMoney = fmtAmountOrDash;
 
-function fmtDate(iso: string | null): string {
-  if (!iso) return "—";
-  const d = new Date(iso.length <= 10 ? `${iso}T00:00:00` : iso);
-  if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
-}
+/**
+ * `statement_date` / `due_date` are date-only columns, so this is exactly the
+ * shared date-only formatter — it was the last call site still building its own
+ * `Intl` options per call (and the last one varying with the reader's locale
+ * instead of the pinned `en-US` the rest of the app uses).
+ */
+const fmtDate = formatDate;
 
 function todayInputDate(): string {
   return new Date().toISOString().slice(0, 10);

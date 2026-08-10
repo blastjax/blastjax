@@ -6,6 +6,7 @@ import {
   yearSlotsFromIndex,
   type PayslipIndex,
 } from "./payslipAggregates";
+import { fmtAmount } from "@/lib/formatNumber";
 import { fmtNum, fmtPctOfTotal } from "./payslipDisplay";
 import {
   DEFAULT_STAT_CARD_ORDER,
@@ -66,13 +67,7 @@ export function PayslipYearStatsSection({ index }: { index: PayslipIndex }) {
       const halvesLeft = Math.max(0, 24 - Math.min(payCount, 24));
       const pctYearRemaining =
         halvesLeft <= 0 ? 0 : Math.min(100, (halvesLeft / 24) * 100);
-      const pctRemainingLabel = (() => {
-        const s = pctYearRemaining.toLocaleString(undefined, {
-          minimumFractionDigits: 2,
-          maximumFractionDigits: 2,
-        });
-        return `${s}% of year remaining`;
-      })();
+      const pctRemainingLabel = `${fmtAmount(pctYearRemaining)}% of year remaining`;
 
       return (
         <div

@@ -43,11 +43,27 @@ _CACHE_PREFIXES: dict[str, str] = {
 }
 
 
-def _cache_prefix(path: str) -> str | None:
+"""
+Namespaces a write must bust *in addition to* its own. An installment write
+changes the credit-card response too (the card's monthly dues are derived from
+its installments), so the two caches can't be invalidated independently.
+"""
+_CACHE_ALSO_INVALIDATES: dict[str, tuple[str, ...]] = {
+    "installment": ("credit_card",),
+}
+
+
+def _cache_prefixes_for(path: str) -> tuple[str, ...]:
+    """Every cache namespace a write to ``path`` invalidates, own namespace first."""
     for route, prefix in _CACHE_PREFIXES.items():
         if path.startswith(route):
-            return prefix
-    return None
+            return (prefix, *_CACHE_ALSO_INVALIDATES.get(prefix, ()))
+    return ()
+
+
+def _invalidate_namespaces(names: tuple[str, ...]) -> None:
+    for name in names:
+        cache.invalidate(name)
 
 
 @asynccontextmanager
@@ -82,14 +98,23 @@ def create_app() -> FastAPI:
 
     @app.middleware("http")
     async def invalidate_cache_on_write(request: Request, call_next):
-        """Invalidate the relevant cache namespace after a successful write."""
+        """
+        Invalidate the affected cache namespaces after a successful write.
+
+        This is the *only* place writes bust the cache. Every write endpoint used
+        to also call ``cache.invalidate`` itself for the same namespace this
+        middleware derives from the path, so each write ran the SCAN + DELETE
+        loop twice (three times for installment writes, which busted two
+        namespaces). Centralizing it here also means cache-invalidation policy
+        lives in one readable table instead of being restated in 28 handlers.
+        """
         path = request.url.path
         is_write = request.method in _WRITE_METHODS
         response = await call_next(request)
         if is_write and response.status_code < 400:
-            ns = _cache_prefix(path)
-            if ns:
-                await run_in_threadpool(cache.invalidate, ns)
+            namespaces = _cache_prefixes_for(path)
+            if namespaces:
+                await run_in_threadpool(_invalidate_namespaces, namespaces)
         return response
 
     from app.routers import (

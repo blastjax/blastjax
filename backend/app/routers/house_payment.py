@@ -70,7 +70,6 @@ def house_payment_list(
 @router.post("/api/house-payment")
 def house_payment_create(body: HousePaymentCreate) -> dict[str, Any]:
     row = insert_house_payment(body.name.strip(), _clean_notes(body.notes))
-    cache.invalidate("house_payment")
     return serialize_house_payment_row(row)
 
 
@@ -97,7 +96,6 @@ def house_payment_replace(
     )
     if row is None:
         raise HTTPException(status_code=404, detail="House payment not found.")
-    cache.invalidate("house_payment")
     return serialize_house_payment_row(row)
 
 
@@ -105,7 +103,6 @@ def house_payment_replace(
 def house_payment_remove(house_payment_id: int) -> dict[str, Any]:
     if not delete_house_payment(house_payment_id):
         raise HTTPException(status_code=404, detail="House payment not found.")
-    cache.invalidate("house_payment")
     return {"ok": True}
 
 
@@ -118,7 +115,6 @@ def house_payment_entry_create(
     )
     if detail is None:
         raise HTTPException(status_code=404, detail="House payment not found.")
-    cache.invalidate("house_payment")
     return _serialize_detail(detail)
 
 
@@ -133,7 +129,6 @@ def house_payment_entry_update(
     )
     if detail is None:
         raise HTTPException(status_code=404, detail="Payment entry not found.")
-    cache.invalidate("house_payment")
     return _serialize_detail(detail)
 
 
@@ -144,5 +139,4 @@ def house_payment_entry_remove(
     detail = delete_house_payment_entry(house_payment_id, entry_id)
     if detail is None:
         raise HTTPException(status_code=404, detail="Payment entry not found.")
-    cache.invalidate("house_payment")
     return _serialize_detail(detail)

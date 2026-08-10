@@ -23,6 +23,7 @@ import {
   type ChartSeriesColorKey,
 } from "@/lib/chartPalette";
 import { getPayslips, type PayslipRow } from "@/lib/api";
+import { fmtAmount, fmtAxisMoneyTick } from "@/lib/formatNumber";
 import { getChartTooltipStyle } from "@/lib/chartTooltipStyle";
 import {
   MONTH_NAMES_SHORT,
@@ -204,12 +205,7 @@ function currentMonthKey(): string {
   return monthKey(d.getFullYear(), d.getMonth() + 1);
 }
 
-function fmtMoney(n: number): string {
-  return n.toLocaleString(undefined, {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-}
+const fmtMoney = fmtAmount;
 
 const PICKER_YEAR_MIN = 1900;
 const PICKER_YEAR_MAX = 2200;
@@ -672,10 +668,7 @@ export default function SalaryStatsClient() {
                       paddingAngle={3}
                       labelLine={{ stroke: axisTickFill, strokeWidth: 1 }}
                       label={({ name, percent }) =>
-                        `${name} ${((percent ?? 0) * 100).toLocaleString(undefined, {
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2,
-                        })}%`
+                        `${name} ${fmtMoney((percent ?? 0) * 100)}%`
                       }
                     >
                       {visiblePieSlices.map((s) => (
@@ -813,17 +806,7 @@ export default function SalaryStatsClient() {
                     />
                     <YAxis
                       tick={{ fontSize: 11, fill: axisTickFill }}
-                      tickFormatter={(v) =>
-                        Number(v) >= 1000
-                          ? `${(Number(v) / 1000).toLocaleString(undefined, {
-                              minimumFractionDigits: 2,
-                              maximumFractionDigits: 2,
-                            })}k`
-                          : Number(v).toLocaleString(undefined, {
-                              minimumFractionDigits: 2,
-                              maximumFractionDigits: 2,
-                            })
-                      }
+                      tickFormatter={fmtAxisMoneyTick}
                     />
                     <Tooltip
                       formatter={(value) => fmtMoney(Number(value ?? 0))}

@@ -6,6 +6,31 @@
  */
 const LOCALE = "en-US";
 
+/**
+ * Formatters are built once at module load rather than per call. `formatDate`
+ * runs once per table row (installment schedules, house-payment entries,
+ * credit-card payments) and `formatMonthDayShort` once per chart x-axis tick,
+ * so re-resolving the locale + options on every call was pure overhead.
+ */
+const DATE_FORMAT = new Intl.DateTimeFormat(LOCALE, {
+  year: "numeric",
+  month: "short",
+  day: "numeric",
+});
+
+const DATE_TIME_FORMAT = new Intl.DateTimeFormat(LOCALE, {
+  year: "numeric",
+  month: "short",
+  day: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+});
+
+const MONTH_DAY_FORMAT = new Intl.DateTimeFormat(LOCALE, {
+  month: "short",
+  day: "numeric",
+});
+
 export const MONTH_NAMES_FULL = [
   "January",
   "February",
@@ -90,7 +115,7 @@ export function formatDate(iso: string | null | undefined): string {
   if (!iso) return "—";
   const d = parseDateOnlyLocal(iso);
   if (!d) return "—";
-  return d.toLocaleDateString(LOCALE, { year: "numeric", month: "short", day: "numeric" });
+  return DATE_FORMAT.format(d);
 }
 
 /** "Jul 21, 2026, 09:30 AM" — canonical display for a full timestamp. */
@@ -98,13 +123,7 @@ export function formatDateTime(iso: string | null | undefined): string {
   if (!iso) return "—";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleString(LOCALE, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  return DATE_TIME_FORMAT.format(d);
 }
 
 /** "Jul 21" — month + day only, for chart x-axes plotted by exact date rather than by month. */
@@ -112,5 +131,5 @@ export function formatMonthDayShort(iso: string | null | undefined): string {
   if (!iso) return "";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
-  return d.toLocaleDateString(LOCALE, { month: "short", day: "numeric" });
+  return MONTH_DAY_FORMAT.format(d);
 }

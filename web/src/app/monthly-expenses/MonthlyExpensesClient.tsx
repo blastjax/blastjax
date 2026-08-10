@@ -11,6 +11,7 @@ import {
   type MonthlyExpenseRow,
 } from "@/lib/api";
 import { formatMonthYearShort, monthKey, parseMonthKey } from "@/lib/dateFormat";
+import { fmtAmount } from "@/lib/formatNumber";
 import {
   formatAmountNumber,
   formatAmountOnBlur,
@@ -35,12 +36,7 @@ const HALF_LABEL: Record<PeriodHalf, string> = {
   2: "2nd half",
 };
 
-function fmtMoney(n: number): string {
-  return n.toLocaleString(undefined, {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-}
+const fmtMoney = fmtAmount;
 
 type ExpenseForm = {
   name: string;

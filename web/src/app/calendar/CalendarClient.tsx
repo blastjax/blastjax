@@ -1,9 +1,11 @@
 "use client";
 
 import {
+  memo,
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type DragEvent,
   type FormEvent,
@@ -27,6 +29,7 @@ import {
   type PayslipRow,
 } from "@/lib/api";
 import { formatMonthDayShort, formatMonthYear } from "@/lib/dateFormat";
+import { fmtAmount } from "@/lib/formatNumber";
 import {
   evaluateAmountExpression,
   formatAmountNumber,
@@ -164,12 +167,7 @@ function roundCents(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
-function fmtMoney(n: number): string {
-  return n.toLocaleString(undefined, {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-}
+const fmtMoney = fmtAmount;
 
 /**
  * Spreads `deltaCents` evenly across the given day balances (in cents), returning the updated
@@ -244,6 +242,14 @@ type DayCell = {
 type ExpenseForm = { amount: string; description: string };
 const emptyExpenseForm = (): ExpenseForm => ({ amount: "", description: "" });
 
+/** Both expense kinds for one calendar month, as cached per month. */
+type MonthExpenses = { fixed: FixedExpenseRow[]; monthly: MonthlyExpenseRow[] };
+
+/** Cache key for {@link MonthExpenses}; not padded — only ever compared to itself. */
+function monthCacheKey(year: number, month: number): string {
+  return `${year}-${month}`;
+}
+
 function dateIso(year: number, month: number, day: number): string {
   return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
@@ -257,6 +263,114 @@ type TransferState = {
   toAmount: number;
 };
 
+type DayGridCellProps = {
+  cell: DayCell;
+  isDragSource: boolean;
+  isDragOverTarget: boolean;
+  onOpenSpend: (cell: DayCell) => void;
+  onDragStart: (e: DragEvent<HTMLDivElement>, iso: string) => void;
+  onDragOver: (e: DragEvent<HTMLDivElement>, iso: string) => void;
+  onDragLeave: (iso: string) => void;
+  onDrop: (e: DragEvent<HTMLDivElement>, iso: string) => void;
+  onDragEnd: () => void;
+};
+
+/**
+ * One day in the month grid, memoized.
+ *
+ * Dragging a day fires `dragover`/`dragleave` continuously, and each one is a
+ * state update on the parent. Rendering the cells inline meant every such
+ * event rebuilt all ~42 of them — six template-string class computations each —
+ * even though at most two cells actually change appearance. With this split,
+ * the parent still re-renders but React skips every cell whose props are
+ * unchanged, which is all of them but the drag source and the hovered target.
+ *
+ * All the callbacks are `useCallback`-stable in the parent, so the memo
+ * comparison is meaningful; `cell` is a fresh object only when `dayCells`
+ * genuinely recomputes.
+ */
+const DayGridCell = memo(function DayGridCell({
+  cell,
+  isDragSource,
+  isDragOverTarget,
+  onOpenSpend,
+  onDragStart,
+  onDragOver,
+  onDragLeave,
+  onDrop,
+  onDragEnd,
+}: DayGridCellProps) {
+  const { day, iso, periodHalf, isPast, isToday, dailyBudget } = cell;
+  const draggable = dailyBudget != null;
+  /** Orange for the 1st-half pay period, blue for the 2nd — always visible so the
+   *  boundary between periods reads at a glance, even on past/today cells. */
+  const halfBorderClasses =
+    periodHalf === 1
+      ? "border-orange-400 dark:border-orange-600"
+      : "border-blue-400 dark:border-blue-600";
+  const halfBgClasses =
+    periodHalf === 1
+      ? "bg-orange-50/50 dark:bg-orange-950/20"
+      : "bg-blue-50/50 dark:bg-blue-950/20";
+  return (
+    <div
+      role={draggable ? "button" : undefined}
+      tabIndex={draggable ? 0 : undefined}
+      draggable={draggable}
+      onClick={draggable ? () => onOpenSpend(cell) : undefined}
+      onKeyDown={
+        draggable
+          ? (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onOpenSpend(cell);
+              }
+            }
+          : undefined
+      }
+      onDragStart={draggable ? (e) => onDragStart(e, iso) : undefined}
+      onDragOver={draggable ? (e) => onDragOver(e, iso) : undefined}
+      onDragLeave={draggable ? () => onDragLeave(iso) : undefined}
+      onDrop={draggable ? (e) => onDrop(e, iso) : undefined}
+      onDragEnd={onDragEnd}
+      className={`flex min-h-[5rem] min-w-0 flex-col items-center justify-center gap-1 rounded-lg border-2 px-1.5 py-2 text-center transition sm:min-h-[7rem] ${
+        draggable ? "cursor-grab active:cursor-grabbing" : ""
+      } ${
+        isDragOverTarget
+          ? "border-indigo-500 bg-indigo-100 ring-2 ring-indigo-500/60 dark:border-indigo-400 dark:bg-indigo-950/70"
+          : isToday
+            ? `${halfBorderClasses} bg-indigo-50 ring-2 ring-indigo-500/50 dark:bg-indigo-950/50`
+            : isPast
+              ? `border-dashed ${halfBorderClasses} bg-zinc-50/60 opacity-60 dark:bg-zinc-900/30`
+              : `${halfBorderClasses} ${halfBgClasses}`
+      } ${isDragSource ? "opacity-40" : ""}`}
+    >
+      <span
+        className={`text-sm font-semibold tabular-nums ${
+          isToday
+            ? "text-indigo-900 dark:text-indigo-100"
+            : isPast
+              ? "text-zinc-400 dark:text-zinc-600"
+              : "text-zinc-800 dark:text-zinc-100"
+        }`}
+      >
+        {day}
+      </span>
+      <span
+        className={`min-w-0 truncate text-xs tabular-nums leading-tight ${
+          isToday
+            ? "font-semibold text-indigo-700 dark:text-indigo-300"
+            : isPast
+              ? "text-zinc-400 dark:text-zinc-600"
+              : "text-zinc-600 dark:text-zinc-400"
+        }`}
+      >
+        {dailyBudget != null ? fmtMoney(dailyBudget) : "–"}
+      </span>
+    </div>
+  );
+});
+
 export default function CalendarClient() {
   const [payslips, setPayslips] = useState<PayslipRow[]>([]);
   const [fixedExpenses, setFixedExpenses] = useState<FixedExpenseRow[]>([]);
@@ -264,7 +378,14 @@ export default function CalendarClient() {
   const [monthlyExpenses, setMonthlyExpenses] = useState<MonthlyExpenseRow[]>([]);
   const [nextMonthlyExpenses, setNextMonthlyExpenses] = useState<MonthlyExpenseRow[]>([]);
   const [payPeriodOverrides, setPayPeriodOverrides] = useState<Map<string, string>>(new Map());
-  const [loading, setLoading] = useState(true);
+  /**
+   * Two independent first-load flags rather than one `loading` toggle: the
+   * shared (all-month) data and the viewed month's expenses arrive separately,
+   * and neither should ever flip back to "loading" when the user pages months.
+   */
+  const [sharedLoaded, setSharedLoaded] = useState(false);
+  const [monthLoaded, setMonthLoaded] = useState(false);
+  const loading = !sharedLoaded || !monthLoaded;
   const [error, setError] = useState<string | null>(null);
 
   const [expenseModalHalf, setExpenseModalHalf] = useState<PeriodHalf | null>(null);
@@ -305,27 +426,63 @@ export default function CalendarClient() {
   const year = viewedYear;
   const month = viewedMonth;
 
-  const loadExpenses = useCallback(async () => {
-    const r = await getFixedExpenses(undefined, viewedYear, viewedMonth);
-    setFixedExpenses(r.expenses);
-  }, [viewedYear, viewedMonth]);
+  /**
+   * Per-month expense lists already fetched this session, keyed "YYYY-M".
+   * Paging with ←/→ paints from here on the same tick and then revalidates in
+   * the background, so a month that's already been seen never blanks out
+   * waiting on the network. A ref (not state) because writing to it must not
+   * itself trigger a render — the setState calls fed from it already do.
+   */
+  const monthExpenseCache = useRef<Map<string, MonthExpenses>>(new Map());
 
-  const loadNextExpenses = useCallback(async () => {
+  const readMonthCache = useCallback(
+    (y: number, m: number): MonthExpenses | undefined =>
+      monthExpenseCache.current.get(monthCacheKey(y, m)),
+    [],
+  );
+
+  /** Both expense lists for one month in one round trip pair; result is cached. */
+  const fetchMonthExpenses = useCallback(
+    async (y: number, m: number): Promise<MonthExpenses> => {
+      const [fixed, monthly] = await Promise.all([
+        getFixedExpenses(undefined, y, m),
+        getMonthlyExpenses(undefined, y, m),
+      ]);
+      const entry: MonthExpenses = { fixed: fixed.expenses, monthly: monthly.expenses };
+      monthExpenseCache.current.set(monthCacheKey(y, m), entry);
+      return entry;
+    },
+    [],
+  );
+
+  /**
+   * Drop cached months after a write. Recurring monthly expenses show up in
+   * every month's response, so a single edit can invalidate any cached month,
+   * not just the one it was filed under — clearing everything is the only
+   * correct scope.
+   */
+  const clearMonthCache = useCallback(() => {
+    monthExpenseCache.current.clear();
+  }, []);
+
+  /** Viewed month + the next one (the grid can spill into next month's half-1). */
+  const loadViewedMonths = useCallback(async () => {
     const next = addMonths(viewedYear, viewedMonth, 1);
-    const r = await getFixedExpenses(undefined, next.year, next.month);
-    setNextFixedExpenses(r.expenses);
-  }, [viewedYear, viewedMonth]);
+    const [cur, nxt] = await Promise.all([
+      fetchMonthExpenses(viewedYear, viewedMonth),
+      fetchMonthExpenses(next.year, next.month),
+    ]);
+    setFixedExpenses(cur.fixed);
+    setMonthlyExpenses(cur.monthly);
+    setNextFixedExpenses(nxt.fixed);
+    setNextMonthlyExpenses(nxt.monthly);
+  }, [fetchMonthExpenses, viewedYear, viewedMonth]);
 
-  const loadMonthlyExpenses = useCallback(async () => {
-    const r = await getMonthlyExpenses(undefined, viewedYear, viewedMonth);
-    setMonthlyExpenses(r.expenses);
-  }, [viewedYear, viewedMonth]);
-
-  const loadNextMonthlyExpenses = useCallback(async () => {
-    const next = addMonths(viewedYear, viewedMonth, 1);
-    const r = await getMonthlyExpenses(undefined, next.year, next.month);
-    setNextMonthlyExpenses(r.expenses);
-  }, [viewedYear, viewedMonth]);
+  /** Re-read the viewed month only (after adding/deleting one of its expenses). */
+  const reloadViewedMonth = useCallback(async () => {
+    clearMonthCache();
+    await loadViewedMonths();
+  }, [clearMonthCache, loadViewedMonths]);
 
   const loadOverrides = useCallback(async () => {
     const r = await getCalendarDayOverrides();
@@ -341,23 +498,15 @@ export default function CalendarClient() {
     );
   }, []);
 
-  const load = useCallback(async () => {
-    setError(null);
-    setLoading(true);
-    const [
-      payslipResult,
-      expensesResult,
-      nextExpensesResult,
-      monthlyExpensesResult,
-      nextMonthlyExpensesResult,
-      overridesResult,
-      payPeriodResult,
-    ] = await Promise.allSettled([
+  /**
+   * Payslips and both override lists cover every month at once, so they load
+   * exactly once per mount — they used to be bundled into the same callback as
+   * the month-scoped expense lists, which meant every ←/→ press refetched all
+   * seven endpoints and flipped `loading` back on, blanking the whole grid.
+   */
+  const loadSharedData = useCallback(async () => {
+    const [payslipResult, overridesResult, payPeriodResult] = await Promise.allSettled([
       getPayslips(12),
-      loadExpenses(),
-      loadNextExpenses(),
-      loadMonthlyExpenses(),
-      loadNextMonthlyExpenses(),
       loadOverrides(),
       loadPayPeriodOverrides(),
     ]);
@@ -369,26 +518,6 @@ export default function CalendarClient() {
       firstError = e instanceof Error ? e.message : "Failed to load last salary";
       setPayslips([]);
     }
-    if (expensesResult.status === "rejected") {
-      const e = expensesResult.reason;
-      firstError ??= e instanceof Error ? e.message : "Failed to load fixed expenses";
-      setFixedExpenses([]);
-    }
-    if (nextExpensesResult.status === "rejected") {
-      const e = nextExpensesResult.reason;
-      firstError ??= e instanceof Error ? e.message : "Failed to load next month's fixed expenses";
-      setNextFixedExpenses([]);
-    }
-    if (monthlyExpensesResult.status === "rejected") {
-      const e = monthlyExpensesResult.reason;
-      firstError ??= e instanceof Error ? e.message : "Failed to load monthly expenses";
-      setMonthlyExpenses([]);
-    }
-    if (nextMonthlyExpensesResult.status === "rejected") {
-      const e = nextMonthlyExpensesResult.reason;
-      firstError ??= e instanceof Error ? e.message : "Failed to load next month's monthly expenses";
-      setNextMonthlyExpenses([]);
-    }
     if (overridesResult.status === "rejected") {
       const e = overridesResult.reason;
       firstError ??= e instanceof Error ? e.message : "Failed to load day overrides";
@@ -399,50 +528,54 @@ export default function CalendarClient() {
       firstError ??= e instanceof Error ? e.message : "Failed to load pay period overrides";
       setPayPeriodOverrides(new Map());
     }
-    setError(firstError);
-    setLoading(false);
-  }, [
-    loadExpenses,
-    loadNextExpenses,
-    loadMonthlyExpenses,
-    loadNextMonthlyExpenses,
-    loadOverrides,
-    loadPayPeriodOverrides,
-  ]);
+    return firstError;
+  }, [loadOverrides, loadPayPeriodOverrides]);
 
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  /**
-   * The backend caches fixed/monthly-expense list responses in Redis (see
-   * backend/cache.py), but only for months actually requested. Warm that
-   * cache for the surrounding 24 months (12 back, 12 forward) right after
-   * the initial load so paging through the calendar with prev/next/arrow
-   * keys hits Redis instead of the database. Best-effort and silent — a
-   * failed prefetch just means that month falls back to a live query later.
-   */
   useEffect(() => {
     let cancelled = false;
-    const warmCache = async () => {
-      const y0 = today.getFullYear();
-      const m0 = today.getMonth() + 1;
-      for (let i = 1; i <= 12 && !cancelled; i++) {
-        const future = addMonths(y0, m0, i);
-        const past = addMonths(y0, m0, -i);
-        await Promise.allSettled([
-          getFixedExpenses(undefined, future.year, future.month),
-          getMonthlyExpenses(undefined, future.year, future.month),
-          getFixedExpenses(undefined, past.year, past.month),
-          getMonthlyExpenses(undefined, past.year, past.month),
-        ]);
-      }
-    };
-    void warmCache();
+    void loadSharedData().then((sharedError) => {
+      if (cancelled) return;
+      if (sharedError) setError(sharedError);
+      setSharedLoaded(true);
+    });
     return () => {
       cancelled = true;
     };
-  }, [today]);
+  }, [loadSharedData]);
+
+  /**
+   * Month-scoped refresh, including the first one. Already-visited months paint
+   * from `monthExpenseCache` on this same tick and then revalidate in the
+   * background, so paging with ←/→ stays responsive instead of dropping to a
+   * spinner — `monthLoaded` latches after the first fetch and never clears.
+   */
+  useEffect(() => {
+    const next = addMonths(viewedYear, viewedMonth, 1);
+    const cachedCur = readMonthCache(viewedYear, viewedMonth);
+    const cachedNext = readMonthCache(next.year, next.month);
+    if (cachedCur) {
+      setFixedExpenses(cachedCur.fixed);
+      setMonthlyExpenses(cachedCur.monthly);
+    }
+    if (cachedNext) {
+      setNextFixedExpenses(cachedNext.fixed);
+      setNextMonthlyExpenses(cachedNext.monthly);
+    }
+    let cancelled = false;
+    void loadViewedMonths().then(
+      () => {
+        if (!cancelled) setMonthLoaded(true);
+      },
+      (e: unknown) => {
+        if (cancelled) return;
+        setError(e instanceof Error ? e.message : "Failed to load expenses");
+        setMonthLoaded(true);
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [viewedYear, viewedMonth, readMonthCache, loadViewedMonths]);
 
   const goToPrevMonth = useCallback(() => {
     setViewedMonth((m) => {
@@ -1072,14 +1205,14 @@ export default function CalendarClient() {
           period_month: viewedMonth,
         });
         setExpenseForm(emptyExpenseForm());
-        await loadExpenses();
+        await reloadViewedMonth();
       } catch (err) {
         setExpenseError(err instanceof Error ? err.message : "Failed to add expense");
       } finally {
         setSavingExpense(false);
       }
     },
-    [expenseModalHalf, expenseForm, loadExpenses, viewedYear, viewedMonth],
+    [expenseModalHalf, expenseForm, reloadViewedMonth, viewedYear, viewedMonth],
   );
 
   const onDeleteExpense = useCallback(
@@ -1087,12 +1220,12 @@ export default function CalendarClient() {
       setExpenseError(null);
       try {
         await deleteFixedExpense(id);
-        await loadExpenses();
+        await reloadViewedMonth();
       } catch (err) {
         setExpenseError(err instanceof Error ? err.message : "Failed to delete expense");
       }
     },
-    [loadExpenses],
+    [reloadViewedMonth],
   );
 
   const onDeleteMonthlyExpense = useCallback(
@@ -1100,12 +1233,12 @@ export default function CalendarClient() {
       setExpenseError(null);
       try {
         await deleteMonthlyExpense(id);
-        await loadMonthlyExpenses();
+        await reloadViewedMonth();
       } catch (err) {
         setExpenseError(err instanceof Error ? err.message : "Failed to delete expense");
       }
     },
-    [loadMonthlyExpenses],
+    [reloadViewedMonth],
   );
 
   const modalExpenses =
@@ -1443,83 +1576,26 @@ export default function CalendarClient() {
               ))}
             </div>
             <div className="mt-1.5 grid flex-1 grid-cols-7 gap-1.5 sm:gap-2">
-              {gridCells.map((cell, idx) => {
-                if (!cell) {
-                  return <div key={`blank-${idx}`} />;
-                }
-                const { day, iso, periodHalf, isPast, isToday, dailyBudget } = cell;
-                const draggable = dailyBudget != null;
-                const isDragSource = dragSourceIso === iso;
-                const isDragOverTarget = dragOverIso === iso && dragSourceIso !== iso;
-                /** Orange for the 1st-half pay period, blue for the 2nd — always visible so the
-                 *  boundary between periods reads at a glance, even on past/today cells. */
-                const halfBorderClasses =
-                  periodHalf === 1
-                    ? "border-orange-400 dark:border-orange-600"
-                    : "border-blue-400 dark:border-blue-600";
-                const halfBgClasses =
-                  periodHalf === 1
-                    ? "bg-orange-50/50 dark:bg-orange-950/20"
-                    : "bg-blue-50/50 dark:bg-blue-950/20";
-                return (
-                  <div
-                    key={iso}
-                    role={draggable ? "button" : undefined}
-                    tabIndex={draggable ? 0 : undefined}
-                    draggable={draggable}
-                    onClick={draggable ? () => openSpendModal(cell) : undefined}
-                    onKeyDown={
-                      draggable
-                        ? (e) => {
-                            if (e.key === "Enter" || e.key === " ") {
-                              e.preventDefault();
-                              openSpendModal(cell);
-                            }
-                          }
-                        : undefined
+              {gridCells.map((cell, idx) =>
+                cell ? (
+                  <DayGridCell
+                    key={cell.iso}
+                    cell={cell}
+                    isDragSource={dragSourceIso === cell.iso}
+                    isDragOverTarget={
+                      dragOverIso === cell.iso && dragSourceIso !== cell.iso
                     }
-                    onDragStart={draggable ? (e) => handleDayDragStart(e, iso) : undefined}
-                    onDragOver={draggable ? (e) => handleDayDragOver(e, iso) : undefined}
-                    onDragLeave={draggable ? () => handleDayDragLeave(iso) : undefined}
-                    onDrop={draggable ? (e) => handleDayDrop(e, iso) : undefined}
+                    onOpenSpend={openSpendModal}
+                    onDragStart={handleDayDragStart}
+                    onDragOver={handleDayDragOver}
+                    onDragLeave={handleDayDragLeave}
+                    onDrop={handleDayDrop}
                     onDragEnd={handleDayDragEnd}
-                    className={`flex min-h-[5rem] min-w-0 flex-col items-center justify-center gap-1 rounded-lg border-2 px-1.5 py-2 text-center transition sm:min-h-[7rem] ${
-                      draggable ? "cursor-grab active:cursor-grabbing" : ""
-                    } ${
-                      isDragOverTarget
-                        ? "border-indigo-500 bg-indigo-100 ring-2 ring-indigo-500/60 dark:border-indigo-400 dark:bg-indigo-950/70"
-                        : isToday
-                          ? `${halfBorderClasses} bg-indigo-50 ring-2 ring-indigo-500/50 dark:bg-indigo-950/50`
-                          : isPast
-                            ? `border-dashed ${halfBorderClasses} bg-zinc-50/60 opacity-60 dark:bg-zinc-900/30`
-                            : `${halfBorderClasses} ${halfBgClasses}`
-                    } ${isDragSource ? "opacity-40" : ""}`}
-                  >
-                    <span
-                      className={`text-sm font-semibold tabular-nums ${
-                        isToday
-                          ? "text-indigo-900 dark:text-indigo-100"
-                          : isPast
-                            ? "text-zinc-400 dark:text-zinc-600"
-                            : "text-zinc-800 dark:text-zinc-100"
-                      }`}
-                    >
-                      {day}
-                    </span>
-                    <span
-                      className={`min-w-0 truncate text-xs tabular-nums leading-tight ${
-                        isToday
-                          ? "font-semibold text-indigo-700 dark:text-indigo-300"
-                          : isPast
-                            ? "text-zinc-400 dark:text-zinc-600"
-                            : "text-zinc-600 dark:text-zinc-400"
-                      }`}
-                    >
-                      {dailyBudget != null ? fmtMoney(dailyBudget) : "–"}
-                    </span>
-                  </div>
-                );
-              })}
+                  />
+                ) : (
+                  <div key={`blank-${idx}`} />
+                ),
+              )}
             </div>
           </section>
         </>

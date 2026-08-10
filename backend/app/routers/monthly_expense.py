@@ -63,7 +63,6 @@ def monthly_expense_create(body: MonthlyExpenseCreate) -> dict[str, Any]:
         body.period_month,
         body.is_recurring,
     )
-    cache.invalidate("monthly_expense")
     return {"expense": _serialize(row)}
 
 
@@ -81,7 +80,6 @@ def monthly_expense_replace(expense_id: int, body: MonthlyExpenseCreate) -> dict
     )
     if row is None:
         raise HTTPException(status_code=404, detail="Expense not found.")
-    cache.invalidate("monthly_expense")
     return {"expense": _serialize(row)}
 
 
@@ -89,5 +87,4 @@ def monthly_expense_replace(expense_id: int, body: MonthlyExpenseCreate) -> dict
 def monthly_expense_remove(expense_id: int) -> dict[str, Any]:
     if not delete_monthly_expense(expense_id):
         raise HTTPException(status_code=404, detail="Expense not found.")
-    cache.invalidate("monthly_expense")
     return {"ok": True}

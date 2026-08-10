@@ -19,6 +19,7 @@ import { ToggleLegendList } from "@/components/ToggleLegendList";
 import { useTheme } from "@/components/ThemeProvider";
 import { getPayslips, type PayslipRow } from "@/lib/api";
 import { getChartTooltipStyle } from "@/lib/chartTooltipStyle";
+import { fmtAmount, fmtAxisMoneyTick } from "@/lib/formatNumber";
 import {
   MONTH_NAMES_FULL,
   MONTH_NAMES_SHORT,
@@ -114,12 +115,7 @@ function ForecastTrendSparkline({
   );
 }
 
-function fmtMoney(n: number): string {
-  return n.toLocaleString(undefined, {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-}
+const fmtMoney = fmtAmount;
 
 const MONTHLY_BY_YEAR_TICK_STEP = 25000;
 
@@ -335,17 +331,7 @@ export default function CommissionClient() {
                   />
                   <YAxis
                     tick={{ fontSize: 11, fill: axisTickFill }}
-                    tickFormatter={(v) =>
-                      Number(v) >= 1000
-                        ? `${(Number(v) / 1000).toLocaleString(undefined, {
-                            minimumFractionDigits: 2,
-                            maximumFractionDigits: 2,
-                          })}k`
-                        : Number(v).toLocaleString(undefined, {
-                            minimumFractionDigits: 2,
-                            maximumFractionDigits: 2,
-                          })
-                    }
+                    tickFormatter={fmtAxisMoneyTick}
                   />
                   <Tooltip
                     formatter={(value) => fmtMoney(Number(value ?? 0))}
@@ -436,17 +422,7 @@ export default function CommissionClient() {
                     tick={{ fontSize: 11, fill: axisTickFill }}
                     domain={[0, monthlyByYearTicks[monthlyByYearTicks.length - 1]]}
                     ticks={monthlyByYearTicks}
-                    tickFormatter={(v) =>
-                      Number(v) >= 1000
-                        ? `${(Number(v) / 1000).toLocaleString(undefined, {
-                            minimumFractionDigits: 2,
-                            maximumFractionDigits: 2,
-                          })}k`
-                        : Number(v).toLocaleString(undefined, {
-                            minimumFractionDigits: 2,
-                            maximumFractionDigits: 2,
-                          })
-                    }
+                    tickFormatter={fmtAxisMoneyTick}
                   />
                   <Tooltip
                     formatter={(value) => fmtMoney(Number(value ?? 0))}

@@ -56,7 +56,6 @@ def fixed_expense_create(body: FixedExpenseCreate) -> dict[str, Any]:
         body.period_year,
         body.period_month,
     )
-    cache.invalidate("fixed_expense")
     return {"expense": _serialize(row)}
 
 
@@ -64,5 +63,4 @@ def fixed_expense_create(body: FixedExpenseCreate) -> dict[str, Any]:
 def fixed_expense_remove(expense_id: int) -> dict[str, Any]:
     if not delete_fixed_expense(expense_id):
         raise HTTPException(status_code=404, detail="Expense not found.")
-    cache.invalidate("fixed_expense")
     return {"ok": True}

@@ -5,6 +5,7 @@ import {
   parseMonthKey as sharedParseMonthKey,
 } from "@/lib/dateFormat";
 import type { PayslipRow } from "@/lib/api";
+import { fmtAmount } from "@/lib/formatNumber";
 
 /** Calendar month { y, m } for aggregation (1-12); mirrors salary-stats bucketing. */
 function calendarMonthForRow(r: PayslipRow): { y: number; m: number } | null {
@@ -177,9 +178,7 @@ function sameMonthHistory(
   return samples;
 }
 
-function formatAmount(n: number): string {
-  return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
+const formatAmount = fmtAmount;
 
 /** Short label (e.g. "Jul 2023") for the same calendar month `yearsAgo` years before `targetKey`. */
 function sameMonthLabel(targetKey: string, yearsAgo: number): string {
