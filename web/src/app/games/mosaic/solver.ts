@@ -62,12 +62,6 @@ export function applyMove(
   return { grid: g, changed: true };
 }
 
-export function isSolved(grid: Grid): boolean {
-  const first = grid[0][0];
-  for (const row of grid) for (const v of row) if (v !== first) return false;
-  return true;
-}
-
 // ---- board codes (copy/paste a board + start tile without repainting) ----
 
 const CODE_CHARS = "0123456789abcdefghijklmnopqrstuvwxyz";

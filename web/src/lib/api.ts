@@ -531,6 +531,151 @@ export async function generateMosaicPuzzle(
   };
 }
 
+/**
+ * Mambo (Takuzu / Binairo). `hSigns` is rows x (cols - 1) — the sign between
+ * (r, c) and (r, c + 1); `vSigns` is (rows - 1) x cols, between (r, c) and
+ * (r + 1, c). Sign values: 0 none, 1 "=", 2 "✕".
+ */
+export type MamboBoard = {
+  grid: number[][];
+  hSigns: number[][];
+  vSigns: number[][];
+};
+
+function mamboBody(board: MamboBoard, timeBudgetMs?: number) {
+  return {
+    grid: board.grid,
+    h_signs: board.hSigns,
+    v_signs: board.vSigns,
+    time_budget_ms: timeBudgetMs,
+  };
+}
+
+export type MamboSolveResult = {
+  solution: number[][] | null;
+  /** Capped at 2, so 2 means "two or more". */
+  solutionCount: number;
+  unique: boolean;
+  /** True only if the budget cut the search short, making the counts above
+   * lower bounds rather than answers. */
+  timedOut: boolean;
+  nodeCount: number;
+};
+
+export async function solveMambo(
+  board: MamboBoard,
+  timeBudgetMs?: number,
+): Promise<MamboSolveResult> {
+  const res = await sendJson<{
+    solution: number[][] | null;
+    solution_count: number;
+    unique: boolean;
+    timed_out: boolean;
+    node_count: number;
+  }>("POST", "/api/mambo/solve", mamboBody(board, timeBudgetMs));
+  return {
+    solution: res.solution,
+    solutionCount: res.solution_count,
+    unique: res.unique,
+    timedOut: res.timed_out,
+    nodeCount: res.node_count,
+  };
+}
+
+/** One cell the board forces, plus the technique and wording to explain it. */
+export type MamboStep = {
+  r: number;
+  c: number;
+  value: number;
+  technique: string;
+  detail: string;
+};
+
+export type MamboStepsResult = {
+  steps: MamboStep[];
+  solved: boolean;
+  unique: boolean;
+  solutionCount: number;
+  /** The entries already on the board break a rule against each other. */
+  conflict: boolean;
+  timedOut: boolean;
+};
+
+export async function solveMamboSteps(
+  board: MamboBoard,
+  timeBudgetMs?: number,
+): Promise<MamboStepsResult> {
+  const res = await sendJson<{
+    steps: MamboStep[];
+    solved: boolean;
+    unique: boolean;
+    solution_count: number;
+    conflict: boolean;
+    timed_out: boolean;
+  }>("POST", "/api/mambo/steps", mamboBody(board, timeBudgetMs));
+  return {
+    steps: res.steps,
+    solved: res.solved,
+    unique: res.unique,
+    solutionCount: res.solution_count,
+    conflict: res.conflict,
+    timedOut: res.timed_out,
+  };
+}
+
+export type MamboDifficulty = "easy" | "medium" | "hard";
+
+export type MamboGenerateResult = {
+  grid: number[][];
+  solution: number[][];
+  hSigns: number[][];
+  vSigns: number[][];
+  /** The difficulty actually achieved, which `exactMatch` compares to the one
+   * that was asked for. */
+  difficulty: MamboDifficulty;
+  /** False when the clock ran out before the difficulty could be established,
+   * in which case `difficulty` is the worst case rather than a measurement. */
+  difficultyConfirmed: boolean;
+  exactMatch: boolean;
+  attempts: number;
+  givenCount: number;
+};
+
+export async function generateMamboPuzzle(
+  rows: number,
+  cols: number,
+  difficulty: MamboDifficulty,
+  timeBudgetMs?: number,
+): Promise<MamboGenerateResult> {
+  const res = await sendJson<{
+    grid: number[][];
+    solution: number[][];
+    h_signs: number[][];
+    v_signs: number[][];
+    difficulty: MamboDifficulty;
+    difficulty_confirmed: boolean;
+    exact_match: boolean;
+    attempts: number;
+    given_count: number;
+  }>("POST", "/api/mambo/generate", {
+    rows,
+    cols,
+    difficulty,
+    time_budget_ms: timeBudgetMs,
+  });
+  return {
+    grid: res.grid,
+    solution: res.solution,
+    hSigns: res.h_signs,
+    vSigns: res.v_signs,
+    difficulty: res.difficulty,
+    difficultyConfirmed: res.difficulty_confirmed,
+    exactMatch: res.exact_match,
+    attempts: res.attempts,
+    givenCount: res.given_count,
+  };
+}
+
 export type BloodPressureRow = {
   id: number;
   systolic: number | null;

@@ -125,6 +125,7 @@ def create_app() -> FastAPI:
         health,
         house_payment,
         installment,
+        mambo,
         monthly_expense,
         mosaic,
         pay_period_start_override,
@@ -143,6 +144,7 @@ def create_app() -> FastAPI:
         credit_card.router,
         pay_period_start_override.router,
         mosaic.router,
+        mambo.router,
     ):
         app.include_router(router)
 

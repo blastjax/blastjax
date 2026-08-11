@@ -13,7 +13,7 @@ import {
   solveMosaicBestStart,
   solveMosaicFree,
 } from "@/lib/api";
-import { applyMove, decodeBoard, encodeBoard, isSolved, type Cell, type Grid } from "./solver";
+import { applyMove, decodeBoard, encodeBoard, type Cell, type Grid } from "./solver";
 
 const PALETTE = [
   "#e15b5b", // red
@@ -31,12 +31,15 @@ const MAX_BOARD_PX = 560;
 /** Reserved space around the board in full-screen mode: the fixed-width
  * side panel (+ gaps/padding) horizontally, the compact header + palette
  * row vertically. */
-const FULLSCREEN_RESERVE_W = 360;
-const FULLSCREEN_RESERVE_H = 190;
 const ROW_LABEL_W = 26;
 const COL_LABEL_H = 20;
+const FULLSCREEN_RESERVE_W = 360 + 2 * ROW_LABEL_W;
+const FULLSCREEN_RESERVE_H = 190 + 2 * COL_LABEL_H;
 
-type Mode = "play" | "paint" | "seed";
+const LABEL_CLASSES =
+  "flex items-center justify-center overflow-hidden text-[10px] font-medium text-zinc-500 dark:text-zinc-400";
+
+type Mode = "paint" | "seed";
 type Solving = "solve" | "findBest" | "free" | null;
 
 /** One step of a solution: repaint the blob at (r, c) to `color`. For
@@ -120,12 +123,10 @@ export default function MosaicClient() {
   const [mode, setMode] = useState<Mode>("paint");
   const [paintColor, setPaintColor] = useState(0);
 
-  const [movesApplied, setMovesApplied] = useState(0);
   const [solution, setSolution] = useState<SolutionState | null>(null);
   const [solveError, setSolveError] = useState<string | null>(null);
   const [snapshots, setSnapshots] = useState<Grid[] | null>(null);
   const [stepIndex, setStepIndex] = useState(0);
-  const [showWin, setShowWin] = useState(false);
 
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState(5);
@@ -204,7 +205,6 @@ export default function MosaicClient() {
     setSolution(null);
     setSnapshots(null);
     setStepIndex(0);
-    setShowWin(false);
     setSolveError(null);
   }
 
@@ -223,7 +223,6 @@ export default function MosaicClient() {
     setGrid(blank);
     setOriginalGrid(cloneGrid(blank));
     setSeed({ r: 0, c: 0 });
-    setMovesApplied(0);
     setPaintColor(0);
     setMode("paint");
     invalidateSolution();
@@ -252,7 +251,7 @@ export default function MosaicClient() {
     if (mode === "seed") {
       if (!isDown) return;
       setSeed({ r, c });
-      setMode("play");
+      setMode("paint");
       return;
     }
     if (mode === "paint") {
@@ -261,79 +260,46 @@ export default function MosaicClient() {
     }
   }
 
-  function applyRealMove(colorIdx: number) {
-    const result = applyMove(grid, seed, colorIdx);
-    if (!result.changed) return;
-    const newGrid = result.grid;
-    setGrid(newGrid);
-    setMovesApplied((m) => m + 1);
-
-    if (solution && snapshots) {
-      const next = solution.moves[stepIndex];
-      // Clicking a palette colour repaints the blob at `seed`, so it only
-      // stays on-script when the next move targets that same blob.
-      const onScript =
-        next != null &&
-        next.color === colorIdx &&
-        next.r === seed.r &&
-        next.c === seed.c;
-      if (onScript) {
-        const newIndex = stepIndex + 1;
-        const newSnapshots = [...snapshots];
-        newSnapshots[newIndex] = cloneGrid(newGrid);
-        setSnapshots(newSnapshots);
-        setStepIndex(newIndex);
-      } else {
-        // Player went off-script from the shown solution; drop it.
-        setSolution(null);
-        setSnapshots(null);
-      }
-    }
-
-    if (isSolved(newGrid)) {
-      stopPlaying();
-      setShowWin(true);
-    }
-  }
-
   function onPaletteClick(idx: number) {
-    if (mode === "paint") {
-      setPaintColor(idx);
-      return;
-    }
-    if (!painted) return;
-    applyRealMove(idx);
+    if (mode !== "paint") return;
+    setPaintColor(idx);
   }
 
   function togglePaint() {
-    setMode((m) => (m === "paint" ? "play" : "paint"));
+    setMode("paint");
+  }
+
+  /** Recolors a palette slot, cycling to the next hue in PALETTE that isn't
+   * already showing on another slot (so no two swatches end up identical). */
+  function cyclePaletteColor(idx: number) {
+    setColors((prev) => {
+      const next = prev.slice();
+      let i = PALETTE.indexOf(prev[idx]);
+      for (let step = 0; step < PALETTE.length; step++) {
+        i = (i + 1) % PALETTE.length;
+        if (!prev.some((c, j) => j !== idx && c === PALETTE[i])) {
+          next[idx] = PALETTE[i];
+          break;
+        }
+      }
+      return next;
+    });
   }
 
   function toggleSeed() {
-    setMode((m) => (m === "seed" ? "play" : "seed"));
+    setMode("seed");
   }
 
   function resetPuzzle() {
     stopPlaying();
     const g = cloneGrid(originalGrid);
     setGrid(g);
-    setMovesApplied(0);
     setStepIndex(0);
     setSnapshots(solution ? [cloneGrid(g)] : null);
-    setShowWin(false);
-  }
-
-  function undoMove() {
-    if (movesApplied === 0) return;
-    stopPlaying();
-    setGrid(cloneGrid(originalGrid));
-    setMovesApplied((m) => Math.max(0, m - 1));
-    invalidateSolution();
   }
 
   async function solveFromSeed() {
     if (!painted) return;
-    setMode("play");
     stopPlaying();
     setSolving("solve");
     setSolveError(null);
@@ -374,7 +340,6 @@ export default function MosaicClient() {
    * blob, which yields far shorter solutions than a fixed start tile. */
   async function solveFreeCell() {
     if (!painted) return;
-    setMode("play");
     stopPlaying();
     setSolving("free");
     setSolveError(null);
@@ -413,7 +378,6 @@ export default function MosaicClient() {
 
   async function findBestStartAndSolve() {
     if (!painted) return;
-    setMode("play");
     stopPlaying();
     setSolving("findBest");
     setSolveError(null);
@@ -450,9 +414,6 @@ export default function MosaicClient() {
       setGrid(result.grid);
       setOriginalGrid(cloneGrid(result.grid));
       setSeed(result.seed);
-      setMovesApplied(0);
-      setMode("play");
-      setShowWin(false);
       setSolveError(null);
       setSolution({
         moves: movesFromColors(result.moves, result.seed),
@@ -509,8 +470,7 @@ export default function MosaicClient() {
     setGrid(g);
     setOriginalGrid(cloneGrid(g));
     setSeed(s);
-    setMovesApplied(0);
-    setMode("play");
+    setMode("paint");
     invalidateSolution();
     setCodeError(null);
     setGenerateStatus(null);
@@ -532,11 +492,6 @@ export default function MosaicClient() {
     setGrid(newGrid);
     setSnapshots(newSnapshots);
     setStepIndex(newIndex);
-    setMovesApplied((m) => m + 1);
-    if (isSolved(newGrid)) {
-      stopPlaying();
-      setShowWin(true);
-    }
   }
 
   function stepPrev() {
@@ -544,8 +499,6 @@ export default function MosaicClient() {
     const newIndex = stepIndex - 1;
     setGrid(cloneGrid(snapshots[newIndex]));
     setStepIndex(newIndex);
-    setMovesApplied((m) => Math.max(0, m - 1));
-    setShowWin(false);
   }
 
   const stepNextLatest = useLatest(stepNext);
@@ -582,11 +535,9 @@ export default function MosaicClient() {
   }, [rows, cols, fullscreen, windowSize]);
 
   const modeLabel =
-    mode === "play"
-      ? "Play mode: click a color to make a move."
-      : mode === "paint"
-        ? "Paint mode: pick a color, then click/drag tiles to draw the board."
-        : "Click a tile to set the start tile.";
+    mode === "paint"
+      ? "Paint mode: pick a color, then click/drag tiles to draw the board."
+      : "Click a tile to set the start tile.";
 
   /** The move the solution wants next, if any — drives the palette hint and
    * (for free-cell solutions) the target-tile marker on the board. */
@@ -625,17 +576,28 @@ export default function MosaicClient() {
 
   const stepLabelText = solution ? `Move ${stepIndex} / ${solution.moves.length}` : "";
 
-  const winText = showWin
-    ? `Solved in ${movesApplied} move${movesApplied === 1 ? "" : "s"}!${
-        solution && solution.optimal
-          ? movesApplied === solution.moves.length
-            ? " — optimal!"
-            : ` — optimal is ${solution.moves.length}`
-          : ""
-      }`
-    : null;
-
   const disabledSecondary = `${SECONDARY_BUTTON_CLASSES} disabled:cursor-not-allowed disabled:opacity-50`;
+
+  /** Edge labels, rendered on both sides of each axis so a row or column's
+   * number is reachable from whichever end you're reading from. */
+  const colLabels = (
+    <div className="flex" style={{ paddingLeft: ROW_LABEL_W }}>
+      {Array.from({ length: cols }, (_, c) => (
+        <div key={c} style={{ width: cellPx, height: COL_LABEL_H }} className={LABEL_CLASSES}>
+          {c + 1}
+        </div>
+      ))}
+    </div>
+  );
+  const rowLabels = (
+    <div className="flex flex-col">
+      {Array.from({ length: rows }, (_, r) => (
+        <div key={r} style={{ width: ROW_LABEL_W, height: cellPx }} className={LABEL_CLASSES}>
+          {r + 1}
+        </div>
+      ))}
+    </div>
+  );
 
   const rootClasses = fullscreen
     ? "fixed inset-0 z-[100] flex h-[100dvh] w-screen flex-col gap-3 overflow-hidden bg-[var(--background)] p-3"
@@ -754,19 +716,9 @@ export default function MosaicClient() {
                 📍 Set start
               </button>
             </div>
-            <div className="flex gap-2">
-              <button type="button" className={SECONDARY_BUTTON_CLASSES} onClick={resetPuzzle}>
-                ↺ Reset
-              </button>
-              <button
-                type="button"
-                className={disabledSecondary}
-                onClick={undoMove}
-                disabled={movesApplied === 0}
-              >
-                ⬅ Undo
-              </button>
-            </div>
+            <button type="button" className={SECONDARY_BUTTON_CLASSES} onClick={resetPuzzle}>
+              ↺ Reset
+            </button>
             <p className="text-xs text-zinc-500 dark:text-zinc-400">{modeLabel}</p>
             {!painted && (
               <p className="text-xs font-medium text-indigo-600 dark:text-indigo-400">
@@ -938,42 +890,14 @@ export default function MosaicClient() {
                 <p className="text-xs text-zinc-500 dark:text-zinc-400">{stepLabelText}</p>
               </div>
             )}
-
-            <p className="text-xs text-zinc-500 dark:text-zinc-400">Moves used: {movesApplied}</p>
           </div>
         </section>
 
         <section className={boardSectionClasses}>
-          {winText && (
-            <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200">
-              {winText}
-            </div>
-          )}
-
           <div className="flex flex-col items-start">
-            <div className="flex" style={{ paddingLeft: ROW_LABEL_W }}>
-              {Array.from({ length: cols }, (_, c) => (
-                <div
-                  key={c}
-                  style={{ width: cellPx, height: COL_LABEL_H }}
-                  className="flex items-center justify-center overflow-hidden text-[10px] font-medium text-zinc-500 dark:text-zinc-400"
-                >
-                  {c + 1}
-                </div>
-              ))}
-            </div>
+            {colLabels}
             <div className="flex">
-              <div className="flex flex-col">
-                {Array.from({ length: rows }, (_, r) => (
-                  <div
-                    key={r}
-                    style={{ width: ROW_LABEL_W, height: cellPx }}
-                    className="flex items-center justify-center overflow-hidden text-[10px] font-medium text-zinc-500 dark:text-zinc-400"
-                  >
-                    {r + 1}
-                  </div>
-                ))}
-              </div>
+              {rowLabels}
               <div
                 className="select-none overflow-hidden rounded-xl border-[3px] border-zinc-900 shadow-lg dark:border-zinc-100"
                 style={{
@@ -1033,18 +957,9 @@ export default function MosaicClient() {
                   }),
                 )}
               </div>
+              {rowLabels}
             </div>
-            <div className="flex" style={{ paddingLeft: ROW_LABEL_W }}>
-              {Array.from({ length: cols }, (_, c) => (
-                <div
-                  key={c}
-                  style={{ width: cellPx, height: COL_LABEL_H }}
-                  className="flex items-center justify-center overflow-hidden text-[10px] font-medium text-zinc-500 dark:text-zinc-400"
-                >
-                  {c + 1}
-                </div>
-              ))}
-            </div>
+            {colLabels}
           </div>
 
           <div className="flex gap-2.5">
@@ -1062,18 +977,18 @@ export default function MosaicClient() {
             )}
             {colors.map((color, idx) => {
               const active = mode === "paint" && paintColor === idx;
-              const suggested =
-                mode !== "paint" &&
-                painted &&
-                nextMove != null &&
-                nextMove.color === idx;
-              const disabled = mode !== "paint" && !painted;
+              const suggested = mode !== "paint" && nextMove != null && nextMove.color === idx;
+              const disabled = mode !== "paint";
               return (
                 <button
                   key={idx}
                   type="button"
                   disabled={disabled}
+                  title={mode === "paint" ? "Click to paint · double-click to change this color" : undefined}
                   onClick={() => onPaletteClick(idx)}
+                  onDoubleClick={
+                    mode === "paint" ? () => cyclePaletteColor(idx) : undefined
+                  }
                   className={`h-12 w-12 rounded-xl shadow transition hover:-translate-y-0.5 disabled:pointer-events-none disabled:opacity-40 ${
                     active
                       ? "ring-2 ring-zinc-900 dark:ring-zinc-100"
