@@ -323,7 +323,7 @@ export default function MastermindClient() {
                     ))}
                   </div>
 
-                  <div className="ml-auto grid grid-cols-2 gap-1">
+                  <div className="ml-auto grid grid-cols-2 gap-1.5">
                     {stored.feedbackPegs.map((p, pos) => (
                       <FeedbackPeg
                         key={pos}
@@ -437,11 +437,11 @@ function FeedbackPeg({
 }) {
   const isExact = value === FB_EXACT;
   const isColorOnly = value === FB_COLOR_ONLY;
-  const classes = `h-3.5 w-3.5 rounded-full border transition ${
+  const classes = `h-6 w-6 rounded-full border-2 transition ${
     isExact
-      ? "border-zinc-500 bg-white"
+      ? "border-zinc-600 bg-white shadow-sm"
       : isColorOnly
-        ? "border-zinc-500 bg-transparent"
+        ? "border-zinc-600 bg-transparent"
         : "border-dashed border-zinc-300 bg-transparent"
   }`;
   const label = isExact ? "correct position and colour" : isColorOnly ? "correct colour, wrong position" : "no result set";
@@ -454,7 +454,7 @@ function FeedbackPeg({
       onClick={onClick}
       aria-label={`Feedback peg: ${label}. Click to cycle.`}
       title="Click to cycle: none → correct spot → correct colour only"
-      className={`${classes} cursor-pointer hover:border-indigo-400`}
+      className={`${classes} cursor-pointer hover:border-indigo-500`}
     />
   );
 }
