@@ -263,7 +263,7 @@ export default function MastermindClient() {
               <li>· Hit Submit once that&apos;s the guess you actually played.</li>
               <li>
                 · Then grade it (highlighted below): click a feedback dot to cycle none → ⬤ white
-                (right colour, right spot) → ○ hollow (right colour, wrong spot).
+                (right colour, right spot) → ⬤ black (right colour, wrong spot).
               </li>
               <li>· Any submitted row&apos;s grade can be revisited later if you spot a mistake.</li>
               <li>· Undo unlocks the last row again if you want to redo the guess itself.</li>
@@ -287,7 +287,7 @@ export default function MastermindClient() {
           )}
 
           {/* Always a white panel, in both themes, so the grade circles (a
-              white fill vs. a hollow ring) stay legible against it. */}
+              white fill vs. a black fill) stay legible against it. */}
           <div className="flex w-full max-w-md flex-col-reverse gap-2 rounded-xl border border-zinc-200 bg-white p-3 shadow-sm">
             {Array.from({ length: MAX_ATTEMPTS }, (_, idx) => {
               const isActive = idx === activeIdx && !gameOver;
@@ -441,7 +441,7 @@ function FeedbackPeg({
     isExact
       ? "border-zinc-600 bg-white shadow-sm"
       : isColorOnly
-        ? "border-zinc-600 bg-transparent"
+        ? "border-zinc-600 bg-black shadow-sm"
         : "border-dashed border-zinc-300 bg-transparent"
   }`;
   const label = isExact ? "correct position and colour" : isColorOnly ? "correct colour, wrong position" : "no result set";
