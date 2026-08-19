@@ -27,12 +27,15 @@ const COLOR_COUNTS = Array.from(
   (_, i) => MIN_COLORS + i,
 );
 
-function colorHex(v: number): string {
-  return v < 0 ? "transparent" : COLOR_PALETTE[v].hex;
+/** `colorMap[slot]` is the palette index displayed for legend slot `slot` —
+ * identity by default, but a slot's colour can be reassigned so the legend
+ * matches whatever physical pegs the player has on hand. */
+function colorHex(v: number, colorMap: number[]): string {
+  return v < 0 ? "transparent" : COLOR_PALETTE[colorMap[v]].hex;
 }
 
-function colorName(v: number): string {
-  return v < 0 ? "empty" : COLOR_PALETTE[v].name;
+function colorName(v: number, colorMap: number[]): string {
+  return v < 0 ? "empty" : COLOR_PALETTE[colorMap[v]].name;
 }
 
 export default function MastermindClient() {
@@ -43,6 +46,11 @@ export default function MastermindClient() {
   const [submittedCount, setSubmittedCount] = useState(0);
   /** Which peg of the active row the next legend click will fill. */
   const [pointer, setPointer] = useState(0);
+  /** Which palette colour each legend slot currently displays — double-click
+   * a legend pin to cycle it, independent of the game state. */
+  const [colorMap, setColorMap] = useState<number[]>(() =>
+    COLOR_PALETTE.map((_, i) => i),
+  );
 
   const codeSpace = useMemo(() => allCodes(numColors), [numColors]);
 
@@ -108,6 +116,29 @@ export default function MastermindClient() {
       return next;
     });
     setPointer((p) => (p + 1) % CODE_LENGTH);
+  }
+
+  /** Cycles which palette colour a legend slot displays, without touching
+   * the guess value that clicking it places (the slot index stays the
+   * identity of that colour throughout the game). */
+  function cycleLegendColor(slot: number) {
+    setColorMap((prev) => {
+      const next = prev.slice();
+      next[slot] = (next[slot] + 1) % COLOR_PALETTE.length;
+      return next;
+    });
+  }
+
+  /** A double-click's second `click` event arrives with `detail >= 2` in
+   * evergreen browsers, so it can be told apart from a plain click without
+   * an artificial delay: the first click still places the colour as usual,
+   * and the second re-colours the pin instead of placing it again. */
+  function handleLegendClick(slot: number, e: React.MouseEvent) {
+    if (e.detail >= 2) {
+      cycleLegendColor(slot);
+    } else {
+      placeColorAtPointer(slot);
+    }
   }
 
   /** Grading only applies to a guess that's actually been played, so only
@@ -223,8 +254,8 @@ export default function MastermindClient() {
                   <span
                     key={i}
                     className="h-7 w-7 shrink-0 rounded-full border border-zinc-300 dark:border-zinc-700"
-                    style={{ background: colorHex(v) }}
-                    title={colorName(v)}
+                    style={{ background: colorHex(v, colorMap) }}
+                    title={colorName(v, colorMap)}
                   />
                 ))}
               </div>
@@ -245,8 +276,8 @@ export default function MastermindClient() {
                   <span
                     key={i}
                     className="h-6 w-6 shrink-0 rounded-full border border-zinc-300 dark:border-zinc-700"
-                    style={{ background: colorHex(v) }}
-                    title={colorName(v)}
+                    style={{ background: colorHex(v, colorMap) }}
+                    title={colorName(v, colorMap)}
                   />
                 ))}
                 <span className="text-xs font-medium text-emerald-800 dark:text-emerald-200">
@@ -267,22 +298,27 @@ export default function MastermindClient() {
               </li>
               <li>· Any submitted row&apos;s grade can be revisited later if you spot a mistake.</li>
               <li>· Undo unlocks the last row again if you want to redo the guess itself.</li>
+              <li>· Double-click a pin in the legend to cycle its colour, to match pegs you have on hand.</li>
             </ul>
           </div>
         </section>
 
         <section className="flex flex-1 min-w-0 flex-col items-center gap-4">
+          {/* Fixed so it floats over the page instead of shoving the board
+              down when it appears or its text wraps. */}
           {banner && (
-            <div
-              className={`w-full max-w-md rounded-lg border px-4 py-3 text-sm font-medium ${
-                banner.tone === "good"
-                  ? "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200"
-                  : banner.tone === "bad"
-                    ? "border-red-200 bg-red-50 text-red-800 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200"
-                    : "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200"
-              }`}
-            >
-              {banner.text}
+            <div className="pointer-events-none fixed inset-x-0 top-4 z-50 flex justify-center px-4">
+              <div
+                className={`pointer-events-auto w-full max-w-md rounded-lg border px-4 py-3 text-sm font-medium shadow-lg ${
+                  banner.tone === "good"
+                    ? "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200"
+                    : banner.tone === "bad"
+                      ? "border-red-200 bg-red-50 text-red-800 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200"
+                      : "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200"
+                }`}
+              >
+                {banner.text}
+              </div>
             </div>
           )}
 
@@ -315,6 +351,7 @@ export default function MastermindClient() {
                       <GuessPeg
                         key={pos}
                         value={v}
+                        colorMap={colorMap}
                         ghost={isGhost}
                         interactive={isActive}
                         selected={isActive && pointer === pos}
@@ -363,22 +400,25 @@ export default function MastermindClient() {
           </button>
 
           <div className="flex flex-wrap items-center justify-center gap-2">
-            {COLOR_PALETTE.slice(0, numColors).map((c, idx) => (
-              <button
-                key={c.name}
-                type="button"
-                disabled={gameOver}
-                onClick={() => placeColorAtPointer(idx)}
-                title={`Place ${c.name} at peg ${pointer + 1}`}
-                aria-label={`Place ${c.name} at the targeted peg`}
-                className="flex h-8 w-8 items-center justify-center rounded-full border border-transparent p-1 transition hover:border-zinc-300 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:border-zinc-700 dark:hover:bg-zinc-800"
-              >
-                <span
-                  className="block h-full w-full rounded-full ring-1 ring-inset ring-black/10"
-                  style={{ background: c.hex }}
-                />
-              </button>
-            ))}
+            {Array.from({ length: numColors }, (_, idx) => {
+              const name = colorName(idx, colorMap);
+              return (
+                <button
+                  key={idx}
+                  type="button"
+                  disabled={gameOver}
+                  onClick={(e) => handleLegendClick(idx, e)}
+                  title={`Click: place ${name} at peg ${pointer + 1} · double-click: change this pin's colour`}
+                  aria-label={`Place ${name} at the targeted peg. Double-click to change this pin's colour.`}
+                  className="flex h-8 w-8 items-center justify-center rounded-full border border-transparent p-1 transition hover:border-zinc-300 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:border-zinc-700 dark:hover:bg-zinc-800"
+                >
+                  <span
+                    className="block h-full w-full rounded-full ring-1 ring-inset ring-black/10"
+                    style={{ background: colorHex(idx, colorMap) }}
+                  />
+                </button>
+              );
+            })}
           </div>
         </section>
       </div>
@@ -388,12 +428,14 @@ export default function MastermindClient() {
 
 function GuessPeg({
   value,
+  colorMap,
   ghost,
   interactive,
   selected,
   onSelect,
 }: {
   value: number;
+  colorMap: number[];
   ghost: boolean;
   interactive: boolean;
   selected: boolean;
@@ -405,8 +447,8 @@ function GuessPeg({
     return (
       <span
         className={`${base} ${empty ? "border-dashed border-zinc-300" : "border-zinc-300"}`}
-        style={{ background: empty ? "transparent" : colorHex(value) }}
-        title={colorName(value)}
+        style={{ background: empty ? "transparent" : colorHex(value, colorMap) }}
+        title={colorName(value, colorMap)}
       />
     );
   }
@@ -414,14 +456,14 @@ function GuessPeg({
     <button
       type="button"
       onClick={onSelect}
-      aria-label={`Guess peg: ${colorName(value)}. Click to target it, then pick a colour below.`}
+      aria-label={`Guess peg: ${colorName(value, colorMap)}. Click to target it, then pick a colour below.`}
       title="Click to target this peg, then click a colour in the legend"
       className={`${base} cursor-pointer ${
         empty ? "border-dashed border-zinc-400 hover:border-indigo-400" : "border-zinc-400 hover:brightness-110"
       } ${ghost ? "opacity-40" : ""} ${
         selected ? "ring-2 ring-indigo-500 ring-offset-2 ring-offset-white" : ""
       }`}
-      style={{ background: empty ? "transparent" : colorHex(value) }}
+      style={{ background: empty ? "transparent" : colorHex(value, colorMap) }}
     />
   );
 }
