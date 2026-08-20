@@ -1,5 +1,5 @@
 """
-Payslip and installment API (PostgreSQL via ``DATABASE_URL`` or ``DB_*``).
+Payslip and installment API (local SQLite file, see ``backend/db.py``).
 
 Run from the `backend` directory: ``uvicorn main:app --reload``
 """

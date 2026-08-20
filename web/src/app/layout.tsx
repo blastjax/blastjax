@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { AppShell } from "@/components/AppShell";
+import { AuthGate } from "@/components/AuthGate";
 import { ThemeInitScript } from "@/components/ThemeInitScript";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import "./globals.css";
@@ -39,7 +40,9 @@ export default function RootLayout({
       >
         <ThemeInitScript />
         <ThemeProvider>
-          <AppShell>{children}</AppShell>
+          <AuthGate>
+            <AppShell>{children}</AppShell>
+          </AuthGate>
         </ThemeProvider>
       </body>
     </html>

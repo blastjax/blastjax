@@ -1,1235 +1,368 @@
 """
-Payslip and installment storage: PostgreSQL (``DATABASE_URL`` or ``DB_*``).
+Payslip and installment storage: local SQLite file under ``data/`` (default
+``<repo-root>/data/budget.sqlite``, overridable via ``DATABASE_URL``).
 """
 
 from __future__ import annotations
 
-import logging
 import os
-import time
+import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qsl, quote, quote_plus, urlencode, urlparse, urlunparse
 
-import psycopg2
-from psycopg2 import pool
 from dotenv import load_dotenv
 
-_log = logging.getLogger(__name__)
-
 _BACKEND_DIR = Path(__file__).resolve().parent
+_REPO_ROOT = _BACKEND_DIR.parent
+_DEFAULT_SQLITE_PATH = _REPO_ROOT / "data" / "budget.sqlite"
 
 
 def _load_env_files() -> None:
     """Load repo-root `.env` then `backend/.env` (or `/app/.env` in the API image)."""
     for path in (_BACKEND_DIR.parent / ".env", _BACKEND_DIR / ".env"):
         if path.is_file():
-            # Prefer values from these files over inherited OS/env vars so local Neon `DB_*`
-            # is not shadowed by a leftover machine-level `DATABASE_URL`.
             load_dotenv(path, override=True)
 
 
-def _rewrite_database_url_for_docker() -> None:
-    """
-    In Docker, ``127.0.0.1`` / ``localhost`` in ``DATABASE_URL`` point at the container itself.
-    When using Compose, Postgres is reachable as ``db:5432``. Rewrite so one root ``.env``
-    can keep ``@127.0.0.1:5433`` for local ``uvicorn`` while ``docker compose`` still works.
-    """
-    if not Path("/.dockerenv").exists():
-        return
-    raw = (os.environ.get("DATABASE_URL") or "").strip()
-    if not raw:
-        return
-    low = raw.lower()
-    if not (low.startswith("postgresql:") or low.startswith("postgres:")):
-        return
-    parsed = urlparse(raw)
-    host = (parsed.hostname or "").lower()
-    if host not in ("127.0.0.1", "localhost"):
-        return
-    user = parsed.username or ""
-    password = parsed.password or ""
-    if user and password:
-        netloc = f"{quote_plus(user)}:{quote_plus(password)}@db:5432"
-    elif user:
-        netloc = f"{quote_plus(user)}@db:5432"
-    elif password:
-        netloc = f":{quote_plus(password)}@db:5432"
-    else:
-        netloc = "db:5432"
-    new_url = urlunparse(
-        (
-            parsed.scheme,
-            netloc,
-            parsed.path or "",
-            parsed.params,
-            parsed.query,
-            parsed.fragment,
-        )
-    )
-    os.environ["DATABASE_URL"] = new_url
-    _log.debug(
-        "Docker: DATABASE_URL host %s → db:5432 (same credentials and database path)",
-        host,
-    )
-
-
 _load_env_files()
-_rewrite_database_url_for_docker()
 
 
-class _PostgresCursorProxy:
-    __slots__ = ("_cur",)
-
-    def __init__(self, cur: Any) -> None:
-        self._cur = cur
-
-    def execute(self, operation: str, parameters: Any | None = None) -> Any:
-        op = operation.replace("?", "%s")
-        if parameters is not None:
-            return self._cur.execute(op, parameters)
-        return self._cur.execute(op)
-
-    def executemany(self, operation: str, seq_of_parameters: Any) -> Any:
-        return self._cur.executemany(operation.replace("?", "%s"), seq_of_parameters)
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._cur, name)
+def _parse_sqlite_path(raw: str) -> Path:
+    """Accept a ``sqlite:///relative/path``, ``sqlite:////absolute/path`` URL,
+    or a bare filesystem path. Relative paths resolve against the repo root
+    (the same anchor the migration script uses), so a local ``uvicorn`` run
+    and the one-off migration agree on where the file lives."""
+    s = raw.strip()
+    low = s.lower()
+    if low.startswith("sqlite:///"):
+        s = s[len("sqlite:///") :]
+    elif low.startswith("sqlite:"):
+        s = s[len("sqlite:") :]
+    path = Path(s)
+    if not path.is_absolute():
+        path = _REPO_ROOT / path
+    return path
 
 
-@contextmanager
-def db_cursor(conn: Any):
-    raw = conn.cursor()
-    cur: Any = _PostgresCursorProxy(raw)
-    try:
-        yield cur
-    finally:
-        raw.close()
+def sqlite_path() -> Path:
+    """Resolve the SQLite file location: ``DATABASE_URL`` if set, else the
+    default ``data/budget.sqlite`` under the repo root."""
+    raw = (os.environ.get("DATABASE_URL") or "").strip()
+    if raw:
+        return _parse_sqlite_path(raw)
+    return _DEFAULT_SQLITE_PATH
 
 
-def _database_url_from_db_parts() -> str | None:
-    host = (os.environ.get("DB_HOST") or "").strip()
-    if not host:
-        return None
-    dbname = (os.environ.get("DB_NAME") or "").strip()
-    if not dbname:
-        return None
-    user = (os.environ.get("DB_USER") or "").strip()
-    password = os.environ.get("DB_PASSWORD") or ""
-    port = (os.environ.get("DB_PORT") or "5432").strip() or "5432"
-    path = quote(dbname, safe="")
-    if user and password:
-        return (
-            f"postgresql://{quote_plus(user)}:{quote_plus(password)}"
-            f"@{host}:{port}/{path}"
-        )
-    if user:
-        return f"postgresql://{quote_plus(user)}@{host}:{port}/{path}"
-    if password:
-        return f"postgresql://:{quote_plus(password)}@{host}:{port}/{path}"
-    return f"postgresql://{host}:{port}/{path}"
+def database_url() -> str:
+    """The database this app always reads from and writes to."""
+    return f"sqlite:///{sqlite_path().as_posix()}"
 
 
-def database_url() -> str | None:
-    """
-    Resolve the *cloud* Postgres URL. When ``DB_HOST`` and ``DB_NAME`` (and other DB_* parts)
-    are set, those win over ``DATABASE_URL`` so a machine-level ``DATABASE_URL`` cannot silently
-    override Neon's ``DB_*`` from the project ``.env``.
-    """
-    from_parts = _database_url_from_db_parts()
-    if from_parts:
-        return from_parts
-    direct = (os.environ.get("DATABASE_URL") or "").strip()
-    if direct:
-        return direct
-    return None
-
-
-def cloud_database_url() -> str | None:
-    """The database the app always reads from and writes to (Neon ``DB_*`` / ``DATABASE_URL``)."""
+def cloud_database_url() -> str:
+    """Back-compat alias for ``database_url()`` — kept so callers that used to
+    distinguish "the cloud DB" from a local override don't need to change."""
     return database_url()
 
 
-_LIBPQ_DEFAULT_PARAMS: tuple[tuple[str, str], ...] = (
-    # Faster detection of half-open sockets (Neon / PgBouncer / NAT idle kills).
-    # Without these, a dropped TCP socket isn't noticed until the next query
-    # actually tries to write — which is exactly the case our pre-ping is for.
-    ("keepalives", "1"),
-    ("keepalives_idle", "30"),
-    ("keepalives_interval", "10"),
-    ("keepalives_count", "3"),
-    # Tag connections so they're easy to spot in pg_stat_activity. Allowed by
-    # Neon's pooler (which has a strict allow-list for startup parameters).
-    ("application_name", "budgetapp"),
-    # Fail fast when the cloud DB is unreachable instead of blocking the
-    # request on a long TCP connect.
-    ("connect_timeout", "8"),
-)
-
-
-def _postgres_connect_url(url: str) -> str:
-    """
-    Normalize the DSN: enforce TLS for Neon and bake server-side defaults
-    (search_path, keepalives) into the connection string so they're applied
-    once at connect time instead of on every pool checkout.
-    """
-    u = url.strip()
-    low = u.lower()
-    if not (low.startswith("postgresql:") or low.startswith("postgres:")):
-        return u
-    parsed = urlparse(u)
-    pairs = parse_qsl(parsed.query, keep_blank_values=True)
-    keys_lower = {k.lower() for k, _ in pairs}
-    host = (parsed.hostname or "").lower()
-    if "neon.tech" in host and "sslmode" not in keys_lower:
-        pairs.append(("sslmode", "require"))
-        keys_lower.add("sslmode")
-    for key, value in _LIBPQ_DEFAULT_PARAMS:
-        if key.lower() not in keys_lower:
-            pairs.append((key, value))
-            keys_lower.add(key.lower())
-    new_query = urlencode(pairs, quote_via=quote)
-    return urlunparse(parsed._replace(query=new_query))
-
-
 def storage_kind() -> str:
-    u = (cloud_database_url() or "").strip().lower()
-    if u.startswith("postgresql:") or u.startswith("postgres:"):
-        return "postgres"
-    return "none"
+    return "sqlite"
 
 
 def use_database() -> bool:
-    return storage_kind() == "postgres"
-
-
-# One pool per distinct DSN (in practice, just the cloud DB).
-_pg_pools: dict[str, pool.ThreadedConnectionPool] = {}
-
-
-def _pool_bounds() -> tuple[int, int]:
-    mn = int(os.environ.get("DB_POOL_MIN") or "1")
-    mx = int(os.environ.get("DB_POOL_MAX") or "10")
-    mn = max(1, mn)
-    mx = max(mn, min(mx, 50))
-    return mn, mx
-
-
-def _is_postgres_url(url: str | None) -> bool:
-    u = (url or "").strip().lower()
-    return u.startswith("postgresql:") or u.startswith("postgres:")
-
-
-def _ensure_pool(url: str) -> pool.ThreadedConnectionPool:
-    """Lazy per-DSN pool: reuse TCP/TLS sessions instead of connecting per request."""
-    url = (url or "").strip()
-    existing = _pg_pools.get(url)
-    if existing is not None:
-        return existing
-    if not _is_postgres_url(url):
-        raise RuntimeError(
-            "DATABASE_URL must be a postgresql://... URL (or set DB_HOST, DB_NAME, …).",
-        )
-    mn, mx = _pool_bounds()
-    p = pool.ThreadedConnectionPool(mn, mx, dsn=_postgres_connect_url(url))
-    _pg_pools[url] = p
-    return p
+    """The SQLite file is self-provisioning, so storage is always available."""
+    return True
 
 
 def close_connection_pool() -> None:
-    """Release pooled connections on process shutdown (e.g. uvicorn reload)."""
-    for p in _pg_pools.values():
-        try:
-            p.closeall()
-        except Exception:
-            pass
-    _pg_pools.clear()
-    _conn_last_seen.clear()
-    _conn_initialized.clear()
-
-
-def _connection_is_closed(conn: Any) -> bool:
-    """``psycopg2`` connections expose ``closed != 0`` once the socket is gone."""
-    try:
-        return bool(getattr(conn, "closed", 1))
-    except Exception:
-        return True
-
-
-# Per-connection "last successfully released" timestamps, keyed by ``id(conn)``.
-# Used to skip the pre-ping when a connection was used very recently and is
-# overwhelmingly likely to still be alive. Cleared whenever we discard a
-# connection from the pool.
-_conn_last_seen: dict[int, float] = {}
-
-# Tracks which physical connections have already had session-level setup
-# applied (e.g. ``SET search_path``). Neon's pooler doesn't allow
-# ``search_path`` in libpq startup options, so we have to issue it via
-# ``SET`` — but the GUC persists for the life of the connection, so we only
-# need to do it once per ``getconn`` of a given connection object.
-_conn_initialized: set[int] = set()
-
-
-def _initialize_session(conn: Any) -> None:
-    """Apply per-connection settings that can't be baked into the DSN."""
-    if id(conn) in _conn_initialized:
-        return
-    with conn.cursor() as cur:
-        cur.execute("SET search_path TO public")
-    _conn_initialized.add(id(conn))
-
-
-def _ping_after_idle_seconds() -> float:
-    raw = os.environ.get("DB_PING_AFTER_IDLE_SECONDS")
-    if raw is None or not raw.strip():
-        return 30.0
-    try:
-        return max(0.0, float(raw))
-    except ValueError:
-        return 30.0
-
-
-def _acquire_live_connection(p: pool.ThreadedConnectionPool) -> Any:
-    """
-    Check out a known-good connection, replacing any the server has dropped.
-
-    Pooled Postgres providers (Neon, PgBouncer) silently kill idle TCP sockets.
-    ``psycopg2.pool`` doesn't validate connections on checkout, so the first
-    cursor on a stale connection raises ``InterfaceError: connection already
-    closed`` — and then our cleanup path explodes trying to roll it back.
-
-    To avoid paying a ``SELECT 1`` round-trip on every request, only ping
-    connections that have been idle longer than ``DB_PING_AFTER_IDLE_SECONDS``
-    (default 30s). Recently-used connections are returned immediately; if one
-    happens to be stale anyway, the cleanup path in :func:`get_connection`
-    will discard it and the next checkout will receive a fresh one.
-    """
-    threshold = _ping_after_idle_seconds()
-    last_err: Exception | None = None
-    for _ in range(3):
-        conn = p.getconn()
-        if _connection_is_closed(conn):
-            _drop_conn_state(conn)
-            try:
-                p.putconn(conn, close=True)
-            except Exception:
-                pass
-            continue
-        last_seen = _conn_last_seen.get(id(conn))
-        now = time.monotonic()
-        try:
-            if last_seen is None or (now - last_seen) >= threshold:
-                with conn.cursor() as cur:
-                    cur.execute("SELECT 1")
-            _initialize_session(conn)
-            _conn_last_seen[id(conn)] = now
-            return conn
-        except (psycopg2.InterfaceError, psycopg2.OperationalError) as e:
-            last_err = e
-            _drop_conn_state(conn)
-            try:
-                p.putconn(conn, close=True)
-            except Exception:
-                pass
-            continue
-    assert last_err is not None
-    raise last_err
-
-
-def _drop_conn_state(conn: Any) -> None:
-    _conn_last_seen.pop(id(conn), None)
-    _conn_initialized.discard(id(conn))
+    """No-op: SQLite connections here are opened and closed per call, not pooled."""
+    return None
 
 
 @contextmanager
-def _connection_for(url: str | None):
-    if not _is_postgres_url(url):
-        raise RuntimeError(
-            "DATABASE_URL must be a postgresql://... URL (or set DB_HOST, DB_NAME, …).",
-        )
-    p = _ensure_pool(url or "")
-    conn = _acquire_live_connection(p)
-    broken = False
+def db_cursor(conn: sqlite3.Connection):
+    cur = conn.cursor()
     try:
-        yield conn
-        try:
-            conn.commit()
-        except (psycopg2.InterfaceError, psycopg2.OperationalError):
-            broken = True
-            raise
-    except Exception:
-        # Roll back any partial transaction, but tolerate a connection that
-        # was already torn down by the server (otherwise rollback itself raises
-        # ``InterfaceError: connection already closed`` and hides the real error).
-        try:
-            if not _connection_is_closed(conn):
-                conn.rollback()
-        except (psycopg2.InterfaceError, psycopg2.OperationalError):
-            broken = True
-        except Exception:
-            broken = True
-        raise
+        yield cur
     finally:
-        if _connection_is_closed(conn):
-            broken = True
-        if broken:
-            _drop_conn_state(conn)
-        else:
-            _conn_last_seen[id(conn)] = time.monotonic()
-        try:
-            # ``close=True`` makes the pool discard the dead connection so the
-            # next checkout opens a fresh one instead of replaying the failure.
-            p.putconn(conn, close=broken)
-        except Exception:
-            pass
+        cur.close()
 
 
 @contextmanager
 def get_connection():
-    """Connection to the cloud (source-of-truth) DB. The app always reads/writes here."""
-    with _connection_for(cloud_database_url()) as conn:
+    """Open, use, and close one SQLite connection for the duration of the block.
+
+    Commits on success; rolls back on any exception so a failed multi-statement
+    write (e.g. insert + recompute) never leaves a partial change committed.
+    """
+    path = sqlite_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(path), timeout=30, check_same_thread=False)
+    conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA journal_mode = WAL")
+    try:
         yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 
-_MINIMAL_PERF_INDEX_DDL = """
-CREATE INDEX IF NOT EXISTS idx_payslip_period_sort ON payslip(
-    period_year DESC, period_month DESC, period_half DESC, created_at DESC
-);
-CREATE INDEX IF NOT EXISTS idx_installment_finish_name ON installment(finish_date, name);
-CREATE INDEX IF NOT EXISTS idx_house_payment_name ON house_payment(name);
-"""
-
-def _backfill_installment_lines_if_empty(cur: Any) -> None:
-    cur.execute(
-        """
-        SELECT id, installment_total, principal, interest, payment_total
-        FROM installment
-        """
-    )
-    for iid, total, principal, interest, payment_total in cur.fetchall():
-        cur.execute(
-            "SELECT 1 FROM installment_line WHERE installment_id = ? LIMIT 1",
-            (iid,),
-        )
-        if cur.fetchone():
-            continue
-        ptot = _line_payment_total(float(principal or 0), interest)
-        for seq in range(1, int(total) + 1):
-            cur.execute(
-                """
-                INSERT INTO installment_line (installment_id, seq, principal, interest, payment_total)
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                (iid, seq, principal, interest, ptot),
-            )
+def check_connection() -> bool:
+    try:
+        with get_connection() as conn:
+            with db_cursor(conn) as cur:
+                cur.execute("SELECT 1")
+        return True
+    except Exception:
+        return False
 
 
+def _row_to_dict(cur: Any, row: Any) -> dict[str, Any]:
+    return dict(zip([d[0] for d in cur.description], row))
 
 
-def _ensure_minimal_performance_indexes(cur: Any) -> None:
-    for stmt in _MINIMAL_PERF_INDEX_DDL.strip().split(";"):
-        s = stmt.strip()
-        if s:
-            cur.execute(s)
+def _with_bool(row: dict[str, Any], key: str) -> dict[str, Any]:
+    """SQLite has no native boolean storage class — the driver hands back plain
+    ``0``/``1`` integers for BOOLEAN-affinity columns and boolean expressions,
+    where Postgres/psycopg2 gave a real ``bool``. Coerce so JSON responses keep
+    serializing as ``true``/``false`` instead of ``1``/``0``."""
+    if key in row and row[key] is not None:
+        row[key] = bool(row[key])
+    return row
 
 
-def _migrate_payslip_rename_employee_hdmf_to_pag_ibig(cur: Any) -> None:
-    """Rename legacy payslip column employee_hdmf -> pag_ibig (once)."""
-    cur.execute(
-        """
-        DO $$ BEGIN
-          IF EXISTS (
-            SELECT 1 FROM information_schema.columns
-            WHERE table_schema = 'public'
-              AND table_name = 'payslip'
-              AND column_name = 'employee_hdmf'
-          ) AND NOT EXISTS (
-            SELECT 1 FROM information_schema.columns
-            WHERE table_schema = 'public'
-              AND table_name = 'payslip'
-              AND column_name = 'pag_ibig'
-          ) THEN
-            ALTER TABLE payslip RENAME COLUMN employee_hdmf TO pag_ibig;
-          END IF;
-        END $$;
-        """
-    )
-
-
-def _migrate_payslip_drop_source_filename(cur: Any) -> None:
-    cur.execute("ALTER TABLE payslip DROP COLUMN IF EXISTS source_filename")
-
-
-def _migrate_payslip_thirteenth_month(cur: Any) -> None:
-    """Add 13th month pay column if missing (existing DBs)."""
-    cur.execute(
-        "ALTER TABLE payslip ADD COLUMN IF NOT EXISTS thirteenth_month DOUBLE PRECISION"
-    )
-
-
-def _migrate_payslip_basic_salary(cur: Any) -> None:
-    """Add basic salary column if missing (existing DBs)."""
-    cur.execute(
-        "ALTER TABLE payslip ADD COLUMN IF NOT EXISTS basic_salary DOUBLE PRECISION"
-    )
-
-
-def _migrate_payslip_pdf_columns(cur: Any) -> None:
-    """Add the single-PDF attachment column if missing (existing DBs)."""
-    cur.execute("ALTER TABLE payslip ADD COLUMN IF NOT EXISTS pdf_data BYTEA")
-
-
-def _migrate_payslip_drop_pdf_filename(cur: Any) -> None:
-    """Drop the original-filename column; PDFs are now served under a fixed name."""
-    cur.execute("ALTER TABLE payslip DROP COLUMN IF EXISTS pdf_filename")
-
-
-def _migrate_payslip_created_at_default(cur: Any) -> None:
-    """Ensure older payslip tables can create rows without explicit timestamps."""
-    cur.execute("ALTER TABLE payslip ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ")
-    cur.execute(
-        "UPDATE payslip SET created_at = CURRENT_TIMESTAMP WHERE created_at IS NULL"
-    )
-    cur.execute(
-        "ALTER TABLE payslip ALTER COLUMN created_at SET DEFAULT CURRENT_TIMESTAMP"
-    )
-    cur.execute("ALTER TABLE payslip ALTER COLUMN created_at SET NOT NULL")
-
-
-def _migrate_payslip_deduction_columns(cur: Any) -> None:
-    """Add withholding / statutory deduction columns if missing (existing DBs)."""
-    for name in ("withholding_tax", "sss_contribution", "philhealth", "pag_ibig"):
-        cur.execute(
-            f"ALTER TABLE payslip ADD COLUMN IF NOT EXISTS {name} DOUBLE PRECISION"
-        )
-
-
-def _init_schema_minimal_stmts() -> list[str]:
-    return [
-        """
-        CREATE SCHEMA IF NOT EXISTS public
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS payslip (
-            id SERIAL PRIMARY KEY,
-            total DOUBLE PRECISION,
-            commission DOUBLE PRECISION,
-            reimbursement DOUBLE PRECISION,
-            medical_reimbursement DOUBLE PRECISION,
-            others DOUBLE PRECISION,
-            mp2 DOUBLE PRECISION,
-            allowances DOUBLE PRECISION,
-            thirteenth_month DOUBLE PRECISION,
-            basic_salary DOUBLE PRECISION,
-            period_year INTEGER,
-            period_month INTEGER,
-            period_half INTEGER,
-            notes TEXT,
-            withholding_tax DOUBLE PRECISION,
-            sss_contribution DOUBLE PRECISION,
-            philhealth DOUBLE PRECISION,
-            pag_ibig DOUBLE PRECISION,
-            pdf_data BYTEA,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() AT TIME ZONE 'UTC')
-        )
-        """,
-        """
-        CREATE INDEX IF NOT EXISTS idx_payslip_created ON payslip (created_at DESC)
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS installment (
-            id SERIAL PRIMARY KEY,
-            name TEXT NOT NULL,
-            installment_current INTEGER NOT NULL,
-            installment_total INTEGER NOT NULL,
-            principal DOUBLE PRECISION NOT NULL,
-            interest DOUBLE PRECISION,
-            payment_total DOUBLE PRECISION NOT NULL,
-            start_date TEXT NOT NULL,
-            finish_date TEXT NOT NULL,
-            remaining DOUBLE PRECISION NOT NULL,
-            original_total DOUBLE PRECISION NOT NULL,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() AT TIME ZONE 'UTC'),
-            CONSTRAINT chk_installment_n CHECK (
-                installment_total >= 1
-                AND installment_current >= 1
-                AND installment_current <= installment_total + 1
-            ),
-            CONSTRAINT chk_installment_amounts CHECK (payment_total >= 0 AND remaining >= 0)
-        )
-        """,
-        """
-        CREATE INDEX IF NOT EXISTS idx_installment_created ON installment (created_at DESC)
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS installment_line (
-            id SERIAL PRIMARY KEY,
-            installment_id INTEGER NOT NULL REFERENCES installment(id) ON DELETE CASCADE,
-            seq INTEGER NOT NULL,
-            principal DOUBLE PRECISION NOT NULL DEFAULT 0,
-            interest DOUBLE PRECISION,
-            payment_total DOUBLE PRECISION NOT NULL,
-            UNIQUE (installment_id, seq)
-        )
-        """,
-        """
-        CREATE INDEX IF NOT EXISTS idx_installment_line_parent
-            ON installment_line (installment_id)
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS house_payment (
-            id SERIAL PRIMARY KEY,
-            name TEXT NOT NULL,
-            notes TEXT,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() AT TIME ZONE 'UTC')
-        )
-        """,
-        """
-        CREATE INDEX IF NOT EXISTS idx_house_payment_created ON house_payment (created_at DESC)
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS house_payment_entry (
-            id SERIAL PRIMARY KEY,
-            house_payment_id INTEGER NOT NULL REFERENCES house_payment(id) ON DELETE CASCADE,
-            paid_on DATE NOT NULL,
-            amount DOUBLE PRECISION NOT NULL,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() AT TIME ZONE 'UTC'),
-            CONSTRAINT chk_house_payment_entry_amount CHECK (amount >= 0)
-        )
-        """,
-        """
-        CREATE INDEX IF NOT EXISTS idx_house_payment_entry_parent
-            ON house_payment_entry (house_payment_id, paid_on DESC)
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS blood_pressure (
-            id SERIAL PRIMARY KEY,
-            systolic INTEGER,
-            diastolic INTEGER,
-            pulse INTEGER,
-            spo2 INTEGER,
-            temperature NUMERIC(5,2),
-            weight NUMERIC(6,2),
-            notes TEXT,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() AT TIME ZONE 'UTC'),
-            CONSTRAINT chk_blood_pressure_values CHECK (
-                (systolic IS NULL AND diastolic IS NULL AND pulse IS NULL)
-                OR (systolic > 0 AND diastolic > 0 AND pulse > 0)
-            ),
-            CONSTRAINT chk_blood_pressure_spo2 CHECK (
-                spo2 IS NULL OR (spo2 > 0 AND spo2 <= 100)
-            ),
-            CONSTRAINT chk_blood_pressure_temperature CHECK (
-                temperature IS NULL OR (temperature > 25 AND temperature <= 45)
-            ),
-            CONSTRAINT chk_blood_pressure_weight CHECK (
-                weight IS NULL OR weight > 0
-            ),
-            CONSTRAINT chk_blood_pressure_any_field CHECK (
-                systolic IS NOT NULL OR diastolic IS NOT NULL OR pulse IS NOT NULL
-                OR spo2 IS NOT NULL OR temperature IS NOT NULL OR weight IS NOT NULL
-                OR notes IS NOT NULL
-            )
-        )
-        """,
-        """
-        CREATE INDEX IF NOT EXISTS idx_blood_pressure_created
-            ON blood_pressure (created_at DESC)
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS fixed_expense (
-            id SERIAL PRIMARY KEY,
-            period_half INTEGER NOT NULL,
-            period_year INTEGER NOT NULL,
-            period_month INTEGER NOT NULL,
-            amount DOUBLE PRECISION NOT NULL,
-            description TEXT,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() AT TIME ZONE 'UTC'),
-            CONSTRAINT chk_fixed_expense_half CHECK (period_half IN (1, 2)),
-            CONSTRAINT chk_fixed_expense_amount CHECK (amount > 0),
-            CONSTRAINT chk_fixed_expense_month CHECK (period_month BETWEEN 1 AND 12)
-        )
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS monthly_expense (
-            id SERIAL PRIMARY KEY,
-            name TEXT NOT NULL,
-            description TEXT,
-            amount DOUBLE PRECISION NOT NULL,
-            period_half INTEGER NOT NULL,
-            period_year INTEGER NOT NULL,
-            period_month INTEGER NOT NULL,
-            is_recurring BOOLEAN NOT NULL DEFAULT FALSE,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() AT TIME ZONE 'UTC'),
-            CONSTRAINT chk_monthly_expense_half CHECK (period_half IN (1, 2)),
-            CONSTRAINT chk_monthly_expense_amount CHECK (amount > 0),
-            CONSTRAINT chk_monthly_expense_month CHECK (period_month BETWEEN 1 AND 12)
-        )
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS calendar_day_override (
-            id SERIAL PRIMARY KEY,
-            day DATE NOT NULL UNIQUE,
-            amount DOUBLE PRECISION NOT NULL,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() AT TIME ZONE 'UTC'),
-            CONSTRAINT chk_calendar_day_override_amount CHECK (amount >= 0)
-        )
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS pay_period_start_override (
-            id SERIAL PRIMARY KEY,
-            period_year INTEGER NOT NULL,
-            period_month INTEGER NOT NULL,
-            period_half INTEGER NOT NULL,
-            start_date DATE NOT NULL,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() AT TIME ZONE 'UTC'),
-            CONSTRAINT chk_pp_start_override_half CHECK (period_half IN (1, 2)),
-            CONSTRAINT chk_pp_start_override_month CHECK (period_month BETWEEN 1 AND 12),
-            CONSTRAINT chk_pp_start_override_half1_bound
-                CHECK (period_half <> 1 OR start_date <= make_date(period_year, period_month, 1)),
-            CONSTRAINT chk_pp_start_override_half2_bound
-                CHECK (period_half <> 2 OR (
-                    start_date > make_date(period_year, period_month, 1)
-                    AND start_date <= make_date(period_year, period_month, 16)
-                )),
-            CONSTRAINT uq_pp_start_override UNIQUE (period_year, period_month, period_half)
-        )
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS credit_card (
-            id SERIAL PRIMARY KEY,
-            name TEXT NOT NULL,
-            credit_limit DOUBLE PRECISION NOT NULL,
-            last_statement_balance DOUBLE PRECISION NOT NULL DEFAULT 0,
-            current_balance DOUBLE PRECISION NOT NULL DEFAULT 0,
-            minimum_due DOUBLE PRECISION NOT NULL DEFAULT 0,
-            interest_rate DOUBLE PRECISION NOT NULL DEFAULT 3.5,
-            statement_date TEXT,
-            due_date TEXT,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() AT TIME ZONE 'UTC'),
-            CONSTRAINT chk_credit_card_amounts CHECK (
-                credit_limit >= 0 AND last_statement_balance >= 0
-                AND minimum_due >= 0 AND interest_rate >= 0
-            )
-        )
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS credit_card_payment (
-            id SERIAL PRIMARY KEY,
-            credit_card_id INTEGER NOT NULL REFERENCES credit_card(id) ON DELETE CASCADE,
-            amount DOUBLE PRECISION NOT NULL,
-            payment_date TEXT NOT NULL,
-            note TEXT,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() AT TIME ZONE 'UTC'),
-            CONSTRAINT chk_credit_card_payment_amount CHECK (amount > 0)
-        )
-        """,
-        """
-        CREATE INDEX IF NOT EXISTS idx_credit_card_payment_parent
-            ON credit_card_payment (credit_card_id, payment_date DESC)
-        """,
-    ]
-
-
-def _migrate_installment_original_total_from_principal(cur: Any) -> None:
-    """Keep installment.original_total equal to sum(principal) on schedule lines (not payment_total)."""
-    cur.execute(
-        """
-        UPDATE installment i
-        SET original_total = s.sum_p
-        FROM (
-            SELECT installment_id, COALESCE(SUM(principal), 0) AS sum_p
-            FROM installment_line
-            GROUP BY installment_id
-        ) AS s
-        WHERE i.id = s.installment_id
-        """
-    )
-
-
-def _migrate_installment_repair_constraints(cur: Any) -> None:
+# One CREATE TABLE (plus its indexes) per statement, in FK-safe dependency
+# order: ``credit_card`` and ``house_payment`` before the tables that
+# reference them, ``installment`` before ``installment_line``. Uses
+# ``IF NOT EXISTS`` throughout, so re-running against a database that already
+# has these tables (e.g. one produced by
+# ``backend/scripts/migrate_postgres_to_sqlite.py``) is a no-op.
+_SCHEMA_STATEMENTS: list[str] = [
     """
-    Add the primary key, unique, and foreign-key constraints that
-    ``_init_schema_minimal_stmts`` would have set on a fresh DB but that
-    were missing on databases created by earlier versions (where
-    ``CREATE TABLE IF NOT EXISTS`` saw an existing table and skipped the
-    full DDL). Idempotent — each constraint is added only when not already
-    present.
-
-    ``installment_line`` is the only table where the missing
-    ``UNIQUE (installment_id, seq)`` constraint is load-bearing for our
-    own helpers (``_resync_installment_lines_on_total_change`` uses
-    ``ON CONFLICT (installment_id, seq)``).
+    CREATE TABLE IF NOT EXISTS credit_card (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        credit_limit REAL NOT NULL,
+        last_statement_balance REAL NOT NULL DEFAULT 0,
+        current_balance REAL NOT NULL DEFAULT 0,
+        minimum_due REAL NOT NULL DEFAULT 0,
+        interest_rate REAL NOT NULL DEFAULT 3.5,
+        statement_date TEXT,
+        due_date TEXT,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CHECK (
+            credit_limit >= 0 AND last_statement_balance >= 0
+            AND minimum_due >= 0 AND interest_rate >= 0
+        )
+    )
+    """,
     """
-    cur.execute(
-        """
-        DO $$ BEGIN
-          IF NOT EXISTS (
-            SELECT 1 FROM pg_constraint
-            WHERE conrelid = 'installment'::regclass AND contype = 'p'
-          ) AND NOT EXISTS (
-            SELECT id FROM installment GROUP BY id HAVING COUNT(*) > 1 LIMIT 1
-          ) THEN
-            ALTER TABLE installment ADD PRIMARY KEY (id);
-          END IF;
-        END $$;
-        """
+    CREATE TABLE IF NOT EXISTS payslip (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        total REAL,
+        commission REAL,
+        reimbursement REAL,
+        medical_reimbursement REAL,
+        others REAL,
+        mp2 REAL,
+        allowances REAL,
+        thirteenth_month REAL,
+        basic_salary REAL,
+        period_year INTEGER,
+        period_month INTEGER,
+        period_half INTEGER,
+        notes TEXT,
+        withholding_tax REAL,
+        sss_contribution REAL,
+        philhealth REAL,
+        pag_ibig REAL,
+        pdf_data BLOB,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
     )
-    cur.execute(
-        """
-        DO $$ BEGIN
-          IF NOT EXISTS (
-            SELECT 1 FROM pg_constraint
-            WHERE conrelid = 'installment_line'::regclass AND contype = 'p'
-          ) AND NOT EXISTS (
-            SELECT id FROM installment_line GROUP BY id HAVING COUNT(*) > 1 LIMIT 1
-          ) THEN
-            ALTER TABLE installment_line ADD PRIMARY KEY (id);
-          END IF;
-        END $$;
-        """
-    )
-    cur.execute(
-        """
-        DO $$ BEGIN
-          IF NOT EXISTS (
-            SELECT 1 FROM pg_constraint
-            WHERE conrelid = 'installment_line'::regclass
-              AND contype = 'u'
-              AND conkey = (
-                SELECT array_agg(attnum ORDER BY attnum)
-                FROM pg_attribute
-                WHERE attrelid = 'installment_line'::regclass
-                  AND attname IN ('installment_id', 'seq')
-              )
-          ) AND NOT EXISTS (
-            SELECT installment_id, seq FROM installment_line
-            GROUP BY installment_id, seq HAVING COUNT(*) > 1 LIMIT 1
-          ) THEN
-            ALTER TABLE installment_line
-              ADD CONSTRAINT installment_line_installment_id_seq_key
-              UNIQUE (installment_id, seq);
-          END IF;
-        END $$;
-        """
-    )
-    cur.execute(
-        """
-        DO $$ BEGIN
-          IF NOT EXISTS (
-            SELECT 1 FROM pg_constraint
-            WHERE conrelid = 'installment_line'::regclass AND contype = 'f'
-          ) AND EXISTS (
-            SELECT 1 FROM pg_constraint
-            WHERE conrelid = 'installment'::regclass AND contype = 'p'
-          ) AND NOT EXISTS (
-            SELECT 1 FROM installment_line il
-            LEFT JOIN installment i ON i.id = il.installment_id
-            WHERE i.id IS NULL
-            LIMIT 1
-          ) THEN
-            ALTER TABLE installment_line
-              ADD CONSTRAINT installment_line_installment_id_fkey
-              FOREIGN KEY (installment_id) REFERENCES installment(id) ON DELETE CASCADE;
-          END IF;
-        END $$;
-        """
-    )
-    # Resync SERIAL sequences past existing max(id) so future inserts don't
-    # immediately violate the new primary keys. Safe to run unconditionally —
-    # ``setval`` accepts the new last-used value and ``nextval`` after this
-    # returns ``max+1``.
-    cur.execute(
-        """
-        SELECT setval(
-            pg_get_serial_sequence('installment', 'id'),
-            GREATEST(1, COALESCE((SELECT MAX(id) FROM installment), 1))
-        )
-        """
-    )
-    cur.execute(
-        """
-        SELECT setval(
-            pg_get_serial_sequence('installment_line', 'id'),
-            GREATEST(1, COALESCE((SELECT MAX(id) FROM installment_line), 1))
-        )
-        """
-    )
-
-
-def _migrate_installment_relax_payment_total(cur: Any) -> None:
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_payslip_created ON payslip (created_at DESC)",
     """
-    Allow amount-less plans (``payment_total = 0``). The Add form no longer
-    requires a per-payment total — it's filled in later via the schedule
-    editor — but older DBs enforced ``payment_total > 0``. Rebuild the check
-    with ``>= 0`` (existing rows already satisfy the looser bound).
+    CREATE INDEX IF NOT EXISTS idx_payslip_period_sort ON payslip (
+        period_year DESC, period_month DESC, period_half DESC, created_at DESC
+    )
+    """,
     """
-    cur.execute(
-        "ALTER TABLE installment DROP CONSTRAINT IF EXISTS chk_installment_amounts"
+    CREATE TABLE IF NOT EXISTS installment (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        installment_current INTEGER NOT NULL,
+        installment_total INTEGER NOT NULL,
+        principal REAL NOT NULL,
+        interest REAL,
+        payment_total REAL NOT NULL,
+        start_date TEXT NOT NULL,
+        finish_date TEXT NOT NULL,
+        remaining REAL NOT NULL,
+        original_total REAL NOT NULL,
+        credit_card_id INTEGER REFERENCES credit_card(id) ON DELETE SET NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CHECK (
+            installment_total >= 1
+            AND installment_current >= 1
+            AND installment_current <= installment_total + 1
+        ),
+        CHECK (payment_total >= 0 AND remaining >= 0)
     )
-    cur.execute(
-        """
-        ALTER TABLE installment
-          ADD CONSTRAINT chk_installment_amounts
-          CHECK (payment_total >= 0 AND remaining >= 0)
-        """
-    )
-
-
-def _migrate_installment_recompute_aggregates(cur: Any) -> None:
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_installment_created ON installment (created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_installment_finish_name ON installment (finish_date, name)",
+    "CREATE INDEX IF NOT EXISTS idx_installment_credit_card_id ON installment (credit_card_id)",
     """
-    Recompute every plan's cached ``remaining`` / ``original_total`` (and the
-    current-line principal/interest/payment_total) from its schedule lines, so
-    ``remaining`` always equals the sum of the unpaid scheduled payments.
-
-    Repairs rows whose cached ``remaining`` went stale — e.g. a manually entered
-    balance left over from before the per-line schedule existed, or lines
-    backfilled by a migration without a follow-up recompute.
+    CREATE TABLE IF NOT EXISTS installment_line (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        installment_id INTEGER NOT NULL REFERENCES installment(id) ON DELETE CASCADE,
+        seq INTEGER NOT NULL,
+        principal REAL NOT NULL DEFAULT 0,
+        interest REAL,
+        payment_total REAL NOT NULL,
+        UNIQUE (installment_id, seq)
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_installment_line_parent ON installment_line (installment_id)",
     """
-    cur.execute("SELECT id FROM installment")
-    for (iid,) in cur.fetchall():
-        _recompute_installment_aggregates(cur, iid)
-
-
-def _migrate_aux_created_at_defaults(cur: Any) -> None:
+    CREATE TABLE IF NOT EXISTS house_payment (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        notes TEXT,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_house_payment_created ON house_payment (created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_house_payment_name ON house_payment (name)",
     """
-    Ensure non-payslip tables created before ``created_at`` had a default
-    can still accept inserts that don't supply a timestamp. Idempotent —
-    re-applying the default / NOT NULL on a column that already has them
-    is a no-op.
+    CREATE TABLE IF NOT EXISTS house_payment_entry (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        house_payment_id INTEGER NOT NULL REFERENCES house_payment(id) ON DELETE CASCADE,
+        paid_on DATE NOT NULL,
+        amount REAL NOT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CHECK (amount >= 0)
+    )
+    """,
     """
-    for tbl in ("installment", "house_payment", "house_payment_entry"):
-        cur.execute(
-            f"UPDATE {tbl} SET created_at = (NOW() AT TIME ZONE 'UTC') WHERE created_at IS NULL"
-        )
-        cur.execute(
-            f"ALTER TABLE {tbl} ALTER COLUMN created_at SET DEFAULT (NOW() AT TIME ZONE 'UTC')"
-        )
-        cur.execute(
-            f"ALTER TABLE {tbl} ALTER COLUMN created_at SET NOT NULL"
-        )
-
-
-def _migrate_blood_pressure_spo2(cur: Any) -> None:
-    """Add the nullable ``spo2`` (oxygen saturation %) column to existing
-    blood_pressure tables. Idempotent."""
-    cur.execute("ALTER TABLE blood_pressure ADD COLUMN IF NOT EXISTS spo2 INTEGER")
-    cur.execute(
-        "ALTER TABLE blood_pressure DROP CONSTRAINT IF EXISTS chk_blood_pressure_spo2"
-    )
-    cur.execute(
-        """
-        ALTER TABLE blood_pressure ADD CONSTRAINT chk_blood_pressure_spo2 CHECK (
-            spo2 IS NULL OR (spo2 > 0 AND spo2 <= 100)
-        )
-        """
-    )
-
-
-def _migrate_blood_pressure_temperature_weight(cur: Any) -> None:
-    """Add nullable ``temperature`` (°C) and ``weight`` (kg) columns. Idempotent."""
-    cur.execute(
-        "ALTER TABLE blood_pressure ADD COLUMN IF NOT EXISTS temperature NUMERIC(5,2)"
-    )
-    cur.execute(
-        "ALTER TABLE blood_pressure ADD COLUMN IF NOT EXISTS weight NUMERIC(6,2)"
-    )
-    cur.execute(
-        "ALTER TABLE blood_pressure DROP CONSTRAINT IF EXISTS chk_blood_pressure_temperature"
-    )
-    cur.execute(
-        """
-        ALTER TABLE blood_pressure ADD CONSTRAINT chk_blood_pressure_temperature CHECK (
-            temperature IS NULL OR (temperature > 25 AND temperature <= 45)
-        )
-        """
-    )
-    cur.execute(
-        "ALTER TABLE blood_pressure DROP CONSTRAINT IF EXISTS chk_blood_pressure_weight"
-    )
-    cur.execute(
-        """
-        ALTER TABLE blood_pressure ADD CONSTRAINT chk_blood_pressure_weight CHECK (
-            weight IS NULL OR weight > 0
-        )
-        """
-    )
-
-
-def _migrate_blood_pressure_nullable_core(cur: Any) -> None:
-    """Allow systolic/diastolic/pulse to be left blank, as long as they're all
-    blank together (or all set together), and at least one field on the row
-    is populated. Idempotent."""
-    cur.execute("ALTER TABLE blood_pressure ALTER COLUMN systolic DROP NOT NULL")
-    cur.execute("ALTER TABLE blood_pressure ALTER COLUMN diastolic DROP NOT NULL")
-    cur.execute("ALTER TABLE blood_pressure ALTER COLUMN pulse DROP NOT NULL")
-    cur.execute(
-        "ALTER TABLE blood_pressure DROP CONSTRAINT IF EXISTS chk_blood_pressure_values"
-    )
-    cur.execute(
-        """
-        ALTER TABLE blood_pressure ADD CONSTRAINT chk_blood_pressure_values CHECK (
+    CREATE INDEX IF NOT EXISTS idx_house_payment_entry_parent
+        ON house_payment_entry (house_payment_id, paid_on DESC)
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS blood_pressure (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        systolic INTEGER,
+        diastolic INTEGER,
+        pulse INTEGER,
+        spo2 INTEGER,
+        temperature NUMERIC(5, 2),
+        weight NUMERIC(6, 2),
+        notes TEXT,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CHECK (
             (systolic IS NULL AND diastolic IS NULL AND pulse IS NULL)
             OR (systolic > 0 AND diastolic > 0 AND pulse > 0)
-        )
-        """
-    )
-    cur.execute(
-        "ALTER TABLE blood_pressure DROP CONSTRAINT IF EXISTS chk_blood_pressure_any_field"
-    )
-    cur.execute(
-        """
-        ALTER TABLE blood_pressure ADD CONSTRAINT chk_blood_pressure_any_field CHECK (
+        ),
+        CHECK (spo2 IS NULL OR (spo2 > 0 AND spo2 <= 100)),
+        CHECK (temperature IS NULL OR (temperature > 25 AND temperature <= 45)),
+        CHECK (weight IS NULL OR weight > 0),
+        CHECK (
             systolic IS NOT NULL OR diastolic IS NOT NULL OR pulse IS NOT NULL
             OR spo2 IS NOT NULL OR temperature IS NOT NULL OR weight IS NOT NULL
             OR notes IS NOT NULL
         )
-        """
     )
-
-
-def _migrate_house_payment_simplify(cur: Any) -> None:
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_blood_pressure_created ON blood_pressure (created_at DESC)",
     """
-    Simplified house-payment model: only ``name`` + ``notes`` on the plan, with
-    individual payments stored in ``house_payment_entry`` (date + amount).
-    Drops the prior installment-style columns and the legacy ``house_payment_line``
-    table.
+    CREATE TABLE IF NOT EXISTS fixed_expense (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        period_half INTEGER NOT NULL,
+        period_year INTEGER NOT NULL,
+        period_month INTEGER NOT NULL,
+        amount REAL NOT NULL,
+        description TEXT,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CHECK (period_half IN (1, 2)),
+        CHECK (amount > 0),
+        CHECK (period_month BETWEEN 1 AND 12)
+    )
+    """,
     """
-    cur.execute("DROP TABLE IF EXISTS house_payment_line CASCADE")
-    cur.execute(
-        "ALTER TABLE house_payment DROP CONSTRAINT IF EXISTS chk_house_payment_n"
-    )
-    cur.execute(
-        "ALTER TABLE house_payment DROP CONSTRAINT IF EXISTS chk_house_payment_amounts"
-    )
-    for col in (
-        "installment_current",
-        "installment_total",
-        "principal",
-        "interest",
-        "payment_total",
-        "start_date",
-        "finish_date",
-        "remaining",
-        "original_total",
-        "down_payment",
-    ):
-        cur.execute(f"ALTER TABLE house_payment DROP COLUMN IF EXISTS {col}")
-
-
-def _migrate_fixed_expense_period_columns(cur: Any) -> None:
+    CREATE INDEX IF NOT EXISTS idx_fixed_expense_period
+        ON fixed_expense (period_year, period_month, period_half, created_at DESC)
+    """,
     """
-    Fixed expenses used to have no month scoping at all — one row applied to
-    every month's calendar half forever. Add period_year/period_month so a
-    fixed expense (e.g. a one-off savings goal) can be tied to the single
-    month it was actually added for. Existing rows are backfilled to the
-    current month so they keep showing up where the user last saw them.
+    CREATE TABLE IF NOT EXISTS monthly_expense (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        description TEXT,
+        amount REAL NOT NULL,
+        period_half INTEGER NOT NULL,
+        period_year INTEGER NOT NULL,
+        period_month INTEGER NOT NULL,
+        is_recurring BOOLEAN NOT NULL DEFAULT 0,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CHECK (period_half IN (1, 2)),
+        CHECK (amount > 0),
+        CHECK (period_month BETWEEN 1 AND 12)
+    )
+    """,
     """
-    cur.execute("ALTER TABLE fixed_expense ADD COLUMN IF NOT EXISTS period_year INTEGER")
-    cur.execute("ALTER TABLE fixed_expense ADD COLUMN IF NOT EXISTS period_month INTEGER")
-    cur.execute(
-        """
-        UPDATE fixed_expense
-        SET period_year = EXTRACT(YEAR FROM NOW() AT TIME ZONE 'UTC')::INTEGER,
-            period_month = EXTRACT(MONTH FROM NOW() AT TIME ZONE 'UTC')::INTEGER
-        WHERE period_year IS NULL OR period_month IS NULL
-        """
-    )
-    cur.execute("ALTER TABLE fixed_expense ALTER COLUMN period_year SET NOT NULL")
-    cur.execute("ALTER TABLE fixed_expense ALTER COLUMN period_month SET NOT NULL")
-    cur.execute(
-        "ALTER TABLE fixed_expense DROP CONSTRAINT IF EXISTS chk_fixed_expense_month"
-    )
-    cur.execute(
-        "ALTER TABLE fixed_expense ADD CONSTRAINT chk_fixed_expense_month "
-        "CHECK (period_month BETWEEN 1 AND 12)"
-    )
-    cur.execute("DROP INDEX IF EXISTS idx_fixed_expense_half")
-    cur.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_fixed_expense_period
-            ON fixed_expense (period_year, period_month, period_half, created_at DESC)
-        """
-    )
-
-
-def _migrate_monthly_expense_columns(cur: Any) -> None:
+    CREATE INDEX IF NOT EXISTS idx_monthly_expense_period
+        ON monthly_expense (period_year, period_month, period_half, created_at DESC)
+    """,
     """
-    An earlier, abandoned attempt at this feature left a ``monthly_expense``
-    table on some databases without ``name``/``description``. ``CREATE TABLE
-    IF NOT EXISTS`` is a no-op against that table, so add the missing columns
-    explicitly. Idempotent.
-
-    ``period_year``/``period_month`` were added later: monthly expenses used
-    to recur on every calendar month forever, which meant one entry showed up
-    on months it was never meant for. Existing rows are backfilled to the
-    current month so they keep showing up where the user last saw them, and
-    from here on an expense is scoped to the single month it was created for.
+    CREATE TABLE IF NOT EXISTS calendar_day_override (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        day DATE NOT NULL UNIQUE,
+        amount REAL NOT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CHECK (amount >= 0)
+    )
+    """,
     """
-    cur.execute("ALTER TABLE monthly_expense ADD COLUMN IF NOT EXISTS name TEXT")
-    cur.execute("UPDATE monthly_expense SET name = '' WHERE name IS NULL")
-    cur.execute("ALTER TABLE monthly_expense ALTER COLUMN name SET NOT NULL")
-    cur.execute("ALTER TABLE monthly_expense ADD COLUMN IF NOT EXISTS description TEXT")
-    cur.execute(
-        "ALTER TABLE monthly_expense ADD COLUMN IF NOT EXISTS amount DOUBLE PRECISION"
+    CREATE TABLE IF NOT EXISTS pay_period_start_override (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        period_year INTEGER NOT NULL,
+        period_month INTEGER NOT NULL,
+        period_half INTEGER NOT NULL,
+        start_date DATE NOT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CHECK (period_half IN (1, 2)),
+        CHECK (period_month BETWEEN 1 AND 12),
+        UNIQUE (period_year, period_month, period_half)
     )
-    cur.execute(
-        "ALTER TABLE monthly_expense ADD COLUMN IF NOT EXISTS period_half INTEGER"
-    )
-    cur.execute(
-        "ALTER TABLE monthly_expense ADD COLUMN IF NOT EXISTS period_year INTEGER"
-    )
-    cur.execute(
-        "ALTER TABLE monthly_expense ADD COLUMN IF NOT EXISTS period_month INTEGER"
-    )
-    cur.execute(
-        """
-        UPDATE monthly_expense
-        SET period_year = EXTRACT(YEAR FROM NOW() AT TIME ZONE 'UTC')::INTEGER,
-            period_month = EXTRACT(MONTH FROM NOW() AT TIME ZONE 'UTC')::INTEGER
-        WHERE period_year IS NULL OR period_month IS NULL
-        """
-    )
-    cur.execute("ALTER TABLE monthly_expense ALTER COLUMN period_year SET NOT NULL")
-    cur.execute("ALTER TABLE monthly_expense ALTER COLUMN period_month SET NOT NULL")
-    cur.execute(
-        "ALTER TABLE monthly_expense DROP CONSTRAINT IF EXISTS chk_monthly_expense_half"
-    )
-    cur.execute(
-        "ALTER TABLE monthly_expense ADD CONSTRAINT chk_monthly_expense_half CHECK (period_half IN (1, 2))"
-    )
-    cur.execute(
-        "ALTER TABLE monthly_expense DROP CONSTRAINT IF EXISTS chk_monthly_expense_amount"
-    )
-    cur.execute(
-        "ALTER TABLE monthly_expense ADD CONSTRAINT chk_monthly_expense_amount CHECK (amount > 0)"
-    )
-    cur.execute(
-        "ALTER TABLE monthly_expense DROP CONSTRAINT IF EXISTS chk_monthly_expense_month"
-    )
-    cur.execute(
-        "ALTER TABLE monthly_expense ADD CONSTRAINT chk_monthly_expense_month "
-        "CHECK (period_month BETWEEN 1 AND 12)"
-    )
-    cur.execute("DROP INDEX IF EXISTS idx_monthly_expense_half")
-    cur.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_monthly_expense_period
-            ON monthly_expense (period_year, period_month, period_half, created_at DESC)
-        """
-    )
-    cur.execute(
-        "ALTER TABLE monthly_expense ADD COLUMN IF NOT EXISTS is_recurring BOOLEAN"
-    )
-    cur.execute("UPDATE monthly_expense SET is_recurring = FALSE WHERE is_recurring IS NULL")
-    cur.execute("ALTER TABLE monthly_expense ALTER COLUMN is_recurring SET NOT NULL")
-    cur.execute("ALTER TABLE monthly_expense ALTER COLUMN is_recurring SET DEFAULT FALSE")
-
-
-def _migrate_installment_credit_card_id(cur: Any) -> None:
+    """,
     """
-    Optional link from an installment plan to the (single) credit card it's
-    carried on. Nullable — most installments aren't tied to a card.
+    CREATE TABLE IF NOT EXISTS credit_card_payment (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        credit_card_id INTEGER NOT NULL REFERENCES credit_card(id) ON DELETE CASCADE,
+        amount REAL NOT NULL,
+        payment_date TEXT NOT NULL,
+        note TEXT,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CHECK (amount > 0)
+    )
+    """,
     """
-    cur.execute(
-        "ALTER TABLE installment ADD COLUMN IF NOT EXISTS credit_card_id INTEGER"
-    )
-    cur.execute(
-        """
-        DO $$ BEGIN
-          IF NOT EXISTS (
-            SELECT 1 FROM pg_constraint WHERE conname = 'installment_credit_card_id_fkey'
-          ) THEN
-            ALTER TABLE installment
-              ADD CONSTRAINT installment_credit_card_id_fkey
-              FOREIGN KEY (credit_card_id) REFERENCES credit_card(id) ON DELETE SET NULL;
-          END IF;
-        END $$;
-        """
-    )
-    cur.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_installment_credit_card_id
-            ON installment (credit_card_id)
-        """
-    )
-
-
-# Bump this whenever the DDL or migrations below change. ``init_schema()``
-# uses it to skip the entire migration block on warm starts (very common
-# on Neon, where containers cold-start often).
-_SCHEMA_VERSION = 20
+    CREATE INDEX IF NOT EXISTS idx_credit_card_payment_parent
+        ON credit_card_payment (credit_card_id, payment_date DESC)
+    """,
+]
 
 
 def init_schema() -> None:
-    """
-    Ensure the database matches the expected schema. On warm starts (when
-    ``_app_meta.schema_version`` already equals ``_SCHEMA_VERSION``), this is
-    a single ``SELECT`` round-trip and returns immediately. On a fresh DB or
-    after ``_SCHEMA_VERSION`` bumps, it runs the minimal DDL plus all
-    migrations in a single transaction and stamps the new version.
-    """
-    if not use_database():
-        return
-    _init_schema_on(get_connection)
-
-
-def _init_schema_on(conn_factory: Any) -> None:
-    with conn_factory() as conn:
-        with db_cursor(conn) as cur:
-            cur.execute(
-                """
-                CREATE TABLE IF NOT EXISTS _app_meta (
-                    key TEXT PRIMARY KEY,
-                    value TEXT NOT NULL
-                )
-                """
-            )
-            cur.execute(
-                "SELECT value FROM _app_meta WHERE key = 'schema_version'"
-            )
-            row = cur.fetchone()
-            current = 0
-            if row:
-                try:
-                    current = int(row[0])
-                except (TypeError, ValueError):
-                    current = 0
-            if current >= _SCHEMA_VERSION:
-                return
-            for stmt in _init_schema_minimal_stmts():
-                cur.execute(stmt.strip())
-            _backfill_installment_lines_if_empty(cur)
-            _ensure_minimal_performance_indexes(cur)
-            _migrate_payslip_drop_source_filename(cur)
-            _migrate_payslip_rename_employee_hdmf_to_pag_ibig(cur)
-            _migrate_payslip_deduction_columns(cur)
-            _migrate_payslip_thirteenth_month(cur)
-            _migrate_payslip_basic_salary(cur)
-            _migrate_payslip_pdf_columns(cur)
-            _migrate_payslip_drop_pdf_filename(cur)
-            _migrate_payslip_created_at_default(cur)
-            _migrate_installment_original_total_from_principal(cur)
-            _migrate_house_payment_simplify(cur)
-            _migrate_blood_pressure_spo2(cur)
-            _migrate_blood_pressure_temperature_weight(cur)
-            _migrate_blood_pressure_nullable_core(cur)
-            _migrate_aux_created_at_defaults(cur)
-            _migrate_installment_repair_constraints(cur)
-            _migrate_installment_relax_payment_total(cur)
-            _migrate_installment_recompute_aggregates(cur)
-            _migrate_monthly_expense_columns(cur)
-            _migrate_installment_credit_card_id(cur)
-            _migrate_fixed_expense_period_columns(cur)
-            cur.execute(
-                """
-                INSERT INTO _app_meta (key, value)
-                VALUES ('schema_version', ?)
-                ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
-                """,
-                (str(_SCHEMA_VERSION),),
-            )
+    """Create every table/index that doesn't already exist. Idempotent and cheap
+    enough to call on every startup — ``CREATE ... IF NOT EXISTS`` short-circuits
+    once the schema is in place."""
+    with get_connection() as conn:
+        for stmt in _SCHEMA_STATEMENTS:
+            conn.execute(stmt)
+        conn.commit()
 
 
 _PAYSLIP_RETURN_COLS = """
@@ -1241,10 +374,6 @@ _PAYSLIP_RETURN_COLS = """
     (pdf_data IS NOT NULL) AS has_pdf,
     created_at
 """
-
-
-def _row_to_dict(cur: Any, row: Any) -> dict[str, Any]:
-    return dict(zip([d[0] for d in cur.description], row))
 
 
 def insert_payslip(
@@ -1300,7 +429,7 @@ def insert_payslip(
                     pag_ibig,
                 ),
             )
-            return _row_to_dict(cur, cur.fetchone())
+            return _with_bool(_row_to_dict(cur, cur.fetchone()), "has_pdf")
 
 
 _PAYSLIP_INSERT_COLS: tuple[str, ...] = (
@@ -1367,7 +496,7 @@ def list_payslips(limit: int = 200) -> list[dict[str, Any]]:
                 (limit,),
             )
             cols = [d[0] for d in cur.description]
-            return [dict(zip(cols, r)) for r in cur.fetchall()]
+            return [_with_bool(dict(zip(cols, r)), "has_pdf") for r in cur.fetchall()]
 
 
 def get_payslip(payslip_id: int) -> dict[str, Any] | None:
@@ -1378,7 +507,7 @@ def get_payslip(payslip_id: int) -> dict[str, Any] | None:
                 (payslip_id,),
             )
             row = cur.fetchone()
-            return _row_to_dict(cur, row) if row else None
+            return _with_bool(_row_to_dict(cur, row), "has_pdf") if row else None
 
 
 def update_payslip(
@@ -1449,7 +578,7 @@ def update_payslip(
                 ),
             )
             row = cur.fetchone()
-            return _row_to_dict(cur, row) if row else None
+            return _with_bool(_row_to_dict(cur, row), "has_pdf") if row else None
 
 
 def delete_payslip(payslip_id: int) -> bool:
@@ -1465,7 +594,7 @@ def set_payslip_pdf(payslip_id: int, data: bytes) -> bool:
         with db_cursor(conn) as cur:
             cur.execute(
                 "UPDATE payslip SET pdf_data = ? WHERE id = ?",
-                (psycopg2.Binary(data), payslip_id),
+                (data, payslip_id),
             )
             return cur.rowcount > 0
 
@@ -1481,11 +610,7 @@ def get_payslip_pdf(payslip_id: int) -> bytes | None:
             row = cur.fetchone()
             if not row or row[0] is None:
                 return None
-            data = row[0]
-            # psycopg2 hands bytea back as a memoryview; normalize to bytes.
-            if isinstance(data, memoryview):
-                data = data.tobytes()
-            return bytes(data)
+            return bytes(row[0])
 
 
 def delete_payslip_pdf(payslip_id: int) -> bool:
@@ -1571,14 +696,15 @@ def list_installments_with_lines(limit: int = 500) -> list[dict[str, Any]]:
             if not headers:
                 return []
             ids = [h["id"] for h in headers]
+            placeholders = ",".join("?" * len(ids))
             cur.execute(
-                """
+                f"""
                 SELECT installment_id, id, seq, principal, interest, payment_total
                 FROM installment_line
-                WHERE installment_id = ANY(?)
+                WHERE installment_id IN ({placeholders})
                 ORDER BY installment_id ASC, seq ASC
                 """,
-                (ids,),
+                ids,
             )
             lcols = [d[0] for d in cur.description]
             lines_by_iid: dict[int, list[dict[str, Any]]] = {}
@@ -1628,44 +754,11 @@ def _installment_lines_rows(cur: Any, installment_id: int) -> list[dict[str, Any
 
 
 def _installment_detail(cur: Any, installment_id: int) -> dict[str, Any] | None:
-    """Header + lines in a single round trip via ``json_agg``."""
-    cur.execute(
-        """
-        SELECT
-            to_jsonb(hdr) AS installment,
-            COALESCE(
-                (SELECT jsonb_agg(
-                            jsonb_build_object(
-                                'id', l.id,
-                                'seq', l.seq,
-                                'principal', l.principal,
-                                'interest', l.interest,
-                                'payment_total', l.payment_total
-                            )
-                            ORDER BY l.seq ASC
-                        )
-                   FROM installment_line l
-                   WHERE l.installment_id = hdr.id),
-                '[]'::jsonb
-            ) AS lines
-        FROM (
-            SELECT i.id, i.name, i.installment_current, i.installment_total,
-                   i.principal, i.interest, i.payment_total,
-                   i.start_date, i.finish_date,
-                   i.remaining, i.original_total, i.credit_card_id, i.created_at,
-                   COALESCE(il.payment_total, i.payment_total) AS due_payment
-            FROM installment i
-            LEFT JOIN installment_line il
-                ON il.installment_id = i.id AND il.seq = i.installment_current
-            WHERE i.id = ?
-        ) AS hdr
-        """,
-        (installment_id,),
-    )
-    row = cur.fetchone()
-    if not row:
+    """Header + lines, fetched as two plain queries and combined in Python."""
+    header = _installment_row_dict(cur, installment_id)
+    if header is None:
         return None
-    return {"installment": row[0], "lines": list(row[1] or [])}
+    return {"installment": header, "lines": _installment_lines_rows(cur, installment_id)}
 
 
 def get_installment(installment_id: int) -> dict[str, Any] | None:
@@ -1741,18 +834,17 @@ def _seed_installment_lines(
     principal: float,
     interest: float | None,
 ) -> None:
-    """Insert seq 1..N as a single statement using ``generate_series``."""
+    """Insert seq 1..N in one batch."""
     n = int(installment_total)
     if n <= 0:
         return
     ptot = _line_payment_total(principal, interest)
-    cur.execute(
+    cur.executemany(
         """
         INSERT INTO installment_line (installment_id, seq, principal, interest, payment_total)
-        SELECT ?, gs, ?, ?, ?
-        FROM generate_series(1, ?) AS gs
+        VALUES (?, ?, ?, ?, ?)
         """,
-        (installment_id, principal, interest, ptot, n),
+        [(installment_id, seq, principal, interest, ptot) for seq in range(1, n + 1)],
     )
 
 
@@ -1877,32 +969,25 @@ def update_installment_lines_bulk(
     installment_id: int,
     items: list[tuple[int, float, float | None]],
 ) -> dict[str, Any] | None:
-    """UPDATE many lines (by seq) in one statement, then recompute aggregates once."""
+    """UPDATE many lines (by seq), then recompute aggregates once."""
     if not items:
         return None
     with get_connection() as conn:
         with db_cursor(conn) as cur:
-            values_sql = ",".join(
-                ["(?::integer, ?::numeric, ?::numeric)"] * len(items)
-            )
-            params: list[Any] = []
+            updated_any = False
             for seq, principal, interest in items:
-                params.append(int(seq))
-                params.append(principal)
-                params.append(interest)
-            params.append(installment_id)
-            cur.execute(
-                f"""
-                UPDATE installment_line AS il
-                SET principal = data.principal,
-                    interest = data.interest,
-                    payment_total = data.principal + COALESCE(data.interest, 0)
-                FROM (VALUES {values_sql}) AS data(seq, principal, interest)
-                WHERE il.installment_id = ? AND il.seq = data.seq
-                """,
-                params,
-            )
-            if cur.rowcount == 0:
+                ptot = _line_payment_total(principal, interest)
+                cur.execute(
+                    """
+                    UPDATE installment_line
+                    SET principal = ?, interest = ?, payment_total = ?
+                    WHERE installment_id = ? AND seq = ?
+                    """,
+                    (principal, interest, ptot, installment_id, int(seq)),
+                )
+                if cur.rowcount > 0:
+                    updated_any = True
+            if not updated_any:
                 return None
             _recompute_installment_aggregates(cur, installment_id)
             return _installment_detail(cur, installment_id)
@@ -1933,32 +1018,18 @@ def reorder_installment_lines(
                 return None
             if set(ordered_line_ids) != set(existing_ids):
                 return None
-            # First, push every seq into a non-overlapping range so the second
-            # UPDATE can renumber freely without violating the
-            # ``UNIQUE (installment_id, seq)`` constraint mid-statement. Then
-            # apply the new ordering in a single statement using a VALUES
-            # join.
+            # First, push every seq into a non-overlapping range so the following
+            # per-row UPDATEs can renumber freely without violating the
+            # ``UNIQUE (installment_id, seq)`` constraint mid-statement.
             cur.execute(
                 "UPDATE installment_line SET seq = id + 1000000 WHERE installment_id = ?",
                 (installment_id,),
             )
-            values_sql = ",".join(
-                ["(?::integer, ?::integer)"] * len(ordered_line_ids)
-            )
-            params: list[Any] = []
             for i, lid in enumerate(ordered_line_ids):
-                params.append(int(lid))
-                params.append(i + 1)
-            params.append(installment_id)
-            cur.execute(
-                f"""
-                UPDATE installment_line AS il
-                SET seq = data.new_seq
-                FROM (VALUES {values_sql}) AS data(id, new_seq)
-                WHERE il.installment_id = ? AND il.id = data.id
-                """,
-                params,
-            )
+                cur.execute(
+                    "UPDATE installment_line SET seq = ? WHERE installment_id = ? AND id = ?",
+                    (i + 1, installment_id, int(lid)),
+                )
             _recompute_installment_aggregates(cur, installment_id)
             return _installment_detail(cur, installment_id)
 
@@ -1972,8 +1043,8 @@ def _resync_installment_lines_on_total_change(
 ) -> None:
     """
     Truncate the schedule to ``new_total`` rows and (re)apply the per-line
-    amounts. Two statements: a DELETE for any rows past the new tail, plus
-    an UPSERT that creates or updates seq 1..new_total in one shot.
+    amounts. A DELETE for any rows past the new tail, plus an UPSERT that
+    creates or updates seq 1..new_total.
     """
     n = int(new_total)
     ptot = _line_payment_total(principal, interest)
@@ -1983,17 +1054,16 @@ def _resync_installment_lines_on_total_change(
     )
     if n <= 0:
         return
-    cur.execute(
+    cur.executemany(
         """
         INSERT INTO installment_line (installment_id, seq, principal, interest, payment_total)
-        SELECT ?, gs, ?, ?, ?
-        FROM generate_series(1, ?) AS gs
+        VALUES (?, ?, ?, ?, ?)
         ON CONFLICT (installment_id, seq) DO UPDATE SET
-            principal = EXCLUDED.principal,
-            interest = EXCLUDED.interest,
-            payment_total = EXCLUDED.payment_total
+            principal = excluded.principal,
+            interest = excluded.interest,
+            payment_total = excluded.payment_total
         """,
-        (installment_id, principal, interest, ptot, n),
+        [(installment_id, seq, principal, interest, ptot) for seq in range(1, n + 1)],
     )
 
 
@@ -2016,13 +1086,20 @@ def update_installment(
         with db_cursor(conn) as cur:
             cur.execute(
                 """
-                WITH old AS (
-                    SELECT installment_total AS old_total,
-                           (SELECT COUNT(*) FROM installment_line
-                              WHERE installment_id = installment.id) AS line_count
-                    FROM installment WHERE id = ?
-                )
-                UPDATE installment AS i SET
+                SELECT installment_total,
+                       (SELECT COUNT(*) FROM installment_line
+                          WHERE installment_id = installment.id)
+                FROM installment WHERE id = ?
+                """,
+                (installment_id,),
+            )
+            row = cur.fetchone()
+            if not row:
+                return None
+            old_total, line_count = int(row[0] or 0), int(row[1] or 0)
+            cur.execute(
+                """
+                UPDATE installment SET
                     name = ?,
                     installment_current = ?,
                     installment_total = ?,
@@ -2034,12 +1111,9 @@ def update_installment(
                     remaining = ?,
                     original_total = ?,
                     credit_card_id = ?
-                FROM old
-                WHERE i.id = ?
-                RETURNING old.old_total, old.line_count
+                WHERE id = ?
                 """,
                 (
-                    installment_id,
                     name,
                     installment_current,
                     installment_total,
@@ -2054,10 +1128,6 @@ def update_installment(
                     installment_id,
                 ),
             )
-            row = cur.fetchone()
-            if not row:
-                return None
-            old_total, line_count = int(row[0] or 0), int(row[1] or 0)
             has_lines = line_count > 0
             if has_lines and old_total != int(installment_total):
                 _resync_installment_lines_on_total_change(
@@ -2078,37 +1148,34 @@ def delete_installment(installment_id: int) -> bool:
 def installment_apply_payment(installment_id: int) -> dict[str, Any] | None:
     """Advance ``installment_current`` by one and return the refreshed header row.
 
-    Combines the read + line-count + update into a single CTE round trip so
-    the only follow-up is the recompute / fallback ``UPDATE remaining``.
+    Reads the current state (including line count) first; only advances when
+    there's a payment left to apply (``installment_current <= installment_total``
+    and ``remaining > 0``) — otherwise returns ``None`` without changing anything.
     """
     with get_connection() as conn:
         with db_cursor(conn) as cur:
             cur.execute(
                 """
-                WITH src AS (
-                    SELECT id, installment_current, installment_total,
-                           payment_total, remaining,
-                           (SELECT COUNT(*) FROM installment_line il
-                              WHERE il.installment_id = installment.id) AS line_count
-                    FROM installment WHERE id = ?
-                ),
-                upd AS (
-                    UPDATE installment AS i
-                    SET installment_current = i.installment_current + 1
-                    FROM src
-                    WHERE i.id = src.id
-                      AND src.installment_current <= src.installment_total
-                      AND src.remaining > 0
-                    RETURNING src.line_count, src.remaining, src.payment_total
-                )
-                SELECT line_count, remaining, payment_total FROM upd
+                SELECT installment_current, installment_total, payment_total, remaining,
+                       (SELECT COUNT(*) FROM installment_line il
+                          WHERE il.installment_id = installment.id)
+                FROM installment WHERE id = ?
                 """,
                 (installment_id,),
             )
             row = cur.fetchone()
             if not row:
                 return None
-            line_count, rem, pay = int(row[0] or 0), float(row[1] or 0), float(row[2] or 0)
+            current, total, pay, rem, line_count = row
+            current, total, line_count = int(current), int(total), int(line_count or 0)
+            rem = float(rem or 0)
+            pay = float(pay or 0)
+            if not (current <= total and rem > 0):
+                return None
+            cur.execute(
+                "UPDATE installment SET installment_current = installment_current + 1 WHERE id = ?",
+                (installment_id,),
+            )
             if line_count > 0:
                 _recompute_installment_aggregates(cur, installment_id)
             else:
@@ -2168,49 +1235,14 @@ def _house_payment_entries_rows(
 def _house_payment_detail(
     cur: Any, house_payment_id: int
 ) -> dict[str, Any] | None:
-    """Plan header (with aggregates) + entries in a single round trip."""
-    cur.execute(
-        """
-        SELECT
-            to_jsonb(hdr) AS house_payment,
-            COALESCE(
-                (SELECT jsonb_agg(
-                            jsonb_build_object(
-                                'id', e.id,
-                                'paid_on', e.paid_on,
-                                'amount', e.amount,
-                                'created_at', e.created_at
-                            )
-                            ORDER BY e.paid_on DESC, e.id DESC
-                        )
-                   FROM house_payment_entry e
-                   WHERE e.house_payment_id = hdr.id),
-                '[]'::jsonb
-            ) AS entries
-        FROM (
-            SELECT h.id, h.name, h.notes, h.created_at,
-                   COALESCE(agg.entry_count, 0) AS entry_count,
-                   COALESCE(agg.total_paid, 0) AS total_paid,
-                   agg.last_paid_on
-            FROM house_payment h
-            LEFT JOIN (
-                SELECT house_payment_id,
-                       COUNT(*) AS entry_count,
-                       COALESCE(SUM(amount), 0) AS total_paid,
-                       MAX(paid_on) AS last_paid_on
-                FROM house_payment_entry
-                WHERE house_payment_id = ?
-                GROUP BY house_payment_id
-            ) AS agg ON agg.house_payment_id = h.id
-            WHERE h.id = ?
-        ) AS hdr
-        """,
-        (house_payment_id, house_payment_id),
-    )
-    row = cur.fetchone()
-    if not row:
+    """Plan header (with aggregates) + entries, fetched as two plain queries."""
+    header = _house_payment_row_dict(cur, house_payment_id)
+    if header is None:
         return None
-    return {"house_payment": row[0], "entries": list(row[1] or [])}
+    return {
+        "house_payment": header,
+        "entries": _house_payment_entries_rows(cur, house_payment_id),
+    }
 
 
 def list_house_payments(limit: int = 500) -> list[dict[str, Any]]:
@@ -2531,7 +1563,7 @@ def list_monthly_expenses(
                 """,
                 tuple(params),
             )
-            return [_row_to_dict(cur, r) for r in cur.fetchall()]
+            return [_with_bool(_row_to_dict(cur, r), "is_recurring") for r in cur.fetchall()]
 
 
 def insert_monthly_expense(
@@ -2555,7 +1587,7 @@ def insert_monthly_expense(
                 """,
                 (name, description, amount, period_half, period_year, period_month, is_recurring),
             )
-            return _row_to_dict(cur, cur.fetchone())
+            return _with_bool(_row_to_dict(cur, cur.fetchone()), "is_recurring")
 
 
 def update_monthly_expense(
@@ -2590,7 +1622,7 @@ def update_monthly_expense(
                 ),
             )
             row = cur.fetchone()
-            return _row_to_dict(cur, row) if row else None
+            return _with_bool(_row_to_dict(cur, row), "is_recurring") if row else None
 
 
 def delete_monthly_expense(expense_id: int) -> bool:
@@ -2808,7 +1840,7 @@ def upsert_calendar_day_overrides(
                     """
                     INSERT INTO calendar_day_override (day, amount)
                     VALUES (?, ?)
-                    ON CONFLICT (day) DO UPDATE SET amount = EXCLUDED.amount
+                    ON CONFLICT (day) DO UPDATE SET amount = excluded.amount
                     """,
                     (day, amount),
                 )
@@ -2860,7 +1892,7 @@ def upsert_pay_period_start_override(
                     (period_year, period_month, period_half, start_date)
                 VALUES (?, ?, ?, ?)
                 ON CONFLICT (period_year, period_month, period_half)
-                    DO UPDATE SET start_date = EXCLUDED.start_date
+                    DO UPDATE SET start_date = excluded.start_date
                 RETURNING {_PP_START_OVERRIDE_COLS}
                 """,
                 (period_year, period_month, period_half, start_date),
@@ -2882,15 +1914,3 @@ def delete_pay_period_start_override(
                 (period_year, period_month, period_half),
             )
             return cur.fetchone() is not None
-
-
-def check_connection() -> bool:
-    if not use_database():
-        return False
-    try:
-        with get_connection() as conn:
-            with db_cursor(conn) as cur:
-                cur.execute("SELECT 1")
-        return True
-    except Exception:
-        return False

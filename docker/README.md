@@ -1,12 +1,20 @@
 # Docker
 
-## PostgreSQL
+## Database
 
-Compose runs **Postgres 16** as service **`db`** and points the API at:
+The API stores everything in a local SQLite file. Compose sets `DATABASE_URL=sqlite:////app/data/budget.sqlite`
+for the **`api`** service and bind-mounts the repo-root **`./data`** directory to **`/app/data`**, so the same
+file the app uses when run locally with `uvicorn` (`<repo root>/data/budget.sqlite`) is what the container reads
+and writes too — nothing to provision or migrate before starting the container. This value is fixed in
+`docker-compose.yml` and can't be overridden from `.env`: it has to match the bind mount, and a stray
+`DATABASE_URL` in `.env` (left over from local dev, say) pointing anywhere else would silently not persist
+across container restarts.
 
-`postgresql://postgres:blast@db:5432/budgetapp`
-
-Data lives in the **`pgdata`** named volume. The **`api`** service loads your root **`.env`** (`env_file`). Use the same **`DATABASE_URL`** as on the host (for example `...@127.0.0.1:5433/budgetapp`); inside the container the backend **rewrites** `127.0.0.1` / `localhost` to **`db:5432`** so Compose networking works. Remote URLs (Neon, etc.) are left unchanged.
+Every other setting the `api` container receives (`REDIS_URL`, `BUDGET_CORS_ORIGINS`, `BUDGET_OTP_SECRET`, …) is
+listed explicitly under that service's `environment:` in `docker-compose.yml`, each as `${VAR:-default}`. There's
+no `env_file: .env` passing the whole file through — compose only auto-loads `.env` from the repo root to fill in
+those `${...}` placeholders (nothing is copied into the image or container), so adding a new setting means adding
+a line to `docker-compose.yml`, not just to `.env`.
 
 ## Builds (cache + image size)
 
@@ -25,7 +33,7 @@ docker compose up
 
 - Web: `http://localhost:3000`
 - API: `http://127.0.0.1:8000`
-- Postgres on the host: `localhost:5433` (user `postgres`, password `blast`, db `budgetapp`)
+- Database file: `./data/budget.sqlite` on the host (bind-mounted into the `api` container)
 
 The web bundle is built with `NEXT_PUBLIC_API_URL` (default `http://127.0.0.1:8000`). To change it, set the variable when building, for example:
 

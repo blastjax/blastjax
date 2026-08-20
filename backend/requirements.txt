@@ -1,6 +1,9 @@
-fastapi>=0.100
-uvicorn[standard]>=0.22
-psycopg2-binary>=2.9
-python-dotenv>=1.0
-python-multipart>=0.0.9
-redis>=5.0
+# Compatible-release pins (`~=`): patch/security updates still install, but a
+# new minor (FastAPI is pre-1.0, so minors do break) can't silently land in a
+# production image rebuild. Bump these deliberately.
+fastapi~=0.137.1
+uvicorn[standard]~=0.49.0
+python-dotenv~=1.2
+python-multipart~=0.0.32
+redis~=8.1
+pyotp~=2.10

@@ -2,19 +2,17 @@
 
 from __future__ import annotations
 
-import logging
 import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.concurrency import run_in_threadpool
 
 import cache
-from db import close_connection_pool, database_url, init_schema
-
-log = logging.getLogger(__name__)
+from app.deps import require_session
+from db import close_connection_pool, init_schema
 
 _WRITE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
@@ -68,10 +66,6 @@ def _invalidate_namespaces(names: tuple[str, ...]) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    if not database_url():
-        log.warning(
-            "DATABASE_URL (or DB_*) is not set — API requests that need the DB will fail until .env is configured.",
-        )
     init_schema()
     cache.init_cache()
     try:
@@ -118,6 +112,7 @@ def create_app() -> FastAPI:
         return response
 
     from app.routers import (
+        auth,
         blood_pressure,
         calendar_day_override,
         credit_card,
@@ -132,8 +127,12 @@ def create_app() -> FastAPI:
         payslip,
     )
 
+    # health and auth stay open — everything else requires an OTP session
+    # (see require_session; it's a no-op until BUDGET_OTP_SECRET is set).
+    app.include_router(health.router)
+    app.include_router(auth.router)
+
     for router in (
-        health.router,
         payslip.router,
         installment.router,
         house_payment.router,
@@ -146,6 +145,6 @@ def create_app() -> FastAPI:
         mosaic.router,
         mambo.router,
     ):
-        app.include_router(router)
+        app.include_router(router, dependencies=[Depends(require_session)])
 
     return app

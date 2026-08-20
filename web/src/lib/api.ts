@@ -1,3 +1,5 @@
+import { AUTH_UNAUTHORIZED_EVENT, clearSessionToken, getSessionToken } from "@/lib/auth";
+
 /** API origin (FastAPI); override with `NEXT_PUBLIC_API_URL` for hosted UIs. */
 export function dataApiBase(): string {
   const rawApi = process.env.NEXT_PUBLIC_API_URL?.trim();
@@ -10,7 +12,17 @@ export async function apiFetch(
   input: RequestInfo | URL,
   init?: RequestInit,
 ): Promise<Response> {
-  return fetch(input, init);
+  const token = getSessionToken();
+  const headers = new Headers(init?.headers);
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  const res = await fetch(input, { ...init, headers });
+  if (res.status === 401) {
+    clearSessionToken();
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new Event(AUTH_UNAUTHORIZED_EVENT));
+    }
+  }
+  return res;
 }
 
 function messageFromErrorResponseBody(text: string): string {

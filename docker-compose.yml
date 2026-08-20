@@ -2,8 +2,12 @@ services:
   redis:
     image: redis:7-alpine
     restart: always
+    # Loopback-only: the api container reaches Redis over the compose network
+    # by service name, so the published port exists purely so a backend run
+    # directly on the host (`uvicorn main:app`) can share it. Binding to
+    # 0.0.0.0 would expose an unauthenticated Redis on a public instance.
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     volumes:
       - redisdata:/data
     healthcheck:
@@ -17,10 +21,29 @@ services:
     build:
       context: ./backend
       dockerfile: ../docker/Dockerfile.backend
+    # Matches the image's own non-root user. Bind mounts keep host ownership,
+    # so if ./data is owned by a different uid on some host, set API_UID /
+    # API_GID in .env to match instead of rebuilding the image (API_UID=0
+    # restores the old root behaviour).
+    user: "${API_UID:-1000}:${API_GID:-1000}"
     ports:
       - "8000:8000"
-    env_file:
-      - .env
+    # Explicit allow-list instead of `env_file: .env` — the container only
+    # ever gets exactly these variables, substituted from a root `.env` if
+    # one exists (compose auto-loads it for ${...} interpolation; no file is
+    # copied into the image or container). DATABASE_URL is fixed, not
+    # user-configurable here, because it has to match the ./data bind mount
+    # below — a value from .env pointing elsewhere would silently not
+    # persist across restarts.
+    environment:
+      DATABASE_URL: sqlite:////app/data/budget.sqlite
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      REDIS_CACHE_TTL: ${REDIS_CACHE_TTL:-300}
+      BUDGET_CORS_ORIGINS: ${BUDGET_CORS_ORIGINS:-}
+      BUDGET_OTP_SECRET: ${BUDGET_OTP_SECRET:-}
+      BUDGET_SESSION_TTL_SECONDS: ${BUDGET_SESSION_TTL_SECONDS:-43200}
+    volumes:
+      - ./data:/app/data
     depends_on:
       redis:
         condition: service_healthy
@@ -42,11 +65,22 @@ services:
       args:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://127.0.0.1:8000}
     ports:
-      - "3000:3000"
+      - "${WEB_PORT:-3000}:3000"
     depends_on:
       api:
         condition: service_healthy
+    # Node 20 has a global fetch, so this needs nothing installed in the image.
+    # The deploy workflow gates on this reporting healthy.
+    healthcheck:
+      test:
+        - "CMD"
+        - "node"
+        - "-e"
+        - "fetch('http://127.0.0.1:3000/').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
 volumes:
-  pgdata:
   redisdata:

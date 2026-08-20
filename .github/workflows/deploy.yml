@@ -1,0 +1,73 @@
+name: Deploy to EC2
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+# One deploy at a time; queue rather than cancel so a run that already
+# started rebuilding on the host is never interrupted half-way.
+concurrency:
+  group: deploy-ec2
+  cancel-in-progress: false
+
+jobs:
+  checks:
+    uses: ./.github/workflows/checks.yml
+
+  deploy:
+    needs: checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          port: ${{ vars.EC2_SSH_PORT || 22 }}
+          script: |
+            set -e
+            cd ${{ vars.APP_DIR }}
+
+            # --ff-only: fail loudly on divergence instead of creating a merge
+            # commit on the server or leaving a half-applied tree.
+            git pull --ff-only origin main
+
+            # The api container runs as uid 1000 (see docker/Dockerfile.backend),
+            # so the bind-mounted DB directory has to be writable by it. Also
+            # fixes ownership left behind by older root-run containers.
+            mkdir -p data
+            sudo chown -R 1000:1000 data
+
+            docker compose build
+            docker compose up -d --remove-orphans
+            docker image prune -f
+
+            # Fail the job if the stack doesn't come up, so a red check means
+            # "not deployed" rather than "deployed and broken". Reuses the
+            # healthchecks already defined in docker-compose.yml, which keeps
+            # this free of any host-side curl/wget dependency.
+            for service in api web; do
+              cid=$(docker compose ps -q "$service")
+              if [ -z "$cid" ]; then
+                echo "$service container is not running" >&2
+                docker compose logs --tail 50 "$service" >&2 || true
+                exit 1
+              fi
+              healthy=""
+              for _ in $(seq 1 40); do
+                status=$(docker inspect -f '{{.State.Health.Status}}' "$cid" 2>/dev/null || echo unknown)
+                if [ "$status" = "healthy" ]; then
+                  healthy=1
+                  break
+                fi
+                sleep 5
+              done
+              if [ -z "$healthy" ]; then
+                echo "$service did not become healthy (last status: ${status:-unknown})" >&2
+                docker compose logs --tail 50 "$service" >&2 || true
+                exit 1
+              fi
+              echo "$service is healthy"
+            done

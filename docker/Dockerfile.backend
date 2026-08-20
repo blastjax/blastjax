@@ -1,4 +1,4 @@
-# API: PostgreSQL via DATABASE_URL (see docker-compose and docker/README.md).
+# API: local SQLite file under /app/data (see docker-compose and docker/README.md).
 # Build with context directory `backend/` (see docker-compose).
 # syntax=docker/dockerfile:1
 FROM python:3.12-slim-bookworm
@@ -15,5 +15,17 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 
 COPY . .
 
+# Run unprivileged. uid/gid 1000 matches the default `ubuntu` user on EC2, so
+# the bind-mounted ./data directory (which holds budget.sqlite plus its -wal
+# and -shm files) stays writable; the deploy workflow chowns it to match.
+RUN groupadd --system --gid 1000 app \
+    && useradd --system --uid 1000 --gid app app \
+    && mkdir -p /app/data \
+    && chown -R app:app /app
+
+USER app
+
 EXPOSE 8000
+# Single worker on purpose: SQLite is the datastore and the OTP session store
+# falls back to per-process memory when Redis is down (see app/security.py).
 CMD ["python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
