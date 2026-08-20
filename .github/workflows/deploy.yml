@@ -37,10 +37,12 @@ jobs:
             mkdir -p data
             sudo chown -R 1000:1000 data
 
-            # --no-parallel: api and web build concurrently by default via
-            # buildx bake, and `next build` alone can exceed the instance's
-            # RAM; building one image at a time keeps peak memory lower.
-            docker compose build --no-parallel
+            # Build one service at a time: by default compose builds api and
+            # web concurrently via buildx bake, and `next build` alone can
+            # exceed the instance's RAM; building sequentially keeps peak
+            # memory lower.
+            docker compose build api
+            docker compose build web
             docker compose up -d --remove-orphans
             docker image prune -f
 
