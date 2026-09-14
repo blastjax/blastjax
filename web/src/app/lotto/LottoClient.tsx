@@ -8,7 +8,7 @@ import {
   deleteLottoAttempt,
   deleteLottoDraw,
   getLottoDraws,
-  importLottoDrawResults,
+  importLottoDrawResultsText,
   setLottoAttemptHidden,
   setLottoDraw,
   updateLottoAttempt,
@@ -531,7 +531,7 @@ type PasteAttemptsModalState = {
   drawDate: string;
   attemptsText: string;
 };
-type ImportModalState = { open: boolean };
+type ImportModalState = { open: boolean; text: string };
 type ImportSummary = { inserted: number; updated: number; total: number; errors: string[] };
 
 const emptyDrawModal: DrawModalState = {
@@ -552,7 +552,7 @@ const emptyAttemptsModal: AttemptsModalState = {
   mode: "add",
 };
 const emptyPasteModal: PasteAttemptsModalState = { open: false, drawDate: "", attemptsText: "" };
-const emptyImportModal: ImportModalState = { open: false };
+const emptyImportModal: ImportModalState = { open: false, text: "" };
 
 export default function LottoClient() {
   const [draws, setDraws] = useState<LottoDrawDetail[]>([]);
@@ -680,7 +680,6 @@ export default function LottoClient() {
   const [pasteFormError, setPasteFormError] = useState<string | null>(null);
 
   const [importModal, setImportModal] = useState<ImportModalState>(emptyImportModal);
-  const [importFile, setImportFile] = useState<File | null>(null);
   const [importFormError, setImportFormError] = useState<string | null>(null);
   const [importSummary, setImportSummary] = useState<ImportSummary | null>(null);
 
@@ -1125,39 +1124,38 @@ export default function LottoClient() {
   const openImport = () => {
     setImportFormError(null);
     setImportSummary(null);
-    setImportFile(null);
-    setImportModal({ open: true });
+    setImportModal({ open: true, text: "" });
   };
 
   const closeImportModal = () => {
     setImportModal(emptyImportModal);
-    setImportFile(null);
     setImportFormError(null);
     setImportSummary(null);
   };
 
-  /** Bulk-loads historic results (date, numbers, jackpot, winners) from a
-   * pipe-delimited text file via `POST /api/lotto/import` — each row is
-   * upserted by date, so re-uploading backfills jackpot/winners onto draws
-   * that already exist instead of duplicating them. */
+  /** Bulk-loads historic results (date, numbers, jackpot, winners) from
+   * pasted text via `POST /api/lotto/import-text` — each row is upserted by
+   * date, so re-pasting backfills jackpot/winners onto draws that already
+   * exist instead of duplicating them. */
   const submitImport = async (e: React.FormEvent) => {
     e.preventDefault();
     setImportFormError(null);
     setImportSummary(null);
-    if (!importFile) {
-      setImportFormError("Choose a .txt file.");
+    if (!importModal.text.trim()) {
+      setImportFormError("Paste in some rows first.");
       return;
     }
     setSaving(true);
     setError(null);
     try {
-      const result = await importLottoDrawResults(importFile);
+      const result = await importLottoDrawResultsText(importModal.text);
       setImportSummary({
         inserted: result.inserted,
         updated: result.updated,
         total: result.total,
         errors: result.errors,
       });
+      setImportModal((m) => ({ ...m, text: "" }));
       await load();
     } catch (err) {
       setImportFormError(err instanceof Error ? err.message : "Import failed");
@@ -1642,7 +1640,7 @@ export default function LottoClient() {
               type="button"
               className={`${ACTION_BUTTON_CLASSES} px-3 py-1.5 text-sm`}
               onClick={openImport}
-              title="Bulk-load historic results (date, numbers, jackpot, winners) from a pipe-delimited text file"
+              title="Bulk-load historic results (date, numbers, jackpot, winners) from pasted text"
             >
               Import historic results
             </button>
@@ -2073,22 +2071,25 @@ export default function LottoClient() {
             </div>
           )}
           <label className="flex flex-col gap-1 text-sm">
-            <span className="text-ink-2">Text file</span>
-            <input
+            <span className="text-ink-2">Results</span>
+            <textarea
               required
-              type="file"
-              accept=".txt,text/plain"
+              rows={10}
+              className={`${INPUT_CLASSES} font-mono`}
+              placeholder={
+                "Ultra Lotto 6/58\t32-25-23-22-01-41\t9/1/2026\t258,474,543.62\t0\n" +
+                "Ultra Lotto 6/58\t53-34-12-09-05-47\t9/4/2026\t265,466,683.02\t0"
+              }
+              value={importModal.text}
               disabled={saving}
-              className="text-sm text-ink-2 file:mr-3 file:rounded-md file:border file:border-zinc-300 file:bg-white file:px-2 file:py-1 file:text-xs file:font-medium file:text-zinc-700 dark:file:border-zinc-600 dark:file:bg-zinc-900 dark:file:text-zinc-200"
-              onChange={(e) => setImportFile(e.target.files?.[0] ?? null)}
+              onChange={(e) => setImportModal((m) => ({ ...m, text: e.target.value }))}
             />
             <span className="text-xs text-ink-3">
               One draw per line: <code>| n1-n2-n3-n4-n5-n6 | m/d/yyyy | jackpot | winners |</code>.
-              A leading game-name column (e.g. pasted straight from a spreadsheet as{" "}
-              <code>Ultra Lotto 6/58⇥n1-n2-n3-n4-n5-n6⇥m/d/yyyy⇥jackpot⇥winners</code>) is fine
-              too — it&apos;s discarded on import. Each row is upserted by date, so re-uploading
-              (e.g. to backfill jackpot/winners on draws already here) overwrites rather than
-              duplicating.
+              A leading game-name column (e.g. pasted straight from a spreadsheet, tab-separated
+              as in the placeholder above) is fine too — it&apos;s discarded on import. Each row
+              is upserted by date, so re-pasting (e.g. to backfill jackpot/winners on draws
+              already here) overwrites rather than duplicating.
             </span>
           </label>
           <div className="flex flex-wrap gap-2">

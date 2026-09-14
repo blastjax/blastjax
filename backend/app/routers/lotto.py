@@ -3,10 +3,10 @@
 A draw is the official result for one date: 6 winning numbers, the jackpot
 prize at stake, and how many tickets won it. A draw is upserted by date
 (posting the same date again overwrites that date's result) — including via
-``POST /api/lotto/import``, which bulk-loads a pipe-delimited historic
-results text file in one shot. Attempts are the user's own picks, added,
-edited, and removed underneath a draw — linked to it (and so to its date)
-via ``draw_id``.
+``POST /api/lotto/import-text``, which bulk-loads pasted historic results
+text (the same shape "Paste attempts" reads, one draw per line) in one shot.
+Attempts are the user's own picks, added, edited, and removed underneath a
+draw — linked to it (and so to its date) via ``draw_id``.
 """
 
 from __future__ import annotations
@@ -14,11 +14,16 @@ from __future__ import annotations
 import datetime as dt
 from typing import Any
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 import cache
 from app.deps import require_db
-from app.schemas.lotto import LottoAttemptCreate, LottoAttemptHiddenUpdate, LottoDrawCreate
+from app.schemas.lotto import (
+    LottoAttemptCreate,
+    LottoAttemptHiddenUpdate,
+    LottoDrawCreate,
+    LottoImportText,
+)
 from app.services.lotto_analysis import LottoAnalysis, NumberStat, PairStat, analyze_draws
 from app.services.lotto_import import import_rows_to_bulk_params, parse_lotto_draw_text
 from app.services.lotto_prize_analysis import DrawRecord, PrizeAnalysis, analyze_prizes
@@ -251,29 +256,25 @@ def lotto_set_draw(body: LottoDrawCreate) -> dict[str, Any]:
     return _serialize_detail(detail)
 
 
-@router.post("/api/lotto/import")
-async def lotto_import(file: UploadFile = File(...)) -> dict[str, Any]:
-    """Bulk-load historic results from a pipe-delimited text file — one row
-    per draw: ``| n1-n2-n3-n4-n5-n6 | m/d/yyyy | jackpot | winners |``. Each
-    row is upserted by date (same rule as ``POST /api/lotto``), so re-uploading
-    the same file — or a newer export that also fills in jackpot/winner
-    columns for draws already in the database — overwrites rather than
-    duplicating."""
-    raw = await file.read()
-    if not raw:
-        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
-    try:
-        text = raw.decode("utf-8")
-    except UnicodeDecodeError:
-        raise HTTPException(status_code=400, detail="File must be UTF-8 text.")
-    parsed, errors = parse_lotto_draw_text(text)
+@router.post("/api/lotto/import-text")
+def lotto_import_text(body: LottoImportText) -> dict[str, Any]:
+    """Bulk-load historic results from pasted text — one row per draw:
+    ``| n1-n2-n3-n4-n5-n6 | m/d/yyyy | jackpot | winners |`` (a leading
+    tab-separated game-name column, e.g. from a spreadsheet paste, is
+    tolerated and discarded — see ``parse_lotto_draw_text``). Each row is
+    upserted by date (same rule as ``POST /api/lotto``), so re-pasting the
+    same rows — or a newer batch that also fills in jackpot/winner columns
+    for draws already in the database — overwrites rather than duplicating."""
+    if not body.text.strip():
+        raise HTTPException(status_code=400, detail="Paste in some rows first.")
+    parsed, errors = parse_lotto_draw_text(body.text)
     if not parsed:
         detail = "No valid draw rows found."
         if errors:
             detail += f" First error — {errors[0]}"
         raise HTTPException(status_code=400, detail=detail)
     summary = upsert_lotto_draws_bulk(import_rows_to_bulk_params(parsed))
-    return {"filename": file.filename, **summary, "errors": errors}
+    return {**summary, "errors": errors}
 
 
 @router.put("/api/lotto/{draw_id}")

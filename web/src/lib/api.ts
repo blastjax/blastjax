@@ -1093,26 +1093,19 @@ export async function deleteLottoAttempt(drawId: number, attemptId: number) {
   );
 }
 
-/** Bulk-loads historic results from a pipe-delimited text file — one row per
- * draw: `| n1-n2-n3-n4-n5-n6 | m/d/yyyy | jackpot | winners |`. Each row is
- * upserted by date, so re-uploading (e.g. to backfill jackpot/winners on
- * draws that already exist) overwrites rather than duplicates. */
-export async function importLottoDrawResults(file: File) {
-  const body = new FormData();
-  body.append("file", file);
-  // No JSON headers — the browser sets the multipart boundary itself.
-  return j<{
-    filename: string;
+/** Bulk-loads historic results from pasted text — one row per draw:
+ * `| n1-n2-n3-n4-n5-n6 | m/d/yyyy | jackpot | winners |` (a leading
+ * tab-separated game-name column, e.g. pasted straight from a spreadsheet,
+ * is fine too — it's discarded). Each row is upserted by date, so re-pasting
+ * (e.g. to backfill jackpot/winners on draws already here) overwrites
+ * rather than duplicating. */
+export async function importLottoDrawResultsText(text: string) {
+  return sendJson<{
     inserted: number;
     updated: number;
     total: number;
     errors: string[];
-  }>(
-    await apiFetch(`${dataApiBase()}/api/lotto/import`, {
-      method: "POST",
-      body,
-    }),
-  );
+  }>("POST", "/api/lotto/import-text", { text });
 }
 
 /** Hides or unhides an attempt without deleting it. */

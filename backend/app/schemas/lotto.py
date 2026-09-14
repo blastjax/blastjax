@@ -73,3 +73,9 @@ class LottoAttemptCreate(LottoNumbers):
 class LottoAttemptHiddenUpdate(BaseModel):
     # Hides or unhides an attempt without deleting it.
     hidden: bool
+
+
+class LottoImportText(BaseModel):
+    # Pasted historic-results text — see `parse_lotto_draw_text` for the
+    # accepted row shapes.
+    text: str
