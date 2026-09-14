@@ -590,9 +590,9 @@ export default function LottoClient() {
   };
 
   // Draws are grouped into one card per year so a history spanning many
-  // years doesn't render as one endless flat list — only the current year
-  // stays uncarded, its draws listed plainly like the page always has.
-  // Past years start collapsed and expand on click.
+  // years doesn't render as one endless flat list. The single most recent
+  // draw is pinned above all year cards; every year (including the current
+  // one) starts collapsed and expands on click.
   const [expandedYears, setExpandedYears] = useState<Set<string>>(new Set());
 
   const toggleYearExpanded = (year: string) => {
@@ -658,7 +658,6 @@ export default function LottoClient() {
 
   // `draws` is already sorted newest-first, so same-year draws are always
   // contiguous — one pass buckets them into ordered year groups.
-  const currentYear = String(new Date().getFullYear());
   const yearGroups: { year: string; items: LottoDrawDetail[] }[] = [];
   for (const detail of draws) {
     const year = detail.draw.draw_date.slice(0, 4);
@@ -1754,16 +1753,17 @@ export default function LottoClient() {
         </div>
       )}
 
+      {/* Most recent draw overall, pinned above every year group instead of
+       * living inside the current year's card. */}
+      {draws.length > 0 && renderDrawCard(draws[0])}
+
       <div className="flex flex-col gap-8">
-        {yearGroups.map((group) => {
-          const isCurrentYear = group.year === currentYear;
+        {yearGroups.map((group, i) => {
           const expanded = expandedYears.has(group.year);
-          // `group.items` is newest-first, so the first entry is this
-          // year's most recent draw. The current year's card always shows
-          // just that one; past years show nothing until expanded, then
-          // list every draw from that year.
-          const latestDraw = group.items[0];
-          const restItems = isCurrentYear ? group.items.slice(1) : group.items;
+          // The very first group holds the overall-latest draw pinned above,
+          // so it's dropped here to avoid showing it twice.
+          const items = i === 0 ? group.items.slice(1) : group.items;
+          if (items.length === 0) return null;
           return (
             <section key={group.year} className={CARD_CLASSES}>
               <button
@@ -1784,16 +1784,9 @@ export default function LottoClient() {
                   ›
                 </span>
               </button>
-              {isCurrentYear && <div className="mt-4">{renderDrawCard(latestDraw)}</div>}
-              {expanded && restItems.length > 0 && (
-                <div
-                  className={`flex flex-col gap-5 ${
-                    isCurrentYear
-                      ? "mt-4"
-                      : "mt-4 border-t border-line pt-4"
-                  }`}
-                >
-                  {restItems.map((detail) => renderDrawCard(detail))}
+              {expanded && (
+                <div className="mt-4 flex flex-col gap-5 border-t border-line pt-4">
+                  {items.map((detail) => renderDrawCard(detail))}
                 </div>
               )}
             </section>
