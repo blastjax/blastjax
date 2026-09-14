@@ -260,23 +260,6 @@ export default function PayslipClient({ company = "Sophos" }: { company?: string
       }
       if (n.screen === "add") {
         stashPayslipModalDraft(n, modalFormRef.current);
-        const slotRows = rowsForSlot(rows, n.year, n.month, n.half);
-        if (slotRows.length === 0) {
-          return null;
-        }
-        return { screen: "slot", year: n.year, month: n.month, half: n.half };
-      }
-      if (n.screen === "detail") {
-        const y = n.row.period_year;
-        const m = n.row.period_month;
-        const h = n.row.period_half;
-        if (
-          y != null &&
-          m != null &&
-          (h === 1 || h === 2)
-        ) {
-          return { screen: "slot", year: y, month: m, half: h };
-        }
         return null;
       }
       return null;
@@ -343,7 +326,7 @@ export default function PayslipClient({ company = "Sophos" }: { company?: string
       const fresh = await createPayslip(body);
       upsertRow(fresh);
       clearPayslipModalDraft(nav);
-      setNav({ screen: "slot", year, month, half });
+      setNav({ screen: "detail", row: fresh });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Save failed");
     } finally {
@@ -528,7 +511,7 @@ export default function PayslipClient({ company = "Sophos" }: { company?: string
         )}
 
         {!loading && (
-          <div className="grid grid-cols-1 gap-x-6 gap-y-10 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid grid-cols-1 gap-x-6 gap-y-10 sm:grid-cols-2">
             {years.map((year) => (
               <div key={year} className="min-w-0">
                 <YearPayslipBlock

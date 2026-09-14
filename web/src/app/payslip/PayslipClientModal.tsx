@@ -37,8 +37,6 @@ import {
   ACTION_BUTTON_CLASSES,
   CLOSE_BUTTON_CLASSES,
   DELETE_BUTTON_CLASSES,
-  DETAIL_BUTTON_CLASSES,
-  EDIT_BUTTON_CLASSES,
   ERROR_ALERT_CLASSES,
   PRIMARY_BUTTON_CLASSES,
   SECONDARY_BUTTON_CLASSES,
@@ -89,106 +87,6 @@ export function PayslipClientModal({
       backdropClassName="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-5 backdrop-blur-sm sm:items-center sm:p-6"
       dialogClassName="max-h-[95vh] w-full max-w-5xl overflow-y-auto rounded-xl border border-line bg-surface p-6 shadow-pop sm:p-8 lg:max-w-6xl"
     >
-            {nav.screen === "slot" && (
-              <>
-                <div className="mb-4 flex items-start justify-between gap-2">
-                  <h2 className="text-lg font-semibold text-ink">
-                    {slotTitle(nav.year, nav.month, nav.half)}
-                  </h2>
-                  <button
-                    type="button"
-                    className={CLOSE_BUTTON_CLASSES}
-                    onClick={() => setNav(null)}
-                  >
-                    Close
-                  </button>
-                </div>
-                {(() => {
-                  const items = rowsForSlot(
-                    rows,
-                    nav.year,
-                    nav.month,
-                    nav.half,
-                  );
-                  return (
-                    <>
-                      {items.length === 0 ? (
-                        <p className="mb-4 text-sm text-ink">
-                          No entries for this half.
-                        </p>
-                      ) : (
-                        <ul className="mb-4 flex flex-col gap-2">
-                          {items.map((r) => (
-                            <li
-                              key={r.id}
-                              className="rounded-lg border border-line bg-zinc-50/80 p-3 dark:bg-zinc-900/40"
-                            >
-                              <div className="flex flex-wrap items-start justify-between gap-2">
-                                <div>
-                                  <p className="text-sm font-medium tabular-nums text-ink">
-                                    Total {fmtNum(r.total)}
-                                  </p>
-                                  {r.notes && (
-                                    <p className="mt-1 line-clamp-2 text-xs text-ink-2">
-                                      {r.notes}
-                                    </p>
-                                  )}
-                                </div>
-                                <div className="flex shrink-0 gap-1">
-                                  <button
-                                    type="button"
-                                    className={DETAIL_BUTTON_CLASSES}
-                                    onClick={() =>
-                                      setNav({ screen: "detail", row: r })
-                                    }
-                                  >
-                                    Details
-                                  </button>
-                                  <button
-                                    type="button"
-                                    className={EDIT_BUTTON_CLASSES}
-                                    onClick={() => {
-                                      setModalForm(formFromRow(r));
-                                      setNav({ screen: "edit", row: r });
-                                    }}
-                                  >
-                                    Edit
-                                  </button>
-                                  <button
-                                    type="button"
-                                    className={DELETE_BUTTON_CLASSES}
-                                    onClick={() => void handleDelete(r.id)}
-                                  >
-                                    Delete
-                                  </button>
-                                </div>
-                              </div>
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                      {items.length === 0 && (
-                        <button
-                          type="button"
-                          className={`w-full ${PRIMARY_BUTTON_CLASSES}`}
-                          onClick={() =>
-                            setNav({
-                              screen: "add",
-                              year: nav.year,
-                              month: nav.month,
-                              half: nav.half,
-                            })
-                          }
-                        >
-                          Add entry for this half
-                        </button>
-                      )}
-                    </>
-                  );
-                })()}
-              </>
-            )}
-
             {nav.screen === "detail" && (() => {
               const row = rows.find((r) => r.id === nav.row.id) ?? nav.row;
               const detailFlags = companyColumnFlags(companies, row.company);

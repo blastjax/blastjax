@@ -244,7 +244,11 @@ export function PayslipFormFields({
           [
             ["total", "Total", flags.show_total],
             ["basic_salary", "Basic salary", flags.show_basic_salary],
-            ["commission", "Commission", flags.show_commission],
+            [
+              "commission",
+              "Commission",
+              flags.show_commission && form.period_half !== "1",
+            ],
             ["reimbursement", "Reimbursement", flags.show_reimbursement],
             [
               "medical_reimbursement",

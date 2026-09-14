@@ -58,12 +58,10 @@ function YearPayslipBlockInner({
           </span>
         )}
       </h3>
-      {/* 2 months per row when this card is narrow (3 side by side is too narrow for a label + peso
-          amount); 3 per row × 4 rows once the card itself has room. Keyed off the card's own width
-          via a container query (not the viewport) so the grid reflows correctly regardless of how
-          much space the sidebar leaves it — a plain `sm:` breakpoint stays stuck on 3 columns (or 2)
-          whenever the viewport crosses 640px without the card actually gaining/losing room. */}
-      <div className="grid w-full min-w-0 grid-cols-2 gap-2 @lg:grid-cols-3 @lg:gap-3.5">
+      {/* Always 3 months per row × 4 rows. Gap widens once the card itself has room, keyed off the
+          card's own width via a container query (not the viewport) so it reflows correctly
+          regardless of how much space the sidebar leaves it. */}
+      <div className="grid w-full min-w-0 grid-cols-3 gap-2 @lg:gap-3.5">
         {MONTHS.map((month) => {
           const ms = yearSlots.months.get(month);
           const monthSum = ms?.netSum ?? null;

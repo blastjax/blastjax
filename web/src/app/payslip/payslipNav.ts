@@ -1,7 +1,6 @@
 import type { PayslipRow } from "@/lib/api";
 
 export type Nav =
-  | { screen: "slot"; year: number; month: number; half: 1 | 2 }
   | { screen: "detail"; row: PayslipRow }
   | { screen: "edit"; row: PayslipRow }
   | {
