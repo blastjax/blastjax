@@ -2030,7 +2030,12 @@ export default function LottoClient() {
         </form>
       </Modal>
 
-      <Modal open={importModal.open} onClose={closeImportModal} ariaLabelledBy="lotto-import-title">
+      <Modal
+        open={importModal.open}
+        onClose={closeImportModal}
+        ariaLabelledBy="lotto-import-title"
+        dialogClassName="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-xl border border-line bg-surface p-5 shadow-pop sm:p-6"
+      >
         <div className="mb-4 flex items-start justify-between gap-2">
           <h2 id="lotto-import-title" className="text-lg font-semibold text-ink">
             Import historic results
@@ -2074,22 +2079,19 @@ export default function LottoClient() {
             <span className="text-ink-2">Results</span>
             <textarea
               required
-              rows={10}
-              className={`${INPUT_CLASSES} font-mono`}
-              placeholder={
-                "Ultra Lotto 6/58\t32-25-23-22-01-41\t9/1/2026\t258,474,543.62\t0\n" +
-                "Ultra Lotto 6/58\t53-34-12-09-05-47\t9/4/2026\t265,466,683.02\t0"
-              }
+              rows={14}
+              wrap="off"
+              className={`${INPUT_CLASSES} font-mono whitespace-pre overflow-x-auto`}
               value={importModal.text}
               disabled={saving}
               onChange={(e) => setImportModal((m) => ({ ...m, text: e.target.value }))}
             />
             <span className="text-xs text-ink-3">
               One draw per line: <code>| n1-n2-n3-n4-n5-n6 | m/d/yyyy | jackpot | winners |</code>.
-              A leading game-name column (e.g. pasted straight from a spreadsheet, tab-separated
-              as in the placeholder above) is fine too — it&apos;s discarded on import. Each row
-              is upserted by date, so re-pasting (e.g. to backfill jackpot/winners on draws
-              already here) overwrites rather than duplicating.
+              A leading game-name column (e.g. pasted straight from a spreadsheet, tab-separated)
+              is fine too — it&apos;s discarded on import. Each row is upserted by date, so
+              re-pasting (e.g. to backfill jackpot/winners on draws already here) overwrites
+              rather than duplicating.
             </span>
           </label>
           <div className="flex flex-wrap gap-2">
