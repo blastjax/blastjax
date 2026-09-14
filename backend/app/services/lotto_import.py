@@ -7,10 +7,20 @@ Accepts rows shaped like either::
 
 i.e. winning numbers - draw date - jackpot prize - winner count, one draw per
 line, with the four fields separated by pipes, plain whitespace, or a mix of
-both (the pipes are cosmetic — only the field order matters). Blank lines and
-lines that don't match are skipped and reported back in ``errors`` rather
-than aborting the whole import, so one bad row in a large paste doesn't block
-the rest.
+both (the pipes are cosmetic — only the field order matters).
+
+A row copied straight out of the results site's spreadsheet leads with a
+tab-separated game-name column, e.g.::
+
+    Ultra Lotto 6/58	32-25-23-22-01-41	9/1/2026	258,474,543.62	0
+
+That leading column is discarded — this app only ever tracks one game, so the
+name itself doesn't matter, only that a tab follows it (a space-separated
+game name would be indistinguishable from the numbers field otherwise).
+
+Blank lines and lines that don't match are skipped and reported back in
+``errors`` rather than aborting the whole import, so one bad row in a large
+paste doesn't block the rest.
 """
 
 from __future__ import annotations
@@ -28,6 +38,7 @@ _SEP = r"(?:\s*\|\s*|\s+)"  # a pipe (spaces optional around it) or plain whites
 
 _ROW_RE = re.compile(
     rf"""^\s*\|?\s*
+        (?:[^\t|]+\t+)?
         (?P<numbers>[\d\-]+){_SEP}
         (?P<date>\d{{1,2}}/\d{{1,2}}/\d{{4}}){_SEP}
         (?P<jackpot>[\d,]+(?:\.\d+)?){_SEP}

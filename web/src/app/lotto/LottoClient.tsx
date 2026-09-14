@@ -2084,8 +2084,11 @@ export default function LottoClient() {
             />
             <span className="text-xs text-ink-3">
               One draw per line: <code>| n1-n2-n3-n4-n5-n6 | m/d/yyyy | jackpot | winners |</code>.
-              Each row is upserted by date, so re-uploading (e.g. to backfill jackpot/winners on
-              draws already here) overwrites rather than duplicating.
+              A leading game-name column (e.g. pasted straight from a spreadsheet as{" "}
+              <code>Ultra Lotto 6/58⇥n1-n2-n3-n4-n5-n6⇥m/d/yyyy⇥jackpot⇥winners</code>) is fine
+              too — it&apos;s discarded on import. Each row is upserted by date, so re-uploading
+              (e.g. to backfill jackpot/winners on draws already here) overwrites rather than
+              duplicating.
             </span>
           </label>
           <div className="flex flex-wrap gap-2">
