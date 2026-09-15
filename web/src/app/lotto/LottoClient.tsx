@@ -24,7 +24,6 @@ import {
   CARD_CLASSES,
   CLOSE_BUTTON_CLASSES,
   DASHED_EMPTY_CLASSES,
-  DETAIL_BUTTON_CLASSES,
   ERROR_ALERT_CLASSES,
   ICON_BUTTON_CLASSES,
   INPUT_CLASSES,
@@ -702,22 +701,13 @@ export default function LottoClient() {
   };
 
   const [collapsedIds, setCollapsedIds] = useState<Set<number>>(new Set());
-  // History tab shows one compact row per draw; a row expands in place into
-  // the full editable card (same one the hero uses) rather than navigating
-  // away, so nothing about managing a historic draw's attempts is lost.
-  const [expandedHistoryDrawIds, setExpandedHistoryDrawIds] = useState<Set<number>>(new Set());
+  // History tab shows one compact row per draw; clicking one opens it in a
+  // modal using the same hero treatment as "This draw" (result balls,
+  // filter/sort, ticket grid) rather than navigating away.
+  const [historyModalDrawId, setHistoryModalDrawId] = useState<number | null>(null);
 
   const toggleCollapsed = (drawId: number) => {
     setCollapsedIds((s) => {
-      const next = new Set(s);
-      if (next.has(drawId)) next.delete(drawId);
-      else next.add(drawId);
-      return next;
-    });
-  };
-
-  const toggleHistoryExpanded = (drawId: number) => {
-    setExpandedHistoryDrawIds((s) => {
       const next = new Set(s);
       if (next.has(drawId)) next.delete(drawId);
       else next.add(drawId);
@@ -1688,25 +1678,12 @@ export default function LottoClient() {
     );
   };
 
-  /** History tab's compact one-line-per-draw row. Clicking it expands in
-   * place into the full `renderDrawCard` (attempts, edit/delete) —
-   * nothing about managing a historic draw is lost, it's just tucked
-   * behind a click instead of always open. */
+  /** History tab's compact one-line-per-draw row. Clicking it opens that
+   * draw in a modal using the same hero treatment `renderDrawCard` gives
+   * "This draw" (result balls, filter/sort, ticket grid) — nothing about
+   * managing a historic draw is lost, it's just reached through a modal
+   * instead of always open on the page. */
   const renderHistoryRow = (detail: LottoDrawDetail) => {
-    if (expandedHistoryDrawIds.has(detail.draw.id)) {
-      return (
-        <div key={detail.draw.id} className="flex flex-col gap-2">
-          <button
-            type="button"
-            className={`${DETAIL_BUTTON_CLASSES} self-start`}
-            onClick={() => toggleHistoryExpanded(detail.draw.id)}
-          >
-            ‹ Collapse
-          </button>
-          {renderDrawCard(detail)}
-        </div>
-      );
-    }
     const hasResult = detail.draw.numbers.length === 6;
     const totalAttempts = detail.attempts.length;
     const ticketCount = new Set(
@@ -1725,7 +1702,7 @@ export default function LottoClient() {
         key={detail.draw.id}
         type="button"
         className="flex w-full flex-wrap items-center gap-3 rounded-lg border border-line bg-surface p-3 text-left transition-colors duration-150 hover:bg-surface-2 dark:hover:bg-zinc-800/60 sm:gap-4"
-        onClick={() => toggleHistoryExpanded(detail.draw.id)}
+        onClick={() => setHistoryModalDrawId(detail.draw.id)}
       >
         <div className="w-28 shrink-0">
           <div className="text-sm font-medium text-ink">{formatDate(detail.draw.draw_date)}</div>
@@ -2446,6 +2423,36 @@ export default function LottoClient() {
           </div>
         </form>
       </Modal>
+
+      {/* History tab: a draw's compact row opens here, in the same hero
+       * treatment "This draw" gives its pinned draw. */}
+      {historyModalDrawId != null &&
+        (() => {
+          const detail = draws.find((d) => d.draw.id === historyModalDrawId);
+          if (!detail) return null;
+          return (
+            <Modal
+              open
+              onClose={() => setHistoryModalDrawId(null)}
+              ariaLabelledBy="lotto-history-draw-title"
+              dialogClassName="max-h-[90vh] w-full max-w-5xl overflow-y-auto rounded-xl border border-line bg-surface p-5 shadow-pop sm:p-6"
+            >
+              <div className="mb-4 flex items-start justify-between gap-2">
+                <h2 id="lotto-history-draw-title" className="sr-only">
+                  {formatDate(detail.draw.draw_date)}
+                </h2>
+                <button
+                  type="button"
+                  className={`${CLOSE_BUTTON_CLASSES} ml-auto`}
+                  onClick={() => setHistoryModalDrawId(null)}
+                >
+                  Close
+                </button>
+              </div>
+              {renderDrawCard(detail, { hero: true })}
+            </Modal>
+          );
+        })()}
     </div>
   );
 }
