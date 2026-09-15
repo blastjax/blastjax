@@ -11,3 +11,5 @@ postman/
 .claude
 docker-compose.override.yml
 graphify-out/
+.agents/
+skills-lock.json

@@ -33,6 +33,10 @@ import {
   PAGE_CONTAINER_CLASSES,
   PRIMARY_BUTTON_CLASSES,
   SECONDARY_BUTTON_CLASSES,
+  SEGMENTED_BUTTON_ACTIVE_CLASSES,
+  SEGMENTED_BUTTON_CLASSES,
+  SEGMENTED_BUTTON_INACTIVE_CLASSES,
+  SEGMENTED_WRAPPER_CLASSES,
   alertClasses,
 } from "@/lib/ui";
 
@@ -56,9 +60,7 @@ function toIsoDate(year: number, month: number, day: number): string {
   ) {
     throw new Error("Enter a valid date.");
   }
-  const mm = String(month).padStart(2, "0");
-  const dd = String(day).padStart(2, "0");
-  return `${year}-${mm}-${dd}`;
+  return date.toISOString().slice(0, 10);
 }
 
 /** The stored "YYYY-MM-DD" -> "M/D/YYYY", for pre-filling the date field
@@ -416,13 +418,17 @@ function NumberBall({
   n,
   variant = "neutral",
   size = "md",
+  className = "",
+  style,
 }: {
   n: number;
   variant?: "neutral" | "result" | "match" | "miss";
-  /** "lg" is 3x the "md" ball — 200% bigger. Currently unused: attempt rows
-   * used to get the spotlight at this size but now match everywhere else
-   * ("md"). Kept in case a future row wants the emphasis again. */
+  /** "lg" is 3x the "md" ball — used for the hero draw's own numbers, where
+   * they're the single most important thing on the page. */
   size?: "md" | "lg";
+  /** Extra classes — e.g. the hero's staggered reveal animation. */
+  className?: string;
+  style?: React.CSSProperties;
 }) {
   const styles: Record<string, string> = {
     neutral:
@@ -439,7 +445,8 @@ function NumberBall({
       : "h-7 w-7 text-xs sm:h-9 sm:w-9 sm:text-sm";
   return (
     <span
-      className={`flex ${sizeClasses} shrink-0 items-center justify-center rounded-full border font-semibold tabular-nums ${styles[variant]}`}
+      style={style}
+      className={`flex ${sizeClasses} shrink-0 items-center justify-center rounded-full border font-semibold tabular-nums ${styles[variant]} ${className}`}
     >
       {String(n).padStart(2, "0")}
     </span>
@@ -503,6 +510,80 @@ function bumpMatches<T>(items: T[], shouldBump: (item: T) => boolean): T[] {
   return [...bumped, ...rest];
 }
 
+/** Derived analytics for the Insights tab — every number's play/draw
+ * frequency, the match-count histogram, and the roll-up stats built from
+ * them. Computed fresh from `draws` each time the tab is viewed rather than
+ * memoized: the corpus is a personal lotto history (thousands of attempts at
+ * most), so a plain pass over it is cheap enough not to bother caching. */
+type InsightsData = {
+  histCounts: number[];
+  totalScored: number;
+  avgMatch: number;
+  hitRate3: number;
+  neverDrawnCount: number;
+  favourites: { n: number; played: number; drawn: number }[];
+  board: { n: number; played: number }[];
+  maxPlayed: number;
+  latestDrawSet: Set<number>;
+};
+
+function buildInsights(draws: LottoDrawDetail[]): InsightsData {
+  const played = new Map<number, number>();
+  const drawn = new Map<number, number>();
+  const histCounts = [0, 0, 0, 0, 0, 0, 0];
+  let totalScored = 0;
+  let matchSum = 0;
+  let hits3 = 0;
+  let latestDrawSet = new Set<number>();
+  let sawLatest = false;
+
+  for (const d of draws) {
+    const hasResult = d.draw.numbers.length === 6;
+    if (hasResult) {
+      if (!sawLatest) {
+        latestDrawSet = new Set(d.draw.numbers);
+        sawLatest = true;
+      }
+      for (const n of d.draw.numbers) drawn.set(n, (drawn.get(n) ?? 0) + 1);
+    }
+    const drawSet = new Set(d.draw.numbers);
+    for (const a of d.attempts) {
+      for (const n of a.numbers) played.set(n, (played.get(n) ?? 0) + 1);
+      if (hasResult) {
+        const score = a.numbers.filter((n) => drawSet.has(n)).length;
+        histCounts[score] += 1;
+        totalScored += 1;
+        matchSum += score;
+        if (score >= 3) hits3 += 1;
+      }
+    }
+  }
+
+  const favourites = [...played.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 8)
+    .map(([n, p]) => ({ n, played: p, drawn: drawn.get(n) ?? 0 }));
+
+  const board = Array.from({ length: 58 }, (_, i) => ({
+    n: i + 1,
+    played: played.get(i + 1) ?? 0,
+  }));
+  const maxPlayed = Math.max(1, ...board.map((c) => c.played));
+  const neverDrawnCount = [...played.keys()].filter((n) => !drawn.has(n)).length;
+
+  return {
+    histCounts,
+    totalScored,
+    avgMatch: totalScored > 0 ? matchSum / totalScored : 0,
+    hitRate3: totalScored > 0 ? (hits3 / totalScored) * 100 : 0,
+    neverDrawnCount,
+    favourites,
+    board,
+    maxPlayed,
+    latestDrawSet,
+  };
+}
+
 type DrawModalState = {
   open: boolean;
   drawId: number | null;
@@ -555,6 +636,26 @@ const emptyAttemptsModal: AttemptsModalState = {
 const emptyPasteModal: PasteAttemptsModalState = { open: false, drawDate: "", attemptsText: "" };
 const emptyImportModal: ImportModalState = { open: false, text: "" };
 
+type LottoTab = "draw" | "history" | "insights";
+const TAB_LABELS: Record<LottoTab, string> = {
+  draw: "This draw",
+  history: "History",
+  insights: "Insights",
+};
+
+type AttemptFilter = "all" | "hits" | "multi";
+const FILTER_LABELS: Record<AttemptFilter, string> = {
+  all: "All",
+  hits: "≥1 match",
+  multi: "≥2 matches",
+};
+
+type AttemptSort = "ticket" | "best";
+const SORT_LABELS: Record<AttemptSort, string> = {
+  ticket: "By ticket",
+  best: "Best first",
+};
+
 export default function LottoClient() {
   const [draws, setDraws] = useState<LottoDrawDetail[]>([]);
   const [loading, setLoading] = useState(true);
@@ -566,11 +667,25 @@ export default function LottoClient() {
   // four buttons competing with the page's actual content for attention.
   const [showDataTools, setShowDataTools] = useState(false);
 
+  const [activeTab, setActiveTab] = useState<LottoTab>("draw");
+
+  // Refine "This draw"'s attempt list without touching History — these two
+  // only apply to the hero draw (see `renderDrawCard`'s `hero` option).
+  const [attemptFilter, setAttemptFilter] = useState<AttemptFilter>("all");
+  const [attemptSort, setAttemptSort] = useState<AttemptSort>("ticket");
+  // Bumped to force the hero's ball row to remount, replaying its reveal
+  // animation — see the "Replay" button.
+  const [heroReplayKey, setHeroReplayKey] = useState(0);
+
   const [collapsedIds, setCollapsedIds] = useState<Set<number>>(new Set());
   // Hidden attempts are tucked out of view by default. This tracks which
   // draws currently have theirs revealed — per-draw, so one draw's hidden
   // attempts can be shown without exposing every other draw's too.
   const [shownHiddenDrawIds, setShownHiddenDrawIds] = useState<Set<number>>(new Set());
+  // History tab shows one compact row per draw; a row expands in place into
+  // the full editable card (same one the hero uses) rather than navigating
+  // away, so nothing about managing a historic draw's attempts is lost.
+  const [expandedHistoryDrawIds, setExpandedHistoryDrawIds] = useState<Set<number>>(new Set());
 
   const toggleCollapsed = (drawId: number) => {
     setCollapsedIds((s) => {
@@ -590,10 +705,18 @@ export default function LottoClient() {
     });
   };
 
+  const toggleHistoryExpanded = (drawId: number) => {
+    setExpandedHistoryDrawIds((s) => {
+      const next = new Set(s);
+      if (next.has(drawId)) next.delete(drawId);
+      else next.add(drawId);
+      return next;
+    });
+  };
+
   // Draws are grouped into one card per year so a history spanning many
-  // years doesn't render as one endless flat list. The single most recent
-  // draw is pinned above all year cards; every year (including the current
-  // one) starts collapsed and expands on click.
+  // years doesn't render as one endless flat list; every year starts
+  // collapsed and expands on click.
   const [expandedYears, setExpandedYears] = useState<Set<string>>(new Set());
 
   const toggleYearExpanded = (year: string) => {
@@ -657,20 +780,19 @@ export default function LottoClient() {
     return { drawCount: draws.length, resultsIn, totalAttempts, bestMatch };
   }, [draws]);
 
-  // Normally the pinned card is just the newest draw. But a draw you're
-  // still waiting on results for — one with attempts already logged — is
-  // more useful up top than an older draw's result, even if it isn't the
-  // newest by date. `draws` is sorted newest-first, so `find` picks the
-  // most recent such pending draw.
+  // Normally "This draw" is just the newest draw. But a draw you're still
+  // waiting on results for — one with attempts already logged — is more
+  // useful there than an older draw's result, even if it isn't the newest
+  // by date. `draws` is sorted newest-first, so `find` picks the most
+  // recent such pending draw.
   const pinnedDraw =
     draws.find((d) => d.attempts.length > 0 && d.draw.numbers.length !== 6) ?? draws[0];
 
   // `draws` is already sorted newest-first, so same-year draws are always
-  // contiguous — one pass buckets them into ordered year groups, skipping
-  // whichever draw is pinned above so it isn't shown twice.
+  // contiguous — one pass buckets them into ordered year groups for the
+  // History tab.
   const yearGroups: { year: string; items: LottoDrawDetail[] }[] = [];
   for (const detail of draws) {
-    if (detail.draw.id === pinnedDraw?.draw.id) continue;
     const year = detail.draw.draw_date.slice(0, 4);
     const last = yearGroups[yearGroups.length - 1];
     if (last && last.year === year) {
@@ -1173,7 +1295,18 @@ export default function LottoClient() {
     }
   };
 
-  const renderDrawCard = (detail: LottoDrawDetail) => {
+  /** Renders one draw's full card: result balls, jackpot/winners, and its
+   * attempts (grouped by ticket, drag-and-drop to regroup, edit/hide/delete
+   * per ticket or per loose attempt).
+   *
+   * `hero: true` is the "This draw" tab's spotlight treatment: bigger balls
+   * with a staggered reveal, an eyebrow label, a Replay button, and the
+   * filter/sort controls (`attemptFilter`/`attemptSort`) applied to its
+   * attempts. Every other call site (History's expanded rows) passes no
+   * options and renders exactly as before — filter/sort are a hero-only
+   * refinement, never applied to a historic draw. */
+  const renderDrawCard = (detail: LottoDrawDetail, opts: { hero?: boolean } = {}) => {
+    const hero = opts.hero ?? false;
     const hasResult = detail.draw.numbers.length === 6;
     const drawSet = new Set(detail.draw.numbers);
     // The card's own header counts every attempt, hidden or not — only
@@ -1191,23 +1324,35 @@ export default function LottoClient() {
       ? detail.attempts
       : detail.attempts.filter((a) => !a.hidden);
     const hasAttempts = totalAttempts > 0;
-    const collapsed = hasAttempts && collapsedIds.has(detail.draw.id);
+    // The hero is always expanded — collapse only makes sense for History's
+    // browsing use case.
+    const collapsed = hero ? false : hasAttempts && collapsedIds.has(detail.draw.id);
+    const collapsible = hasAttempts && !hero;
     // Without a result yet, there's nothing to match attempts against —
     // matchCount is a placeholder (-1) rather than a false "0/6 matched".
     // Order follows visibleAttempts as logged (the sequence on the
     // physical tickets) — see bumpMatches below for how strong matches
     // surface without disturbing that order.
-    const attemptsByMatch = hasResult
+    const scoredAttempts = hasResult
       ? visibleAttempts.map((attempt) => ({
           attempt,
           matchCount: attempt.numbers.filter((n) => drawSet.has(n)).length,
         }))
       : visibleAttempts.map((attempt) => ({ attempt, matchCount: -1 }));
+    // The filter chips are a "This draw"-only refinement — a historic card
+    // always shows everything, exactly as before.
+    const attemptsByMatch =
+      hero && attemptFilter !== "all"
+        ? scoredAttempts.filter(
+            ({ matchCount }) => matchCount >= (attemptFilter === "hits" ? 1 : 2),
+          )
+        : scoredAttempts;
     // Always all six tiers, zero counts included, so the row of badges
     // lines up in the same place on every card instead of shifting
     // around based on which tiers that draw happened to hit. Counts
     // every attempt (hidden or not) — the breakdown is a summary of
-    // the whole draw, not just what "Show hidden" currently reveals.
+    // the whole draw, not just what "Show hidden" (or the hero's
+    // filter) currently reveals.
     const matchBreakdown =
       hasResult && totalAttempts > 0
         ? [1, 2, 3, 4, 5, 6].map((tier) => ({
@@ -1258,10 +1403,28 @@ export default function LottoClient() {
       })),
       (c) => c.bestMatch >= 3,
     );
+    // "Best first" is the hero's read-only leaderboard view — every
+    // attempt across every ticket, ranked by match count, no drag-and-drop
+    // or per-row actions (switch back to "By ticket" for those).
+    const rankedAttempts =
+      hero && attemptSort === "best"
+        ? [...attemptsByMatch].sort((a, b) => b.matchCount - a.matchCount)
+        : null;
+
     const drawNumbersDisplay = hasResult ? (
-      <div className="mt-2 flex flex-wrap justify-center gap-1 sm:gap-1.5">
-        {detail.draw.numbers.map((n) => (
-          <NumberBall key={n} n={n} variant="result" />
+      <div
+        key={hero ? `balls-${heroReplayKey}` : undefined}
+        className="mt-2 flex flex-wrap justify-center gap-1 sm:gap-1.5"
+      >
+        {detail.draw.numbers.map((n, i) => (
+          <NumberBall
+            key={n}
+            n={n}
+            variant="result"
+            size={hero ? "lg" : "md"}
+            className={hero ? "animate-lotto-pop" : undefined}
+            style={hero ? { animationDelay: `${i * 70}ms` } : undefined}
+          />
         ))}
       </div>
     ) : (
@@ -1387,19 +1550,26 @@ export default function LottoClient() {
       </div>
     );
     return (
-      <section key={detail.draw.id} className={CARD_CLASSES}>
+      <section
+        key={detail.draw.id}
+        className={
+          hero
+            ? "rounded-xl border border-indigo-200 bg-indigo-50/40 p-5 shadow-xs dark:border-indigo-900 dark:bg-indigo-950/20 sm:p-6"
+            : CARD_CLASSES
+        }
+      >
         <div
           className={`group -m-1 flex flex-wrap items-start justify-between gap-3 rounded-lg p-1 transition-colors duration-150 ${
-            hasAttempts ? "cursor-pointer hover:bg-surface-2 dark:hover:bg-zinc-800/60" : ""
+            collapsible ? "cursor-pointer hover:bg-surface-2 dark:hover:bg-zinc-800/60" : ""
           }`}
-          role={hasAttempts ? "button" : undefined}
-          tabIndex={hasAttempts ? 0 : undefined}
-          aria-expanded={hasAttempts ? !collapsed : undefined}
+          role={collapsible ? "button" : undefined}
+          tabIndex={collapsible ? 0 : undefined}
+          aria-expanded={collapsible ? !collapsed : undefined}
           onClick={() => {
-            if (hasAttempts) toggleCollapsed(detail.draw.id);
+            if (collapsible) toggleCollapsed(detail.draw.id);
           }}
           onKeyDown={(e) => {
-            if (!hasAttempts) return;
+            if (!collapsible) return;
             if (e.key === "Enter" || e.key === " ") {
               e.preventDefault();
               toggleCollapsed(detail.draw.id);
@@ -1407,9 +1577,22 @@ export default function LottoClient() {
           }}
         >
           <div className="min-w-0">
+            {hero && (
+              <div className="mb-1 flex items-center gap-2">
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-indigo-600 dark:text-indigo-400">
+                  This draw
+                </span>
+                {hasResult && (
+                  <span className="flex items-center gap-1 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
+                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" aria-hidden />
+                    result in
+                  </span>
+                )}
+              </div>
+            )}
             <h2
-              className={`text-lg font-medium text-ink ${
-                hasAttempts
+              className={`font-medium text-ink ${hero ? "text-2xl" : "text-lg"} ${
+                collapsible
                   ? "transition-colors duration-150 group-hover:text-indigo-600 dark:group-hover:text-indigo-400"
                   : ""
               }`}
@@ -1434,6 +1617,15 @@ export default function LottoClient() {
             className="flex flex-wrap items-center gap-1.5 sm:gap-2"
             onClick={(e) => e.stopPropagation()}
           >
+            {hero && hasResult && (
+              <button
+                type="button"
+                className={CLOSE_BUTTON_CLASSES}
+                onClick={() => setHeroReplayKey((k) => k + 1)}
+              >
+                ↻ Replay
+              </button>
+            )}
             <button
               type="button"
               disabled={saving}
@@ -1462,6 +1654,43 @@ export default function LottoClient() {
           </div>
         </div>
 
+        {hero && hasAttempts && (
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            <div className={SEGMENTED_WRAPPER_CLASSES}>
+              {(Object.keys(FILTER_LABELS) as AttemptFilter[]).map((f) => (
+                <button
+                  key={f}
+                  type="button"
+                  className={`${SEGMENTED_BUTTON_CLASSES} ${
+                    attemptFilter === f
+                      ? SEGMENTED_BUTTON_ACTIVE_CLASSES
+                      : SEGMENTED_BUTTON_INACTIVE_CLASSES
+                  }`}
+                  onClick={() => setAttemptFilter(f)}
+                >
+                  {FILTER_LABELS[f]}
+                </button>
+              ))}
+            </div>
+            <div className={SEGMENTED_WRAPPER_CLASSES}>
+              {(Object.keys(SORT_LABELS) as AttemptSort[]).map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  className={`${SEGMENTED_BUTTON_CLASSES} ${
+                    attemptSort === s
+                      ? SEGMENTED_BUTTON_ACTIVE_CLASSES
+                      : SEGMENTED_BUTTON_INACTIVE_CLASSES
+                  }`}
+                  onClick={() => setAttemptSort(s)}
+                >
+                  {SORT_LABELS[s]}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {!collapsed && hasAttempts && (
         <div className="mt-4 border-t border-line pt-4">
           <div className="flex flex-wrap items-center gap-3">
@@ -1487,6 +1716,46 @@ export default function LottoClient() {
             )}
           </div>
 
+          {attemptsByMatch.length === 0 ? (
+            <p className={`${DASHED_EMPTY_CLASSES} mt-3`}>
+              No attempts match this filter.
+            </p>
+          ) : rankedAttempts ? (
+            <ol className="mt-3 flex flex-col gap-2">
+              {rankedAttempts.map(({ attempt, matchCount }, i) => (
+                <li
+                  key={attempt.id}
+                  className="flex flex-wrap items-center gap-3 rounded-lg border border-line bg-surface p-3"
+                >
+                  <span className="w-6 shrink-0 text-xs font-medium text-ink-4 tabular-nums">
+                    {i + 1}
+                  </span>
+                  <div className="flex flex-1 flex-wrap items-center gap-1.5">
+                    {attempt.numbers.map((n) => (
+                      <NumberBall
+                        key={n}
+                        n={n}
+                        variant={hasResult ? (drawSet.has(n) ? "match" : "miss") : "neutral"}
+                      />
+                    ))}
+                  </div>
+                  {attempt.ticket != null && (
+                    <span className="text-xs text-ink-3">ticket {attempt.ticket}</span>
+                  )}
+                  {attempt.hidden && (
+                    <span className="rounded-full border border-line-strong px-1.5 py-0.5 text-[10px] font-medium text-ink-3">
+                      Hidden
+                    </span>
+                  )}
+                  {hasResult && (
+                    <span className="shrink-0 rounded-full bg-surface-2 px-2 py-1 text-xs font-semibold tabular-nums text-ink-2">
+                      {matchCount}/6
+                    </span>
+                  )}
+                </li>
+              ))}
+            </ol>
+          ) : (
           <div className="mt-3 flex flex-col gap-3">
             {ticketClusters.map((cluster) => (
               <div
@@ -1591,6 +1860,7 @@ export default function LottoClient() {
               </div>
             )}
           </div>
+          )}
 
           <button
             type="button"
@@ -1603,6 +1873,90 @@ export default function LottoClient() {
         </div>
         )}
       </section>
+    );
+  };
+
+  /** History tab's compact one-line-per-draw row. Clicking it expands in
+   * place into the full `renderDrawCard` (attempts, drag-and-drop,
+   * edit/hide/delete) — nothing about managing a historic draw is lost,
+   * it's just tucked behind a click instead of always open. */
+  const renderHistoryRow = (detail: LottoDrawDetail) => {
+    if (expandedHistoryDrawIds.has(detail.draw.id)) {
+      return (
+        <div key={detail.draw.id} className="flex flex-col gap-2">
+          <button
+            type="button"
+            className={`${DETAIL_BUTTON_CLASSES} self-start`}
+            onClick={() => toggleHistoryExpanded(detail.draw.id)}
+          >
+            ‹ Collapse
+          </button>
+          {renderDrawCard(detail)}
+        </div>
+      );
+    }
+    const hasResult = detail.draw.numbers.length === 6;
+    const totalAttempts = detail.attempts.length;
+    const ticketCount = new Set(
+      detail.attempts.flatMap((a) => (a.ticket != null ? [a.ticket] : [])),
+    ).size;
+    let bestMatch = -1;
+    if (hasResult) {
+      const drawSet = new Set(detail.draw.numbers);
+      for (const a of detail.attempts) {
+        const count = a.numbers.filter((n) => drawSet.has(n)).length;
+        if (count > bestMatch) bestMatch = count;
+      }
+    }
+    return (
+      <button
+        key={detail.draw.id}
+        type="button"
+        className="flex w-full flex-wrap items-center gap-3 rounded-lg border border-line bg-surface p-3 text-left transition-colors duration-150 hover:bg-surface-2 dark:hover:bg-zinc-800/60 sm:gap-4"
+        onClick={() => toggleHistoryExpanded(detail.draw.id)}
+      >
+        <div className="w-28 shrink-0">
+          <div className="text-sm font-medium text-ink">{formatDate(detail.draw.draw_date)}</div>
+          {detail.draw.jackpot_prize != null && (
+            <div className="text-xs tabular-nums text-ink-4">
+              {fmtAmountOrDash(detail.draw.jackpot_prize)}
+            </div>
+          )}
+        </div>
+        {hasResult ? (
+          <div className="flex flex-wrap gap-1">
+            {detail.draw.numbers.map((n) => (
+              <NumberBall key={n} n={n} variant="result" />
+            ))}
+          </div>
+        ) : (
+          <span className="text-xs font-medium text-amber-700 dark:text-amber-300">
+            Result not in yet
+          </span>
+        )}
+        <div className="ml-auto flex items-center gap-2 text-xs text-ink-3">
+          <span>
+            {totalAttempts > 0
+              ? `${fmtCount(totalAttempts)} attempt${totalAttempts === 1 ? "" : "s"}${
+                  ticketCount > 0
+                    ? ` · ${fmtCount(ticketCount)} ticket${ticketCount === 1 ? "" : "s"}`
+                    : ""
+                }`
+              : "no attempts"}
+          </span>
+          {bestMatch >= 0 && (
+            <span
+              className={`rounded-full px-2 py-1 font-medium ${
+                bestMatch >= 3
+                  ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300"
+                  : "bg-surface-2 text-ink-2"
+              }`}
+            >
+              best {bestMatch}/6
+            </span>
+          )}
+        </div>
+      </button>
     );
   };
 
@@ -1620,8 +1974,8 @@ export default function LottoClient() {
           title="Lotto"
           description={
             <>
-              Enter each date&apos;s result, then log your attempts underneath it — matching
-              numbers turn green.
+              Log each draw (6 numbers, 1–58), then log the attempts you played underneath
+              it — matching numbers turn green.
             </>
           }
           actions={
@@ -1693,114 +2047,301 @@ export default function LottoClient() {
       )}
 
       {!loading && draws.length > 0 && (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <StatTile label="Draws tracked" value={fmtCount(overviewStats.drawCount)} tone="indigo" />
-          <StatTile label="Results in" value={fmtCount(overviewStats.resultsIn)} tone="emerald" />
-          <StatTile label="Attempts logged" value={fmtCount(overviewStats.totalAttempts)} tone="sky" />
-          <StatTile
-            label="Best match"
-            value={overviewStats.bestMatch >= 0 ? `${overviewStats.bestMatch}/6` : "—"}
-            tone="amber"
-          />
-        </div>
-      )}
+        <>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <StatTile label="Draws tracked" value={fmtCount(overviewStats.drawCount)} tone="indigo" />
+            <StatTile label="Results in" value={fmtCount(overviewStats.resultsIn)} tone="emerald" />
+            <StatTile label="Attempts logged" value={fmtCount(overviewStats.totalAttempts)} tone="sky" />
+            <StatTile
+              label="Best match"
+              value={overviewStats.bestMatch >= 0 ? `${overviewStats.bestMatch}/6` : "—"}
+              tone="amber"
+            />
+          </div>
 
-      {/* Only worth a card when there's actually something to say — an
-       * empty "no coincidences" box on every visit is noise, not insight. */}
-      {whatIfMatches.length > 0 && (
-        <section className={CARD_CLASSES}>
-          <h2 className="text-lg font-medium text-ink">What if?</h2>
-          <p className="mt-1 text-sm text-ink-2">
-            Numbers you&apos;ve played that exactly match a different draw&apos;s result
-            somewhere else in the history — if only you&apos;d played them that day instead.
-          </p>
-          <ul className="mt-3 flex flex-col gap-2">
-            {whatIfMatches.map((w) => (
-              <li
-                key={w.key}
-                className="rounded-lg border border-indigo-200 bg-indigo-50/60 p-3 dark:border-indigo-900 dark:bg-indigo-950/30"
-              >
-                <div className="flex flex-wrap items-center gap-1 sm:gap-1.5">
-                  {w.numbers.map((n) => (
-                    <NumberBall key={n} n={n} variant="match" />
-                  ))}
-                </div>
-                <p className="mt-1.5 text-xs text-ink-2">
-                  Attempt from {formatDate(w.loggedDrawDate)} matches the historic draw
-                  result from{" "}
-                  <span className="font-medium text-ink">
-                    {formatDate(w.matchedDrawDate)}
-                  </span>
-                </p>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-
-      {(collapsibleDraws.length > 0 || totalHiddenAttempts > 0) && (
-        <div className="flex justify-end gap-2">
-          {totalHiddenAttempts > 0 && (
-            <button
-              type="button"
-              className={`${ACTION_BUTTON_CLASSES} px-2 py-1.5 text-xs sm:px-3 sm:text-sm`}
-              onClick={toggleShowHiddenAll}
-            >
-              {allHiddenShown
-                ? "Hide hidden attempts"
-                : `Show hidden attempts (${totalHiddenAttempts})`}
-            </button>
+          {/* Only worth a card when there's actually something to say — an
+           * empty "no coincidences" box on every visit is noise, not insight. */}
+          {whatIfMatches.length > 0 && (
+            <section className={CARD_CLASSES}>
+              <h2 className="text-lg font-medium text-ink">What if?</h2>
+              <p className="mt-1 text-sm text-ink-2">
+                Numbers you&apos;ve played that exactly match a different draw&apos;s result
+                somewhere else in the history — if only you&apos;d played them that day instead.
+              </p>
+              <ul className="mt-3 flex flex-col gap-2">
+                {whatIfMatches.map((w) => (
+                  <li
+                    key={w.key}
+                    className="rounded-lg border border-indigo-200 bg-indigo-50/60 p-3 dark:border-indigo-900 dark:bg-indigo-950/30"
+                  >
+                    <div className="flex flex-wrap items-center gap-1 sm:gap-1.5">
+                      {w.numbers.map((n) => (
+                        <NumberBall key={n} n={n} variant="match" />
+                      ))}
+                    </div>
+                    <p className="mt-1.5 text-xs text-ink-2">
+                      Attempt from {formatDate(w.loggedDrawDate)} matches the historic draw
+                      result from{" "}
+                      <span className="font-medium text-ink">
+                        {formatDate(w.matchedDrawDate)}
+                      </span>
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            </section>
           )}
-          {collapsibleDraws.length > 0 && (
-            <button
-              type="button"
-              className={`${ACTION_BUTTON_CLASSES} px-2 py-1.5 text-xs sm:px-3 sm:text-sm`}
-              onClick={toggleCollapseAll}
-            >
-              {allCollapsed ? "Expand all" : "Collapse all"}
-            </button>
-          )}
-        </div>
-      )}
 
-      {/* Pinned above every year group instead of living inside its own
-       * year's card — see `pinnedDraw` above for which draw that is. */}
-      {pinnedDraw && renderDrawCard(pinnedDraw)}
-
-      <div className="flex flex-col gap-8">
-        {yearGroups.map((group) => {
-          const expanded = expandedYears.has(group.year);
-          const items = group.items;
-          if (items.length === 0) return null;
-          return (
-            <section key={group.year} className={CARD_CLASSES}>
+          <div className={`${SEGMENTED_WRAPPER_CLASSES} self-start`}>
+            {(Object.keys(TAB_LABELS) as LottoTab[]).map((t) => (
               <button
+                key={t}
                 type="button"
-                className="-m-1 flex w-full flex-wrap items-center justify-between gap-3 rounded-lg p-1 text-left transition-colors duration-150 hover:bg-surface-2 dark:hover:bg-zinc-800/60"
-                aria-expanded={expanded}
-                onClick={() => toggleYearExpanded(group.year)}
+                className={`${SEGMENTED_BUTTON_CLASSES} ${
+                  activeTab === t ? SEGMENTED_BUTTON_ACTIVE_CLASSES : SEGMENTED_BUTTON_INACTIVE_CLASSES
+                }`}
+                onClick={() => setActiveTab(t)}
               >
-                <h2 className="text-lg font-medium text-ink">
-                  {group.year}
-                </h2>
-                <span
-                  aria-hidden
-                  className={`text-ink-4 transition-transform ${
-                    expanded ? "rotate-90" : ""
-                  }`}
-                >
-                  ›
-                </span>
+                {TAB_LABELS[t]}
               </button>
-              {expanded && (
-                <div className="mt-4 flex flex-col gap-5 border-t border-line pt-4">
-                  {items.map((detail) => renderDrawCard(detail))}
+            ))}
+          </div>
+
+          {activeTab === "draw" && pinnedDraw && renderDrawCard(pinnedDraw, { hero: true })}
+
+          {activeTab === "history" && (
+            <div className="flex flex-col gap-6">
+              {(collapsibleDraws.length > 0 || totalHiddenAttempts > 0) && (
+                <div className="flex justify-end gap-2">
+                  {totalHiddenAttempts > 0 && (
+                    <button
+                      type="button"
+                      className={`${ACTION_BUTTON_CLASSES} px-2 py-1.5 text-xs sm:px-3 sm:text-sm`}
+                      onClick={toggleShowHiddenAll}
+                    >
+                      {allHiddenShown
+                        ? "Hide hidden attempts"
+                        : `Show hidden attempts (${totalHiddenAttempts})`}
+                    </button>
+                  )}
+                  {collapsibleDraws.length > 0 && (
+                    <button
+                      type="button"
+                      className={`${ACTION_BUTTON_CLASSES} px-2 py-1.5 text-xs sm:px-3 sm:text-sm`}
+                      onClick={toggleCollapseAll}
+                    >
+                      {allCollapsed ? "Expand all" : "Collapse all"}
+                    </button>
+                  )}
                 </div>
               )}
-            </section>
-          );
-        })}
-      </div>
+
+              <div className="flex flex-col gap-4">
+                {yearGroups.map((group) => {
+                  const expanded = expandedYears.has(group.year);
+                  let bestOfYear = -1;
+                  for (const d of group.items) {
+                    if (d.draw.numbers.length !== 6) continue;
+                    const s = new Set(d.draw.numbers);
+                    for (const a of d.attempts) {
+                      const c = a.numbers.filter((n) => s.has(n)).length;
+                      if (c > bestOfYear) bestOfYear = c;
+                    }
+                  }
+                  return (
+                    <section key={group.year} className={CARD_CLASSES}>
+                      <button
+                        type="button"
+                        className="-m-1 flex w-full flex-wrap items-center justify-between gap-3 rounded-lg p-1 text-left transition-colors duration-150 hover:bg-surface-2 dark:hover:bg-zinc-800/60"
+                        aria-expanded={expanded}
+                        onClick={() => toggleYearExpanded(group.year)}
+                      >
+                        <div className="flex items-baseline gap-3">
+                          <h2 className="text-lg font-medium text-ink">
+                            {group.year}
+                          </h2>
+                          <span className="text-xs text-ink-3">
+                            {fmtCount(group.items.length)} draw{group.items.length === 1 ? "" : "s"}
+                            {bestOfYear >= 0 ? ` · best ${bestOfYear}/6` : ""}
+                          </span>
+                        </div>
+                        <span
+                          aria-hidden
+                          className={`text-ink-4 transition-transform ${
+                            expanded ? "rotate-90" : ""
+                          }`}
+                        >
+                          ›
+                        </span>
+                      </button>
+                      {expanded && (
+                        <div className="mt-4 flex flex-col gap-2 border-t border-line pt-4">
+                          {group.items.map((detail) => renderHistoryRow(detail))}
+                        </div>
+                      )}
+                    </section>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {activeTab === "insights" &&
+            (() => {
+              const ins = buildInsights(draws);
+              const maxFavPlayed = Math.max(1, ...ins.favourites.map((f) => f.played));
+              const maxFavDrawn = Math.max(1, ...ins.favourites.map((f) => f.drawn));
+              return (
+                <div className="flex flex-col gap-6">
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                    <StatTile
+                      label="Average match"
+                      value={ins.totalScored > 0 ? ins.avgMatch.toFixed(2) : "—"}
+                      tone="indigo"
+                    />
+                    <StatTile
+                      label="Hit rate ≥3"
+                      value={ins.totalScored > 0 ? `${ins.hitRate3.toFixed(1)}%` : "—"}
+                      tone="emerald"
+                    />
+                    <StatTile
+                      label="Never drawn on me"
+                      value={fmtCount(ins.neverDrawnCount)}
+                      tone="amber"
+                    />
+                  </div>
+
+                  <section className={CARD_CLASSES}>
+                    <h2 className="text-sm font-semibold text-ink">Where my attempts land</h2>
+                    <p className="mt-1 text-xs text-ink-3">
+                      Every scored attempt (against a draw with a result in), by match count.
+                    </p>
+                    {ins.totalScored === 0 ? (
+                      <p className={`${DASHED_EMPTY_CLASSES} mt-3`}>
+                        No scored attempts yet — this fills in once a draw&apos;s result is set.
+                      </p>
+                    ) : (
+                      <div className="mt-4 flex flex-col gap-2">
+                        {ins.histCounts.map((count, tier) => (
+                          <div key={tier} className="flex items-center gap-3">
+                            <span className="w-8 shrink-0 text-xs font-medium text-ink-3">
+                              {tier}/6
+                            </span>
+                            <div className="h-5 min-w-0 flex-1 overflow-hidden rounded-full bg-surface-2">
+                              <div
+                                className={`h-full rounded-full ${
+                                  tier >= 3 ? "bg-emerald-500" : "bg-ink-4"
+                                }`}
+                                style={{
+                                  width: `${Math.max(
+                                    (count / ins.totalScored) * 100,
+                                    count > 0 ? 2 : 0,
+                                  )}%`,
+                                }}
+                              />
+                            </div>
+                            <span className="w-14 shrink-0 text-right text-xs font-medium tabular-nums text-ink-2">
+                              {fmtCount(count)}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </section>
+
+                  <section className={CARD_CLASSES}>
+                    <h2 className="text-sm font-semibold text-ink">My numbers vs the machine</h2>
+                    <p className="mt-1 text-xs text-ink-3">
+                      How often you play a number, against how often it&apos;s been drawn.
+                    </p>
+                    {ins.favourites.length === 0 ? (
+                      <p className={`${DASHED_EMPTY_CLASSES} mt-3`}>
+                        Log some attempts to see this.
+                      </p>
+                    ) : (
+                      <>
+                        <div className="mt-4 flex flex-col gap-3">
+                          {ins.favourites.map((f) => (
+                            <div key={f.n} className="flex items-center gap-3">
+                              <NumberBall n={f.n} variant={ins.latestDrawSet.has(f.n) ? "match" : "neutral"} />
+                              <div className="flex min-w-0 flex-1 flex-col gap-1">
+                                <div className="h-2 rounded-full bg-surface-2">
+                                  <div
+                                    className="h-full rounded-full bg-ink-4"
+                                    style={{ width: `${(f.played / maxFavPlayed) * 100}%` }}
+                                  />
+                                </div>
+                                <div className="h-2 rounded-full bg-surface-2">
+                                  <div
+                                    className="h-full rounded-full bg-brand"
+                                    style={{ width: `${(f.drawn / maxFavDrawn) * 100}%` }}
+                                  />
+                                </div>
+                              </div>
+                              <span className="w-24 shrink-0 text-right text-xs tabular-nums text-ink-3">
+                                {fmtCount(f.played)}&times; / {fmtCount(f.drawn)}&times;
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                        <div className="mt-4 flex flex-wrap gap-4 text-xs text-ink-3">
+                          <span className="flex items-center gap-1.5">
+                            <span className="h-1.5 w-3.5 rounded-full bg-ink-4" aria-hidden />
+                            times you played it
+                          </span>
+                          <span className="flex items-center gap-1.5">
+                            <span className="h-1.5 w-3.5 rounded-full bg-brand" aria-hidden />
+                            times it was drawn
+                          </span>
+                        </div>
+                      </>
+                    )}
+                  </section>
+
+                  <section className={CARD_CLASSES}>
+                    <h2 className="text-sm font-semibold text-ink">Board coverage</h2>
+                    <p className="mt-1 text-xs text-ink-3">
+                      Every number, 1–58. Brighter means you play it more often. Ringed
+                      numbers were in the most recent result.
+                    </p>
+                    <div className="mt-4 grid grid-cols-[repeat(auto-fill,minmax(2.25rem,1fr))] gap-1.5">
+                      {ins.board.map((c) => {
+                        const isLatest = ins.latestDrawSet.has(c.n);
+                        const pct =
+                          ins.maxPlayed > 0
+                            ? Math.round((Math.min(c.played, ins.maxPlayed) / ins.maxPlayed) * 55)
+                            : 0;
+                        return (
+                          <div
+                            key={c.n}
+                            className={`flex aspect-square items-center justify-center rounded-md text-xs font-semibold tabular-nums transition-colors duration-150 ${
+                              isLatest
+                                ? "border border-success-line bg-success-soft text-success-text"
+                                : "border border-transparent text-ink-2"
+                            }`}
+                            style={
+                              !isLatest
+                                ? {
+                                    backgroundColor:
+                                      c.played > 0
+                                        ? `color-mix(in srgb, var(--brand) ${12 + pct}%, var(--surface-2))`
+                                        : "var(--surface-2)",
+                                  }
+                                : undefined
+                            }
+                            title={`Played ${c.played} time${c.played === 1 ? "" : "s"}`}
+                          >
+                            {String(c.n).padStart(2, "0")}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </section>
+                </div>
+              );
+            })()}
+        </>
+      )}
 
       <Modal open={drawModal.open} onClose={closeDrawModal} ariaLabelledBy="lotto-draw-title">
         <div className="mb-4 flex items-start justify-between gap-2">
