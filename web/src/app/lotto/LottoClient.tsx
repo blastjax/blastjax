@@ -16,7 +16,7 @@ import {
   type LottoAttemptRow,
   type LottoDrawDetail,
 } from "@/lib/api";
-import { formatDate } from "@/lib/dateFormat";
+import { formatDate, formatMonthDayShort } from "@/lib/dateFormat";
 import { fmtAmountOrDash, fmtCount } from "@/lib/formatNumber";
 import {
   ACTION_BUTTON_CLASSES,
@@ -110,6 +110,14 @@ function numbersToText(numbers: number[]): string {
  * export (historic results and attempts alike) writes numbers in. */
 function numbersToDashString(numbers: number[]): string {
   return numbers.map((n) => String(n).padStart(2, "0")).join("-");
+}
+
+/** `292772750.79` -> "292.77M" — the current-jackpot tile's own compact
+ * form, since a nine-figure jackpot is the one amount on this page too big
+ * for `fmtAmountOrDash`'s full-precision dollar figure to sit next to a
+ * bare match score. Below a million, just the plain amount. */
+function fmtJackpotCompact(n: number): string {
+  return n >= 1_000_000 ? `${(n / 1_000_000).toFixed(2)}M` : fmtAmountOrDash(n);
 }
 
 /** The stored "YYYY-MM-DD" -> "M/D/YYYY", for a txt export row. Distinct
@@ -746,24 +754,27 @@ export default function LottoClient() {
 
   const whatIfMatches = useMemo(() => findWhatIfMatches(draws), [draws]);
 
-  // A one-glance orientation strip — how much history is here, and the one
-  // number worth bragging about. `bestMatch` is -1 (rendered as "—") until
-  // at least one attempt has actually been checked against a real result.
+  // A one-glance orientation strip — the record to beat, and what's at
+  // stake next. `bestMatch` is -1 (rendered as "—") until at least one
+  // attempt has actually been checked against a real result. `draws` is
+  // newest-first, so the first jackpot found scanning from the top is the
+  // most recent draw that has one set.
   const overviewStats = useMemo(() => {
-    let resultsIn = 0;
-    let totalAttempts = 0;
     let bestMatch = -1;
+    let bestMatchDate: string | null = null;
     for (const d of draws) {
-      totalAttempts += d.attempts.length;
       if (d.draw.numbers.length !== 6) continue;
-      resultsIn += 1;
       const drawSet = new Set(d.draw.numbers);
       for (const a of d.attempts) {
         const count = a.numbers.filter((n) => drawSet.has(n)).length;
-        if (count > bestMatch) bestMatch = count;
+        if (count > bestMatch) {
+          bestMatch = count;
+          bestMatchDate = d.draw.draw_date;
+        }
       }
     }
-    return { drawCount: draws.length, resultsIn, totalAttempts, bestMatch };
+    const currentJackpotDraw = draws.find((d) => d.draw.jackpot_prize != null)?.draw ?? null;
+    return { bestMatch, bestMatchDate, currentJackpotDraw };
   }, [draws]);
 
   // Normally "This draw" is just the newest draw. But a draw you're still
@@ -1837,15 +1848,37 @@ export default function LottoClient() {
 
       {!loading && draws.length > 0 && (
         <>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <StatTile label="Draws tracked" value={fmtCount(overviewStats.drawCount)} tone="indigo" />
-            <StatTile label="Results in" value={fmtCount(overviewStats.resultsIn)} tone="emerald" />
-            <StatTile label="Attempts logged" value={fmtCount(overviewStats.totalAttempts)} tone="sky" />
-            <StatTile
-              label="Best match"
-              value={overviewStats.bestMatch >= 0 ? `${overviewStats.bestMatch}/6` : "—"}
-              tone="amber"
-            />
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className={`rounded-lg border p-4 ${STAT_TILE_TONES.emerald.card}`}>
+              <p className={`text-[11px] font-semibold uppercase tracking-wide ${STAT_TILE_TONES.emerald.label}`}>
+                Best match ever
+              </p>
+              <div className="mt-1 flex items-baseline gap-2">
+                <span className={`text-2xl font-bold tabular-nums ${STAT_TILE_TONES.emerald.value}`}>
+                  {overviewStats.bestMatch >= 0 ? `${overviewStats.bestMatch}/6` : "—"}
+                </span>
+                {overviewStats.bestMatchDate && (
+                  <span className="text-sm text-ink-3">{formatDate(overviewStats.bestMatchDate)}</span>
+                )}
+              </div>
+            </div>
+            <div className={`rounded-lg border p-4 ${STAT_TILE_TONES.indigo.card}`}>
+              <p className={`text-[11px] font-semibold uppercase tracking-wide ${STAT_TILE_TONES.indigo.label}`}>
+                Current jackpot
+              </p>
+              <div className="mt-1 flex items-baseline gap-2">
+                <span className={`text-2xl font-bold tabular-nums ${STAT_TILE_TONES.indigo.value}`}>
+                  {overviewStats.currentJackpotDraw?.jackpot_prize != null
+                    ? fmtJackpotCompact(overviewStats.currentJackpotDraw.jackpot_prize)
+                    : "—"}
+                </span>
+                {overviewStats.currentJackpotDraw && (
+                  <span className="text-sm text-ink-3">
+                    {formatMonthDayShort(overviewStats.currentJackpotDraw.draw_date)} draw
+                  </span>
+                )}
+              </div>
+            </div>
           </div>
 
           {/* Only worth a card when there's actually something to say — an
