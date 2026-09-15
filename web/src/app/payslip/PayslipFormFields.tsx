@@ -1,14 +1,14 @@
 "use client";
 
-import type { Dispatch, FocusEvent, SetStateAction } from "react";
+import type { Dispatch, SetStateAction } from "react";
 import {
   DEFAULT_COMPANY_COLUMN_FLAGS,
   type CompanyColumnFlags,
   type CompanyRow,
 } from "@/lib/api";
 import { MONTH_NAMES_FULL } from "@/lib/dateFormat";
-import { formatAmountOnBlur } from "@/lib/parseFormNumber";
 import { INPUT_CLASSES } from "@/lib/ui";
+import { AmountInput } from "@/components/AmountInput";
 import { YearPickerField } from "@/components/YearPickerField";
 import type { FormState } from "./payslipModalForm";
 import { MONTHS } from "./payslipModalForm";
@@ -49,26 +49,17 @@ export function PayslipFormFields({
   showPeriodYearMonth?: boolean;
   flags?: CompanyColumnFlags;
 }) {
-  const onAmountBlur =
-    (key: keyof FormState) => (e: FocusEvent<HTMLInputElement>) => {
-      const formatted = formatAmountOnBlur(e.target.value);
-      if (formatted != null) setForm((f) => ({ ...f, [key]: formatted }));
-    };
+  const onAmountChange = (key: keyof FormState) => (v: string) =>
+    setForm((f) => ({ ...f, [key]: v }));
 
   const deductionFields = (
     <>
       {flags.show_withholding_tax && (
         <label className="flex flex-col gap-1 text-sm">
           <span className="text-ink-2">Withholding tax</span>
-          <input
-            type="text"
-            inputMode="decimal"
-            className={INPUT_CLASSES}
+          <AmountInput
             value={form.withholding_tax}
-            onChange={(e) =>
-              setForm((f) => ({ ...f, withholding_tax: e.target.value }))
-            }
-            onBlur={onAmountBlur("withholding_tax")}
+            onChange={onAmountChange("withholding_tax")}
             disabled={disabled}
           />
         </label>
@@ -76,15 +67,9 @@ export function PayslipFormFields({
       {flags.show_sss_contribution && (
         <label className="flex flex-col gap-1 text-sm">
           <span className="text-ink-2">SSS contribution</span>
-          <input
-            type="text"
-            inputMode="decimal"
-            className={INPUT_CLASSES}
+          <AmountInput
             value={form.sss_contribution}
-            onChange={(e) =>
-              setForm((f) => ({ ...f, sss_contribution: e.target.value }))
-            }
-            onBlur={onAmountBlur("sss_contribution")}
+            onChange={onAmountChange("sss_contribution")}
             disabled={disabled}
           />
         </label>
@@ -92,15 +77,9 @@ export function PayslipFormFields({
       {flags.show_philhealth && (
         <label className="flex flex-col gap-1 text-sm">
           <span className="text-ink-2">Philhealth</span>
-          <input
-            type="text"
-            inputMode="decimal"
-            className={INPUT_CLASSES}
+          <AmountInput
             value={form.philhealth}
-            onChange={(e) =>
-              setForm((f) => ({ ...f, philhealth: e.target.value }))
-            }
-            onBlur={onAmountBlur("philhealth")}
+            onChange={onAmountChange("philhealth")}
             disabled={disabled}
           />
         </label>
@@ -110,15 +89,9 @@ export function PayslipFormFields({
           <span className="text-ink-2">
             Pag-ibig (Employee HDMF)
           </span>
-          <input
-            type="text"
-            inputMode="decimal"
-            className={INPUT_CLASSES}
+          <AmountInput
             value={form.pag_ibig}
-            onChange={(e) =>
-              setForm((f) => ({ ...f, pag_ibig: e.target.value }))
-            }
-            onBlur={onAmountBlur("pag_ibig")}
+            onChange={onAmountChange("pag_ibig")}
             disabled={disabled}
           />
         </label>
@@ -126,15 +99,9 @@ export function PayslipFormFields({
       {flags.show_mp2 && (
         <label className="flex flex-col gap-1 text-sm">
           <span className="text-ink-2">MP2</span>
-          <input
-            type="text"
-            inputMode="decimal"
-            className={INPUT_CLASSES}
+          <AmountInput
             value={form.mp2}
-            onChange={(e) =>
-              setForm((f) => ({ ...f, mp2: e.target.value }))
-            }
-            onBlur={onAmountBlur("mp2")}
+            onChange={onAmountChange("mp2")}
             disabled={disabled}
           />
         </label>
@@ -142,15 +109,9 @@ export function PayslipFormFields({
       {flags.show_trust_fund && (
         <label className="flex flex-col gap-1 text-sm">
           <span className="text-ink-2">Trust Fund</span>
-          <input
-            type="text"
-            inputMode="decimal"
-            className={INPUT_CLASSES}
+          <AmountInput
             value={form.trust_fund}
-            onChange={(e) =>
-              setForm((f) => ({ ...f, trust_fund: e.target.value }))
-            }
-            onBlur={onAmountBlur("trust_fund")}
+            onChange={onAmountChange("trust_fund")}
             disabled={disabled}
           />
         </label>
@@ -263,15 +224,9 @@ export function PayslipFormFields({
         .map(([key, label]) => (
           <label key={key} className="flex flex-col gap-1 text-sm">
             <span className="text-ink-2">{label}</span>
-            <input
-              type="text"
-              inputMode="decimal"
-              className={INPUT_CLASSES}
+            <AmountInput
               value={form[key]}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, [key]: e.target.value }))
-              }
-              onBlur={onAmountBlur(key)}
+              onChange={onAmountChange(key)}
               disabled={disabled}
             />
           </label>
@@ -281,15 +236,9 @@ export function PayslipFormFields({
           form.period_half === "2" && (
           <label className="flex flex-col gap-1 text-sm">
             <span className="text-ink-2">13th Month</span>
-            <input
-              type="text"
-              inputMode="decimal"
-              className={INPUT_CLASSES}
+            <AmountInput
               value={form.thirteenth_month}
-              onBlur={onAmountBlur("thirteenth_month")}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, thirteenth_month: e.target.value }))
-              }
+              onChange={onAmountChange("thirteenth_month")}
               disabled={disabled}
             />
           </label>

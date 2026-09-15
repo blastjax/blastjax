@@ -1,5 +1,6 @@
 "use client";
 
+import { AmountInput } from "@/components/AmountInput";
 import { PageHeader } from "@/components/PageHeader";
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { Modal } from "@/components/Modal";
@@ -12,11 +13,7 @@ import {
 } from "@/lib/api";
 import { formatMonthYearShort, monthKey, parseMonthKey } from "@/lib/dateFormat";
 import { fmtAmount } from "@/lib/formatNumber";
-import {
-  formatAmountNumber,
-  formatAmountOnBlur,
-  parseFormNumber,
-} from "@/lib/parseFormNumber";
+import { formatAmountNumber, parseFormNumber } from "@/lib/parseFormNumber";
 import {
   AMOUNT_NEGATIVE_CLASSES,
   CARD_CLASSES,
@@ -185,6 +182,7 @@ export default function MonthlyExpensesClient() {
 
   const onDelete = useCallback(
     async (id: number) => {
+      if (!window.confirm("Delete this monthly expense?")) return;
       setError(null);
       try {
         await deleteMonthlyExpense(id);
@@ -352,17 +350,10 @@ export default function MonthlyExpensesClient() {
           </label>
           <label className="flex flex-col gap-1 text-sm">
             <span className="text-ink-2">Amount</span>
-            <input
+            <AmountInput
               required
-              type="text"
-              inputMode="decimal"
-              className={INPUT_CLASSES}
               value={form.amount}
-              onChange={(e) => setForm((f) => ({ ...f, amount: e.target.value }))}
-              onBlur={(e) => {
-                const formatted = formatAmountOnBlur(e.target.value);
-                if (formatted != null) setForm((f) => ({ ...f, amount: formatted }));
-              }}
+              onChange={(v) => setForm((f) => ({ ...f, amount: v }))}
               disabled={saving}
             />
           </label>

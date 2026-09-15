@@ -63,6 +63,7 @@ export function Modal({
     >
       <div
         className={dialogClassName}
+        style={{ overscrollBehavior: "contain" }}
         role="dialog"
         aria-modal="true"
         aria-labelledby={ariaLabelledBy}

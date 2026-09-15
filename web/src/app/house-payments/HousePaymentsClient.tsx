@@ -1,5 +1,6 @@
 "use client";
 
+import { AmountInput } from "@/components/AmountInput";
 import { PageHeader } from "@/components/PageHeader";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Modal } from "@/components/Modal";
@@ -16,11 +17,7 @@ import {
   type HousePaymentEntry,
   type HousePaymentRow,
 } from "@/lib/api";
-import {
-  formatAmountNumber,
-  formatAmountOnBlur,
-  parseFormNumber,
-} from "@/lib/parseFormNumber";
+import { formatAmountNumber, parseFormNumber } from "@/lib/parseFormNumber";
 import { formatDate as fmtDate } from "@/lib/dateFormat";
 import { fmtAmountOrDash, fmtCount } from "@/lib/formatNumber";
 import {
@@ -546,19 +543,10 @@ export default function HousePaymentsClient() {
                     </label>
                     <label className="flex flex-col gap-1 text-sm">
                       <span className="text-ink-2">Amount</span>
-                      <input
+                      <AmountInput
                         required
-                        type="text"
-                        inputMode="decimal"
-                        className={INPUT_CLASSES}
                         value={entryForm.amount}
-                        onChange={(e) =>
-                          setEntryForm((f) => ({ ...f, amount: e.target.value }))
-                        }
-                        onBlur={(e) => {
-                          const formatted = formatAmountOnBlur(e.target.value);
-                          if (formatted != null) setEntryForm((f) => ({ ...f, amount: formatted }));
-                        }}
+                        onChange={(v) => setEntryForm((f) => ({ ...f, amount: v }))}
                         disabled={savingEntry}
                       />
                     </label>

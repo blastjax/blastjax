@@ -5,6 +5,7 @@ import {
   LayersIcon,
   WalletIcon,
 } from "@/components/Icons";
+import { AmountInput } from "@/components/AmountInput";
 import { PageHeader } from "@/components/PageHeader";
 import { StatCard } from "@/components/StatCard";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -25,11 +26,7 @@ import {
   type InstallmentLineRow,
   type InstallmentRow,
 } from "@/lib/api";
-import {
-  formatAmountNumber,
-  formatAmountOnBlur,
-  parseFormNumber,
-} from "@/lib/parseFormNumber";
+import { formatAmountNumber, parseFormNumber } from "@/lib/parseFormNumber";
 import { MONTH_NAMES_SHORT, formatMonthYear } from "@/lib/dateFormat";
 import { fmtAmount, fmtAmountOrDash } from "@/lib/formatNumber";
 import {
@@ -39,7 +36,6 @@ import {
   DASHED_EMPTY_CLASSES,
   DELETE_BUTTON_CLASSES,
   ERROR_ALERT_CLASSES,
-  INPUT_CLASSES,
   LOADING_TEXT_CLASSES,
   PAGE_CONTAINER_CLASSES,
   PRIMARY_BUTTON_CLASSES,
@@ -907,65 +903,35 @@ export default function InstallmentsClient() {
                               {fmtMonthYearFromDate(due)}
                             </td>
                             <td className={TABLE_CELL_CLASSES}>
-                              <input
+                              <AmountInput
                                 required
-                                type="text"
-                                inputMode="decimal"
-                                className={`w-24 ${INPUT_CLASSES}`}
+                                className="w-24"
                                 value={ld.principal}
-                                onChange={(e) =>
+                                onChange={(v) =>
                                   setLineDrafts((prev) => ({
                                     ...prev,
                                     [seq]: {
-                                      principal: e.target.value,
+                                      principal: v,
                                       interest: prev[seq]?.interest ?? "",
                                     },
                                   }))
                                 }
-                                onBlur={(e) => {
-                                  const formatted = formatAmountOnBlur(
-                                    e.target.value,
-                                  );
-                                  if (formatted == null) return;
-                                  setLineDrafts((prev) => ({
-                                    ...prev,
-                                    [seq]: {
-                                      principal: formatted,
-                                      interest: prev[seq]?.interest ?? "",
-                                    },
-                                  }));
-                                }}
                                 disabled={saving}
                               />
                             </td>
                             <td className={TABLE_CELL_CLASSES}>
-                              <input
-                                type="text"
-                                inputMode="decimal"
-                                className={`w-24 ${INPUT_CLASSES}`}
+                              <AmountInput
+                                className="w-24"
                                 value={ld.interest}
-                                onChange={(e) =>
+                                onChange={(v) =>
                                   setLineDrafts((prev) => ({
                                     ...prev,
                                     [seq]: {
                                       principal: prev[seq]?.principal ?? "",
-                                      interest: e.target.value,
+                                      interest: v,
                                     },
                                   }))
                                 }
-                                onBlur={(e) => {
-                                  const formatted = formatAmountOnBlur(
-                                    e.target.value,
-                                  );
-                                  if (formatted == null) return;
-                                  setLineDrafts((prev) => ({
-                                    ...prev,
-                                    [seq]: {
-                                      principal: prev[seq]?.principal ?? "",
-                                      interest: formatted,
-                                    },
-                                  }));
-                                }}
                                 disabled={saving}
                               />
                             </td>
@@ -1154,7 +1120,7 @@ export default function InstallmentsClient() {
                   </dl>
                   <div className="mt-3 h-2 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
                     <div
-                      className="h-full rounded-full bg-indigo-500 transition-all dark:bg-indigo-600"
+                      className="h-full rounded-full bg-indigo-500 transition-[width] dark:bg-indigo-600"
                       style={{ width: `${pct}%` }}
                     />
                   </div>
@@ -1254,7 +1220,7 @@ export default function InstallmentsClient() {
                   </dl>
                   <div className="mt-3 h-2 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
                     <div
-                      className="h-full rounded-full bg-zinc-400 transition-all dark:bg-zinc-500"
+                      className="h-full rounded-full bg-zinc-400 transition-[width] dark:bg-zinc-500"
                       style={{ width: `${pct}%` }}
                     />
                   </div>
@@ -1436,19 +1402,15 @@ export default function InstallmentsClient() {
                             )}
                           </td>
                           <td className={`${TABLE_CELL_CLASSES} cursor-auto`}>
-                            <input
-                              type="text"
-                              inputMode="decimal"
+                            <AmountInput
                               draggable={false}
-                              className={`w-28 cursor-text ${INPUT_CLASSES}`}
-                              value={
-                                ed?.principal ?? String(ln.principal)
-                              }
-                              onChange={(e) =>
+                              className="w-28 cursor-text"
+                              value={ed?.principal ?? String(ln.principal)}
+                              onChange={(v) =>
                                 setLineEdits((prev) => ({
                                   ...prev,
                                   [ln.id]: {
-                                    principal: e.target.value,
+                                    principal: v,
                                     interest:
                                       prev[ln.id]?.interest ??
                                       (ln.interest != null
@@ -1457,57 +1419,27 @@ export default function InstallmentsClient() {
                                   },
                                 }))
                               }
-                              onBlur={(e) => {
-                                const formatted = formatAmountOnBlur(e.target.value);
-                                if (formatted == null) return;
-                                setLineEdits((prev) => ({
-                                  ...prev,
-                                  [ln.id]: {
-                                    principal: formatted,
-                                    interest:
-                                      prev[ln.id]?.interest ??
-                                      (ln.interest != null
-                                        ? String(ln.interest)
-                                        : ""),
-                                  },
-                                }));
-                              }}
                             />
                           </td>
                           <td className={`${TABLE_CELL_CLASSES} cursor-auto`}>
-                            <input
-                              type="text"
-                              inputMode="decimal"
+                            <AmountInput
                               draggable={false}
-                              className={`w-24 cursor-text ${INPUT_CLASSES}`}
+                              className="w-24 cursor-text"
                               value={
                                 ed?.interest ??
                                 (ln.interest != null ? String(ln.interest) : "")
                               }
-                              onChange={(e) =>
+                              onChange={(v) =>
                                 setLineEdits((prev) => ({
                                   ...prev,
                                   [ln.id]: {
                                     principal:
                                       prev[ln.id]?.principal ??
                                       String(ln.principal),
-                                    interest: e.target.value,
+                                    interest: v,
                                   },
                                 }))
                               }
-                              onBlur={(e) => {
-                                const formatted = formatAmountOnBlur(e.target.value);
-                                if (formatted == null) return;
-                                setLineEdits((prev) => ({
-                                  ...prev,
-                                  [ln.id]: {
-                                    principal:
-                                      prev[ln.id]?.principal ??
-                                      String(ln.principal),
-                                    interest: formatted,
-                                  },
-                                }));
-                              }}
                             />
                           </td>
                           <td className={TABLE_CELL_CLASSES}>

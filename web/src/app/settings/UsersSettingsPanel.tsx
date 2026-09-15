@@ -190,7 +190,7 @@ export function UsersSettingsPanel() {
         {loading ? (
           <p className={LOADING_TEXT_CLASSES}>Loading users…</p>
         ) : loadError ? (
-          <div className={ERROR_ALERT_CLASSES}>{loadError}</div>
+          <div className={ERROR_ALERT_CLASSES} role="alert">{loadError}</div>
         ) : users.length === 0 ? (
           <div className={DASHED_EMPTY_CLASSES}>No users yet.</div>
         ) : (
@@ -242,7 +242,7 @@ export function UsersSettingsPanel() {
                         />
                       </div>
                     </div>
-                    {editError && <div className={ERROR_ALERT_CLASSES}>{editError}</div>}
+                    {editError && <div className={ERROR_ALERT_CLASSES} role="alert">{editError}</div>}
                     <div className="flex flex-wrap items-center gap-2">
                       <button
                         type="button"
@@ -335,7 +335,7 @@ export function UsersSettingsPanel() {
             />
           </div>
         </div>
-        {verifyError && <div className={`mt-3 ${ERROR_ALERT_CLASSES}`}>{verifyError}</div>}
+        {verifyError && <div className={`mt-3 ${ERROR_ALERT_CLASSES}`} role="alert">{verifyError}</div>}
         <div className="mt-4 flex flex-wrap items-center gap-3">
           <button
             type="button"
@@ -400,7 +400,7 @@ export function UsersSettingsPanel() {
             />
           </div>
         </div>
-        {addError && <div className={`mt-3 ${ERROR_ALERT_CLASSES}`}>{addError}</div>}
+        {addError && <div className={`mt-3 ${ERROR_ALERT_CLASSES}`} role="alert">{addError}</div>}
         <div className="mt-4 flex flex-wrap items-center gap-3">
           <button
             type="button"

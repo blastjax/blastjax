@@ -31,7 +31,9 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
       <MobileNavBackdrop />
       <div className="flex min-w-0 flex-1 flex-col">
         <Header />
-        <main className="min-w-0 flex-1">{children}</main>
+        <main id="main-content" tabIndex={-1} className="min-w-0 flex-1">
+          {children}
+        </main>
       </div>
     </div>
   );

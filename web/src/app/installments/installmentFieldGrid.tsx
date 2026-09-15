@@ -1,7 +1,7 @@
 "use client";
 
 import type { Dispatch, SetStateAction } from "react";
-import { formatAmountOnBlur } from "@/lib/parseFormNumber";
+import { AmountInput } from "@/components/AmountInput";
 import { INPUT_CLASSES } from "@/lib/ui";
 
 export type InstallmentFormState = {
@@ -77,19 +77,10 @@ export function InstallmentFieldGrid({
         <>
           <label className="flex flex-col gap-1 text-sm">
             <span className="text-ink-2">Principal</span>
-            <input
+            <AmountInput
               required
-              type="text"
-              inputMode="decimal"
-              className={INPUT_CLASSES}
               value={form.principal}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, principal: e.target.value }))
-              }
-              onBlur={(e) => {
-                const formatted = formatAmountOnBlur(e.target.value);
-                if (formatted != null) setForm((f) => ({ ...f, principal: formatted }));
-              }}
+              onChange={(v) => setForm((f) => ({ ...f, principal: v }))}
               disabled={saving}
             />
           </label>
@@ -97,18 +88,9 @@ export function InstallmentFieldGrid({
             <span className="text-ink-2">
               Interest (optional)
             </span>
-            <input
-              type="text"
-              inputMode="decimal"
-              className={INPUT_CLASSES}
+            <AmountInput
               value={form.interest}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, interest: e.target.value }))
-              }
-              onBlur={(e) => {
-                const formatted = formatAmountOnBlur(e.target.value);
-                if (formatted != null) setForm((f) => ({ ...f, interest: formatted }));
-              }}
+              onChange={(v) => setForm((f) => ({ ...f, interest: v }))}
               disabled={saving}
             />
           </label>
@@ -116,18 +98,9 @@ export function InstallmentFieldGrid({
             <span className="text-ink-2">
               Total (per payment, optional)
             </span>
-            <input
-              type="text"
-              inputMode="decimal"
-              className={INPUT_CLASSES}
+            <AmountInput
               value={form.payment_total}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, payment_total: e.target.value }))
-              }
-              onBlur={(e) => {
-                const formatted = formatAmountOnBlur(e.target.value);
-                if (formatted != null) setForm((f) => ({ ...f, payment_total: formatted }));
-              }}
+              onChange={(v) => setForm((f) => ({ ...f, payment_total: v }))}
               disabled={saving}
             />
           </label>
@@ -165,18 +138,9 @@ export function InstallmentFieldGrid({
           <span className="text-ink-2">
             Remaining (optional)
           </span>
-          <input
-            type="text"
-            inputMode="decimal"
-            className={INPUT_CLASSES}
+          <AmountInput
             value={form.remaining}
-            onChange={(e) =>
-              setForm((f) => ({ ...f, remaining: e.target.value }))
-            }
-            onBlur={(e) => {
-              const formatted = formatAmountOnBlur(e.target.value);
-              if (formatted != null) setForm((f) => ({ ...f, remaining: formatted }));
-            }}
+            onChange={(v) => setForm((f) => ({ ...f, remaining: v }))}
             disabled={saving}
           />
         </label>
@@ -186,18 +150,9 @@ export function InstallmentFieldGrid({
           <span className="text-ink-2">
             Original total (optional)
           </span>
-          <input
-            type="text"
-            inputMode="decimal"
-            className={INPUT_CLASSES}
+          <AmountInput
             value={form.original_total}
-            onChange={(e) =>
-              setForm((f) => ({ ...f, original_total: e.target.value }))
-            }
-            onBlur={(e) => {
-              const formatted = formatAmountOnBlur(e.target.value);
-              if (formatted != null) setForm((f) => ({ ...f, original_total: formatted }));
-            }}
+            onChange={(v) => setForm((f) => ({ ...f, original_total: v }))}
             disabled={saving}
           />
         </label>

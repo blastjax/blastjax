@@ -309,3 +309,16 @@ select {
   outline: 2px solid var(--brand);
   outline-offset: 1px;
 }
+
+/* One place to honor prefers-reduced-motion for every transition/animation
+ * in the app, instead of a reduced-motion variant on each component. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

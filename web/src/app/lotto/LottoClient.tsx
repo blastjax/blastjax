@@ -1,5 +1,6 @@
 "use client";
 
+import { AmountInput } from "@/components/AmountInput";
 import { PageHeader } from "@/components/PageHeader";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Modal } from "@/components/Modal";
@@ -1846,13 +1847,10 @@ export default function LottoClient() {
               <span className="text-ink-2">
                 Jackpot prize <span className="font-normal text-ink-4">(optional)</span>
               </span>
-              <input
-                type="text"
-                inputMode="decimal"
-                className={INPUT_CLASSES}
+              <AmountInput
                 value={drawModal.jackpotText}
                 disabled={saving}
-                onChange={(e) => setDrawModal((m) => ({ ...m, jackpotText: e.target.value }))}
+                onChange={(v) => setDrawModal((m) => ({ ...m, jackpotText: v }))}
               />
             </label>
             <label className="flex min-w-[8rem] flex-1 flex-col gap-1 text-sm">

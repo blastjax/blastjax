@@ -1,5 +1,6 @@
 "use client";
 
+import { AmountInput } from "@/components/AmountInput";
 import { PageHeader } from "@/components/PageHeader";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
@@ -16,11 +17,7 @@ import {
   type CreditCardRow,
   type InstallmentRow,
 } from "@/lib/api";
-import {
-  formatAmountNumber,
-  formatAmountOnBlur,
-  parseFormNumber,
-} from "@/lib/parseFormNumber";
+import { formatAmountNumber, parseFormNumber } from "@/lib/parseFormNumber";
 import { formatDate } from "@/lib/dateFormat";
 import { fmtAmountOrDash } from "@/lib/formatNumber";
 import {
@@ -652,17 +649,7 @@ export default function CreditCardClient() {
                       <span className="text-ink-2">
                         How much can you pay per month?
                       </span>
-                      <input
-                        type="text"
-                        inputMode="decimal"
-                        className={INPUT_CLASSES}
-                        value={calcPaymentInput}
-                        onChange={(e) => setCalcPaymentInput(e.target.value)}
-                        onBlur={(e) => {
-                          const formatted = formatAmountOnBlur(e.target.value);
-                          if (formatted != null) setCalcPaymentInput(formatted);
-                        }}
-                      />
+                      <AmountInput value={calcPaymentInput} onChange={setCalcPaymentInput} />
                     </label>
                     <div className="rounded-lg border border-line p-4 text-sm">
                       {calcPaymentInput.trim() === "" ? (
@@ -879,51 +866,28 @@ export default function CreditCardClient() {
           </label>
           <label className="flex flex-col gap-1 text-sm">
             <span className="text-ink-2">Credit limit</span>
-            <input
+            <AmountInput
               required
-              type="text"
-              inputMode="decimal"
-              className={INPUT_CLASSES}
               value={cardForm.credit_limit}
-              onChange={(e) => setCardForm((f) => ({ ...f, credit_limit: e.target.value }))}
-              onBlur={(e) => {
-                const formatted = formatAmountOnBlur(e.target.value);
-                if (formatted != null) setCardForm((f) => ({ ...f, credit_limit: formatted }));
-              }}
+              onChange={(v) => setCardForm((f) => ({ ...f, credit_limit: v }))}
               disabled={cardSaving}
             />
           </label>
           <label className="flex flex-col gap-1 text-sm">
             <span className="text-ink-2">Last statement balance</span>
-            <input
+            <AmountInput
               required
-              type="text"
-              inputMode="decimal"
-              className={INPUT_CLASSES}
               value={cardForm.last_statement_balance}
-              onChange={(e) =>
-                setCardForm((f) => ({ ...f, last_statement_balance: e.target.value }))
-              }
-              onBlur={(e) => {
-                const formatted = formatAmountOnBlur(e.target.value);
-                if (formatted != null) setCardForm((f) => ({ ...f, last_statement_balance: formatted }));
-              }}
+              onChange={(v) => setCardForm((f) => ({ ...f, last_statement_balance: v }))}
               disabled={cardSaving}
             />
           </label>
           <label className="flex flex-col gap-1 text-sm">
             <span className="text-ink-2">Minimum amount due</span>
-            <input
+            <AmountInput
               required
-              type="text"
-              inputMode="decimal"
-              className={INPUT_CLASSES}
               value={cardForm.minimum_due}
-              onChange={(e) => setCardForm((f) => ({ ...f, minimum_due: e.target.value }))}
-              onBlur={(e) => {
-                const formatted = formatAmountOnBlur(e.target.value);
-                if (formatted != null) setCardForm((f) => ({ ...f, minimum_due: formatted }));
-              }}
+              onChange={(v) => setCardForm((f) => ({ ...f, minimum_due: v }))}
               disabled={cardSaving}
             />
           </label>
@@ -1005,17 +969,10 @@ export default function CreditCardClient() {
         <form onSubmit={submitPaymentForm} className="grid gap-4">
           <label className="flex flex-col gap-1 text-sm">
             <span className="text-ink-2">Amount</span>
-            <input
+            <AmountInput
               required
-              type="text"
-              inputMode="decimal"
-              className={INPUT_CLASSES}
               value={paymentForm.amount}
-              onChange={(e) => setPaymentForm((f) => ({ ...f, amount: e.target.value }))}
-              onBlur={(e) => {
-                const formatted = formatAmountOnBlur(e.target.value);
-                if (formatted != null) setPaymentForm((f) => ({ ...f, amount: formatted }));
-              }}
+              onChange={(v) => setPaymentForm((f) => ({ ...f, amount: v }))}
               disabled={paymentSaving}
             />
           </label>
@@ -1091,17 +1048,10 @@ export default function CreditCardClient() {
         <form onSubmit={submitBalanceForm} className="grid gap-4">
           <label className="flex flex-col gap-1 text-sm">
             <span className="text-ink-2">Available credit</span>
-            <input
+            <AmountInput
               required
-              type="text"
-              inputMode="decimal"
-              className={INPUT_CLASSES}
               value={balanceForm}
-              onChange={(e) => setBalanceForm(e.target.value)}
-              onBlur={(e) => {
-                const formatted = formatAmountOnBlur(e.target.value);
-                if (formatted != null) setBalanceForm(formatted);
-              }}
+              onChange={setBalanceForm}
               disabled={balanceSaving}
             />
           </label>

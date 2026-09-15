@@ -1,5 +1,6 @@
 "use client";
 
+import { AmountInput } from "@/components/AmountInput";
 import { PageHeader } from "@/components/PageHeader";
 import {
   memo,
@@ -34,7 +35,6 @@ import { fmtAmount, fmtCompactMoney } from "@/lib/formatNumber";
 import {
   evaluateAmountExpression,
   formatAmountNumber,
-  formatAmountOnBlur,
   parseFormNumber,
 } from "@/lib/parseFormNumber";
 import {
@@ -1242,6 +1242,7 @@ export default function CalendarClient() {
 
   const onDeleteExpense = useCallback(
     async (id: number) => {
+      if (!window.confirm("Delete this expense?")) return;
       setExpenseError(null);
       try {
         await deleteFixedExpense(id);
@@ -1255,6 +1256,7 @@ export default function CalendarClient() {
 
   const onDeleteMonthlyExpense = useCallback(
     async (id: number) => {
+      if (!window.confirm("Delete this monthly expense?")) return;
       setExpenseError(null);
       try {
         await deleteMonthlyExpense(id);
@@ -1706,17 +1708,10 @@ export default function CalendarClient() {
           >
             <label className="flex flex-col gap-1 text-sm">
               <span className="text-ink-2">Amount</span>
-              <input
+              <AmountInput
                 required
-                type="text"
-                inputMode="decimal"
-                className={INPUT_CLASSES}
                 value={expenseForm.amount}
-                onChange={(e) => setExpenseForm((f) => ({ ...f, amount: e.target.value }))}
-                onBlur={(e) => {
-                  const formatted = formatAmountOnBlur(e.target.value);
-                  if (formatted != null) setExpenseForm((f) => ({ ...f, amount: formatted }));
-                }}
+                onChange={(v) => setExpenseForm((f) => ({ ...f, amount: v }))}
                 disabled={savingExpense}
               />
             </label>
@@ -1856,17 +1851,10 @@ export default function CalendarClient() {
                 <span className="text-ink-2">
                   Amount spent on day {transfer.fromDay} today
                 </span>
-                <input
-                  type="text"
-                  inputMode="decimal"
+                <AmountInput
                   autoFocus
-                  className={INPUT_CLASSES}
                   value={transferSpent}
-                  onChange={(e) => handleTransferSpentChange(e.target.value)}
-                  onBlur={(e) => {
-                    const formatted = formatAmountOnBlur(e.target.value);
-                    if (formatted != null) setTransferSpent(formatted);
-                  }}
+                  onChange={handleTransferSpentChange}
                   disabled={savingTransfer}
                 />
                 <span className="text-xs text-ink-3">
@@ -1878,17 +1866,11 @@ export default function CalendarClient() {
                   Amount to move (max {fmtMoney(transfer.fromAmount)})
                 </span>
                 <div className="flex gap-2">
-                  <input
+                  <AmountInput
                     required
-                    type="text"
-                    inputMode="decimal"
-                    className={`flex-1 ${INPUT_CLASSES}`}
+                    className="flex-1"
                     value={transferAmount}
-                    onChange={(e) => setTransferAmount(e.target.value)}
-                    onBlur={(e) => {
-                      const formatted = formatAmountOnBlur(e.target.value);
-                      if (formatted != null) setTransferAmount(formatted);
-                    }}
+                    onChange={setTransferAmount}
                     disabled={savingTransfer}
                   />
                   <button
@@ -1949,18 +1931,12 @@ export default function CalendarClient() {
                 <span className="text-ink-2">
                   Amount spent (e.g. 100-10 or 100+10)
                 </span>
-                <input
+                <AmountInput
                   required
-                  type="text"
-                  inputMode="decimal"
+                  mode="expression"
                   autoFocus
-                  className={INPUT_CLASSES}
                   value={spendAmount}
-                  onChange={(e) => setSpendAmount(e.target.value)}
-                  onBlur={(e) => {
-                    const evaluated = evaluateAmountExpression(e.target.value);
-                    if (evaluated != null) setSpendAmount(evaluated);
-                  }}
+                  onChange={setSpendAmount}
                   disabled={savingSpend}
                 />
               </label>

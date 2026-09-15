@@ -167,7 +167,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
             className={FIELD_CLASS}
           />
           {error ? (
-            <p className="mb-3 text-sm text-danger-text">{error}</p>
+            <p className="mb-3 text-sm text-danger-text" role="alert">{error}</p>
           ) : null}
           <button
             type="submit"

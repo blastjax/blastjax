@@ -289,13 +289,13 @@ export function CompaniesSettingsPanel() {
         {loading ? (
           <p className={LOADING_TEXT_CLASSES}>Loading companies…</p>
         ) : loadError ? (
-          <div className={ERROR_ALERT_CLASSES}>{loadError}</div>
+          <div className={ERROR_ALERT_CLASSES} role="alert">{loadError}</div>
         ) : companies.length === 0 ? (
           <div className={DASHED_EMPTY_CLASSES}>No companies yet.</div>
         ) : (
           <>
             {reorderError && (
-              <div className={`mb-3 ${ERROR_ALERT_CLASSES}`}>{reorderError}</div>
+              <div className={`mb-3 ${ERROR_ALERT_CLASSES}`} role="alert">{reorderError}</div>
             )}
             <ul className="divide-y divide-zinc-200 rounded-lg border border-line dark:divide-zinc-900">
               {companies.map((company) => (
@@ -327,7 +327,7 @@ export function CompaniesSettingsPanel() {
                       </span>
                       <ColumnToggleFieldset flags={editFlags} setFlags={setEditFlags} />
                     </div>
-                    {editError && <div className={ERROR_ALERT_CLASSES}>{editError}</div>}
+                    {editError && <div className={ERROR_ALERT_CLASSES} role="alert">{editError}</div>}
                     <div className="flex flex-wrap items-center gap-2">
                       <button
                         type="button"
@@ -397,7 +397,7 @@ export function CompaniesSettingsPanel() {
           </span>
           <ColumnToggleFieldset flags={newFlags} setFlags={setNewFlags} />
         </div>
-        {addError && <div className={`mt-3 ${ERROR_ALERT_CLASSES}`}>{addError}</div>}
+        {addError && <div className={`mt-3 ${ERROR_ALERT_CLASSES}`} role="alert">{addError}</div>}
         <div className="mt-4 flex flex-wrap items-center gap-3">
           <button
             type="button"

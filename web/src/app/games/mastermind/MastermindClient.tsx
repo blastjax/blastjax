@@ -456,7 +456,8 @@ function GuessPeg({
   onSelect: () => void;
 }) {
   const empty = value === EMPTY_PEG;
-  const base = "h-9 w-9 shrink-0 rounded-full border-2 transition-all duration-150";
+  const base =
+    "h-9 w-9 shrink-0 rounded-full border-2 transition-[border-color,box-shadow,filter,opacity] duration-150";
   if (!interactive) {
     return (
       <span
