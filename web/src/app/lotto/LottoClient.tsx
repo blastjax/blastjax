@@ -1548,7 +1548,7 @@ export default function LottoClient() {
         title="Double-click for edit/delete"
         className={
           hero
-            ? "rounded-xl border border-indigo-200 bg-indigo-50/40 p-5 shadow-xs dark:border-indigo-900 dark:bg-indigo-950/20 sm:p-6"
+            ? "rounded-xl bg-indigo-50/40 p-5 shadow-xs dark:bg-indigo-950/20 sm:p-6"
             : CARD_CLASSES
         }
         onDoubleClick={(e) => {
