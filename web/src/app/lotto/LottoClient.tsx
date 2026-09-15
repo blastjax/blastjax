@@ -12,7 +12,6 @@ import {
   getLottoDraws,
   importLottoDrawResultsText,
   setLottoDraw,
-  updateLottoAttempt,
   updateLottoDraw,
   type LottoAttemptRow,
   type LottoDrawDetail,
@@ -1051,75 +1050,6 @@ export default function LottoClient() {
     }
   };
 
-  /** The first unused ticket number for a draw, so a freshly-grouped pair
-   * gets a ticket that doesn't collide with any existing one. */
-  const nextTicketNumber = (attempts: LottoAttemptRow[]): number =>
-    attempts.reduce((max, a) => (a.ticket != null && a.ticket > max ? a.ticket : max), 0) + 1;
-
-  const setAttemptTicket = async (
-    drawId: number,
-    attempt: LottoAttemptRow,
-    ticket: number | null,
-  ) => {
-    if (attempt.ticket === ticket) return;
-    setSaving(true);
-    setError(null);
-    try {
-      const detail = await updateLottoAttempt(drawId, attempt.id, attempt.numbers, ticket);
-      upsertLocalDraw(detail);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to group attempt");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  /** The attempt named by a drop event's drag data, looked up in current state. */
-  const attemptFromDragEvent = (
-    drawId: number,
-    e: React.DragEvent,
-  ): LottoAttemptRow | null => {
-    const id = Number(e.dataTransfer.getData("text/plain"));
-    if (!Number.isFinite(id)) return null;
-    return draws.find((d) => d.draw.id === drawId)?.attempts.find((a) => a.id === id) ?? null;
-  };
-
-  /** Dropping one attempt onto another groups them: if the target is
-   * already on a ticket, the dragged attempt joins it; if neither is
-   * grouped yet, a new ticket is minted for both. */
-  const onDropOnAttempt = async (
-    drawId: number,
-    target: LottoAttemptRow,
-    e: React.DragEvent,
-  ) => {
-    e.preventDefault();
-    const dragged = attemptFromDragEvent(drawId, e);
-    if (!dragged || dragged.id === target.id) return;
-    let ticket = target.ticket;
-    if (ticket == null) {
-      const draw = draws.find((d) => d.draw.id === drawId);
-      ticket = nextTicketNumber(draw?.attempts ?? []);
-      await setAttemptTicket(drawId, target, ticket);
-    }
-    await setAttemptTicket(drawId, dragged, ticket);
-  };
-
-  /** Dropping an attempt directly onto a ticket cluster joins that ticket. */
-  const onDropOnTicket = async (drawId: number, ticket: number, e: React.DragEvent) => {
-    e.preventDefault();
-    const dragged = attemptFromDragEvent(drawId, e);
-    if (!dragged) return;
-    await setAttemptTicket(drawId, dragged, ticket);
-  };
-
-  /** Dropping an attempt onto the ungrouped section pulls it out of its ticket. */
-  const onDropToUngroup = async (drawId: number, e: React.DragEvent) => {
-    e.preventDefault();
-    const dragged = attemptFromDragEvent(drawId, e);
-    if (!dragged) return;
-    await setAttemptTicket(drawId, dragged, null);
-  };
-
   const openPasteAttempts = () => {
     setPasteFormError(null);
     setPasteModal({ open: true, drawDate: "", attemptsText: "" });
@@ -1253,11 +1183,10 @@ export default function LottoClient() {
   };
 
   /** Renders one draw's full card: result balls, jackpot/winners, and its
-   * attempts (grouped by ticket, drag-and-drop to regroup). Edit/Delete for
-   * the draw, a ticket, or an ungrouped attempt aren't on the card face by
-   * default — double-click that thing (see `revealedActions`) to reveal a
-   * pencil/trash icon pair for it. Hide/Unhide stays always-visible, same
-   * as everywhere else in this file.
+   * attempts (grouped by ticket). Edit/Delete for the draw, a ticket, or an
+   * ungrouped attempt aren't on the card face by default — double-click
+   * that thing (see `revealedActions`) to reveal a pencil/trash icon pair
+   * for it.
    *
    * `hero: true` is the "This draw" tab's spotlight treatment: bigger
    * balls, an eyebrow label, and the filter/sort controls
@@ -1315,10 +1244,9 @@ export default function LottoClient() {
     // one physical ticket share a ticket number, so they're grouped
     // together instead of scattered across a flat list. Clusters keep
     // the order the tickets were logged in (that sequence is already
-    // right) — bumpMatches only lifts a 3/6-or-better ticket to the
-    // top, without otherwise reshuffling anything. Ungrouped attempts
-    // sit in their own section underneath (drag one onto a ticket, or
-    // onto another ungrouped attempt, to group it).
+    // right) — bumpMatches only lifts a 3/6-or-better ticket to the top,
+    // without otherwise reshuffling anything. Ungrouped attempts sit in
+    // their own section underneath (edit one to give it a ticket number).
     type AttemptCluster = {
       ticket: number;
       items: typeof attemptsByMatch;
@@ -1346,8 +1274,8 @@ export default function LottoClient() {
       (c) => c.bestMatch >= 3,
     );
     // "Best first" is the hero's read-only leaderboard view — every
-    // attempt across every ticket, ranked by match count, no drag-and-drop
-    // or per-row actions (switch back to "By ticket" for those).
+    // attempt across every ticket, ranked by match count, no per-row
+    // actions (switch back to "By ticket" for those).
     const rankedAttempts =
       hero && attemptSort === "best"
         ? [...attemptsByMatch].sort((a, b) => b.matchCount - a.matchCount)
@@ -1380,7 +1308,7 @@ export default function LottoClient() {
     // A ticketed attempt is edited/deleted as part of its ticket
     // (double-click the ticket card) — only an ungrouped attempt gets its
     // own double-click, since there's no ticket to fold it into.
-    const renderAttemptRow = (attempt: LottoAttemptRow, matchCount: number) => {
+    const renderAttemptRow = (attempt: LottoAttemptRow) => {
       const showActions =
         attempt.ticket == null &&
         revealedActions?.type === "attempt" &&
@@ -1389,30 +1317,8 @@ export default function LottoClient() {
       return (
       <li
         key={attempt.id}
-        draggable
-        title={
-          attempt.ticket == null
-            ? "Drag to group — double-click for edit/delete"
-            : "Drag onto another attempt or ticket to group them"
-        }
-        className="flex cursor-grab items-center gap-2 rounded-lg active:cursor-grabbing"
-        onDragStart={(e) => {
-          const el = e.target as HTMLElement | null;
-          if (!el || el.closest("button")) {
-            e.preventDefault();
-            return;
-          }
-          e.dataTransfer.setData("text/plain", String(attempt.id));
-          e.dataTransfer.effectAllowed = "move";
-        }}
-        onDragOver={(e) => {
-          e.preventDefault();
-          e.dataTransfer.dropEffect = "move";
-        }}
-        onDrop={(e) => {
-          e.stopPropagation();
-          void onDropOnAttempt(detail.draw.id, attempt, e);
-        }}
+        title={attempt.ticket == null ? "Double-click for edit/delete" : undefined}
+        className="flex items-center gap-2 rounded-lg"
         onDoubleClick={
           attempt.ticket == null
             ? (e) => {
@@ -1431,9 +1337,6 @@ export default function LottoClient() {
             />
           ))}
         </div>
-        <span className="flex h-9 w-12 shrink-0 items-center justify-center rounded-lg bg-surface-2 text-xs font-semibold tabular-nums text-ink-2">
-          {hasResult ? `${matchCount}/6` : "—"}
-        </span>
         {showActions && (
           <div
             className="flex shrink-0 items-center gap-1"
@@ -1688,11 +1591,6 @@ export default function LottoClient() {
                         ? "border-emerald-200 bg-emerald-50/40 dark:border-emerald-900 dark:bg-emerald-950/20"
                         : "border-line bg-surface-2/50"
                     }`}
-                    onDragOver={(e) => {
-                      e.preventDefault();
-                      e.dataTransfer.dropEffect = "move";
-                    }}
-                    onDrop={(e) => void onDropOnTicket(detail.draw.id, cluster.ticket, e)}
                     onDoubleClick={(e) => {
                       e.stopPropagation();
                       toggleRevealed({ type: "ticket", drawId: detail.draw.id, ticket: cluster.ticket });
@@ -1722,16 +1620,6 @@ export default function LottoClient() {
                           onClick={(e) => e.stopPropagation()}
                           onDoubleClick={(e) => e.stopPropagation()}
                         >
-                          <button
-                            type="button"
-                            disabled={saving}
-                            aria-label="Add attempt to this ticket"
-                            title="Add attempt to this ticket"
-                            className={ICON_BUTTON_CLASSES}
-                            onClick={() => openAddAttempts(detail.draw.id, cluster.ticket)}
-                          >
-                            +
-                          </button>
                           {showActions && (
                             <>
                               <button
@@ -1760,9 +1648,7 @@ export default function LottoClient() {
                       </div>
                     </div>
                     <ul className="flex flex-col gap-2">
-                      {cluster.items.map(({ attempt, matchCount }) =>
-                        renderAttemptRow(attempt, matchCount),
-                      )}
+                      {cluster.items.map(({ attempt }) => renderAttemptRow(attempt))}
                     </ul>
                   </div>
                   );
@@ -1776,21 +1662,12 @@ export default function LottoClient() {
                     ? "rounded-lg border border-dashed border-line-strong p-3"
                     : ""
                 }
-                onDragOver={(e) => {
-                  e.preventDefault();
-                  e.dataTransfer.dropEffect = "move";
-                }}
-                onDrop={(e) => void onDropToUngroup(detail.draw.id, e)}
               >
                 {ticketClusters.length > 0 && (
-                  <div className="mb-2 text-xs font-medium text-ink-3">
-                    Ungrouped — drag onto a ticket (or another attempt) to group
-                  </div>
+                  <div className="mb-2 text-xs font-medium text-ink-3">Ungrouped</div>
                 )}
                 <ul className="flex flex-col gap-2">
-                  {orderedLooseItems.map(({ attempt, matchCount }) =>
-                    renderAttemptRow(attempt, matchCount),
-                  )}
+                  {orderedLooseItems.map(({ attempt }) => renderAttemptRow(attempt))}
                 </ul>
               </div>
             )}
@@ -1812,9 +1689,9 @@ export default function LottoClient() {
   };
 
   /** History tab's compact one-line-per-draw row. Clicking it expands in
-   * place into the full `renderDrawCard` (attempts, drag-and-drop,
-   * edit/hide/delete) — nothing about managing a historic draw is lost,
-   * it's just tucked behind a click instead of always open. */
+   * place into the full `renderDrawCard` (attempts, edit/delete) —
+   * nothing about managing a historic draw is lost, it's just tucked
+   * behind a click instead of always open. */
   const renderHistoryRow = (detail: LottoDrawDetail) => {
     if (expandedHistoryDrawIds.has(detail.draw.id)) {
       return (
