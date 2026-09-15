@@ -310,27 +310,6 @@ select {
   outline-offset: 1px;
 }
 
-/* The lotto page's hero draw balls pop in on mount/replay, staggered per
- * ball via an inline animation-delay. transform/opacity only, so it stays
- * compositor-friendly; covered by the prefers-reduced-motion block below
- * like every other animation in the app. */
-@keyframes lotto-ball-pop {
-  0% {
-    opacity: 0;
-    transform: translateY(8px) scale(0.82);
-  }
-  60% {
-    transform: translateY(0) scale(1.06);
-  }
-  100% {
-    opacity: 1;
-    transform: none;
-  }
-}
-.animate-lotto-pop {
-  animation: lotto-ball-pop 420ms cubic-bezier(0.2, 0.9, 0.25, 1) both;
-}
-
 /* One place to honor prefers-reduced-motion for every transition/animation
  * in the app, instead of a reduced-motion variant on each component. */
 @media (prefers-reduced-motion: reduce) {
