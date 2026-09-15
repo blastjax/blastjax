@@ -1168,30 +1168,37 @@ export default function CalendarClient() {
   );
 
   /**
-   * Resets every still-active (today or later) day in the viewed month back
-   * to its pay period's even split — the fix for overrides (from a manual
+   * Resets every still-active day in the viewed month back to its pay
+   * period's even split — the fix for overrides (from a manual
    * drag/transfer, or a "log spend" redistribution) going stale once a
    * monthly expense is added, edited, moved between halves, or deleted.
    * Past days are left untouched so already-logged history doesn't move.
+   * `scope: "future"` also excludes today, for resetting only the days
+   * still ahead without touching what's already been logged today.
    */
-  const autoDivideActiveDays = useCallback(async () => {
-    const targets = dayCells.filter((d) => !d.isPast && d.defaultAmount != null);
-    if (targets.length === 0) return;
-    setError(null);
-    setAutoDividing(true);
-    try {
-      const overrides = targets.map((d) => ({
-        day: d.iso,
-        amount: roundCents(d.defaultAmount as number),
-      }));
-      const r = await bulkUpsertCalendarDayOverrides(overrides);
-      setDayOverrides(new Map(r.overrides.map((o) => [o.day, o.amount])));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to auto-divide budget");
-    } finally {
-      setAutoDividing(false);
-    }
-  }, [dayCells]);
+  const autoDivideActiveDays = useCallback(
+    async (scope: "activeToday" | "future" = "activeToday") => {
+      const targets = dayCells.filter(
+        (d) => !d.isPast && (scope === "activeToday" || !d.isToday) && d.defaultAmount != null,
+      );
+      if (targets.length === 0) return;
+      setError(null);
+      setAutoDividing(true);
+      try {
+        const overrides = targets.map((d) => ({
+          day: d.iso,
+          amount: roundCents(d.defaultAmount as number),
+        }));
+        const r = await bulkUpsertCalendarDayOverrides(overrides);
+        setDayOverrides(new Map(r.overrides.map((o) => [o.day, o.amount])));
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to auto-divide budget");
+      } finally {
+        setAutoDividing(false);
+      }
+    },
+    [dayCells],
+  );
 
   const openExpenseModal = useCallback((half: PeriodHalf) => {
     setExpenseError(null);
@@ -1569,12 +1576,21 @@ export default function CalendarClient() {
                 )}
                 <button
                   type="button"
-                  onClick={() => void autoDivideActiveDays()}
+                  onClick={() => void autoDivideActiveDays("activeToday")}
                   disabled={autoDividing}
                   title="Reset today and future days this month to an even split of their pay period's budget"
                   className={`${ACTION_BUTTON_CLASSES} disabled:cursor-not-allowed`}
                 >
                   {autoDividing ? "Dividing…" : "Auto-divide"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void autoDivideActiveDays("future")}
+                  disabled={autoDividing}
+                  title="Reset days after today (not today) this month to an even split of their pay period's budget"
+                  className={`${ACTION_BUTTON_CLASSES} disabled:cursor-not-allowed`}
+                >
+                  {autoDividing ? "Dividing…" : "Auto-divide (future)"}
                 </button>
               </div>
             </div>
