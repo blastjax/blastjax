@@ -657,10 +657,20 @@ export default function LottoClient() {
     return { drawCount: draws.length, resultsIn, totalAttempts, bestMatch };
   }, [draws]);
 
+  // Normally the pinned card is just the newest draw. But a draw you're
+  // still waiting on results for — one with attempts already logged — is
+  // more useful up top than an older draw's result, even if it isn't the
+  // newest by date. `draws` is sorted newest-first, so `find` picks the
+  // most recent such pending draw.
+  const pinnedDraw =
+    draws.find((d) => d.attempts.length > 0 && d.draw.numbers.length !== 6) ?? draws[0];
+
   // `draws` is already sorted newest-first, so same-year draws are always
-  // contiguous — one pass buckets them into ordered year groups.
+  // contiguous — one pass buckets them into ordered year groups, skipping
+  // whichever draw is pinned above so it isn't shown twice.
   const yearGroups: { year: string; items: LottoDrawDetail[] }[] = [];
   for (const detail of draws) {
+    if (detail.draw.id === pinnedDraw?.draw.id) continue;
     const year = detail.draw.draw_date.slice(0, 4);
     const last = yearGroups[yearGroups.length - 1];
     if (last && last.year === year) {
@@ -1052,10 +1062,9 @@ export default function LottoClient() {
       setPasteFormError("Paste in some numbers first.");
       return;
     }
-    let drawDate: string;
+    const drawDate = pasteModal.drawDate;
     let blocks: TicketBlock[];
     try {
-      drawDate = parseDrawDate(pasteModal.drawDate);
       blocks = parseTicketsText(pasteModal.attemptsText);
     } catch (err) {
       setPasteFormError(err instanceof Error ? err.message : "Invalid input");
@@ -1754,16 +1763,14 @@ export default function LottoClient() {
         </div>
       )}
 
-      {/* Most recent draw overall, pinned above every year group instead of
-       * living inside the current year's card. */}
-      {draws.length > 0 && renderDrawCard(draws[0])}
+      {/* Pinned above every year group instead of living inside its own
+       * year's card — see `pinnedDraw` above for which draw that is. */}
+      {pinnedDraw && renderDrawCard(pinnedDraw)}
 
       <div className="flex flex-col gap-8">
-        {yearGroups.map((group, i) => {
+        {yearGroups.map((group) => {
           const expanded = expandedYears.has(group.year);
-          // The very first group holds the overall-latest draw pinned above,
-          // so it's dropped here to avoid showing it twice.
-          const items = i === 0 ? group.items.slice(1) : group.items;
+          const items = group.items;
           if (items.length === 0) return null;
           return (
             <section key={group.year} className={CARD_CLASSES}>
@@ -1976,13 +1983,12 @@ export default function LottoClient() {
             <span className="text-ink-2">Draw date</span>
             <input
               required
-              type="text"
+              type="date"
               className={INPUT_CLASSES}
               value={pasteModal.drawDate}
               disabled={saving}
               onChange={(e) => setPasteModal((m) => ({ ...m, drawDate: e.target.value }))}
             />
-            <span className="text-xs text-ink-3">{DRAW_DATE_HELP}</span>
           </label>
           <label className="flex flex-col gap-1 text-sm">
             <span className="text-ink-2">Attempts</span>

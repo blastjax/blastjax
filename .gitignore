@@ -10,3 +10,4 @@ data/
 postman/
 .claude
 docker-compose.override.yml
+graphify-out/
