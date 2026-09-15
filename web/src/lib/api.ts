@@ -1011,9 +1011,6 @@ export type LottoAttemptRow = {
   ticket: number | null;
   numbers: number[];
   created_at: string;
-  /** Hidden attempts aren't deleted — they're just tucked out of the normal
-   * view until "Show hidden" is switched on. */
-  hidden: boolean;
 };
 
 export type LottoDrawDetail = {
@@ -1106,19 +1103,6 @@ export async function importLottoDrawResultsText(text: string) {
     total: number;
     errors: string[];
   }>("POST", "/api/lotto/import-text", { text });
-}
-
-/** Hides or unhides an attempt without deleting it. */
-export async function setLottoAttemptHidden(
-  drawId: number,
-  attemptId: number,
-  hidden: boolean,
-) {
-  return sendJson<LottoDrawDetail>(
-    "PUT",
-    `/api/lotto/${drawId}/attempts/${attemptId}/hidden`,
-    { hidden },
-  );
 }
 
 /** An app-managed user account. Passwords are Argon2id-hashed server-side —

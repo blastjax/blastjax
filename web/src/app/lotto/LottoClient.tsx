@@ -1,6 +1,7 @@
 "use client";
 
 import { AmountInput } from "@/components/AmountInput";
+import { PencilIcon, TrashIcon } from "@/components/Icons";
 import { PageHeader } from "@/components/PageHeader";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Modal } from "@/components/Modal";
@@ -10,7 +11,6 @@ import {
   deleteLottoDraw,
   getLottoDraws,
   importLottoDrawResultsText,
-  setLottoAttemptHidden,
   setLottoDraw,
   updateLottoAttempt,
   updateLottoDraw,
@@ -25,9 +25,7 @@ import {
   CARD_CLASSES,
   CLOSE_BUTTON_CLASSES,
   DASHED_EMPTY_CLASSES,
-  DELETE_BUTTON_CLASSES,
   DETAIL_BUTTON_CLASSES,
-  EDIT_BUTTON_CLASSES,
   ERROR_ALERT_CLASSES,
   ICON_BUTTON_CLASSES,
   INPUT_CLASSES,
@@ -244,15 +242,8 @@ function buildLottoExportText(draws: LottoDrawDetail[]): string {
  * turns every block into a ticket (see `submitPasteAttempts`), a previously
  * ungrouped attempt comes back with a new ticket number of its own rather
  * than staying ungrouped. That's a limitation of the paste format, not
- * something this exporter can route around.
- *
- * `tagHidden` appends "[hidden]" to a hidden attempt's line — useful for a
- * human-readable export, but never set it on text meant to be pasted back
- * in, since it isn't part of the grammar `parseNumbers` accepts. */
-function attemptsToTicketBlocksText(
-  attempts: LottoAttemptRow[],
-  { tagHidden = false }: { tagHidden?: boolean } = {},
-): string {
+ * something this exporter can route around. */
+function attemptsToTicketBlocksText(attempts: LottoAttemptRow[]): string {
   const byTicket = new Map<number, LottoAttemptRow[]>();
   const loose: LottoAttemptRow[] = [];
   for (const a of attempts) {
@@ -264,8 +255,7 @@ function attemptsToTicketBlocksText(
       loose.push(a);
     }
   }
-  const lineFor = (a: LottoAttemptRow) =>
-    numbersToDashString(a.numbers) + (tagHidden && a.hidden ? "  [hidden]" : "");
+  const lineFor = (a: LottoAttemptRow) => numbersToDashString(a.numbers);
 
   const blocks: string[] = [];
   for (const ticket of [...byTicket.keys()].sort((a, b) => a - b)) {
@@ -281,8 +271,7 @@ function attemptsToTicketBlocksText(
  * Draws with no attempts logged are skipped — nothing to export for them.
  * Each draw's section opens with a date + result header (not part of the
  * "Paste attempts" grammar, so this file is for reading, not pasting back
- * in whole) followed by its attempts in the usual ticket-block shape,
- * hidden attempts tagged inline. */
+ * in whole) followed by its attempts in the usual ticket-block shape. */
 function buildAllAttemptsExportText(draws: LottoDrawDetail[]): string {
   const withAttempts = [...draws].reverse().filter((d) => d.attempts.length > 0);
   return withAttempts
@@ -292,7 +281,7 @@ function buildAllAttemptsExportText(draws: LottoDrawDetail[]): string {
           ? `result ${numbersToDashString(d.draw.numbers)}`
           : "result not in yet";
       const header = `${isoToExportDate(d.draw.draw_date)} - ${result}`;
-      const body = attemptsToTicketBlocksText(d.attempts, { tagHidden: true });
+      const body = attemptsToTicketBlocksText(d.attempts);
       return `${header}\n${body}`;
     })
     .join("\n\n");
@@ -677,10 +666,10 @@ const SORT_LABELS: Record<AttemptSort, string> = {
   best: "Best first",
 };
 
-/** Which card's Edit/Hide/Delete controls the actions modal is currently
- * showing — a draw, one ticket on a draw, or a single ungrouped attempt.
- * `null` means the modal is closed. */
-type CardActionsModalState =
+/** Which card's Edit/Delete icons are currently revealed — a draw, one
+ * ticket on a draw, or a single ungrouped attempt. `null` means none. Only
+ * one card at a time (double-clicking a new one swaps in for the old). */
+type RevealedActions =
   | { type: "draw"; drawId: number }
   | { type: "ticket"; drawId: number; ticket: number }
   | { type: "attempt"; drawId: number; attemptId: number }
@@ -703,17 +692,17 @@ export default function LottoClient() {
   // only apply to the hero draw (see `renderDrawCard`'s `hero` option).
   const [attemptFilter, setAttemptFilter] = useState<AttemptFilter>(0);
   const [attemptSort, setAttemptSort] = useState<AttemptSort>("ticket");
-  // A draw/ticket/attempt card's Edit/Hide/Delete controls live behind a
-  // double-click instead of sitting on the card face — this is what's
-  // showing when non-null. See the card-actions Modal near the other
-  // modals below.
-  const [cardActionsModal, setCardActionsModal] = useState<CardActionsModalState>(null);
+  // A draw/ticket/attempt card's Edit/Delete icons live behind a
+  // double-click instead of sitting on the card face all the time — this
+  // tracks which card currently has them revealed.
+  const [revealedActions, setRevealedActions] = useState<RevealedActions>(null);
+  // Toggle: double-clicking the already-revealed card hides its icons
+  // again; double-clicking a different one swaps the reveal over to it.
+  const toggleRevealed = (target: NonNullable<RevealedActions>) => {
+    setRevealedActions((cur) => (cur && JSON.stringify(cur) === JSON.stringify(target) ? null : target));
+  };
 
   const [collapsedIds, setCollapsedIds] = useState<Set<number>>(new Set());
-  // Hidden attempts are tucked out of view by default. This tracks which
-  // draws currently have theirs revealed — per-draw, so one draw's hidden
-  // attempts can be shown without exposing every other draw's too.
-  const [shownHiddenDrawIds, setShownHiddenDrawIds] = useState<Set<number>>(new Set());
   // History tab shows one compact row per draw; a row expands in place into
   // the full editable card (same one the hero uses) rather than navigating
   // away, so nothing about managing a historic draw's attempts is lost.
@@ -721,15 +710,6 @@ export default function LottoClient() {
 
   const toggleCollapsed = (drawId: number) => {
     setCollapsedIds((s) => {
-      const next = new Set(s);
-      if (next.has(drawId)) next.delete(drawId);
-      else next.add(drawId);
-      return next;
-    });
-  };
-
-  const toggleShowHiddenForDraw = (drawId: number) => {
-    setShownHiddenDrawIds((s) => {
       const next = new Set(s);
       if (next.has(drawId)) next.delete(drawId);
       else next.add(drawId);
@@ -763,21 +743,6 @@ export default function LottoClient() {
   // A draw with no attempts has nothing to collapse, so it's never
   // collapsible — only draws with attempts participate in collapse state.
   const collapsibleDraws = draws.filter((d) => d.attempts.length > 0);
-
-  const drawsWithHidden = draws.filter((d) => d.attempts.some((a) => a.hidden));
-  const totalHiddenAttempts = draws.reduce(
-    (sum, d) => sum + d.attempts.filter((a) => a.hidden).length,
-    0,
-  );
-  const allHiddenShown =
-    drawsWithHidden.length > 0 && drawsWithHidden.every((d) => shownHiddenDrawIds.has(d.draw.id));
-
-  const toggleShowHiddenAll = () => {
-    setShownHiddenDrawIds((s) => {
-      const allShown = drawsWithHidden.every((d) => s.has(d.draw.id));
-      return allShown ? new Set() : new Set(drawsWithHidden.map((d) => d.draw.id));
-    });
-  };
 
   const allCollapsed =
     collapsibleDraws.length > 0 && collapsibleDraws.every((d) => collapsedIds.has(d.draw.id));
@@ -1015,9 +980,8 @@ export default function LottoClient() {
   /** Adds new attempts, or replaces an edited set — see `AttemptsModalState`.
    * A replace deletes every attempt in `editingIds` first and recreates the
    * parsed lines fresh, rather than diffing line-by-line against what was
-   * there before; simpler, at the cost of resetting `hidden` on every
-   * attempt in the edited set (there's no way to know which surviving line
-   * "was" which old attempt once the line count changes). */
+   * there before — simpler, since there's no way to know which surviving
+   * line "was" which old attempt once the line count changes. */
   const submitAttemptsModal = async (e: React.FormEvent) => {
     e.preventDefault();
     setAttemptsFormError(null);
@@ -1082,45 +1046,6 @@ export default function LottoClient() {
       if (detail) upsertLocalDraw(detail);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Delete failed");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  /** Hides or unhides an attempt without deleting it — hidden attempts stay
-   * in the data and reappear once "Show hidden" is switched on. */
-  const onToggleAttemptHidden = async (drawId: number, attempt: LottoAttemptRow) => {
-    setSaving(true);
-    setError(null);
-    try {
-      const detail = await setLottoAttemptHidden(drawId, attempt.id, !attempt.hidden);
-      upsertLocalDraw(detail);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to update attempt");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  /** Hides or unhides every board play on a ticket in one go, instead of one
-   * at a time. Attempts already at the target state are skipped. */
-  const onToggleAttemptsHidden = async (
-    drawId: number,
-    items: { attempt: LottoAttemptRow }[],
-    hidden: boolean,
-  ) => {
-    const targets = items.filter(({ attempt }) => attempt.hidden !== hidden);
-    if (targets.length === 0) return;
-    setSaving(true);
-    setError(null);
-    try {
-      let detail: LottoDrawDetail | null = null;
-      for (const { attempt } of targets) {
-        detail = await setLottoAttemptHidden(drawId, attempt.id, hidden);
-      }
-      if (detail) upsertLocalDraw(detail);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to update attempts");
     } finally {
       setSaving(false);
     }
@@ -1328,10 +1253,11 @@ export default function LottoClient() {
   };
 
   /** Renders one draw's full card: result balls, jackpot/winners, and its
-   * attempts (grouped by ticket, drag-and-drop to regroup). The card face
-   * itself has no Edit/Hide/Delete buttons — double-click the draw, a
-   * ticket, or an ungrouped attempt to open the actions modal for that
-   * thing (see `cardActionsModal`).
+   * attempts (grouped by ticket, drag-and-drop to regroup). Edit/Delete for
+   * the draw, a ticket, or an ungrouped attempt aren't on the card face by
+   * default — double-click that thing (see `revealedActions`) to reveal a
+   * pencil/trash icon pair for it. Hide/Unhide stays always-visible, same
+   * as everywhere else in this file.
    *
    * `hero: true` is the "This draw" tab's spotlight treatment: bigger
    * balls, an eyebrow label, and the filter/sort controls
@@ -1343,36 +1269,28 @@ export default function LottoClient() {
     const hero = opts.hero ?? false;
     const hasResult = detail.draw.numbers.length === 6;
     const drawSet = new Set(detail.draw.numbers);
-    // The card's own header counts every attempt, hidden or not — only
-    // the list below it is filtered by "Show hidden".
     const totalAttempts = detail.attempts.length;
     const ticketCount = new Set(
       detail.attempts.flatMap((a) => (a.ticket != null ? [a.ticket] : [])),
     ).size;
-    // Hidden attempts stay in the data (nothing is deleted) but drop
-    // out of the normal view until this draw's "Show hidden" is
-    // switched on.
-    const showHiddenForDraw = shownHiddenDrawIds.has(detail.draw.id);
-    const rawHiddenCount = detail.attempts.filter((a) => a.hidden).length;
-    const visibleAttempts = showHiddenForDraw
-      ? detail.attempts
-      : detail.attempts.filter((a) => !a.hidden);
     const hasAttempts = totalAttempts > 0;
     // The hero is always expanded — collapse only makes sense for History's
     // browsing use case.
     const collapsed = hero ? false : hasAttempts && collapsedIds.has(detail.draw.id);
     const collapsible = hasAttempts && !hero;
+    const showDrawActions =
+      revealedActions?.type === "draw" && revealedActions.drawId === detail.draw.id;
     // Without a result yet, there's nothing to match attempts against —
     // matchCount is a placeholder (-1) rather than a false "0/6 matched".
-    // Order follows visibleAttempts as logged (the sequence on the
+    // Order follows detail.attempts as logged (the sequence on the
     // physical tickets) — see bumpMatches below for how strong matches
     // surface without disturbing that order.
     const scoredAttempts = hasResult
-      ? visibleAttempts.map((attempt) => ({
+      ? detail.attempts.map((attempt) => ({
           attempt,
           matchCount: attempt.numbers.filter((n) => drawSet.has(n)).length,
         }))
-      : visibleAttempts.map((attempt) => ({ attempt, matchCount: -1 }));
+      : detail.attempts.map((attempt) => ({ attempt, matchCount: -1 }));
     // The filter chips are a "This draw"-only refinement — a historic card
     // always shows everything, exactly as before.
     const attemptsByMatch =
@@ -1381,10 +1299,8 @@ export default function LottoClient() {
         : scoredAttempts;
     // Always all six tiers, zero counts included, so the row of badges
     // lines up in the same place on every card instead of shifting
-    // around based on which tiers that draw happened to hit. Counts
-    // every attempt (hidden or not) — the breakdown is a summary of
-    // the whole draw, not just what "Show hidden" (or the hero's
-    // filter) currently reveals.
+    // around based on which tiers that draw happened to hit — a summary
+    // of the whole draw, not just what the hero's filter currently reveals.
     const matchBreakdown =
       hasResult && totalAttempts > 0
         ? [1, 2, 3, 4, 5, 6].map((tier) => ({
@@ -1407,11 +1323,6 @@ export default function LottoClient() {
       ticket: number;
       items: typeof attemptsByMatch;
       bestMatch: number;
-      // True only when every item currently shown for this ticket is
-      // hidden — with "Show hidden" off, a partly-hidden ticket only
-      // shows its visible attempts, so this reads false until they're
-      // revealed (there'd be nothing to "unhide" from this view yet).
-      allHidden: boolean;
     };
     const byTicket = new Map<number, typeof attemptsByMatch>();
     const looseItems: typeof attemptsByMatch = [];
@@ -1431,7 +1342,6 @@ export default function LottoClient() {
         ticket,
         items,
         bestMatch: Math.max(...items.map((i) => i.matchCount)),
-        allHidden: items.every((i) => i.attempt.hidden),
       })),
       (c) => c.bestMatch >= 3,
     );
@@ -1467,22 +1377,25 @@ export default function LottoClient() {
         )}
       </p>
     );
-    // A ticketed attempt is edited/hidden/deleted as part of its ticket
-    // (double-click the ticket card, or its "⋯" button) — only an
-    // ungrouped attempt gets its own double-click, since there's no ticket
-    // to fold it into.
-    const renderAttemptRow = (attempt: LottoAttemptRow, matchCount: number) => (
+    // A ticketed attempt is edited/deleted as part of its ticket
+    // (double-click the ticket card) — only an ungrouped attempt gets its
+    // own double-click, since there's no ticket to fold it into.
+    const renderAttemptRow = (attempt: LottoAttemptRow, matchCount: number) => {
+      const showActions =
+        attempt.ticket == null &&
+        revealedActions?.type === "attempt" &&
+        revealedActions.drawId === detail.draw.id &&
+        revealedActions.attemptId === attempt.id;
+      return (
       <li
         key={attempt.id}
         draggable
         title={
           attempt.ticket == null
-            ? "Drag to group — double-click for edit/hide/delete"
+            ? "Drag to group — double-click for edit/delete"
             : "Drag onto another attempt or ticket to group them"
         }
-        className={`flex cursor-grab items-center gap-3 rounded-lg active:cursor-grabbing ${
-          attempt.hidden ? "opacity-50" : ""
-        }`}
+        className="flex cursor-grab items-center gap-2 rounded-lg active:cursor-grabbing"
         onDragStart={(e) => {
           const el = e.target as HTMLElement | null;
           if (!el || el.closest("button")) {
@@ -1504,7 +1417,7 @@ export default function LottoClient() {
           attempt.ticket == null
             ? (e) => {
                 e.stopPropagation();
-                setCardActionsModal({ type: "attempt", drawId: detail.draw.id, attemptId: attempt.id });
+                toggleRevealed({ type: "attempt", drawId: detail.draw.id, attemptId: attempt.id });
               }
             : undefined
         }
@@ -1518,16 +1431,40 @@ export default function LottoClient() {
             />
           ))}
         </div>
-        {attempt.hidden && (
-          <span className="shrink-0 rounded-full border border-line-strong px-1.5 py-0.5 text-[10px] font-medium text-ink-3">
-            Hidden
-          </span>
-        )}
         <span className="flex h-9 w-12 shrink-0 items-center justify-center rounded-lg bg-surface-2 text-xs font-semibold tabular-nums text-ink-2">
           {hasResult ? `${matchCount}/6` : "—"}
         </span>
+        {showActions && (
+          <div
+            className="flex shrink-0 items-center gap-1"
+            onClick={(e) => e.stopPropagation()}
+            onDoubleClick={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              disabled={saving}
+              aria-label="Edit attempt"
+              title="Edit attempt"
+              className={ICON_BUTTON_CLASSES}
+              onClick={() => openEditLooseAttempt(detail.draw.id, attempt)}
+            >
+              <PencilIcon className="size-5" />
+            </button>
+            <button
+              type="button"
+              disabled={saving}
+              aria-label="Delete attempt"
+              title="Delete attempt"
+              className={ICON_BUTTON_CLASSES}
+              onClick={() => void onDeleteAttempt(detail.draw.id, attempt.id)}
+            >
+              <TrashIcon className="size-5" />
+            </button>
+          </div>
+        )}
       </li>
-    );
+      );
+    };
     const matchBreakdownDisplay = matchBreakdown.length > 0 && (
       <div className="mt-2 flex flex-wrap items-center gap-1.5">
         {matchBreakdown.map(({ tier, count }) => (
@@ -1548,12 +1485,12 @@ export default function LottoClient() {
         title="Double-click for edit/delete"
         className={
           hero
-            ? "rounded-xl bg-indigo-50/40 p-5 shadow-xs dark:bg-indigo-950/20 sm:p-6"
+            ? "rounded-xl bg-surface p-5 shadow-xs sm:p-6"
             : CARD_CLASSES
         }
         onDoubleClick={(e) => {
           e.stopPropagation();
-          setCardActionsModal({ type: "draw", drawId: detail.draw.id });
+          toggleRevealed({ type: "draw", drawId: detail.draw.id });
         }}
       >
         <div
@@ -1625,6 +1562,30 @@ export default function LottoClient() {
               <span className="sm:hidden">+ Add</span>
               <span className="hidden sm:inline">+ Add attempt</span>
             </button>
+            {showDrawActions && (
+              <>
+                <button
+                  type="button"
+                  disabled={saving}
+                  aria-label="Edit draw"
+                  title="Edit draw"
+                  className={ICON_BUTTON_CLASSES}
+                  onClick={() => openEditDraw(detail)}
+                >
+                  <PencilIcon className="size-5" />
+                </button>
+                <button
+                  type="button"
+                  disabled={saving}
+                  aria-label="Delete draw"
+                  title="Delete draw"
+                  className={ICON_BUTTON_CLASSES}
+                  onClick={() => void onDeleteDraw(detail.draw.id)}
+                >
+                  <TrashIcon className="size-5" />
+                </button>
+              </>
+            )}
           </div>
         </div>
 
@@ -1678,18 +1639,6 @@ export default function LottoClient() {
                 {ticketCount} ticket{ticketCount === 1 ? "" : "s"}
               </span>
             )}
-            {rawHiddenCount > 0 && (
-              <button
-                type="button"
-                disabled={saving}
-                className={DETAIL_BUTTON_CLASSES}
-                onClick={() => toggleShowHiddenForDraw(detail.draw.id)}
-              >
-                {showHiddenForDraw
-                  ? "Hide hidden"
-                  : `Show hidden (${rawHiddenCount})`}
-              </button>
-            )}
           </div>
 
           {attemptsByMatch.length === 0 ? (
@@ -1715,11 +1664,6 @@ export default function LottoClient() {
                   {attempt.ticket != null && (
                     <span className="shrink-0 text-xs text-ink-3">ticket {attempt.ticket}</span>
                   )}
-                  {attempt.hidden && (
-                    <span className="shrink-0 rounded-full border border-line-strong px-1.5 py-0.5 text-[10px] font-medium text-ink-3">
-                      Hidden
-                    </span>
-                  )}
                   <span className="flex h-9 w-12 shrink-0 items-center justify-center rounded-lg bg-surface-2 text-xs font-semibold tabular-nums text-ink-2">
                     {hasResult ? `${matchCount}/6` : "—"}
                   </span>
@@ -1730,10 +1674,15 @@ export default function LottoClient() {
           <div className="mt-3 flex flex-col gap-3">
             {ticketClusters.length > 0 && (
               <div className="grid grid-cols-[repeat(auto-fit,minmax(320px,1fr))] gap-3">
-                {ticketClusters.map((cluster) => (
+                {ticketClusters.map((cluster) => {
+                  const showActions =
+                    revealedActions?.type === "ticket" &&
+                    revealedActions.drawId === detail.draw.id &&
+                    revealedActions.ticket === cluster.ticket;
+                  return (
                   <div
                     key={`ticket-${cluster.ticket}`}
-                    title="Double-click for edit/hide/delete"
+                    title="Double-click for edit/delete"
                     className={`rounded-lg border p-3 transition-colors duration-150 ${
                       cluster.bestMatch >= 3
                         ? "border-emerald-200 bg-emerald-50/40 dark:border-emerald-900 dark:bg-emerald-950/20"
@@ -1746,7 +1695,7 @@ export default function LottoClient() {
                     onDrop={(e) => void onDropOnTicket(detail.draw.id, cluster.ticket, e)}
                     onDoubleClick={(e) => {
                       e.stopPropagation();
-                      setCardActionsModal({ type: "ticket", drawId: detail.draw.id, ticket: cluster.ticket });
+                      toggleRevealed({ type: "ticket", drawId: detail.draw.id, ticket: cluster.ticket });
                     }}
                   >
                     <div className="mb-2 flex flex-wrap items-center gap-2 text-xs font-medium text-ink-3">
@@ -1756,11 +1705,6 @@ export default function LottoClient() {
                       <span>
                         {cluster.items.length} attempt{cluster.items.length === 1 ? "" : "s"}
                       </span>
-                      {cluster.allHidden && (
-                        <span className="rounded-full border border-line-strong px-1.5 py-0.5 text-[10px] font-medium text-ink-3">
-                          Hidden
-                        </span>
-                      )}
                       <div className="ml-auto flex items-center gap-1.5">
                         {hasResult && (
                           <span
@@ -1788,18 +1732,30 @@ export default function LottoClient() {
                           >
                             +
                           </button>
-                          <button
-                            type="button"
-                            disabled={saving}
-                            aria-label="Ticket actions"
-                            title="Edit, hide, or delete this ticket"
-                            className={ICON_BUTTON_CLASSES}
-                            onClick={() =>
-                              setCardActionsModal({ type: "ticket", drawId: detail.draw.id, ticket: cluster.ticket })
-                            }
-                          >
-                            ⋯
-                          </button>
+                          {showActions && (
+                            <>
+                              <button
+                                type="button"
+                                disabled={saving}
+                                aria-label="Edit ticket"
+                                title="Edit ticket"
+                                className={ICON_BUTTON_CLASSES}
+                                onClick={() => openEditTicket(detail.draw.id, cluster.ticket, cluster.items)}
+                              >
+                                <PencilIcon className="size-5" />
+                              </button>
+                              <button
+                                type="button"
+                                disabled={saving}
+                                aria-label="Delete ticket"
+                                title="Delete ticket"
+                                className={ICON_BUTTON_CLASSES}
+                                onClick={() => void onDeleteTicket(detail.draw.id, cluster.items)}
+                              >
+                                <TrashIcon className="size-5" />
+                              </button>
+                            </>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -1809,7 +1765,8 @@ export default function LottoClient() {
                       )}
                     </ul>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             )}
             {orderedLooseItems.length > 0 && (
@@ -2089,28 +2046,15 @@ export default function LottoClient() {
 
           {activeTab === "history" && (
             <div className="flex flex-col gap-6">
-              {(collapsibleDraws.length > 0 || totalHiddenAttempts > 0) && (
+              {collapsibleDraws.length > 0 && (
                 <div className="flex justify-end gap-2">
-                  {totalHiddenAttempts > 0 && (
-                    <button
-                      type="button"
-                      className={`${ACTION_BUTTON_CLASSES} px-2 py-1.5 text-xs sm:px-3 sm:text-sm`}
-                      onClick={toggleShowHiddenAll}
-                    >
-                      {allHiddenShown
-                        ? "Hide hidden attempts"
-                        : `Show hidden attempts (${totalHiddenAttempts})`}
-                    </button>
-                  )}
-                  {collapsibleDraws.length > 0 && (
-                    <button
-                      type="button"
-                      className={`${ACTION_BUTTON_CLASSES} px-2 py-1.5 text-xs sm:px-3 sm:text-sm`}
-                      onClick={toggleCollapseAll}
-                    >
-                      {allCollapsed ? "Expand all" : "Collapse all"}
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    className={`${ACTION_BUTTON_CLASSES} px-2 py-1.5 text-xs sm:px-3 sm:text-sm`}
+                    onClick={toggleCollapseAll}
+                  >
+                    {allCollapsed ? "Expand all" : "Collapse all"}
+                  </button>
                 </div>
               )}
 
@@ -2625,160 +2569,6 @@ export default function LottoClient() {
           </div>
         </form>
       </Modal>
-
-      {/* Edit/Hide/Delete for a draw, a ticket, or a single ungrouped
-       * attempt — opened by double-clicking that card (or, for a ticket,
-       * its "⋯" button) rather than living on the card face. */}
-      {cardActionsModal &&
-        (() => {
-          const modal = cardActionsModal;
-          const detail = draws.find((d) => d.draw.id === modal.drawId);
-          if (!detail) return null;
-          const close = () => setCardActionsModal(null);
-
-          if (modal.type === "draw") {
-            return (
-              <Modal open onClose={close} ariaLabelledBy="lotto-card-actions-title">
-                <div className="mb-4 flex items-start justify-between gap-2">
-                  <h2 id="lotto-card-actions-title" className="text-lg font-semibold text-ink">
-                    {formatDate(detail.draw.draw_date)}
-                  </h2>
-                  <button type="button" className={CLOSE_BUTTON_CLASSES} onClick={close}>
-                    Close
-                  </button>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    className={EDIT_BUTTON_CLASSES}
-                    onClick={() => {
-                      close();
-                      openEditDraw(detail);
-                    }}
-                  >
-                    Edit
-                  </button>
-                  <button
-                    type="button"
-                    className={DELETE_BUTTON_CLASSES}
-                    onClick={() => {
-                      close();
-                      void onDeleteDraw(detail.draw.id);
-                    }}
-                  >
-                    Delete
-                  </button>
-                </div>
-              </Modal>
-            );
-          }
-
-          if (modal.type === "ticket") {
-            const items = detail.attempts
-              .filter((a) => a.ticket === modal.ticket)
-              .map((attempt) => ({ attempt }));
-            const allHidden = items.length > 0 && items.every(({ attempt }) => attempt.hidden);
-            return (
-              <Modal open onClose={close} ariaLabelledBy="lotto-card-actions-title">
-                <div className="mb-4 flex items-start justify-between gap-2">
-                  <h2 id="lotto-card-actions-title" className="text-lg font-semibold text-ink">
-                    Ticket {modal.ticket}
-                  </h2>
-                  <button type="button" className={CLOSE_BUTTON_CLASSES} onClick={close}>
-                    Close
-                  </button>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    className={EDIT_BUTTON_CLASSES}
-                    onClick={() => {
-                      close();
-                      openEditTicket(detail.draw.id, modal.ticket, items);
-                    }}
-                  >
-                    Edit
-                  </button>
-                  {/* Only a real hide is a persisted action here — a
-                   * fully-hidden ticket only ever gets this far once "Show
-                   * hidden" has already revealed it, so un-hiding is left to
-                   * that toggle (or to each attempt's own Unhide) rather
-                   * than a bulk button that would quietly wipe every
-                   * attempt's hidden status at once. */}
-                  {!allHidden && (
-                    <button
-                      type="button"
-                      className={EDIT_BUTTON_CLASSES}
-                      onClick={() => {
-                        close();
-                        void onToggleAttemptsHidden(detail.draw.id, items, true);
-                      }}
-                    >
-                      Hide ticket
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    className={DELETE_BUTTON_CLASSES}
-                    onClick={() => {
-                      close();
-                      void onDeleteTicket(detail.draw.id, items);
-                    }}
-                  >
-                    Delete
-                  </button>
-                </div>
-              </Modal>
-            );
-          }
-
-          const attempt = detail.attempts.find((a) => a.id === modal.attemptId);
-          if (!attempt) return null;
-          return (
-            <Modal open onClose={close} ariaLabelledBy="lotto-card-actions-title">
-              <div className="mb-4 flex items-start justify-between gap-2">
-                <h2 id="lotto-card-actions-title" className="text-lg font-semibold text-ink">
-                  Attempt
-                </h2>
-                <button type="button" className={CLOSE_BUTTON_CLASSES} onClick={close}>
-                  Close
-                </button>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  className={EDIT_BUTTON_CLASSES}
-                  onClick={() => {
-                    close();
-                    openEditLooseAttempt(detail.draw.id, attempt);
-                  }}
-                >
-                  Edit
-                </button>
-                <button
-                  type="button"
-                  className={EDIT_BUTTON_CLASSES}
-                  onClick={() => {
-                    close();
-                    void onToggleAttemptHidden(detail.draw.id, attempt);
-                  }}
-                >
-                  {attempt.hidden ? "Unhide" : "Hide"}
-                </button>
-                <button
-                  type="button"
-                  className={DELETE_BUTTON_CLASSES}
-                  onClick={() => {
-                    close();
-                    void onDeleteAttempt(detail.draw.id, attempt.id);
-                  }}
-                >
-                  Delete
-                </button>
-              </div>
-            </Modal>
-          );
-        })()}
     </div>
   );
 }

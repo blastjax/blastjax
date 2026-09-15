@@ -2157,7 +2157,7 @@ def save_payslip_defaults(
 _LOTTO_DRAW_COLS = (
     "id, draw_date, n1, n2, n3, n4, n5, n6, jackpot_prize, winners, created_at"
 )
-_LOTTO_ATTEMPT_COLS = "id, draw_id, ticket, n1, n2, n3, n4, n5, n6, hidden, created_at"
+_LOTTO_ATTEMPT_COLS = "id, draw_id, ticket, n1, n2, n3, n4, n5, n6, created_at"
 
 
 def _lotto_attempts_rows(cur: Any, draw_id: int) -> list[dict[str, Any]]:
@@ -2411,25 +2411,6 @@ def delete_lotto_attempt(draw_id: int, attempt_id: int) -> dict[str, Any] | None
             cur.execute(
                 "DELETE FROM lotto_attempt WHERE id = ? AND draw_id = ? RETURNING id",
                 (attempt_id, draw_id),
-            )
-            if not cur.fetchone():
-                return None
-            return _lotto_draw_detail(cur, draw_id)
-
-
-def set_lotto_attempt_hidden(
-    draw_id: int, attempt_id: int, hidden: bool
-) -> dict[str, Any] | None:
-    """Hide or unhide an attempt without deleting it."""
-    with get_connection() as conn:
-        with db_cursor(conn) as cur:
-            cur.execute(
-                """
-                UPDATE lotto_attempt SET hidden = ?
-                WHERE id = ? AND draw_id = ?
-                RETURNING id
-                """,
-                (1 if hidden else 0, attempt_id, draw_id),
             )
             if not cur.fetchone():
                 return None

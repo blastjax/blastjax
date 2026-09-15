@@ -263,3 +263,24 @@ export function SidebarToggleIcon(p: IconProps) {
     </Svg>
   );
 }
+
+/* -------------------------------------------------------------------- Actions */
+
+export function PencilIcon(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M15.5 4.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z" />
+      <path d="M13.5 6.5l3 3" />
+    </Svg>
+  );
+}
+
+export function TrashIcon(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M4 7h16M9 7V4.5A1.5 1.5 0 0 1 10.5 3h3A1.5 1.5 0 0 1 15 4.5V7" />
+      <path d="M6 7l1 13a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-13" />
+      <path d="M10 11v6M14 11v6" />
+    </Svg>
+  );
+}

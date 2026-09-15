@@ -20,7 +20,6 @@ import cache
 from app.deps import require_db
 from app.schemas.lotto import (
     LottoAttemptCreate,
-    LottoAttemptHiddenUpdate,
     LottoDrawCreate,
     LottoImportText,
 )
@@ -34,7 +33,6 @@ from db import (
     insert_lotto_attempt,
     list_lotto_draw_results,
     list_lotto_draws,
-    set_lotto_attempt_hidden,
     update_lotto_attempt,
     update_lotto_draw,
     upsert_lotto_draw,
@@ -68,7 +66,6 @@ def _serialize_attempt(row: dict[str, Any]) -> dict[str, Any]:
         "draw_id": row["draw_id"],
         "ticket": row["ticket"],
         "numbers": _numbers(row),
-        "hidden": bool(row["hidden"]),
         "created_at": row["created_at"],
     }
 
@@ -321,16 +318,6 @@ def lotto_update_attempt(
 @router.delete("/api/lotto/{draw_id}/attempts/{attempt_id}")
 def lotto_remove_attempt(draw_id: int, attempt_id: int) -> dict[str, Any]:
     detail = delete_lotto_attempt(draw_id, attempt_id)
-    if detail is None:
-        raise HTTPException(status_code=404, detail="Attempt not found.")
-    return _serialize_detail(detail)
-
-
-@router.put("/api/lotto/{draw_id}/attempts/{attempt_id}/hidden")
-def lotto_set_attempt_hidden(
-    draw_id: int, attempt_id: int, body: LottoAttemptHiddenUpdate
-) -> dict[str, Any]:
-    detail = set_lotto_attempt_hidden(draw_id, attempt_id, body.hidden)
     if detail is None:
         raise HTTPException(status_code=404, detail="Attempt not found.")
     return _serialize_detail(detail)

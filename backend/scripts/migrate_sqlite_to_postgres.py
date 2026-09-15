@@ -272,7 +272,6 @@ _SCHEMA: list[tuple[str, str]] = [
         n6         INTEGER NOT NULL,
         created_at TIMESTAMPTZ(0) NOT NULL DEFAULT CURRENT_TIMESTAMP,
         ticket     INTEGER,
-        hidden     INTEGER NOT NULL DEFAULT 0,
         CHECK (n1 >= 1 AND n1 < n2 AND n2 < n3 AND n3 < n4 AND n4 < n5 AND n5 < n6 AND n6 <= 58)
         """,
     ),
