@@ -180,29 +180,31 @@ export type PageAccess = {
   allowedPages: readonly string[] | null;
 };
 
+/** Company payslip pages (spliced into "Finances" per row from Settings →
+ * Companies — see payslipNavItem/SidebarNav) aren't a single static
+ * NAV_SECTIONS item, so they share this one virtual bucket instead of each
+ * company getting its own toggle. */
+const _PAYSLIP_BUCKET_HREF = "/payslip";
+
 /** Every href a per-user restriction can target: one per top-level
- * NAV_SECTIONS item, not their children (a child is shown/hidden with its
- * parent). ``blastjax`` (and anyone with ``isSuperuser``) always bypasses
- * this. */
-export const RESTRICTABLE_PAGES: readonly { href: string; label: string; section: string }[] =
-  NAV_SECTIONS.flatMap((section) =>
+ * NAV_SECTIONS item (not their children — a child is shown/hidden with its
+ * parent), plus the payslip bucket above. ``blastjax`` (and anyone with
+ * ``isSuperuser``) always bypasses this. */
+export const RESTRICTABLE_PAGES: readonly { href: string; label: string; section: string }[] = [
+  ...NAV_SECTIONS.flatMap((section) =>
     section.items.map((item) => ({
       href: item.href,
       label: item.label,
       section: section.title ?? "General",
     })),
-  );
+  ),
+  { href: _PAYSLIP_BUCKET_HREF, label: "Payslip", section: "Finances" },
+];
 
 const _RESTRICTABLE_HREFS = new Set(RESTRICTABLE_PAGES.map((p) => p.href));
 
 /** Sections/items a restricted user can see. Unrestricted users (superusers,
- * or an ``allowedPages: null`` account) get every section back untouched.
- *
- * ponytail: company payslip entries (spliced in dynamically — see
- * payslipNavItem/SidebarNav) aren't in RESTRICTABLE_PAGES, so they always
- * pass through here regardless of restriction. Add a "/payslip" bucket to
- * RESTRICTABLE_PAGES if those need to be gated too.
- */
+ * or an ``allowedPages: null`` account) get every section back untouched. */
 export function filterNavSections(
   sections: readonly NavSection[],
   user: PageAccess | null,
@@ -212,17 +214,20 @@ export function filterNavSections(
   return sections
     .map((section) => ({
       ...section,
-      items: section.items.filter(
-        (item) => !_RESTRICTABLE_HREFS.has(item.href) || allowed.has(item.href),
-      ),
+      items: section.items.filter((item) => {
+        if (item.href.startsWith(`${_PAYSLIP_BUCKET_HREF}/`)) {
+          return allowed.has(_PAYSLIP_BUCKET_HREF);
+        }
+        return !_RESTRICTABLE_HREFS.has(item.href) || allowed.has(item.href);
+      }),
     }))
     .filter((section) => section.items.length > 0);
 }
 
 /** The top-level NAV_SECTIONS item a pathname belongs to (its own href, or
- * its parent's if it's a sub-page) — or `null` for a path outside the static
- * nav map (e.g. a per-company payslip page), which page restrictions don't
- * cover (see `filterNavSections`). */
+ * its parent's if it's a sub-page), the payslip bucket for a per-company
+ * payslip/commission/salary-stats page, or `null` for anything else outside
+ * the static nav map. */
 export function topLevelHrefForPathname(pathname: string): string | null {
   for (const section of NAV_SECTIONS) {
     for (const item of section.items) {
@@ -231,6 +236,11 @@ export function topLevelHrefForPathname(pathname: string): string | null {
         if (pathname === child.href || pathname.startsWith(`${child.href}/`)) return item.href;
       }
     }
+  }
+  // Mirrors matchingNavHref's own special-case: these are data-driven
+  // (one per row in Settings → Companies), so they can't be listed above.
+  for (const base of ["/payslip", "/commission", "/salary-stats"]) {
+    if (pathname === base || pathname.startsWith(`${base}/`)) return _PAYSLIP_BUCKET_HREF;
   }
   return null;
 }

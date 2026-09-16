@@ -121,7 +121,10 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       }
       setSessionToken(data.token);
       setPassword("");
-      setStatus("authenticated");
+      // Not just setStatus("authenticated") -- that skipped fetching /status,
+      // so currentUser (and with it, page restrictions) stayed null/unset
+      // until the next reload.
+      await checkStatus();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Invalid username or password.");
     } finally {
