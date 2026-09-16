@@ -8,6 +8,7 @@ import { Modal } from "@/components/Modal";
 import { PencilIcon, TrashIcon } from "@/components/Icons";
 import { TimeField } from "@/components/TimeField";
 import {
+  ACTION_BUTTON_CLASSES,
   ADD_BUTTON_CLASSES,
   CLOSE_BUTTON_CLASSES,
   DASHED_EMPTY_CLASSES,
@@ -165,6 +166,18 @@ const TYPE_META: Record<EntryKind, { label: string; dot: string; text: string; b
 };
 
 const TRIP_ACCENTS = ["border-l-indigo-500", "border-l-emerald-500", "border-l-amber-500"];
+
+/** Distinct hues for the calendar's place bars, cycling by chronological
+ * order so consecutive places never land on the same color — separate from
+ * the entry-type palette above (sky/violet/fuchsia/cyan/amber/emerald). */
+const PLACE_BAR_COLORS = [
+  "bg-indigo-500/15 text-indigo-700 dark:text-indigo-300",
+  "bg-rose-500/15 text-rose-700 dark:text-rose-300",
+  "bg-teal-500/15 text-teal-700 dark:text-teal-300",
+  "bg-orange-500/15 text-orange-700 dark:text-orange-300",
+  "bg-lime-500/20 text-lime-700 dark:text-lime-400",
+  "bg-pink-500/15 text-pink-700 dark:text-pink-300",
+];
 
 /** Same geometry as `ICON_BUTTON_CLASSES`, recolored for a destructive action. */
 const VIEW_DELETE_ICON_CLASSES =
@@ -449,6 +462,57 @@ function packEntriesForBand(entries: TimelineEntry[], tripStartIso: string, band
     .map((e, row) => ({ ...e, row }));
 }
 
+type PackedPlace = {
+  id: number;
+  name: string;
+  colorClass: string;
+  startDay: number;
+  endDay: number;
+  row: number;
+  continuesFromPrev: boolean;
+  continuesToNext: boolean;
+};
+
+/** Same clipping-to-a-band idea as `packEntriesForBand`, for the trip's
+ * places: each dated city gets a color-coded bar spanning every day it
+ * covers, colored by `PLACE_BAR_COLORS` cycling in chronological order so
+ * consecutive places are visually distinct from each other. Unlike entries,
+ * places are all "the same kind of thing" and normally run back-to-back
+ * with no overlap, so rows here *do* get reused when one place's bar has
+ * already ended — keeping the places band a single row for the common case
+ * instead of growing one row per place regardless of overlap. */
+function packPlacesForBand(cities: TravelCityRow[], tripStartIso: string, bandStartDay: number, bandEndDay: number): PackedPlace[] {
+  const rowEnds: number[] = [];
+  return sortCitiesByDate(cities)
+    .filter((c): c is TravelCityRow & { start_date: string; end_date: string } => !!c.start_date && !!c.end_date)
+    .map((c, colorIdx) => ({
+      c,
+      colorClass: PLACE_BAR_COLORS[colorIdx % PLACE_BAR_COLORS.length],
+      startDay: dayIndexFor(tripStartIso, c.start_date),
+      endDay: dayIndexFor(tripStartIso, c.end_date),
+    }))
+    .filter(({ startDay, endDay }) => endDay >= bandStartDay && startDay <= bandEndDay)
+    .map(({ c, colorClass, startDay, endDay }) => ({
+      id: c.id,
+      name: c.name,
+      colorClass,
+      startDay: Math.max(startDay, bandStartDay),
+      endDay: Math.min(endDay, bandEndDay),
+      continuesFromPrev: startDay < bandStartDay,
+      continuesToNext: endDay > bandEndDay,
+    }))
+    .map((p) => {
+      let row = rowEnds.findIndex((end) => end < p.startDay);
+      if (row === -1) {
+        row = rowEnds.length;
+        rowEnds.push(p.endDay);
+      } else {
+        rowEnds[row] = p.endDay;
+      }
+      return { ...p, row };
+    });
+}
+
 function findRawRow(
   detail: TravelTripDetail,
   kind: EntryKind,
@@ -579,6 +643,10 @@ export default function TravelsClient() {
   const [revealedTripId, setRevealedTripId] = useState<number | null>(null);
   const [revealedCityId, setRevealedCityId] = useState<number | null>(null);
   const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // "+ Flight/Stay/Activity/Transit/Place" collapse behind a Data tools
+  // toggle, same pattern as the Lotto page.
+  const [showDataTools, setShowDataTools] = useState(false);
 
   // Click-and-drag + arrow-key horizontal scrolling for the trip calendar.
   const calendarScrollRef = useRef<HTMLDivElement>(null);
@@ -1097,7 +1165,7 @@ export default function TravelsClient() {
   // --- Rendering ---
 
   const renderTripCard = (detail: TravelTripDetail, index: number) => {
-    const { trip, cities } = detail;
+    const { trip } = detail;
     const itemCount =
       detail.flights.length + detail.transport.length + detail.itinerary.length + detail.accommodations.length;
     const dayCount = isoDateRange(trip.start_date, trip.end_date).length;
@@ -1158,18 +1226,6 @@ export default function TravelsClient() {
         <div className="mt-1 text-sm text-ink-3">
           {formatDate(trip.start_date)} – {formatDate(trip.end_date)}
         </div>
-        {cities.length > 0 && (
-          <div className="mt-3 flex flex-wrap gap-1.5">
-            {sortCitiesByDate(cities).map((c) => (
-              <span
-                key={c.id}
-                className="rounded-full bg-brand-soft px-2.5 py-1 text-xs font-medium text-brand-text"
-              >
-                {cityChipLabel(c)}
-              </span>
-            ))}
-          </div>
-        )}
         <div className="mt-3 text-xs text-ink-3">
           {dayCount} day{dayCount === 1 ? "" : "s"} · {itemCount} item{itemCount === 1 ? "" : "s"}
         </div>
@@ -1193,10 +1249,11 @@ export default function TravelsClient() {
   /** The calendar card is just the badge, time, and title — route, location,
    * maps links, meta, and notes only show once you click through to the
    * view modal. `bandIdx`/`bandStartDay` place it within its own band's
-   * local columns; a card clipped at a band edge (`continuesFromPrev`/
+   * local columns; `rowOffset` (the band's place-bar row count) pushes it
+   * below those. A card clipped at a band edge (`continuesFromPrev`/
    * `continuesToNext`) loses the rounded corner on that side so the cut
    * reads as a continuation rather than a full start/end. */
-  const renderEntryCard = (entry: PackedEntry, bandIdx: number, bandStartDay: number) => {
+  const renderEntryCard = (entry: PackedEntry, bandIdx: number, bandStartDay: number, rowOffset: number) => {
     const meta = TYPE_META[entry.kind];
     const localStart = entry.startDay - bandStartDay;
     const localEnd = entry.endDay - bandStartDay;
@@ -1205,7 +1262,7 @@ export default function TravelsClient() {
         key={`${entry.kind}-${entry.id}-${bandIdx}`}
         type="button"
         onClick={() => setViewing({ entry })}
-        style={{ gridColumn: `${localStart + 1} / ${localEnd + 2}`, gridRow: entry.row + 2 }}
+        style={{ gridColumn: `${localStart + 1} / ${localEnd + 2}`, gridRow: entry.row + 2 + rowOffset }}
         className={`flex flex-col gap-0.5 self-start border border-line bg-surface p-3 text-left border-l-[3px] ${meta.border} transition-shadow hover:shadow-xs ${
           entry.continuesFromPrev ? "rounded-l-none" : "rounded-l-lg"
         } ${entry.continuesToNext ? "rounded-r-none" : "rounded-r-lg"}`}
@@ -1216,6 +1273,26 @@ export default function TravelsClient() {
         </div>
         <div className="text-sm font-semibold leading-snug text-ink">{entry.title}</div>
       </button>
+    );
+  };
+
+  /** A place's colored bar, spanning every day column it covers within this
+   * band — non-interactive (places are edited/deleted via their chip in the
+   * header), just a compact colored strip so it reads as distinct from the
+   * bordered entry cards below it. */
+  const renderPlaceBar = (place: PackedPlace, bandIdx: number, bandStartDay: number) => {
+    const localStart = place.startDay - bandStartDay;
+    const localEnd = place.endDay - bandStartDay;
+    return (
+      <div
+        key={`place-${place.id}-${bandIdx}`}
+        style={{ gridColumn: `${localStart + 1} / ${localEnd + 2}`, gridRow: place.row + 2 }}
+        className={`truncate px-3 py-1.5 text-xs font-semibold ${place.colorClass} ${
+          place.continuesFromPrev ? "rounded-l-none" : "rounded-l-full"
+        } ${place.continuesToNext ? "rounded-r-none" : "rounded-r-full"}`}
+      >
+        {place.name}
+      </div>
     );
   };
 
@@ -1283,34 +1360,44 @@ export default function TravelsClient() {
             ))}
             <button
               type="button"
+              className={ACTION_BUTTON_CLASSES}
+              aria-expanded={showDataTools}
+              onClick={() => setShowDataTools((v) => !v)}
+            >
+              Data tools <span aria-hidden>{showDataTools ? "▴" : "▾"}</span>
+            </button>
+          </div>
+        </div>
+
+        {showDataTools && (
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
               disabled={saving}
               onClick={() => openAddPlace(trip.id)}
               className="rounded-full border border-dashed border-line-strong px-3 py-1.5 text-xs font-semibold text-ink-3 hover:border-brand hover:text-brand"
             >
               + Place
             </button>
+            <button type="button" disabled={saving} className={ADD_BUTTON_CLASSES} onClick={() => openAddEntry(trip.id, "flight")}>
+              + Flight
+            </button>
+            <button
+              type="button"
+              disabled={saving}
+              className={ADD_BUTTON_CLASSES}
+              onClick={() => openAddEntry(trip.id, "accommodation")}
+            >
+              + Stay
+            </button>
+            <button type="button" disabled={saving} className={ADD_BUTTON_CLASSES} onClick={() => openAddEntry(trip.id, "activity")}>
+              + Activity
+            </button>
+            <button type="button" disabled={saving} className={ADD_BUTTON_CLASSES} onClick={() => openAddEntry(trip.id, "train")}>
+              + Transit
+            </button>
           </div>
-        </div>
-
-        <div className="mt-4 flex flex-wrap gap-2">
-          <button type="button" disabled={saving} className={ADD_BUTTON_CLASSES} onClick={() => openAddEntry(trip.id, "flight")}>
-            + Flight
-          </button>
-          <button
-            type="button"
-            disabled={saving}
-            className={ADD_BUTTON_CLASSES}
-            onClick={() => openAddEntry(trip.id, "accommodation")}
-          >
-            + Stay
-          </button>
-          <button type="button" disabled={saving} className={ADD_BUTTON_CLASSES} onClick={() => openAddEntry(trip.id, "activity")}>
-            + Activity
-          </button>
-          <button type="button" disabled={saving} className={ADD_BUTTON_CLASSES} onClick={() => openAddEntry(trip.id, "train")}>
-            + Transit
-          </button>
-        </div>
+        )}
 
         <div className="mt-4 flex flex-wrap gap-4 rounded-lg border border-line bg-surface p-3.5">
           {(Object.keys(TYPE_META) as EntryKind[]).map((k) => (
@@ -1334,6 +1421,8 @@ export default function TravelsClient() {
         >
           {bands.map((band, bandIdx) => {
             const packed = packEntriesForBand(entries, trip.start_date, band.startDay, band.endDay);
+            const places = packPlacesForBand(cities, trip.start_date, band.startDay, band.endDay);
+            const placeRows = places.reduce((n, p) => Math.max(n, p.row + 1), 0);
             const daysWithEntries = new Set<number>();
             for (const e of packed) {
               for (let d = e.startDay; d <= e.endDay; d++) daysWithEntries.add(d);
@@ -1346,7 +1435,6 @@ export default function TravelsClient() {
               >
                 {band.days.map((iso, i) => {
                   const { weekday, label } = dayHeaderParts(iso);
-                  const city = cityForDate(cities, iso);
                   return (
                     <div
                       key={`hdr-${iso}`}
@@ -1356,17 +1444,22 @@ export default function TravelsClient() {
                       <div className="text-[11px] font-semibold uppercase tracking-wider text-ink-3">
                         {weekday} · {label}
                       </div>
-                      {city && <div className="mt-0.5 font-serif text-lg font-semibold text-ink">{city}</div>}
                     </div>
                   );
                 })}
 
-                {packed.map((entry) => renderEntryCard(entry, bandIdx, band.startDay))}
+                {places.map((place) => renderPlaceBar(place, bandIdx, band.startDay))}
+
+                {packed.map((entry) => renderEntryCard(entry, bandIdx, band.startDay, placeRows))}
 
                 {band.days.map(
                   (iso, i) =>
                     !daysWithEntries.has(band.startDay + i) && (
-                      <p key={`empty-${iso}`} style={{ gridColumn: i + 1, gridRow: 2 }} className="px-0.5 py-3 text-xs text-ink-4">
+                      <p
+                        key={`empty-${iso}`}
+                        style={{ gridColumn: i + 1, gridRow: 2 + placeRows }}
+                        className="px-0.5 py-3 text-xs text-ink-4"
+                      >
                         No items yet
                       </p>
                     ),
