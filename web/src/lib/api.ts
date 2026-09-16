@@ -1255,16 +1255,25 @@ export async function reorderCompanies(ids: number[]) {
   return sendJson<{ companies: CompanyRow[] }>("PUT", "/api/companies/reorder", { ids });
 }
 
-/** A trip is filed under an entry year + start/end month (like a journal
- * entry, but spanning several consecutive months for a longer trip —
- * `entry_month_end` equals `entry_month` for the default single-month case). */
 export type TravelTripRow = {
   id: number;
   title: string;
-  entry_year: number;
-  entry_month: number;
-  entry_month_end: number;
+  start_date: string;
+  end_date: string;
   notes: string | null;
+  created_at: string;
+};
+
+/** A place visited during the trip, shown as a chip on the card grid and
+ * trip header. `start_date`/`end_date` are optional — a chip can just be a
+ * name with no date range attached. */
+export type TravelCityRow = {
+  id: number;
+  trip_id: number;
+  name: string;
+  start_date: string | null;
+  end_date: string | null;
+  sort_order: number;
   created_at: string;
 };
 
@@ -1273,35 +1282,51 @@ export type TravelFlightRow = {
   trip_id: number;
   flight_number: string;
   flight_date: string | null;
+  /** Set only for an overnight/red-eye landing on a later calendar date;
+   * `null` means it lands the same day. */
+  arrival_date: string | null;
   departure_time: string | null;
   arrival_time: string | null;
   from_location: string | null;
   /** Custom Google Maps link; when unset the UI builds a search link from `from_location`. */
   from_map_url: string | null;
+  /** City/country resolved from `from_map_url`, if it was a maps link — used
+   * to build a "City, Country" calendar title instead of the full place name. */
+  from_city: string | null;
+  from_country: string | null;
   to_location: string | null;
   /** Custom Google Maps link; when unset the UI builds a search link from `to_location`. */
   to_map_url: string | null;
+  to_city: string | null;
+  to_country: string | null;
   notes: string | null;
   created_at: string;
 };
 
-/** A bus or train leg — same shape as a flight, plus a `mode`; the number
- * is optional since a bus route isn't always known/labeled the way a
- * flight number is. */
+/** A bus, train, or ferry leg — same shape as a flight, plus a `mode`; the
+ * number is optional since a bus/ferry route isn't always known/labeled the
+ * way a flight number is. */
 export type TravelTransportRow = {
   id: number;
   trip_id: number;
-  mode: "bus" | "train";
+  mode: "bus" | "train" | "ferry";
   number: string | null;
   travel_date: string | null;
+  /** Set only for an overnight leg arriving on a later calendar date;
+   * `null` means it arrives the same day. */
+  arrival_date: string | null;
   departure_time: string | null;
   arrival_time: string | null;
   from_location: string | null;
   /** Custom Google Maps link; when unset the UI builds a search link from `from_location`. */
   from_map_url: string | null;
+  from_city: string | null;
+  from_country: string | null;
   to_location: string | null;
   /** Custom Google Maps link; when unset the UI builds a search link from `to_location`. */
   to_map_url: string | null;
+  to_city: string | null;
+  to_country: string | null;
   notes: string | null;
   created_at: string;
 };
@@ -1345,6 +1370,7 @@ export type TravelAccommodationRow = {
 
 export type TravelTripDetail = {
   trip: TravelTripRow;
+  cities: TravelCityRow[];
   flights: TravelFlightRow[];
   transport: TravelTransportRow[];
   itinerary: TravelItineraryRow[];
@@ -1353,34 +1379,49 @@ export type TravelTripDetail = {
 
 export type TravelTripCreateBody = {
   title: string;
-  entry_year: number;
-  entry_month: number;
-  entry_month_end: number;
+  start_date: string;
+  end_date: string;
   notes?: string | null;
+};
+
+export type TravelCityBody = {
+  name: string;
+  start_date?: string | null;
+  end_date?: string | null;
 };
 
 export type TravelFlightBody = {
   flight_number: string;
   flight_date?: string | null;
+  arrival_date?: string | null;
   departure_time?: string | null;
   arrival_time?: string | null;
   from_location?: string | null;
   from_map_url?: string | null;
+  from_city?: string | null;
+  from_country?: string | null;
   to_location?: string | null;
   to_map_url?: string | null;
+  to_city?: string | null;
+  to_country?: string | null;
   notes?: string | null;
 };
 
 export type TravelTransportBody = {
-  mode: "bus" | "train";
+  mode: "bus" | "train" | "ferry";
   number?: string | null;
   travel_date?: string | null;
+  arrival_date?: string | null;
   departure_time?: string | null;
   arrival_time?: string | null;
   from_location?: string | null;
   from_map_url?: string | null;
+  from_city?: string | null;
+  from_country?: string | null;
   to_location?: string | null;
   to_map_url?: string | null;
+  to_city?: string | null;
+  to_country?: string | null;
   notes?: string | null;
 };
 
@@ -1410,6 +1451,18 @@ export type TravelAccommodationBody = {
 
 export async function getTravelTrips(limit?: number) {
   return getJson<{ trips: TravelTripDetail[] }>("/api/travel", { limit });
+}
+
+/** Resolves a pasted Google Maps link to its place name (e.g. a
+ * `maps.app.goo.gl` short link to "Bang Sue Grand Station") plus the city
+ * and country its coordinates reverse-geocode to, so the field can show a
+ * real name instead of the raw URL and the calendar can build a shorter
+ * "City, Country" title. Each field is `null` when it couldn't be resolved. */
+export async function resolveMapLink(url: string) {
+  return getJson<{ name: string | null; city: string | null; country: string | null }>(
+    "/api/travel/resolve-map-link",
+    { url },
+  );
 }
 
 export async function createTravelTrip(body: TravelTripCreateBody) {
@@ -1511,4 +1564,16 @@ export async function deleteTravelAccommodation(tripId: number, accommodationId:
     "DELETE",
     `/api/travel/${tripId}/accommodations/${accommodationId}`,
   );
+}
+
+export async function createTravelCity(tripId: number, body: TravelCityBody) {
+  return sendJson<TravelTripDetail>("POST", `/api/travel/${tripId}/cities`, body);
+}
+
+export async function updateTravelCity(tripId: number, cityId: number, body: TravelCityBody) {
+  return sendJson<TravelTripDetail>("PUT", `/api/travel/${tripId}/cities/${cityId}`, body);
+}
+
+export async function deleteTravelCity(tripId: number, cityId: number) {
+  return sendJson<TravelTripDetail>("DELETE", `/api/travel/${tripId}/cities/${cityId}`);
 }

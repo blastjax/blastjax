@@ -1,11 +1,11 @@
 """Travel trip API models.
 
-A trip is filed under an entry year + month (like a journal entry) and holds
-four kinds of nested records: flights, ground transport (bus/train), itinerary
-items, and accommodations. Locations on itinerary/accommodation rows (and a
-flight's or transport leg's origin/destination) carry an optional custom
-Google Maps link; when one isn't set, the frontend builds a maps search link
-from the location's name instead.
+A trip spans a real start/end date range and holds a list of cities visited
+plus four kinds of nested records: flights, ground transport (bus/train),
+itinerary items, and accommodations. Locations on itinerary/accommodation
+rows (and a flight's or transport leg's origin/destination) carry an
+optional custom Google Maps link; when one isn't set, the frontend builds a
+maps search link from the location's name instead.
 """
 
 from __future__ import annotations
@@ -45,11 +45,8 @@ def _require_text(v: str, label: str) -> str:
 
 class TravelTripCreate(BaseModel):
     title: str = Field(min_length=1)
-    entry_year: int = Field(ge=1900, le=2999)
-    entry_month: int = Field(ge=1, le=12)
-    # Inclusive end month, same year — a trip can span several consecutive
-    # months; equal to entry_month for the (default) single-month case.
-    entry_month_end: int = Field(ge=1, le=12)
+    start_date: dt.date
+    end_date: dt.date
     notes: str | None = None
 
     @field_validator("title")
@@ -64,20 +61,46 @@ class TravelTripCreate(BaseModel):
 
     @model_validator(mode="after")
     def _end_after_start(self) -> "TravelTripCreate":
-        if self.entry_month_end < self.entry_month:
-            raise ValueError("End month must be on or after the start month.")
+        if self.end_date < self.start_date:
+            raise ValueError("End date must be on or after the start date.")
+        return self
+
+
+class TravelCityCreate(BaseModel):
+    name: str = Field(min_length=1)
+    start_date: dt.date | None = None
+    end_date: dt.date | None = None
+
+    @field_validator("name")
+    @classmethod
+    def _name(cls, v: str) -> str:
+        return _require_text(v, "Name")
+
+    @model_validator(mode="after")
+    def _end_after_start(self) -> "TravelCityCreate":
+        if self.start_date is not None and self.end_date is not None and self.end_date < self.start_date:
+            raise ValueError("End date must be on or after the start date.")
         return self
 
 
 class TravelFlightCreate(BaseModel):
     flight_number: str = Field(min_length=1)
     flight_date: dt.date | None = None
+    # Set only when the flight lands on a later calendar date than it departs
+    # (an overnight/red-eye) — None means it lands the same day.
+    arrival_date: dt.date | None = None
     departure_time: dt.time | None = None
     arrival_time: dt.time | None = None
     from_location: str | None = None
     from_map_url: str | None = None
+    # City/country the maps link resolved to, if it was one -- used to build
+    # a "City, Country" calendar title instead of the full place name.
+    from_city: str | None = None
+    from_country: str | None = None
     to_location: str | None = None
     to_map_url: str | None = None
+    to_city: str | None = None
+    to_country: str | None = None
     notes: str | None = None
 
     @field_validator("flight_number")
@@ -93,29 +116,46 @@ class TravelFlightCreate(BaseModel):
     @field_validator(
         "from_location",
         "from_map_url",
+        "from_city",
+        "from_country",
         "to_location",
         "to_map_url",
+        "to_city",
+        "to_country",
         "notes",
     )
     @classmethod
     def _optional(cls, v: str | None) -> str | None:
         return _clean_optional(v)
 
+    @model_validator(mode="after")
+    def _arrival_after_departure(self) -> "TravelFlightCreate":
+        if self.flight_date is not None and self.arrival_date is not None and self.arrival_date < self.flight_date:
+            raise ValueError("Arrival date must be on or after the flight date.")
+        return self
+
 
 class TravelTransportCreate(BaseModel):
-    """A bus or train leg — same shape as a flight, plus a mode, with the
-    number optional since a bus route isn't always known/labeled the way a
-    flight number is."""
+    """A bus, train, or ferry leg — same shape as a flight, plus a mode, with
+    the number optional since a bus/ferry route isn't always known/labeled
+    the way a flight number is."""
 
-    mode: Literal["bus", "train"]
+    mode: Literal["bus", "train", "ferry"]
     number: str | None = None
     travel_date: dt.date | None = None
+    # Set only when the leg arrives on a later calendar date than it departs
+    # (an overnight train/ferry) — None means it arrives the same day.
+    arrival_date: dt.date | None = None
     departure_time: dt.time | None = None
     arrival_time: dt.time | None = None
     from_location: str | None = None
     from_map_url: str | None = None
+    from_city: str | None = None
+    from_country: str | None = None
     to_location: str | None = None
     to_map_url: str | None = None
+    to_city: str | None = None
+    to_country: str | None = None
     notes: str | None = None
 
     @field_validator("departure_time", "arrival_time", mode="before")
@@ -127,13 +167,23 @@ class TravelTransportCreate(BaseModel):
         "number",
         "from_location",
         "from_map_url",
+        "from_city",
+        "from_country",
         "to_location",
         "to_map_url",
+        "to_city",
+        "to_country",
         "notes",
     )
     @classmethod
     def _optional(cls, v: str | None) -> str | None:
         return _clean_optional(v)
+
+    @model_validator(mode="after")
+    def _arrival_after_departure(self) -> "TravelTransportCreate":
+        if self.travel_date is not None and self.arrival_date is not None and self.arrival_date < self.travel_date:
+            raise ValueError("Arrival date must be on or after the travel date.")
+        return self
 
 
 class TravelItineraryCreate(BaseModel):

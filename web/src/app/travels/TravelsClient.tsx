@@ -1,50 +1,54 @@
 "use client";
 
 import { PageHeader } from "@/components/PageHeader";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { DatePickerField } from "@/components/DatePickerField";
-import { DateRangePickerField } from "@/components/DateRangePickerField";
 import { LocationLink } from "@/components/LocationLink";
 import { Modal } from "@/components/Modal";
+import { PencilIcon, TrashIcon } from "@/components/Icons";
 import { TimeField } from "@/components/TimeField";
-import { TripCalendar } from "@/components/TripCalendar";
 import {
   ADD_BUTTON_CLASSES,
-  CARD_CLASSES,
   CLOSE_BUTTON_CLASSES,
   DASHED_EMPTY_CLASSES,
   DELETE_BUTTON_CLASSES,
-  EDIT_BUTTON_CLASSES,
   ERROR_ALERT_CLASSES,
+  ICON_BUTTON_CLASSES,
   INPUT_CLASSES,
+  LABEL_CLASSES,
   PAGE_CONTAINER_CLASSES,
   PRIMARY_BUTTON_CLASSES,
   SECONDARY_BUTTON_CLASSES,
 } from "@/lib/ui";
 import {
   createTravelAccommodation,
+  createTravelCity,
   createTravelFlight,
   createTravelItinerary,
   createTravelTransport,
   createTravelTrip,
   deleteTravelAccommodation,
+  deleteTravelCity,
   deleteTravelFlight,
   deleteTravelItinerary,
   deleteTravelTransport,
   deleteTravelTrip,
   getTravelTrips,
+  resolveMapLink,
   updateTravelAccommodation,
+  updateTravelCity,
   updateTravelFlight,
   updateTravelItinerary,
   updateTravelTransport,
   updateTravelTrip,
   type TravelAccommodationRow,
+  type TravelCityRow,
   type TravelFlightRow,
   type TravelItineraryRow,
   type TravelTransportRow,
   type TravelTripDetail,
 } from "@/lib/api";
-import { formatDate, formatTimeLabel, formatTimeRange, MONTH_NAMES_FULL } from "@/lib/dateFormat";
+import { formatDate, formatTimeLabel, formatTimeRange, MONTH_NAMES_SHORT, parseDateOnlyLocal, toIsoDateLocal } from "@/lib/dateFormat";
 import { mapsUrlFor } from "@/lib/maps";
 
 const TIME_HELP =
@@ -53,9 +57,7 @@ const TIME_HELP =
 /** Parses free-text "H:MM"/"HH:MM", or plain digits ("1430", "930", "14")
  * as a 24-hour time, zero-padding the result. Blank means "not set"
  * (returns `undefined` so the field is omitted from the request rather
- * than sent as ""). Throws on anything else — an out-of-range hour/minute,
- * "2:30 PM", garbage — same pattern as the app's other free-text fields
- * (e.g. Lotto's draw date). */
+ * than sent as ""). Throws on anything else. */
 function parseOptionalTime24(text: string): string | undefined {
   const trimmed = text.trim();
   if (!trimmed) return undefined;
@@ -68,8 +70,6 @@ function parseOptionalTime24(text: string): string | undefined {
   } else {
     const digitsOnly = /^\d{1,4}$/.exec(trimmed);
     if (!digitsOnly) throw new Error(TIME_HELP);
-    // 1-2 digits is just the hour ("14" -> 14:00); 3-4 digits splits the
-    // last two off as minutes ("1430" -> 14:30, "930" -> 9:30).
     if (trimmed.length <= 2) {
       h = Number(trimmed);
       mi = 0;
@@ -82,221 +82,475 @@ function parseOptionalTime24(text: string): string | undefined {
   return `${String(h).padStart(2, "0")}:${String(mi).padStart(2, "0")}`;
 }
 
-/** Live preview while editing an accommodation's dates — the saved
- * nights/days always come from the server (`TravelAccommodationRow.nights`),
- * this is only for immediate feedback in the form. */
-function previewNightsDays(checkin: string, checkout: string): { nights: number; days: number } | null {
-  if (!checkin || !checkout) return null;
-  const ci = new Date(`${checkin}T00:00:00`);
-  const co = new Date(`${checkout}T00:00:00`);
-  if (Number.isNaN(ci.getTime()) || Number.isNaN(co.getTime())) return null;
-  const nights = Math.max(0, Math.round((co.getTime() - ci.getTime()) / 86_400_000));
-  return { nights, days: nights + 1 };
+/** Blank -> undefined so optional API fields are omitted rather than sent as "". */
+function optOrUndefined(s: string): string | undefined {
+  const trimmed = s.trim();
+  return trimmed ? trimmed : undefined;
 }
 
-/** "Train Nozomi 23", or just "Bus"/"Train" when no number is set. */
-function transportLabel(t: Pick<TravelTransportRow, "mode" | "number">): string {
-  const mode = t.mode === "bus" ? "Bus" : "Train";
-  return t.number ? `${mode} ${t.number}` : mode;
+function addDaysIso(iso: string, days: number): string {
+  const d = parseDateOnlyLocal(iso);
+  if (!d) return iso;
+  d.setDate(d.getDate() + days);
+  return toIsoDateLocal(d);
 }
 
-function ItemRow({
-  children,
-  onEdit,
-  onDelete,
-  saving,
-}: {
-  children: React.ReactNode;
-  onEdit: () => void;
-  onDelete: () => void;
-  saving: boolean;
-}) {
-  return (
-    <li className="flex flex-wrap items-start justify-between gap-3 rounded-lg border border-line bg-surface p-3">
-      <div className="min-w-0 flex-1 text-sm">{children}</div>
-      <div className="flex shrink-0 items-center gap-2">
-        <button type="button" disabled={saving} className={EDIT_BUTTON_CLASSES} onClick={onEdit}>
-          Edit
-        </button>
-        <button
-          type="button"
-          disabled={saving}
-          className={DELETE_BUTTON_CLASSES}
-          onClick={onDelete}
-        >
-          Delete
-        </button>
-      </div>
-    </li>
-  );
+function dayIndexFor(startIso: string, dateIso: string): number {
+  const s = parseDateOnlyLocal(startIso);
+  const d = parseDateOnlyLocal(dateIso);
+  if (!s || !d) return 0;
+  return Math.round((d.getTime() - s.getTime()) / 86_400_000);
+}
+
+/** Every ISO date from `startIso` to `endIso`, inclusive. */
+function isoDateRange(startIso: string, endIso: string): string[] {
+  const start = parseDateOnlyLocal(startIso);
+  const end = parseDateOnlyLocal(endIso);
+  if (!start || !end) return [];
+  const out: string[] = [];
+  const cur = new Date(start);
+  while (cur.getTime() <= end.getTime()) {
+    out.push(toIsoDateLocal(cur));
+    cur.setDate(cur.getDate() + 1);
+  }
+  return out;
+}
+
+/** "FRI" / "Oct 3" — compact day-column header pieces. */
+function dayHeaderParts(iso: string): { weekday: string; label: string } {
+  const d = parseDateOnlyLocal(iso);
+  if (!d) return { weekday: "", label: iso };
+  const weekday = d.toLocaleDateString("en-US", { weekday: "short" }).toUpperCase();
+  return { weekday, label: `${MONTH_NAMES_SHORT[d.getMonth()]} ${d.getDate()}` };
+}
+
+/** The city whose date range covers `iso`, or null. Cities with no dates
+ * set never match a specific day. */
+function cityForDate(cities: TravelCityRow[], iso: string): string | null {
+  for (const c of cities) {
+    if (c.start_date && c.end_date && iso >= c.start_date && iso <= c.end_date) return c.name;
+  }
+  return null;
+}
+
+function cityChipLabel(c: TravelCityRow): string {
+  if (c.start_date && c.end_date) {
+    return c.start_date === c.end_date
+      ? `${c.name} · ${formatDate(c.start_date)}`
+      : `${c.name} · ${formatDate(c.start_date)} – ${formatDate(c.end_date)}`;
+  }
+  return c.name;
+}
+
+type EntryKind = "flight" | "train" | "bus" | "ferry" | "activity" | "accommodation";
+
+const TYPE_META: Record<EntryKind, { label: string; dot: string; text: string; border: string }> = {
+  flight: { label: "FLIGHT", dot: "bg-sky-500", text: "text-sky-700 dark:text-sky-300", border: "border-l-sky-500" },
+  train: { label: "TRAIN", dot: "bg-violet-500", text: "text-violet-700 dark:text-violet-300", border: "border-l-violet-500" },
+  bus: { label: "BUS", dot: "bg-fuchsia-500", text: "text-fuchsia-700 dark:text-fuchsia-300", border: "border-l-fuchsia-500" },
+  ferry: { label: "FERRY", dot: "bg-cyan-500", text: "text-cyan-700 dark:text-cyan-300", border: "border-l-cyan-500" },
+  activity: { label: "ACTIVITY", dot: "bg-amber-500", text: "text-amber-700 dark:text-amber-300", border: "border-l-amber-500" },
+  accommodation: { label: "STAY", dot: "bg-emerald-500", text: "text-emerald-700 dark:text-emerald-300", border: "border-l-emerald-500" },
+};
+
+const TRIP_ACCENTS = ["border-l-indigo-500", "border-l-emerald-500", "border-l-amber-500"];
+
+/** Same geometry as `ICON_BUTTON_CLASSES`, recolored for a destructive action. */
+const VIEW_DELETE_ICON_CLASSES =
+  "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-danger-text transition-colors duration-150 hover:bg-danger-soft disabled:pointer-events-none disabled:opacity-50";
+
+/** Compact edit/delete icon buttons sized for a chip pill rather than a card or modal. */
+const CHIP_EDIT_ICON_CLASSES =
+  "inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-brand-text/70 transition-colors duration-150 hover:text-brand-text disabled:pointer-events-none disabled:opacity-50";
+const CHIP_DELETE_ICON_CLASSES =
+  "inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-danger-text/80 transition-colors duration-150 hover:text-danger-text disabled:pointer-events-none disabled:opacity-50";
+
+/** How long a click waits before acting, in case it's the first half of a
+ * double-click — used wherever a single click navigates/does nothing but a
+ * double-click reveals edit/delete actions instead. */
+const DBLCLICK_WINDOW_MS = 220;
+
+/** Width of one day column in the trip calendar grid, in pixels — also the
+ * step used by the calendar's arrow-key horizontal scroll. */
+const DAY_COLUMN_WIDTH = 260;
+
+/** True for text that looks like a pasted URL, e.g. a Google Maps link. */
+function looksLikeUrl(s: string): boolean {
+  return /^https?:\/\//i.test(s.trim());
+}
+
+/** Resolves a location field's value for saving. If it's still a raw pasted
+ * maps link — e.g. the onBlur resolve (see `resolveLocationFieldOnBlur`)
+ * hadn't finished before Save was clicked — this awaits the same lookup so
+ * the save is never left with a URL where the name belongs. Already-plain
+ * text is returned as-is, with whatever custom map URL/city/country the
+ * field already had (untouched). */
+async function resolvedLocation(
+  value: string,
+  existingMapUrl: string,
+  existingCity: string,
+  existingCountry: string,
+): Promise<{ name: string; mapUrl: string; city: string; country: string }> {
+  const trimmed = value.trim();
+  if (!looksLikeUrl(trimmed)) {
+    return { name: trimmed, mapUrl: existingMapUrl, city: existingCity, country: existingCountry };
+  }
+  try {
+    const { name, city, country } = await resolveMapLink(trimmed);
+    return { name: name ?? trimmed, mapUrl: trimmed, city: city ?? "", country: country ?? "" };
+  } catch {
+    return { name: trimmed, mapUrl: trimmed, city: existingCity, country: existingCountry };
+  }
+}
+
+/** A flight/transport leg's headline: "MNL → NRT" when both ends are known,
+ * degrading down to whichever end is set, or the flight/transport number. */
+function routeHeadline(from: string | null, to: string | null, fallback: string): string {
+  if (from && to) return `${from} → ${to}`;
+  return from || to || fallback;
+}
+
+/** The calendar title for a flight/transit route: flights always show
+ * "City, Country" for each end; transit shows just "City" unless the two
+ * ends resolved to different countries (an international leg), in which
+ * case it gets the same "City, Country" treatment to flag the crossing.
+ * Falls back to the plain location text (or the route's own fallback)
+ * whenever a city hasn't been resolved — i.e. the field was typed rather
+ * than pasted from a maps link. */
+function routeTitle(
+  isFlight: boolean,
+  from: string | null,
+  fromCity: string | null,
+  fromCountry: string | null,
+  to: string | null,
+  toCity: string | null,
+  toCountry: string | null,
+  fallback: string,
+): string {
+  const crossesCountry = !!fromCountry && !!toCountry && fromCountry !== toCountry;
+  const useCountry = isFlight || crossesCountry;
+  const fromLabel = fromCity ? (useCountry && fromCountry ? `${fromCity}, ${fromCountry}` : fromCity) : from;
+  const toLabel = toCity ? (useCountry && toCountry ? `${toCity}, ${toCountry}` : toCity) : to;
+  return routeHeadline(fromLabel, toLabel, fallback);
+}
+
+type TimelineEntry = {
+  kind: EntryKind;
+  id: number;
+  date: string;
+  time: string | null;
+  timeLabel: string | null;
+  title: string;
+  route: { from: string | null; to: string | null; fromUrl: string | null; toUrl: string | null } | null;
+  location: string | null;
+  locationUrl: string | null;
+  meta: { k: string; v: string }[] | null;
+  notes: string | null;
+  /** The last date this entry is still in progress (accommodation checkout
+   * / flight or transit arrival), if later than `date` — the entry's card
+   * spans from `date` to this day in the calendar, aligned across every
+   * day column it passes through instead of repeating per day. */
+  spanEndDate: string | null;
+};
+
+function buildTimelineEntries(detail: TravelTripDetail): TimelineEntry[] {
+  const owns: TimelineEntry[] = [];
+
+  for (const f of detail.flights) {
+    if (!f.flight_date) continue;
+    owns.push({
+      kind: "flight",
+      id: f.id,
+      date: f.flight_date,
+      time: f.departure_time,
+      timeLabel: formatTimeRange(f.departure_time, f.arrival_time),
+      title: routeTitle(
+        true,
+        f.from_location,
+        f.from_city,
+        f.from_country,
+        f.to_location,
+        f.to_city,
+        f.to_country,
+        f.flight_number,
+      ),
+      route:
+        f.from_location || f.to_location
+          ? {
+              from: f.from_location,
+              to: f.to_location,
+              fromUrl: mapsUrlFor(f.from_location, f.from_map_url),
+              toUrl: mapsUrlFor(f.to_location, f.to_map_url),
+            }
+          : null,
+      location: null,
+      locationUrl: null,
+      meta:
+        f.arrival_date && f.arrival_date > f.flight_date
+          ? [{ k: "Flight", v: f.flight_number }, { k: "Arrives", v: formatDate(f.arrival_date) }]
+          : [{ k: "Flight", v: f.flight_number }],
+      notes: f.notes,
+      spanEndDate: f.arrival_date,
+    });
+  }
+
+  for (const t of detail.transport) {
+    if (!t.travel_date) continue;
+    const modeLabel = t.mode === "bus" ? "Bus" : "Train";
+    owns.push({
+      kind: t.mode,
+      id: t.id,
+      date: t.travel_date,
+      time: t.departure_time,
+      timeLabel: formatTimeRange(t.departure_time, t.arrival_time),
+      title: routeTitle(
+        false,
+        t.from_location,
+        t.from_city,
+        t.from_country,
+        t.to_location,
+        t.to_city,
+        t.to_country,
+        t.number ? `${modeLabel} ${t.number}` : modeLabel,
+      ),
+      route:
+        t.from_location || t.to_location
+          ? {
+              from: t.from_location,
+              to: t.to_location,
+              fromUrl: mapsUrlFor(t.from_location, t.from_map_url),
+              toUrl: mapsUrlFor(t.to_location, t.to_map_url),
+            }
+          : null,
+      location: null,
+      locationUrl: null,
+      meta: (() => {
+        const m: { k: string; v: string }[] = [];
+        if (t.number) m.push({ k: "Number", v: t.number });
+        if (t.arrival_date && t.arrival_date > t.travel_date) m.push({ k: "Arrives", v: formatDate(t.arrival_date) });
+        return m.length ? m : null;
+      })(),
+      notes: t.notes,
+      spanEndDate: t.arrival_date,
+    });
+  }
+
+  for (const item of detail.itinerary) {
+    const spans = !!item.item_end_date && item.item_end_date !== item.item_date;
+    owns.push({
+      kind: "activity",
+      id: item.id,
+      date: item.item_date,
+      time: item.start_time,
+      timeLabel: formatTimeRange(item.start_time, item.end_time),
+      title: item.activity,
+      route: null,
+      location: item.location_name,
+      locationUrl: mapsUrlFor(item.location_name, item.location_map_url),
+      meta: spans ? [{ k: "Ends", v: formatDate(item.item_end_date) }] : null,
+      notes: item.notes,
+      // Activities aren't part of the day-spanning alignment (only
+      // flights/transit/stays are) — "Ends" above covers a multi-day one.
+      spanEndDate: null,
+    });
+  }
+
+  for (const a of detail.accommodations) {
+    const checkout = `${formatDate(a.checkout_date)}${a.checkout_time ? ` · ${formatTimeLabel(a.checkout_time)}` : ""} (${a.nights} night${a.nights === 1 ? "" : "s"})`;
+    const meta: { k: string; v: string }[] = [{ k: "Check-out", v: checkout }];
+    if (a.booking_confirmation) meta.push({ k: "Confirmation", v: a.booking_confirmation });
+    owns.push({
+      kind: "accommodation",
+      id: a.id,
+      date: a.checkin_date,
+      time: a.checkin_time,
+      timeLabel: formatTimeRange(a.checkin_time, a.checkout_time),
+      title: a.name,
+      route: null,
+      location: a.location_name,
+      locationUrl: mapsUrlFor(a.location_name, a.location_map_url),
+      meta,
+      notes: [a.instructions, a.notes].filter(Boolean).join("\n\n") || null,
+      spanEndDate: a.checkout_date,
+    });
+  }
+
+  return owns.sort((a, b) => {
+    if (a.date !== b.date) return a.date < b.date ? -1 : 1;
+    if (a.time !== b.time) return (a.time ?? "99:99") < (b.time ?? "99:99") ? -1 : 1;
+    return a.id - b.id;
+  });
+}
+
+/** How many day columns sit in one horizontal band before wrapping to the
+ * next — keeps a long trip readable instead of one very wide scrolling strip. */
+const DAYS_PER_BAND = 5;
+
+type PackedEntry = TimelineEntry & {
+  startDay: number;
+  endDay: number;
+  row: number;
+  /** True when this card is a clipped piece of an entry that actually
+   * started in an earlier band, or continues into a later one — the entry
+   * itself doesn't need to line up across bands ("if it's in a different
+   * row it's okay"), this just drops the rounded corner on that edge so the
+   * cut reads as a continuation rather than a full start/end. */
+  continuesFromPrev: boolean;
+  continuesToNext: boolean;
+};
+
+/** Assigns each entry in `entries` a grid row *within one band* of days
+ * ([bandStartDay, bandEndDay], inclusive day indices from the trip start) so
+ * a multi-day flight/transit/stay lands in the same row across every day
+ * column it spans in this band — a Gantt-style horizontal bar rather than a
+ * repeated card per day. An entry outside the band is dropped; one that
+ * only partly overlaps is clipped to the band's edges (its row can differ
+ * from whatever band it also appears in before/after).
+ *
+ * Rows stack in strict chronological order and are never backfilled: each
+ * entry, in start-day/time order, just takes the next row down. Alignment
+ * only ever applies to a single entry's own date span (its bar spans every
+ * day it covers) — it does not try to also line up separate, unrelated
+ * entries that merely don't conflict, e.g. a stay starting the day a
+ * different flight ends. That reuse-for-compactness reads as "this stay is
+ * related to that flight" when it isn't, so a later entry always renders
+ * below every earlier one instead of hopping back into a freed row. */
+function packEntriesForBand(entries: TimelineEntry[], tripStartIso: string, bandStartDay: number, bandEndDay: number): PackedEntry[] {
+  return entries
+    .map((e) => {
+      const startDay = dayIndexFor(tripStartIso, e.date);
+      const endDay = dayIndexFor(tripStartIso, e.spanEndDate && e.spanEndDate > e.date ? e.spanEndDate : e.date);
+      return { e, startDay, endDay };
+    })
+    .filter(({ startDay, endDay }) => endDay >= bandStartDay && startDay <= bandEndDay)
+    .map(({ e, startDay, endDay }) => ({
+      ...e,
+      startDay: Math.max(startDay, bandStartDay),
+      endDay: Math.min(endDay, bandEndDay),
+      continuesFromPrev: startDay < bandStartDay,
+      continuesToNext: endDay > bandEndDay,
+    }))
+    .sort((a, b) => {
+      if (a.startDay !== b.startDay) return a.startDay - b.startDay;
+      if (a.time !== b.time) return (a.time ?? "99:99") < (b.time ?? "99:99") ? -1 : 1;
+      return a.id - b.id;
+    })
+    .map((e, row) => ({ ...e, row }));
+}
+
+function findRawRow(
+  detail: TravelTripDetail,
+  kind: EntryKind,
+  id: number,
+): TravelFlightRow | TravelTransportRow | TravelItineraryRow | TravelAccommodationRow | null {
+  if (kind === "flight") return detail.flights.find((f) => f.id === id) ?? null;
+  if (kind === "activity") return detail.itinerary.find((i) => i.id === id) ?? null;
+  if (kind === "accommodation") return detail.accommodations.find((a) => a.id === id) ?? null;
+  return detail.transport.find((t) => t.id === id) ?? null;
 }
 
 type TripFormState = {
   open: boolean;
   editId: number | null;
   title: string;
-  entryYear: string;
-  entryMonth: string;
-  /** Inclusive end month, same year — a trip can span several consecutive
-   * months. Defaults equal to `entryMonth` (the single-month case). */
-  entryMonthEnd: string;
+  startDate: string;
+  numDays: string;
   notes: string;
 };
 const emptyTripForm = (): TripFormState => ({
   open: true,
   editId: null,
   title: "",
-  entryYear: String(new Date().getFullYear()),
-  entryMonth: String(new Date().getMonth() + 1),
-  entryMonthEnd: String(new Date().getMonth() + 1),
+  startDate: toIsoDateLocal(new Date()),
+  numDays: "1",
   notes: "",
 });
+const CLOSED_TRIP_MODAL: TripFormState = { ...emptyTripForm(), open: false };
 
-type FlightFormState = {
-  open: boolean;
-  tripId: number | null;
-  editId: number | null;
-  flightNumber: string;
-  flightDate: string;
-  departureTime: string;
-  arrivalTime: string;
-  fromLocation: string;
-  fromMapUrl: string;
-  toLocation: string;
-  toMapUrl: string;
-  notes: string;
-};
-const emptyFlightForm = (tripId: number): FlightFormState => ({
-  open: true,
-  tripId,
-  editId: null,
-  flightNumber: "",
-  flightDate: "",
-  departureTime: "",
-  arrivalTime: "",
-  fromLocation: "",
-  fromMapUrl: "",
-  toLocation: "",
-  toMapUrl: "",
-  notes: "",
-});
-
-type TransportFormState = {
-  open: boolean;
-  tripId: number | null;
-  editId: number | null;
-  mode: "bus" | "train";
-  /** Optional — a bus route isn't always known/labeled the way a flight
-   * number is. */
-  number: string;
-  travelDate: string;
-  departureTime: string;
-  arrivalTime: string;
-  fromLocation: string;
-  fromMapUrl: string;
-  toLocation: string;
-  toMapUrl: string;
-  notes: string;
-};
-const emptyTransportForm = (tripId: number): TransportFormState => ({
-  open: true,
-  tripId,
-  editId: null,
-  mode: "bus",
-  number: "",
-  travelDate: "",
-  departureTime: "",
-  arrivalTime: "",
-  fromLocation: "",
-  fromMapUrl: "",
-  toLocation: "",
-  toMapUrl: "",
-  notes: "",
-});
-
-type ItineraryFormState = {
-  open: boolean;
-  tripId: number | null;
-  editId: number | null;
-  itemDate: string;
-  /** Optional — set only for an item that spans past its start date (an
-   * overnight train, a multi-day trek). Blank means a same-day item. */
-  itemEndDate: string;
-  startTime: string;
-  endTime: string;
-  activity: string;
-  locationName: string;
-  locationMapUrl: string;
-  notes: string;
-};
-const emptyItineraryForm = (tripId: number): ItineraryFormState => ({
-  open: true,
-  tripId,
-  editId: null,
-  itemDate: "",
-  itemEndDate: "",
-  startTime: "",
-  endTime: "",
-  activity: "",
-  locationName: "",
-  locationMapUrl: "",
-  notes: "",
-});
-
-type AccommodationFormState = {
+type PlaceFormState = {
   open: boolean;
   tripId: number | null;
   editId: number | null;
   name: string;
-  checkinDate: string;
+  startDate: string;
+  endDate: string;
+};
+const CLOSED_PLACE_MODAL: PlaceFormState = {
+  open: false,
+  tripId: null,
+  editId: null,
+  name: "",
+  startDate: "",
+  endDate: "",
+};
+
+type EntryFormState = {
+  open: boolean;
+  tripId: number | null;
+  kind: EntryKind;
+  editId: number | null;
+  dayIndex: number;
+  time1: string;
+  time2: string;
+  fromLocation: string;
+  toLocation: string;
+  /** Custom Google Maps link, set automatically when the matching *Location
+   * field is a pasted maps link that resolved to a name. */
+  fromMapUrl: string;
+  toMapUrl: string;
+  locationMapUrl: string;
+  /** From/To only — city/country the maps link resolved to, for the
+   * calendar's "City, Country" title. Empty when typed manually. */
+  fromCity: string;
+  fromCountry: string;
+  toCity: string;
+  toCountry: string;
+  /** Flight/transit only — set only for an overnight leg landing on a later
+   * calendar date than it departs. */
+  arrivalDate: string;
+  flightNumber: string;
+  number: string;
+  activity: string;
+  name: string;
+  locationName: string;
   checkoutDate: string;
-  checkinTime: string;
   checkoutTime: string;
   bookingConfirmation: string;
   instructions: string;
-  locationName: string;
-  locationMapUrl: string;
   notes: string;
 };
-const emptyAccommodationForm = (tripId: number): AccommodationFormState => ({
+const emptyEntryForm = (tripId: number, kind: EntryKind): EntryFormState => ({
   open: true,
   tripId,
+  kind,
   editId: null,
+  dayIndex: 0,
+  time1: "",
+  time2: "",
+  fromLocation: "",
+  toLocation: "",
+  fromMapUrl: "",
+  toMapUrl: "",
+  locationMapUrl: "",
+  fromCity: "",
+  fromCountry: "",
+  toCity: "",
+  toCountry: "",
+  arrivalDate: "",
+  flightNumber: "",
+  number: "",
+  activity: "",
   name: "",
-  checkinDate: "",
+  locationName: "",
   checkoutDate: "",
-  checkinTime: "",
   checkoutTime: "",
   bookingConfirmation: "",
   instructions: "",
-  locationName: "",
-  locationMapUrl: "",
   notes: "",
 });
+const CLOSED_ENTRY_MODAL: EntryFormState = { ...emptyEntryForm(0, "flight"), open: false, tripId: null };
 
-const CLOSED_TRIP_MODAL: TripFormState = { ...emptyTripForm(), open: false };
-const CLOSED_FLIGHT_MODAL: FlightFormState = { ...emptyFlightForm(0), open: false, tripId: null };
-const CLOSED_TRANSPORT_MODAL: TransportFormState = {
-  ...emptyTransportForm(0),
-  open: false,
-  tripId: null,
-};
-const CLOSED_ITINERARY_MODAL: ItineraryFormState = {
-  ...emptyItineraryForm(0),
-  open: false,
-  tripId: null,
-};
-const CLOSED_ACCOMMODATION_MODAL: AccommodationFormState = {
-  ...emptyAccommodationForm(0),
-  open: false,
-  tripId: null,
-};
-
-/** Blank -> undefined so optional API fields are omitted rather than sent as "". */
-function optOrUndefined(s: string): string | undefined {
-  const trimmed = s.trim();
-  return trimmed ? trimmed : undefined;
-}
+type ViewingState = { entry: TimelineEntry } | null;
 
 export default function TravelsClient() {
   const [trips, setTrips] = useState<TravelTripDetail[]>([]);
@@ -304,55 +558,41 @@ export default function TravelsClient() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [expandedYears, setExpandedYears] = useState<Set<string>>(new Set());
+  const [view, setView] = useState<"list" | "trip">("list");
+  const [activeTripId, setActiveTripId] = useState<number | null>(null);
 
-  const toggleYear = (year: string) => {
-    setExpandedYears((s) => {
-      const next = new Set(s);
-      if (next.has(year)) next.delete(year);
-      else next.add(year);
-      return next;
-    });
-  };
+  // Trip cards and place chips hide their edit/delete controls until
+  // double-clicked; a single click still does its normal thing (open the
+  // trip / nothing, for a chip). `clickTimerRef` lets a click wait briefly
+  // to see if a second one turns it into a double-click instead.
+  const [revealedTripId, setRevealedTripId] = useState<number | null>(null);
+  const [revealedCityId, setRevealedCityId] = useState<number | null>(null);
+  const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Individual trip cards default open — only ids explicitly collapsed by
-  // the user are tracked, so newly loaded/added trips start expanded.
-  const [collapsedTripIds, setCollapsedTripIds] = useState<Set<number>>(new Set());
-
-  const toggleTripCollapsed = (tripId: number) => {
-    setCollapsedTripIds((s) => {
-      const next = new Set(s);
-      if (next.has(tripId)) next.delete(tripId);
-      else next.add(tripId);
-      return next;
-    });
-  };
+  // Click-and-drag + arrow-key horizontal scrolling for the trip calendar.
+  const calendarScrollRef = useRef<HTMLDivElement>(null);
+  const calendarDragRef = useRef<{ startX: number; startScrollLeft: number; moved: boolean } | null>(null);
+  const [isDraggingCalendar, setIsDraggingCalendar] = useState(false);
 
   const [tripModal, setTripModal] = useState<TripFormState>(CLOSED_TRIP_MODAL);
   const [tripError, setTripError] = useState<string | null>(null);
 
-  const [flightModal, setFlightModal] = useState<FlightFormState>(CLOSED_FLIGHT_MODAL);
-  const [flightError, setFlightError] = useState<string | null>(null);
+  const [placeModal, setPlaceModal] = useState<PlaceFormState>(CLOSED_PLACE_MODAL);
+  const [placeError, setPlaceError] = useState<string | null>(null);
 
-  const [transportModal, setTransportModal] = useState<TransportFormState>(CLOSED_TRANSPORT_MODAL);
-  const [transportError, setTransportError] = useState<string | null>(null);
+  const [entryModal, setEntryModal] = useState<EntryFormState>(CLOSED_ENTRY_MODAL);
+  const [entryError, setEntryError] = useState<string | null>(null);
+  const [resolvingMapField, setResolvingMapField] = useState<
+    "fromLocation" | "toLocation" | "locationName" | null
+  >(null);
 
-  const [itineraryModal, setItineraryModal] =
-    useState<ItineraryFormState>(CLOSED_ITINERARY_MODAL);
-  const [itineraryError, setItineraryError] = useState<string | null>(null);
-
-  const [accommodationModal, setAccommodationModal] =
-    useState<AccommodationFormState>(CLOSED_ACCOMMODATION_MODAL);
-  const [accommodationError, setAccommodationError] = useState<string | null>(null);
+  const [viewing, setViewing] = useState<ViewingState>(null);
 
   const load = useCallback(async () => {
     setError(null);
     try {
       const r = await getTravelTrips(500);
       setTrips(r.trips);
-      const currentYear = String(new Date().getFullYear());
-      const years = new Set(r.trips.map((t) => String(t.trip.entry_year)));
-      setExpandedYears(years.has(currentYear) ? new Set([currentYear]) : new Set());
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load trips");
       setTrips([]);
@@ -365,21 +605,70 @@ export default function TravelsClient() {
     void load();
   }, [load]);
 
+  const onCalendarMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return; // left click only
+    const el = calendarScrollRef.current;
+    if (!el) return;
+    calendarDragRef.current = { startX: e.clientX, startScrollLeft: el.scrollLeft, moved: false };
+    setIsDraggingCalendar(true);
+  };
+
+  useEffect(() => {
+    if (!isDraggingCalendar) return;
+    const onMove = (e: MouseEvent) => {
+      const el = calendarScrollRef.current;
+      const drag = calendarDragRef.current;
+      if (!el || !drag) return;
+      const dx = e.clientX - drag.startX;
+      if (Math.abs(dx) > 4) drag.moved = true;
+      el.scrollLeft = drag.startScrollLeft - dx;
+    };
+    const onUp = () => {
+      setIsDraggingCalendar(false);
+      // A real drag shouldn't also fire the click it ends on (e.g. opening
+      // whichever card the cursor happened to land on).
+      if (calendarDragRef.current?.moved) {
+        const suppressClick = (e: MouseEvent) => {
+          e.stopPropagation();
+          e.preventDefault();
+        };
+        window.addEventListener("click", suppressClick, { capture: true, once: true });
+      }
+      calendarDragRef.current = null;
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, [isDraggingCalendar]);
+
+  const onCalendarKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    const el = calendarScrollRef.current;
+    if (!el) return;
+    if (e.key === "ArrowRight") {
+      el.scrollBy({ left: DAY_COLUMN_WIDTH + 16, behavior: "smooth" });
+    } else if (e.key === "ArrowLeft") {
+      el.scrollBy({ left: -(DAY_COLUMN_WIDTH + 16), behavior: "smooth" });
+    } else {
+      return;
+    }
+    e.preventDefault();
+  };
+
   const upsertLocalTrip = (detail: TravelTripDetail) => {
     setTrips((ts) => {
       const i = ts.findIndex((t) => t.trip.id === detail.trip.id);
       const out = i === -1 ? [detail, ...ts] : ts.map((t, idx) => (idx === i ? detail : t));
       return out.sort((a, b) => {
-        if (a.trip.entry_year !== b.trip.entry_year) {
-          return b.trip.entry_year - a.trip.entry_year;
-        }
-        if (a.trip.entry_month !== b.trip.entry_month) {
-          return b.trip.entry_month - a.trip.entry_month;
-        }
+        if (a.trip.start_date !== b.trip.start_date) return b.trip.start_date < a.trip.start_date ? -1 : 1;
         return b.trip.id - a.trip.id;
       });
     });
   };
+
+  const activeDetail = activeTripId != null ? trips.find((t) => t.trip.id === activeTripId) ?? null : null;
 
   // --- Trip ---
 
@@ -389,13 +678,13 @@ export default function TravelsClient() {
   };
   const openEditTrip = (detail: TravelTripDetail) => {
     setTripError(null);
+    const days = isoDateRange(detail.trip.start_date, detail.trip.end_date).length;
     setTripModal({
       open: true,
       editId: detail.trip.id,
       title: detail.trip.title,
-      entryYear: String(detail.trip.entry_year),
-      entryMonth: String(detail.trip.entry_month),
-      entryMonthEnd: String(detail.trip.entry_month_end),
+      startDate: detail.trip.start_date,
+      numDays: String(Math.max(1, days)),
       notes: detail.trip.notes ?? "",
     });
   };
@@ -407,28 +696,21 @@ export default function TravelsClient() {
     e.preventDefault();
     setTripError(null);
     const title = tripModal.title.trim();
-    const entryYear = Number(tripModal.entryYear);
-    const entryMonth = Number(tripModal.entryMonth);
-    const entryMonthEnd = Number(tripModal.entryMonthEnd);
+    const numDays = Math.max(1, parseInt(tripModal.numDays, 10) || 1);
     if (!title) {
       setTripError("Enter a title.");
       return;
     }
-    if (!Number.isInteger(entryYear) || entryYear < 1900 || entryYear > 2999) {
-      setTripError("Enter a valid year.");
-      return;
-    }
-    if (entryMonthEnd < entryMonth) {
-      setTripError("End month must be on or after the start month.");
+    if (!tripModal.startDate) {
+      setTripError("Pick a start date.");
       return;
     }
     setSaving(true);
     try {
       const body = {
         title,
-        entry_year: entryYear,
-        entry_month: entryMonth,
-        entry_month_end: entryMonthEnd,
+        start_date: tripModal.startDate,
+        end_date: addDaysIso(tripModal.startDate, numDays - 1),
         notes: optOrUndefined(tripModal.notes) ?? null,
       };
       const detail =
@@ -437,6 +719,10 @@ export default function TravelsClient() {
           : await createTravelTrip(body);
       upsertLocalTrip(detail);
       closeTripModal();
+      if (tripModal.editId == null) {
+        setView("trip");
+        setActiveTripId(detail.trip.id);
+      }
     } catch (err) {
       setTripError(err instanceof Error ? err.message : "Save failed");
     } finally {
@@ -450,6 +736,10 @@ export default function TravelsClient() {
     try {
       await deleteTravelTrip(tripId);
       setTrips((ts) => ts.filter((t) => t.trip.id !== tripId));
+      if (activeTripId === tripId) {
+        setView("list");
+        setActiveTripId(null);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Delete failed");
     } finally {
@@ -457,356 +747,63 @@ export default function TravelsClient() {
     }
   };
 
-  // --- Flight ---
+  // --- Place (city) ---
 
-  const openAddFlight = (tripId: number, initialDate?: string) => {
-    setFlightError(null);
-    setFlightModal({ ...emptyFlightForm(tripId), flightDate: initialDate ?? "" });
+  const openAddPlace = (tripId: number) => {
+    setPlaceError(null);
+    setPlaceModal({ open: true, tripId, editId: null, name: "", startDate: "", endDate: "" });
   };
-  const openEditFlight = (tripId: number, f: TravelFlightRow) => {
-    setFlightError(null);
-    setFlightModal({
+  const openEditPlace = (tripId: number, city: TravelCityRow) => {
+    setPlaceError(null);
+    setRevealedCityId(null);
+    setPlaceModal({
       open: true,
       tripId,
-      editId: f.id,
-      flightNumber: f.flight_number,
-      flightDate: f.flight_date ?? "",
-      departureTime: f.departure_time ?? "",
-      arrivalTime: f.arrival_time ?? "",
-      fromLocation: f.from_location ?? "",
-      fromMapUrl: f.from_map_url ?? "",
-      toLocation: f.to_location ?? "",
-      toMapUrl: f.to_map_url ?? "",
-      notes: f.notes ?? "",
+      editId: city.id,
+      name: city.name,
+      startDate: city.start_date ?? "",
+      endDate: city.end_date ?? "",
     });
   };
-  const closeFlightModal = () => {
-    setFlightModal(CLOSED_FLIGHT_MODAL);
-    setFlightError(null);
+  const closePlaceModal = () => {
+    setPlaceModal(CLOSED_PLACE_MODAL);
+    setPlaceError(null);
   };
-  const submitFlight = async (e: React.FormEvent) => {
+  const submitPlace = async (e: React.FormEvent) => {
     e.preventDefault();
-    setFlightError(null);
-    if (flightModal.tripId == null) return;
-    const flightNumber = flightModal.flightNumber.trim();
-    if (!flightNumber) {
-      setFlightError("Enter a flight number.");
-      return;
-    }
-    let departureTime: string | undefined;
-    let arrivalTime: string | undefined;
-    try {
-      departureTime = parseOptionalTime24(flightModal.departureTime);
-      arrivalTime = parseOptionalTime24(flightModal.arrivalTime);
-    } catch (err) {
-      setFlightError(err instanceof Error ? err.message : "Invalid time");
-      return;
-    }
-    setSaving(true);
-    try {
-      const body = {
-        flight_number: flightNumber,
-        flight_date: optOrUndefined(flightModal.flightDate) ?? null,
-        departure_time: departureTime ?? null,
-        arrival_time: arrivalTime ?? null,
-        from_location: optOrUndefined(flightModal.fromLocation) ?? null,
-        from_map_url: optOrUndefined(flightModal.fromMapUrl) ?? null,
-        to_location: optOrUndefined(flightModal.toLocation) ?? null,
-        to_map_url: optOrUndefined(flightModal.toMapUrl) ?? null,
-        notes: optOrUndefined(flightModal.notes) ?? null,
-      };
-      const detail =
-        flightModal.editId != null
-          ? await updateTravelFlight(flightModal.tripId, flightModal.editId, body)
-          : await createTravelFlight(flightModal.tripId, body);
-      upsertLocalTrip(detail);
-      closeFlightModal();
-    } catch (err) {
-      setFlightError(err instanceof Error ? err.message : "Save failed");
-    } finally {
-      setSaving(false);
-    }
-  };
-  const onDeleteFlight = async (tripId: number, flightId: number) => {
-    if (!confirm("Delete this flight?")) return;
-    setSaving(true);
-    setError(null);
-    try {
-      const detail = await deleteTravelFlight(tripId, flightId);
-      upsertLocalTrip(detail);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Delete failed");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  // --- Transport (bus/train) ---
-
-  const openAddTransport = (tripId: number, initialDate?: string) => {
-    setTransportError(null);
-    setTransportModal({ ...emptyTransportForm(tripId), travelDate: initialDate ?? "" });
-  };
-  const openEditTransport = (tripId: number, t: TravelTransportRow) => {
-    setTransportError(null);
-    setTransportModal({
-      open: true,
-      tripId,
-      editId: t.id,
-      mode: t.mode,
-      number: t.number ?? "",
-      travelDate: t.travel_date ?? "",
-      departureTime: t.departure_time ?? "",
-      arrivalTime: t.arrival_time ?? "",
-      fromLocation: t.from_location ?? "",
-      fromMapUrl: t.from_map_url ?? "",
-      toLocation: t.to_location ?? "",
-      toMapUrl: t.to_map_url ?? "",
-      notes: t.notes ?? "",
-    });
-  };
-  const closeTransportModal = () => {
-    setTransportModal(CLOSED_TRANSPORT_MODAL);
-    setTransportError(null);
-  };
-  const submitTransport = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setTransportError(null);
-    if (transportModal.tripId == null) return;
-    let departureTime: string | undefined;
-    let arrivalTime: string | undefined;
-    try {
-      departureTime = parseOptionalTime24(transportModal.departureTime);
-      arrivalTime = parseOptionalTime24(transportModal.arrivalTime);
-    } catch (err) {
-      setTransportError(err instanceof Error ? err.message : "Invalid time");
-      return;
-    }
-    setSaving(true);
-    try {
-      const body = {
-        mode: transportModal.mode,
-        number: optOrUndefined(transportModal.number) ?? null,
-        travel_date: optOrUndefined(transportModal.travelDate) ?? null,
-        departure_time: departureTime ?? null,
-        arrival_time: arrivalTime ?? null,
-        from_location: optOrUndefined(transportModal.fromLocation) ?? null,
-        from_map_url: optOrUndefined(transportModal.fromMapUrl) ?? null,
-        to_location: optOrUndefined(transportModal.toLocation) ?? null,
-        to_map_url: optOrUndefined(transportModal.toMapUrl) ?? null,
-        notes: optOrUndefined(transportModal.notes) ?? null,
-      };
-      const detail =
-        transportModal.editId != null
-          ? await updateTravelTransport(transportModal.tripId, transportModal.editId, body)
-          : await createTravelTransport(transportModal.tripId, body);
-      upsertLocalTrip(detail);
-      closeTransportModal();
-    } catch (err) {
-      setTransportError(err instanceof Error ? err.message : "Save failed");
-    } finally {
-      setSaving(false);
-    }
-  };
-  const onDeleteTransport = async (tripId: number, transportId: number) => {
-    if (!confirm("Delete this bus/train leg?")) return;
-    setSaving(true);
-    setError(null);
-    try {
-      const detail = await deleteTravelTransport(tripId, transportId);
-      upsertLocalTrip(detail);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Delete failed");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  // --- Itinerary ---
-
-  const openAddItinerary = (tripId: number, initialDate?: string) => {
-    setItineraryError(null);
-    setItineraryModal({ ...emptyItineraryForm(tripId), itemDate: initialDate ?? "" });
-  };
-  const openEditItinerary = (tripId: number, item: TravelItineraryRow) => {
-    setItineraryError(null);
-    setItineraryModal({
-      open: true,
-      tripId,
-      editId: item.id,
-      itemDate: item.item_date,
-      itemEndDate: item.item_end_date ?? "",
-      startTime: item.start_time ?? "",
-      endTime: item.end_time ?? "",
-      activity: item.activity,
-      locationName: item.location_name ?? "",
-      locationMapUrl: item.location_map_url ?? "",
-      notes: item.notes ?? "",
-    });
-  };
-  const closeItineraryModal = () => {
-    setItineraryModal(CLOSED_ITINERARY_MODAL);
-    setItineraryError(null);
-  };
-  const submitItinerary = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setItineraryError(null);
-    if (itineraryModal.tripId == null) return;
-    const activity = itineraryModal.activity.trim();
-    if (!itineraryModal.itemDate) {
-      setItineraryError("Enter a date.");
-      return;
-    }
-    if (!activity) {
-      setItineraryError("Enter an activity.");
-      return;
-    }
-    if (itineraryModal.itemEndDate && itineraryModal.itemEndDate < itineraryModal.itemDate) {
-      setItineraryError("End date must be on or after the start date.");
-      return;
-    }
-    let startTime: string | undefined;
-    let endTime: string | undefined;
-    try {
-      startTime = parseOptionalTime24(itineraryModal.startTime);
-      endTime = parseOptionalTime24(itineraryModal.endTime);
-    } catch (err) {
-      setItineraryError(err instanceof Error ? err.message : "Invalid time");
-      return;
-    }
-    setSaving(true);
-    try {
-      const body = {
-        item_date: itineraryModal.itemDate,
-        item_end_date: optOrUndefined(itineraryModal.itemEndDate) ?? null,
-        start_time: startTime ?? null,
-        end_time: endTime ?? null,
-        activity,
-        location_name: optOrUndefined(itineraryModal.locationName) ?? null,
-        location_map_url: optOrUndefined(itineraryModal.locationMapUrl) ?? null,
-        notes: optOrUndefined(itineraryModal.notes) ?? null,
-      };
-      const detail =
-        itineraryModal.editId != null
-          ? await updateTravelItinerary(itineraryModal.tripId, itineraryModal.editId, body)
-          : await createTravelItinerary(itineraryModal.tripId, body);
-      upsertLocalTrip(detail);
-      closeItineraryModal();
-    } catch (err) {
-      setItineraryError(err instanceof Error ? err.message : "Save failed");
-    } finally {
-      setSaving(false);
-    }
-  };
-  const onDeleteItinerary = async (tripId: number, itemId: number) => {
-    if (!confirm("Delete this itinerary item?")) return;
-    setSaving(true);
-    setError(null);
-    try {
-      const detail = await deleteTravelItinerary(tripId, itemId);
-      upsertLocalTrip(detail);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Delete failed");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  // --- Accommodation ---
-
-  const openAddAccommodation = (tripId: number, initialDate?: string) => {
-    setAccommodationError(null);
-    setAccommodationModal({
-      ...emptyAccommodationForm(tripId),
-      checkinDate: initialDate ?? "",
-      checkoutDate: initialDate ?? "",
-    });
-  };
-  const openEditAccommodation = (tripId: number, a: TravelAccommodationRow) => {
-    setAccommodationError(null);
-    setAccommodationModal({
-      open: true,
-      tripId,
-      editId: a.id,
-      name: a.name,
-      checkinDate: a.checkin_date,
-      checkoutDate: a.checkout_date,
-      checkinTime: a.checkin_time ?? "",
-      checkoutTime: a.checkout_time ?? "",
-      bookingConfirmation: a.booking_confirmation ?? "",
-      instructions: a.instructions ?? "",
-      locationName: a.location_name ?? "",
-      locationMapUrl: a.location_map_url ?? "",
-      notes: a.notes ?? "",
-    });
-  };
-  const closeAccommodationModal = () => {
-    setAccommodationModal(CLOSED_ACCOMMODATION_MODAL);
-    setAccommodationError(null);
-  };
-  const submitAccommodation = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setAccommodationError(null);
-    if (accommodationModal.tripId == null) return;
-    const name = accommodationModal.name.trim();
+    setPlaceError(null);
+    if (placeModal.tripId == null) return;
+    const name = placeModal.name.trim();
     if (!name) {
-      setAccommodationError("Enter a name.");
-      return;
-    }
-    if (!accommodationModal.checkinDate || !accommodationModal.checkoutDate) {
-      setAccommodationError("Enter both check-in and check-out dates.");
-      return;
-    }
-    if (accommodationModal.checkoutDate < accommodationModal.checkinDate) {
-      setAccommodationError("Check-out date must be on or after check-in date.");
-      return;
-    }
-    let checkinTime: string | undefined;
-    let checkoutTime: string | undefined;
-    try {
-      checkinTime = parseOptionalTime24(accommodationModal.checkinTime);
-      checkoutTime = parseOptionalTime24(accommodationModal.checkoutTime);
-    } catch (err) {
-      setAccommodationError(err instanceof Error ? err.message : "Invalid time");
+      setPlaceError("Enter a place or country.");
       return;
     }
     setSaving(true);
     try {
       const body = {
         name,
-        checkin_date: accommodationModal.checkinDate,
-        checkout_date: accommodationModal.checkoutDate,
-        checkin_time: checkinTime ?? null,
-        checkout_time: checkoutTime ?? null,
-        booking_confirmation: optOrUndefined(accommodationModal.bookingConfirmation) ?? null,
-        instructions: optOrUndefined(accommodationModal.instructions) ?? null,
-        location_name: optOrUndefined(accommodationModal.locationName) ?? null,
-        location_map_url: optOrUndefined(accommodationModal.locationMapUrl) ?? null,
-        notes: optOrUndefined(accommodationModal.notes) ?? null,
+        start_date: optOrUndefined(placeModal.startDate) ?? null,
+        end_date: optOrUndefined(placeModal.endDate) ?? null,
       };
       const detail =
-        accommodationModal.editId != null
-          ? await updateTravelAccommodation(
-              accommodationModal.tripId,
-              accommodationModal.editId,
-              body,
-            )
-          : await createTravelAccommodation(accommodationModal.tripId, body);
+        placeModal.editId != null
+          ? await updateTravelCity(placeModal.tripId, placeModal.editId, body)
+          : await createTravelCity(placeModal.tripId, body);
       upsertLocalTrip(detail);
-      closeAccommodationModal();
+      closePlaceModal();
     } catch (err) {
-      setAccommodationError(err instanceof Error ? err.message : "Save failed");
+      setPlaceError(err instanceof Error ? err.message : "Save failed");
     } finally {
       setSaving(false);
     }
   };
-  const onDeleteAccommodation = async (tripId: number, accommodationId: number) => {
-    if (!confirm("Delete this stay?")) return;
+  const onDeletePlace = async (tripId: number, cityId: number) => {
     setSaving(true);
     setError(null);
     try {
-      const detail = await deleteTravelAccommodation(tripId, accommodationId);
+      const detail = await deleteTravelCity(tripId, cityId);
       upsertLocalTrip(detail);
+      setRevealedCityId(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Delete failed");
     } finally {
@@ -814,375 +811,572 @@ export default function TravelsClient() {
     }
   };
 
-  // `trips` is already sorted year desc, month desc — one pass buckets
-  // same-year, same-month runs into nested groups.
-  type MonthGroup = { month: number; trips: TravelTripDetail[] };
-  type YearGroup = { year: number; months: MonthGroup[] };
-  const yearGroups: YearGroup[] = [];
-  for (const detail of trips) {
-    const { entry_year, entry_month } = detail.trip;
-    let yg = yearGroups[yearGroups.length - 1];
-    if (!yg || yg.year !== entry_year) {
-      yg = { year: entry_year, months: [] };
-      yearGroups.push(yg);
-    }
-    let mg = yg.months[yg.months.length - 1];
-    if (!mg || mg.month !== entry_month) {
-      mg = { month: entry_month, trips: [] };
-      yg.months.push(mg);
-    }
-    mg.trips.push(detail);
-  }
+  // --- Entry (flight / train / bus / ferry / activity / accommodation) ---
 
-  const renderTripCard = (detail: TravelTripDetail) => {
-    const { trip, flights, transport, itinerary, accommodations } = detail;
-    const collapsed = collapsedTripIds.has(trip.id);
-    const itemCount = flights.length + transport.length + itinerary.length + accommodations.length;
+  /** When a Location/From/To field is a pasted Google Maps link, resolves
+   * it to a place name on blur — swapping the field's text to the name
+   * while keeping the pasted link as that field's custom maps URL. For
+   * From/To, also stashes the resolved city/country (used to build the
+   * calendar's "City, Country" title) — omitted for Location, which has no
+   * route title. */
+  const resolveLocationFieldOnBlur = async (
+    field: "fromLocation" | "toLocation" | "locationName",
+    mapUrlField: "fromMapUrl" | "toMapUrl" | "locationMapUrl",
+    cityField?: "fromCity" | "toCity",
+    countryField?: "fromCountry" | "toCountry",
+  ) => {
+    const value = entryModal[field].trim();
+    if (!looksLikeUrl(value)) return;
+    setResolvingMapField(field);
+    try {
+      const { name, city, country } = await resolveMapLink(value);
+      setEntryModal((m) =>
+        m[field] === entryModal[field]
+          ? {
+              ...m,
+              [field]: name ?? value,
+              [mapUrlField]: value,
+              ...(cityField ? { [cityField]: city ?? "" } : {}),
+              ...(countryField ? { [countryField]: country ?? "" } : {}),
+            }
+          : m,
+      );
+    } catch {
+      setEntryModal((m) => (m[field] === entryModal[field] ? { ...m, [mapUrlField]: value } : m));
+    } finally {
+      setResolvingMapField((f) => (f === field ? null : f));
+    }
+  };
+
+  const openAddEntry = (tripId: number, kind: EntryKind) => {
+    setEntryError(null);
+    setEntryModal(emptyEntryForm(tripId, kind));
+  };
+
+  const openEditEntry = (tripId: number, kind: EntryKind, id: number) => {
+    const detail = trips.find((t) => t.trip.id === tripId);
+    if (!detail) return;
+    const raw = findRawRow(detail, kind, id);
+    if (!raw) return;
+    setEntryError(null);
+    const start = detail.trip.start_date;
+    if (kind === "flight") {
+      const f = raw as TravelFlightRow;
+      setEntryModal({
+        ...emptyEntryForm(tripId, kind),
+        editId: id,
+        dayIndex: dayIndexFor(start, f.flight_date ?? start),
+        time1: formatTimeLabel(f.departure_time) ?? "",
+        time2: formatTimeLabel(f.arrival_time) ?? "",
+        fromLocation: f.from_location ?? "",
+        toLocation: f.to_location ?? "",
+        fromMapUrl: f.from_map_url ?? "",
+        fromCity: f.from_city ?? "",
+        fromCountry: f.from_country ?? "",
+        toMapUrl: f.to_map_url ?? "",
+        toCity: f.to_city ?? "",
+        toCountry: f.to_country ?? "",
+        arrivalDate: f.arrival_date ?? "",
+        flightNumber: f.flight_number,
+        notes: f.notes ?? "",
+      });
+    } else if (kind === "activity") {
+      const item = raw as TravelItineraryRow;
+      setEntryModal({
+        ...emptyEntryForm(tripId, kind),
+        editId: id,
+        dayIndex: dayIndexFor(start, item.item_date),
+        time1: formatTimeLabel(item.start_time) ?? "",
+        time2: formatTimeLabel(item.end_time) ?? "",
+        activity: item.activity,
+        locationName: item.location_name ?? "",
+        locationMapUrl: item.location_map_url ?? "",
+        notes: item.notes ?? "",
+      });
+    } else if (kind === "accommodation") {
+      const a = raw as TravelAccommodationRow;
+      setEntryModal({
+        ...emptyEntryForm(tripId, kind),
+        editId: id,
+        dayIndex: dayIndexFor(start, a.checkin_date),
+        time1: formatTimeLabel(a.checkin_time) ?? "",
+        checkoutDate: a.checkout_date,
+        checkoutTime: formatTimeLabel(a.checkout_time) ?? "",
+        name: a.name,
+        locationName: a.location_name ?? "",
+        locationMapUrl: a.location_map_url ?? "",
+        bookingConfirmation: a.booking_confirmation ?? "",
+        instructions: a.instructions ?? "",
+        notes: a.notes ?? "",
+      });
+    } else {
+      const t = raw as TravelTransportRow;
+      setEntryModal({
+        ...emptyEntryForm(tripId, t.mode),
+        editId: id,
+        dayIndex: dayIndexFor(start, t.travel_date ?? start),
+        time1: formatTimeLabel(t.departure_time) ?? "",
+        time2: formatTimeLabel(t.arrival_time) ?? "",
+        fromLocation: t.from_location ?? "",
+        toLocation: t.to_location ?? "",
+        fromMapUrl: t.from_map_url ?? "",
+        fromCity: t.from_city ?? "",
+        fromCountry: t.from_country ?? "",
+        toMapUrl: t.to_map_url ?? "",
+        toCity: t.to_city ?? "",
+        toCountry: t.to_country ?? "",
+        arrivalDate: t.arrival_date ?? "",
+        number: t.number ?? "",
+        notes: t.notes ?? "",
+      });
+    }
+  };
+
+  const closeEntryModal = () => {
+    setEntryModal(CLOSED_ENTRY_MODAL);
+    setEntryError(null);
+  };
+
+  const submitEntry = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setEntryError(null);
+    const m = entryModal;
+    if (m.tripId == null) return;
+    const detail = trips.find((t) => t.trip.id === m.tripId);
+    if (!detail) return;
+    const date = addDaysIso(detail.trip.start_date, m.dayIndex);
+    const arrivalDate = optOrUndefined(m.arrivalDate) ?? null;
+    if (arrivalDate && arrivalDate < date) {
+      setEntryError("Arrival date must be on or after the departure date.");
+      return;
+    }
+    let time1: string | undefined;
+    let time2: string | undefined;
+    let checkoutTime: string | undefined;
+    try {
+      time1 = parseOptionalTime24(m.time1);
+      time2 = parseOptionalTime24(m.time2);
+      checkoutTime = parseOptionalTime24(m.checkoutTime);
+    } catch (err) {
+      setEntryError(err instanceof Error ? err.message : "Invalid time");
+      return;
+    }
+    setSaving(true);
+    try {
+      // Re-resolve any location field that's still a raw pasted maps link —
+      // the onBlur resolve (resolveLocationFieldOnBlur) may not have
+      // finished yet if Save was clicked right after pasting.
+      const [from, to, loc] = await Promise.all([
+        resolvedLocation(m.fromLocation, m.fromMapUrl, m.fromCity, m.fromCountry),
+        resolvedLocation(m.toLocation, m.toMapUrl, m.toCity, m.toCountry),
+        resolvedLocation(m.locationName, m.locationMapUrl, "", ""),
+      ]);
+      let result: TravelTripDetail;
+      if (m.kind === "flight") {
+        const flightNumber = m.flightNumber.trim();
+        if (!flightNumber) throw new Error("Enter a flight number.");
+        const body = {
+          flight_number: flightNumber,
+          flight_date: date,
+          arrival_date: arrivalDate,
+          departure_time: time1 ?? null,
+          arrival_time: time2 ?? null,
+          from_location: optOrUndefined(from.name) ?? null,
+          from_map_url: optOrUndefined(from.mapUrl) ?? null,
+          from_city: optOrUndefined(from.city) ?? null,
+          from_country: optOrUndefined(from.country) ?? null,
+          to_location: optOrUndefined(to.name) ?? null,
+          to_map_url: optOrUndefined(to.mapUrl) ?? null,
+          to_city: optOrUndefined(to.city) ?? null,
+          to_country: optOrUndefined(to.country) ?? null,
+          notes: optOrUndefined(m.notes) ?? null,
+        };
+        result =
+          m.editId != null
+            ? await updateTravelFlight(m.tripId, m.editId, body)
+            : await createTravelFlight(m.tripId, body);
+      } else if (m.kind === "train" || m.kind === "bus" || m.kind === "ferry") {
+        const body = {
+          mode: m.kind,
+          number: optOrUndefined(m.number) ?? null,
+          travel_date: date,
+          arrival_date: arrivalDate,
+          departure_time: time1 ?? null,
+          arrival_time: time2 ?? null,
+          from_location: optOrUndefined(from.name) ?? null,
+          from_map_url: optOrUndefined(from.mapUrl) ?? null,
+          from_city: optOrUndefined(from.city) ?? null,
+          from_country: optOrUndefined(from.country) ?? null,
+          to_location: optOrUndefined(to.name) ?? null,
+          to_map_url: optOrUndefined(to.mapUrl) ?? null,
+          to_city: optOrUndefined(to.city) ?? null,
+          to_country: optOrUndefined(to.country) ?? null,
+          notes: optOrUndefined(m.notes) ?? null,
+        };
+        result =
+          m.editId != null
+            ? await updateTravelTransport(m.tripId, m.editId, body)
+            : await createTravelTransport(m.tripId, body);
+      } else if (m.kind === "activity") {
+        const activity = m.activity.trim();
+        if (!activity) throw new Error("Enter an activity.");
+        const body = {
+          item_date: date,
+          start_time: time1 ?? null,
+          end_time: time2 ?? null,
+          activity,
+          location_name: optOrUndefined(loc.name) ?? null,
+          location_map_url: optOrUndefined(loc.mapUrl) ?? null,
+          notes: optOrUndefined(m.notes) ?? null,
+        };
+        result =
+          m.editId != null
+            ? await updateTravelItinerary(m.tripId, m.editId, body)
+            : await createTravelItinerary(m.tripId, body);
+      } else {
+        const name = m.name.trim();
+        if (!name) throw new Error("Enter a name.");
+        if (!m.checkoutDate) throw new Error("Pick a check-out date.");
+        if (m.checkoutDate < date) throw new Error("Check-out date must be on or after check-in date.");
+        const body = {
+          name,
+          checkin_date: date,
+          checkout_date: m.checkoutDate,
+          checkin_time: time1 ?? null,
+          checkout_time: checkoutTime ?? null,
+          booking_confirmation: optOrUndefined(m.bookingConfirmation) ?? null,
+          instructions: optOrUndefined(m.instructions) ?? null,
+          location_name: optOrUndefined(loc.name) ?? null,
+          location_map_url: optOrUndefined(loc.mapUrl) ?? null,
+          notes: optOrUndefined(m.notes) ?? null,
+        };
+        result =
+          m.editId != null
+            ? await updateTravelAccommodation(m.tripId, m.editId, body)
+            : await createTravelAccommodation(m.tripId, body);
+      }
+      upsertLocalTrip(result);
+      closeEntryModal();
+    } catch (err) {
+      setEntryError(err instanceof Error ? err.message : "Save failed");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const onDeleteEntry = async (tripId: number, kind: EntryKind, id: number) => {
+    if (!confirm("Delete this item?")) return;
+    setSaving(true);
+    setError(null);
+    try {
+      let result: TravelTripDetail;
+      if (kind === "flight") result = await deleteTravelFlight(tripId, id);
+      else if (kind === "activity") result = await deleteTravelItinerary(tripId, id);
+      else if (kind === "accommodation") result = await deleteTravelAccommodation(tripId, id);
+      else result = await deleteTravelTransport(tripId, id);
+      upsertLocalTrip(result);
+      setViewing(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Delete failed");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // --- Rendering ---
+
+  const renderTripCard = (detail: TravelTripDetail, index: number) => {
+    const { trip, cities } = detail;
+    const itemCount =
+      detail.flights.length + detail.transport.length + detail.itinerary.length + detail.accommodations.length;
+    const dayCount = isoDateRange(trip.start_date, trip.end_date).length;
+    const revealed = revealedTripId === trip.id;
+    const openTrip = () => {
+      setView("trip");
+      setActiveTripId(trip.id);
+    };
     return (
       <div
         key={trip.id}
-        className="rounded-lg border border-line bg-zinc-50/60 p-4 dark:bg-zinc-900/40"
+        role="button"
+        tabIndex={0}
+        onClick={() => {
+          if (clickTimerRef.current) return;
+          clickTimerRef.current = setTimeout(() => {
+            clickTimerRef.current = null;
+            openTrip();
+          }, DBLCLICK_WINDOW_MS);
+        }}
+        onDoubleClick={() => {
+          if (clickTimerRef.current) {
+            clearTimeout(clickTimerRef.current);
+            clickTimerRef.current = null;
+          }
+          setRevealedTripId((cur) => (cur === trip.id ? null : trip.id));
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") openTrip();
+        }}
+        className={`cursor-pointer rounded-xl border border-line bg-surface p-5 shadow-xs transition-shadow hover:shadow-pop border-l-4 ${TRIP_ACCENTS[index % TRIP_ACCENTS.length]}`}
       >
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <button
-            type="button"
-            className="-m-1 flex min-w-0 flex-1 items-start gap-2 rounded-lg p-1 text-left transition-colors hover:bg-surface-2"
-            aria-expanded={!collapsed}
-            onClick={() => toggleTripCollapsed(trip.id)}
-          >
-            <span
-              aria-hidden
-              className={`mt-0.5 shrink-0 text-ink-4 transition-transform ${
-                collapsed ? "" : "rotate-90"
-              }`}
-            >
-              ›
-            </span>
-            <span className="min-w-0">
-              <h4 className="text-base font-semibold text-ink">
-                {trip.title}
-                {collapsed && itemCount > 0 && (
-                  <span className="ml-2 text-sm font-normal text-ink-3">
-                    ({itemCount} item{itemCount === 1 ? "" : "s"})
-                  </span>
-                )}
-              </h4>
-              {trip.notes && !collapsed && (
-                <p className="mt-1 whitespace-pre-line text-sm text-ink-2">
-                  {trip.notes}
-                </p>
-              )}
-            </span>
-          </button>
-          <div className="flex shrink-0 items-center gap-2">
-            <button
-              type="button"
-              disabled={saving}
-              className={EDIT_BUTTON_CLASSES}
-              onClick={() => openEditTrip(detail)}
-            >
-              Edit
-            </button>
-            <button
-              type="button"
-              disabled={saving}
-              className={DELETE_BUTTON_CLASSES}
-              onClick={() => void onDeleteTrip(trip.id)}
-            >
-              Delete
-            </button>
-          </div>
-        </div>
-
-        {!collapsed && (
-          <>
-        {/* Calendar */}
-        <div className="mt-4 rounded-lg border border-line bg-surface p-4">
-          <h5 className="mb-3 text-sm font-medium text-ink-2">Calendar</h5>
-          <TripCalendar
-            trip={trip}
-            flights={flights}
-            transport={transport}
-            itinerary={itinerary}
-            accommodations={accommodations}
-            saving={saving}
-            onAddFlight={(date) => openAddFlight(trip.id, date)}
-            onEditFlight={(f) => openEditFlight(trip.id, f)}
-            onDeleteFlight={(flightId) => void onDeleteFlight(trip.id, flightId)}
-            onAddTransport={(date) => openAddTransport(trip.id, date)}
-            onEditTransport={(t) => openEditTransport(trip.id, t)}
-            onDeleteTransport={(transportId) => void onDeleteTransport(trip.id, transportId)}
-            onAddItinerary={(date) => openAddItinerary(trip.id, date)}
-            onEditItinerary={(item) => openEditItinerary(trip.id, item)}
-            onDeleteItinerary={(itemId) => void onDeleteItinerary(trip.id, itemId)}
-            onAddAccommodation={(date) => openAddAccommodation(trip.id, date)}
-            onEditAccommodation={(a) => openEditAccommodation(trip.id, a)}
-            onDeleteAccommodation={(id) => void onDeleteAccommodation(trip.id, id)}
-          />
-        </div>
-
-        {/* Flights */}
-        <div className="mt-4 rounded-lg border border-line bg-surface p-4">
-          <div className="flex items-center justify-between gap-2">
-            <h5 className="text-sm font-medium text-ink-2">Flights</h5>
-            <button
-              type="button"
-              disabled={saving}
-              className={ADD_BUTTON_CLASSES}
-              onClick={() => openAddFlight(trip.id)}
-            >
-              + Add flight
-            </button>
-          </div>
-          {flights.length === 0 ? (
-            <p className="mt-2 text-xs text-ink-3">No flights logged.</p>
-          ) : (
-            <ul className="mt-2 flex flex-col gap-2">
-              {flights.map((f) => {
-                const fromUrl = mapsUrlFor(f.from_location, f.from_map_url);
-                const toUrl = mapsUrlFor(f.to_location, f.to_map_url);
-                const timeRange = formatTimeRange(f.departure_time, f.arrival_time);
-                return (
-                  <ItemRow
-                    key={f.id}
-                    saving={saving}
-                    onEdit={() => openEditFlight(trip.id, f)}
-                    onDelete={() => void onDeleteFlight(trip.id, f.id)}
-                  >
-                    <div className="font-medium text-ink">
-                      {f.flight_number}
-                      {f.flight_date && (
-                        <span className="ml-2 font-normal text-ink-3">
-                          {formatDate(f.flight_date)}
-                        </span>
-                      )}
-                    </div>
-                    {timeRange && (
-                      <div className="mt-0.5 text-ink-2">{timeRange}</div>
-                    )}
-                    {(f.from_location || f.to_location) && (
-                      <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
-                        <LocationLink name={f.from_location} url={fromUrl} />
-                        {f.from_location && f.to_location && (
-                          <span className="text-ink-4" aria-hidden>
-                            →
-                          </span>
-                        )}
-                        <LocationLink name={f.to_location} url={toUrl} />
-                      </div>
-                    )}
-                    {f.notes && (
-                      <div className="mt-0.5 whitespace-pre-line text-ink-3">
-                        {f.notes}
-                      </div>
-                    )}
-                  </ItemRow>
-                );
-              })}
-            </ul>
+        <div className="flex items-start justify-between gap-2">
+          <h3 className="min-w-0 flex-1 truncate text-lg font-semibold text-ink">{trip.title}</h3>
+          {revealed && (
+            <div className="flex shrink-0 items-center gap-1" onClick={(e) => e.stopPropagation()}>
+              <button
+                type="button"
+                aria-label="Edit trip"
+                disabled={saving}
+                className={ICON_BUTTON_CLASSES}
+                onClick={() => openEditTrip(detail)}
+              >
+                <PencilIcon className="size-5" />
+              </button>
+              <button
+                type="button"
+                aria-label="Delete trip"
+                disabled={saving}
+                className={VIEW_DELETE_ICON_CLASSES}
+                onClick={() => void onDeleteTrip(trip.id)}
+              >
+                <TrashIcon className="size-5" />
+              </button>
+            </div>
           )}
         </div>
-
-        {/* Transport (bus/train) */}
-        <div className="mt-4 rounded-lg border border-line bg-surface p-4">
-          <div className="flex items-center justify-between gap-2">
-            <h5 className="text-sm font-medium text-ink-2">
-              Bus / Train
-            </h5>
-            <button
-              type="button"
-              disabled={saving}
-              className={ADD_BUTTON_CLASSES}
-              onClick={() => openAddTransport(trip.id)}
-            >
-              + Add bus/train
-            </button>
-          </div>
-          {transport.length === 0 ? (
-            <p className="mt-2 text-xs text-ink-3">
-              No bus/train legs logged.
-            </p>
-          ) : (
-            <ul className="mt-2 flex flex-col gap-2">
-              {transport.map((t) => {
-                const fromUrl = mapsUrlFor(t.from_location, t.from_map_url);
-                const toUrl = mapsUrlFor(t.to_location, t.to_map_url);
-                const timeRange = formatTimeRange(t.departure_time, t.arrival_time);
-                return (
-                  <ItemRow
-                    key={t.id}
-                    saving={saving}
-                    onEdit={() => openEditTransport(trip.id, t)}
-                    onDelete={() => void onDeleteTransport(trip.id, t.id)}
-                  >
-                    <div className="font-medium text-ink">
-                      {transportLabel(t)}
-                      {t.travel_date && (
-                        <span className="ml-2 font-normal text-ink-3">
-                          {formatDate(t.travel_date)}
-                        </span>
-                      )}
-                    </div>
-                    {timeRange && (
-                      <div className="mt-0.5 text-ink-2">{timeRange}</div>
-                    )}
-                    {(t.from_location || t.to_location) && (
-                      <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
-                        <LocationLink name={t.from_location} url={fromUrl} />
-                        {t.from_location && t.to_location && (
-                          <span className="text-ink-4" aria-hidden>
-                            →
-                          </span>
-                        )}
-                        <LocationLink name={t.to_location} url={toUrl} />
-                      </div>
-                    )}
-                    {t.notes && (
-                      <div className="mt-0.5 whitespace-pre-line text-ink-3">
-                        {t.notes}
-                      </div>
-                    )}
-                  </ItemRow>
-                );
-              })}
-            </ul>
-          )}
+        <div className="mt-1 text-sm text-ink-3">
+          {formatDate(trip.start_date)} – {formatDate(trip.end_date)}
         </div>
-
-        {/* Itinerary */}
-        <div className="mt-4 rounded-lg border border-line bg-surface p-4">
-          <div className="flex items-center justify-between gap-2">
-            <h5 className="text-sm font-medium text-ink-2">Itinerary</h5>
-            <button
-              type="button"
-              disabled={saving}
-              className={ADD_BUTTON_CLASSES}
-              onClick={() => openAddItinerary(trip.id)}
-            >
-              + Add item
-            </button>
+        {cities.length > 0 && (
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            {cities.map((c) => (
+              <span
+                key={c.id}
+                className="rounded-full bg-brand-soft px-2.5 py-1 text-xs font-medium text-brand-text"
+              >
+                {cityChipLabel(c)}
+              </span>
+            ))}
           </div>
-          {itinerary.length === 0 ? (
-            <p className="mt-2 text-xs text-ink-3">
-              No itinerary items yet.
-            </p>
-          ) : (
-            <ul className="mt-2 flex flex-col gap-2">
-              {itinerary.map((item) => {
-                const url = mapsUrlFor(item.location_name, item.location_map_url);
-                const timeRange = formatTimeRange(item.start_time, item.end_time);
-                const spansDays = item.item_end_date && item.item_end_date !== item.item_date;
-                return (
-                  <ItemRow
-                    key={item.id}
-                    saving={saving}
-                    onEdit={() => openEditItinerary(trip.id, item)}
-                    onDelete={() => void onDeleteItinerary(trip.id, item.id)}
-                  >
-                    <div className="font-medium text-ink">
-                      {spansDays
-                        ? `${formatDate(item.item_date)} – ${formatDate(item.item_end_date)}`
-                        : formatDate(item.item_date)}
-                      {timeRange && (
-                        <span className="ml-2 font-normal text-ink-3">
-                          {timeRange}
-                        </span>
-                      )}
-                    </div>
-                    <div className="mt-0.5 text-ink-2">{item.activity}</div>
-                    {item.location_name && (
-                      <div className="mt-0.5">
-                        <LocationLink name={item.location_name} url={url} />
-                      </div>
-                    )}
-                    {item.notes && (
-                      <div className="mt-0.5 whitespace-pre-line text-ink-3">
-                        {item.notes}
-                      </div>
-                    )}
-                  </ItemRow>
-                );
-              })}
-            </ul>
-          )}
-        </div>
-
-        {/* Accommodations */}
-        <div className="mt-4 rounded-lg border border-line bg-surface p-4">
-          <div className="flex items-center justify-between gap-2">
-            <h5 className="text-sm font-medium text-ink-2">
-              Accommodations
-            </h5>
-            <button
-              type="button"
-              disabled={saving}
-              className={ADD_BUTTON_CLASSES}
-              onClick={() => openAddAccommodation(trip.id)}
-            >
-              + Add stay
-            </button>
-          </div>
-          {accommodations.length === 0 ? (
-            <p className="mt-2 text-xs text-ink-3">No stays logged.</p>
-          ) : (
-            <ul className="mt-2 flex flex-col gap-2">
-              {accommodations.map((a) => {
-                const url = mapsUrlFor(a.location_name, a.location_map_url);
-                return (
-                  <ItemRow
-                    key={a.id}
-                    saving={saving}
-                    onEdit={() => openEditAccommodation(trip.id, a)}
-                    onDelete={() => void onDeleteAccommodation(trip.id, a.id)}
-                  >
-                    <div className="font-medium text-ink">{a.name}</div>
-                    <div className="mt-0.5 text-ink-2">
-                      {formatDate(a.checkin_date)}
-                      {a.checkin_time && ` · ${formatTimeLabel(a.checkin_time)}`}
-                      {" – "}
-                      {formatDate(a.checkout_date)}
-                      {a.checkout_time && ` · ${formatTimeLabel(a.checkout_time)}`}
-                      <span className="ml-2 rounded-full border border-line-strong px-1.5 py-0.5 text-[11px] font-medium text-ink-3">
-                        {a.nights} night{a.nights === 1 ? "" : "s"} · {a.days} day
-                        {a.days === 1 ? "" : "s"}
-                      </span>
-                    </div>
-                    {a.location_name && (
-                      <div className="mt-0.5">
-                        <LocationLink name={a.location_name} url={url} />
-                      </div>
-                    )}
-                    {a.booking_confirmation && (
-                      <div className="mt-0.5 whitespace-pre-line text-ink-3">
-                        Confirmation: {a.booking_confirmation}
-                      </div>
-                    )}
-                    {a.instructions && (
-                      <div className="mt-0.5 whitespace-pre-line text-ink-3">
-                        {a.instructions}
-                      </div>
-                    )}
-                    {a.notes && (
-                      <div className="mt-0.5 whitespace-pre-line text-ink-3">
-                        {a.notes}
-                      </div>
-                    )}
-                  </ItemRow>
-                );
-              })}
-            </ul>
-          )}
-        </div>
-          </>
         )}
+        <div className="mt-3 text-xs text-ink-3">
+          {dayCount} day{dayCount === 1 ? "" : "s"} · {itemCount} item{itemCount === 1 ? "" : "s"}
+        </div>
       </div>
     );
   };
 
-  const accommodationPreview = previewNightsDays(
-    accommodationModal.checkinDate,
-    accommodationModal.checkoutDate,
+  const renderListView = () => (
+    <div className="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-4">
+      {trips.map((t, i) => renderTripCard(t, i))}
+      <button
+        type="button"
+        onClick={openAddTrip}
+        className="flex min-h-[120px] items-center justify-center rounded-xl border border-dashed border-line-strong px-4 py-6 text-sm font-medium text-ink-3 transition-colors duration-150 hover:border-brand hover:text-brand"
+      >
+        + New Trip
+      </button>
+    </div>
   );
+
+  /** The calendar card is just the badge, time, and title — route, location,
+   * maps links, meta, and notes only show once you click through to the
+   * view modal. `bandIdx`/`bandStartDay` place it within its own band's
+   * local columns; a card clipped at a band edge (`continuesFromPrev`/
+   * `continuesToNext`) loses the rounded corner on that side so the cut
+   * reads as a continuation rather than a full start/end. */
+  const renderEntryCard = (entry: PackedEntry, bandIdx: number, bandStartDay: number) => {
+    const meta = TYPE_META[entry.kind];
+    const localStart = entry.startDay - bandStartDay;
+    const localEnd = entry.endDay - bandStartDay;
+    return (
+      <button
+        key={`${entry.kind}-${entry.id}-${bandIdx}`}
+        type="button"
+        onClick={() => setViewing({ entry })}
+        style={{ gridColumn: `${localStart + 1} / ${localEnd + 2}`, gridRow: entry.row + 2 }}
+        className={`flex flex-col gap-0.5 self-start border border-line bg-surface p-3 text-left border-l-[3px] ${meta.border} transition-shadow hover:shadow-xs ${
+          entry.continuesFromPrev ? "rounded-l-none" : "rounded-l-lg"
+        } ${entry.continuesToNext ? "rounded-r-none" : "rounded-r-lg"}`}
+      >
+        <div className="flex items-baseline justify-between gap-2">
+          <span className={`text-[11px] font-bold tracking-wide ${meta.text}`}>{meta.label}</span>
+          {entry.timeLabel && <span className="whitespace-nowrap text-xs font-semibold text-ink-2">{entry.timeLabel}</span>}
+        </div>
+        <div className="text-sm font-semibold leading-snug text-ink">{entry.title}</div>
+      </button>
+    );
+  };
+
+  const renderTripView = (detail: TravelTripDetail) => {
+    const { trip, cities } = detail;
+    const days = isoDateRange(trip.start_date, trip.end_date);
+    const entries = buildTimelineEntries(detail);
+    const bands: { days: string[]; startDay: number; endDay: number }[] = [];
+    for (let i = 0; i < days.length; i += DAYS_PER_BAND) {
+      bands.push({ days: days.slice(i, i + DAYS_PER_BAND), startDay: i, endDay: Math.min(i + DAYS_PER_BAND, days.length) - 1 });
+    }
+
+    return (
+      <>
+        <button
+          type="button"
+          onClick={() => {
+            setView("list");
+            setActiveTripId(null);
+          }}
+          className="mb-4 text-sm font-medium text-ink-3 transition-colors hover:text-ink"
+        >
+          ← All trips
+        </button>
+
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h2 className="font-serif text-3xl font-semibold text-ink">{trip.title}</h2>
+            <div className="mt-1.5 text-sm text-ink-3">
+              {formatDate(trip.start_date)} – {formatDate(trip.end_date)} · {days.length} day
+              {days.length === 1 ? "" : "s"}
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {cities.map((c) => (
+              <span
+                key={c.id}
+                onDoubleClick={() => setRevealedCityId((cur) => (cur === c.id ? null : c.id))}
+                className="flex items-center gap-1.5 rounded-full bg-brand-soft px-3 py-1.5 text-xs font-medium text-brand-text"
+              >
+                {cityChipLabel(c)}
+                {revealedCityId === c.id && (
+                  <span className="flex items-center gap-0.5">
+                    <button
+                      type="button"
+                      aria-label={`Edit ${c.name}`}
+                      disabled={saving}
+                      onClick={() => openEditPlace(trip.id, c)}
+                      className={CHIP_EDIT_ICON_CLASSES}
+                    >
+                      <PencilIcon className="size-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={`Delete ${c.name}`}
+                      disabled={saving}
+                      onClick={() => void onDeletePlace(trip.id, c.id)}
+                      className={CHIP_DELETE_ICON_CLASSES}
+                    >
+                      <TrashIcon className="size-3.5" />
+                    </button>
+                  </span>
+                )}
+              </span>
+            ))}
+            <button
+              type="button"
+              disabled={saving}
+              onClick={() => openAddPlace(trip.id)}
+              className="rounded-full border border-dashed border-line-strong px-3 py-1.5 text-xs font-semibold text-ink-3 hover:border-brand hover:text-brand"
+            >
+              + Place
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-4 flex flex-wrap gap-2">
+          <button type="button" disabled={saving} className={ADD_BUTTON_CLASSES} onClick={() => openAddEntry(trip.id, "flight")}>
+            + Flight
+          </button>
+          <button
+            type="button"
+            disabled={saving}
+            className={ADD_BUTTON_CLASSES}
+            onClick={() => openAddEntry(trip.id, "accommodation")}
+          >
+            + Stay
+          </button>
+          <button type="button" disabled={saving} className={ADD_BUTTON_CLASSES} onClick={() => openAddEntry(trip.id, "activity")}>
+            + Activity
+          </button>
+          <button type="button" disabled={saving} className={ADD_BUTTON_CLASSES} onClick={() => openAddEntry(trip.id, "train")}>
+            + Transit
+          </button>
+        </div>
+
+        <div className="mt-4 flex flex-wrap gap-4 rounded-lg border border-line bg-surface p-3.5">
+          {(Object.keys(TYPE_META) as EntryKind[]).map((k) => (
+            <div key={k} className="flex items-center gap-1.5 text-xs text-ink-3">
+              <span className={`h-2 w-2 rounded-full ${TYPE_META[k].dot}`} />
+              {TYPE_META[k].label}
+            </div>
+          ))}
+        </div>
+
+        <div
+          ref={calendarScrollRef}
+          tabIndex={0}
+          role="region"
+          aria-label="Trip calendar — drag or use the left/right arrow keys to scroll"
+          onMouseDown={onCalendarMouseDown}
+          onKeyDown={onCalendarKeyDown}
+          className={`mt-5 flex flex-col gap-6 overflow-x-auto rounded-lg pb-4 select-none focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/40 ${
+            isDraggingCalendar ? "cursor-grabbing" : "cursor-grab"
+          }`}
+        >
+          {bands.map((band, bandIdx) => {
+            const packed = packEntriesForBand(entries, trip.start_date, band.startDay, band.endDay);
+            const daysWithEntries = new Set<number>();
+            for (const e of packed) {
+              for (let d = e.startDay; d <= e.endDay; d++) daysWithEntries.add(d);
+            }
+            return (
+              <div
+                key={`band-${band.startDay}`}
+                className="grid items-start gap-x-4 gap-y-4"
+                style={{ gridTemplateColumns: `repeat(${band.days.length}, ${DAY_COLUMN_WIDTH}px)` }}
+              >
+                {band.days.map((iso, i) => {
+                  const { weekday, label } = dayHeaderParts(iso);
+                  const city = cityForDate(cities, iso);
+                  return (
+                    <div
+                      key={`hdr-${iso}`}
+                      style={{ gridColumn: i + 1, gridRow: 1 }}
+                      className="sticky top-0 bg-page pb-4 border-b-2 border-ink"
+                    >
+                      <div className="text-[11px] font-semibold uppercase tracking-wider text-ink-3">
+                        {weekday} · {label}
+                      </div>
+                      {city && <div className="mt-0.5 font-serif text-lg font-semibold text-ink">{city}</div>}
+                    </div>
+                  );
+                })}
+
+                {packed.map((entry) => renderEntryCard(entry, bandIdx, band.startDay))}
+
+                {band.days.map(
+                  (iso, i) =>
+                    !daysWithEntries.has(band.startDay + i) && (
+                      <p key={`empty-${iso}`} style={{ gridColumn: i + 1, gridRow: 2 }} className="px-0.5 py-3 text-xs text-ink-4">
+                        No items yet
+                      </p>
+                    ),
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </>
+    );
+  };
+
+  const isTransit = entryModal.kind === "train" || entryModal.kind === "bus" || entryModal.kind === "ferry";
+  const kindLabels: Record<EntryKind, string> = {
+    flight: "flight",
+    train: "transit",
+    bus: "transit",
+    ferry: "transit",
+    activity: "activity",
+    accommodation: "stay",
+  };
 
   return (
     <div className={PAGE_CONTAINER_CLASSES}>
@@ -1190,8 +1384,8 @@ export default function TravelsClient() {
         title="Travels"
         description={
           <>
-            Trips filed by the year and month you took them, each with its flights, bus/train
-            legs, day-by-day itinerary, and accommodations. Location links open in Google Maps.
+            Trips laid out day by day — flights, stays, activities, and transit color-coded on
+            one timeline per trip. Location links open in Google Maps.
           </>
         }
       />
@@ -1202,79 +1396,19 @@ export default function TravelsClient() {
         </div>
       )}
 
-      {!loading && trips.length === 0 && (
+      {!loading && trips.length === 0 && view === "list" && (
         <p className={DASHED_EMPTY_CLASSES}>No trips yet — add one to get started.</p>
       )}
 
-      <button
-        type="button"
-        onClick={openAddTrip}
-        className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-line-strong px-4 py-3 text-sm font-medium text-ink-3 transition-colors duration-150 hover:border-brand hover:text-brand"
-      >
-        + Add trip
-      </button>
-
-      <div className="flex flex-col gap-6">
-        {yearGroups.map((yg) => {
-          const yearKey = String(yg.year);
-          const expanded = expandedYears.has(yearKey);
-          const tripCount = yg.months.reduce((n, mg) => n + mg.trips.length, 0);
-          return (
-            <section key={yearKey} className={CARD_CLASSES}>
-              <button
-                type="button"
-                className="-m-1 flex w-full flex-wrap items-center justify-between gap-3 rounded-lg p-1 text-left transition-colors hover:bg-surface-2 dark:hover:bg-zinc-800/60"
-                aria-expanded={expanded}
-                onClick={() => toggleYear(yearKey)}
-              >
-                <h2 className="text-lg font-medium text-ink">
-                  {yg.year}
-                  <span className="ml-2 text-sm font-normal text-ink-3">
-                    ({tripCount} trip{tripCount === 1 ? "" : "s"})
-                  </span>
-                </h2>
-                <span
-                  aria-hidden
-                  className={`text-ink-4 transition-transform ${
-                    expanded ? "rotate-90" : ""
-                  }`}
-                >
-                  ›
-                </span>
-              </button>
-              {expanded && (
-                <div className="mt-4 flex flex-col gap-6">
-                  {yg.months.map((mg) => (
-                    <div key={mg.month}>
-                      <h3 className="text-xs font-semibold uppercase tracking-wider text-ink-3">
-                        {MONTH_NAMES_FULL[mg.month - 1] ?? mg.month}
-                      </h3>
-                      <div className="mt-3 flex flex-col gap-4">
-                        {mg.trips.map((t) => renderTripCard(t))}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </section>
-          );
-        })}
-      </div>
+      {view === "list" ? renderListView() : activeDetail ? renderTripView(activeDetail) : null}
 
       {/* Trip modal */}
       <Modal open={tripModal.open} onClose={closeTripModal} ariaLabelledBy="travel-trip-title">
         <div className="mb-4 flex items-start justify-between gap-2">
-          <h2
-            id="travel-trip-title"
-            className="text-lg font-semibold text-ink"
-          >
-            {tripModal.editId != null ? "Edit trip" : "Add trip"}
+          <h2 id="travel-trip-title" className="text-lg font-semibold text-ink">
+            {tripModal.editId != null ? "Edit trip" : "New trip"}
           </h2>
-          <button
-            type="button"
-            className={CLOSE_BUTTON_CLASSES}
-            onClick={closeTripModal}
-          >
+          <button type="button" className={CLOSE_BUTTON_CLASSES} onClick={closeTripModal}>
             Close
           </button>
         </div>
@@ -1285,80 +1419,41 @@ export default function TravelsClient() {
             </div>
           )}
           <label className="flex flex-col gap-1 text-sm">
-            <span className="text-ink-2">Title</span>
+            <span className={LABEL_CLASSES}>Trip name</span>
             <input
               required
               type="text"
               className={INPUT_CLASSES}
               value={tripModal.title}
               disabled={saving}
-              placeholder="e.g. Japan trip"
+              placeholder="e.g. Rome, Florence & Venice"
               onChange={(e) => setTripModal((m) => ({ ...m, title: e.target.value }))}
             />
           </label>
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-2 gap-3">
             <label className="flex flex-col gap-1 text-sm">
-              <span className="text-ink-2">Year</span>
-              <input
-                required
-                type="number"
-                className={INPUT_CLASSES}
-                value={tripModal.entryYear}
+              <span className={LABEL_CLASSES}>Start date</span>
+              <DatePickerField
+                value={tripModal.startDate}
                 disabled={saving}
-                onChange={(e) => setTripModal((m) => ({ ...m, entryYear: e.target.value }))}
+                onChange={(iso) => setTripModal((m) => ({ ...m, startDate: iso }))}
               />
             </label>
             <label className="flex flex-col gap-1 text-sm">
-              <span className="text-ink-2">Start month</span>
-              <select
+              <span className={LABEL_CLASSES}># Days</span>
+              <input
+                required
+                type="number"
+                min={1}
                 className={INPUT_CLASSES}
-                value={tripModal.entryMonth}
+                value={tripModal.numDays}
                 disabled={saving}
-                onChange={(e) =>
-                  setTripModal((m) => {
-                    const entryMonth = e.target.value;
-                    // Keep the end month from trailing behind a later start
-                    // month — most trips are a single month, so this keeps
-                    // that the common case without an extra click.
-                    const entryMonthEnd =
-                      Number(m.entryMonthEnd) < Number(entryMonth) ? entryMonth : m.entryMonthEnd;
-                    return { ...m, entryMonth, entryMonthEnd };
-                  })
-                }
-              >
-                {MONTH_NAMES_FULL.map((name, i) => (
-                  <option key={name} value={i + 1}>
-                    {name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="text-ink-2">End month</span>
-              <select
-                className={INPUT_CLASSES}
-                value={tripModal.entryMonthEnd}
-                disabled={saving}
-                onChange={(e) => setTripModal((m) => ({ ...m, entryMonthEnd: e.target.value }))}
-              >
-                {MONTH_NAMES_FULL.map((name, i) => (
-                  <option
-                    key={name}
-                    value={i + 1}
-                    disabled={i + 1 < Number(tripModal.entryMonth)}
-                  >
-                    {name}
-                  </option>
-                ))}
-              </select>
+                onChange={(e) => setTripModal((m) => ({ ...m, numDays: e.target.value }))}
+              />
             </label>
           </div>
-          <p className="-mt-2 text-xs text-ink-3">
-            A trip usually files under one month — pick a later end month only if it spans
-            several.
-          </p>
           <label className="flex flex-col gap-1 text-sm">
-            <span className="text-ink-2">
+            <span className={LABEL_CLASSES}>
               Notes <span className="font-normal text-ink-4">(optional)</span>
             </span>
             <textarea
@@ -1371,667 +1466,460 @@ export default function TravelsClient() {
           </label>
           <div className="flex flex-wrap gap-2">
             <button type="submit" disabled={saving} className={PRIMARY_BUTTON_CLASSES}>
-              {saving ? "Saving…" : tripModal.editId != null ? "Update" : "Add"}
+              {saving ? "Saving…" : tripModal.editId != null ? "Update" : "Create"}
             </button>
-            <button
-              type="button"
-              disabled={saving}
-              className={SECONDARY_BUTTON_CLASSES}
-              onClick={closeTripModal}
-            >
+            <button type="button" disabled={saving} className={SECONDARY_BUTTON_CLASSES} onClick={closeTripModal}>
               Cancel
             </button>
           </div>
         </form>
       </Modal>
 
-      {/* Flight modal */}
-      <Modal open={flightModal.open} onClose={closeFlightModal} ariaLabelledBy="travel-flight-title">
+      {/* Place (city) modal */}
+      <Modal open={placeModal.open} onClose={closePlaceModal} ariaLabelledBy="travel-place-title">
         <div className="mb-4 flex items-start justify-between gap-2">
-          <h2
-            id="travel-flight-title"
-            className="text-lg font-semibold text-ink"
-          >
-            {flightModal.editId != null ? "Edit flight" : "Add flight"}
+          <h2 id="travel-place-title" className="text-lg font-semibold text-ink">
+            {placeModal.editId != null ? "Edit place" : "Add place"}
           </h2>
-          <button
-            type="button"
-            className={CLOSE_BUTTON_CLASSES}
-            onClick={closeFlightModal}
-          >
+          <button type="button" className={CLOSE_BUTTON_CLASSES} onClick={closePlaceModal}>
             Close
           </button>
         </div>
-        <form onSubmit={submitFlight} className="flex flex-col gap-4">
-          {flightError && (
+        <form onSubmit={submitPlace} className="flex flex-col gap-4">
+          {placeError && (
             <div className={ERROR_ALERT_CLASSES} role="alert">
-              {flightError}
+              {placeError}
             </div>
           )}
+          <label className="flex flex-col gap-1 text-sm">
+            <span className={LABEL_CLASSES}>Place or country</span>
+            <input
+              required
+              type="text"
+              className={INPUT_CLASSES}
+              value={placeModal.name}
+              disabled={saving}
+              placeholder="e.g. Kyoto, Japan"
+              onChange={(e) => setPlaceModal((m) => ({ ...m, name: e.target.value }))}
+            />
+          </label>
           <div className="grid grid-cols-2 gap-3">
             <label className="flex flex-col gap-1 text-sm">
-              <span className="text-ink-2">Flight number</span>
+              <span className={LABEL_CLASSES}>
+                From <span className="font-normal text-ink-4">(optional)</span>
+              </span>
+              <DatePickerField
+                value={placeModal.startDate}
+                disabled={saving}
+                minDate={activeDetail?.trip.start_date}
+                maxDate={activeDetail?.trip.end_date}
+                anchorDate={activeDetail?.trip.start_date}
+                onChange={(iso) => setPlaceModal((m) => ({ ...m, startDate: iso }))}
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              <span className={LABEL_CLASSES}>
+                To <span className="font-normal text-ink-4">(optional)</span>
+              </span>
+              <DatePickerField
+                value={placeModal.endDate}
+                disabled={saving}
+                minDate={activeDetail?.trip.start_date}
+                maxDate={activeDetail?.trip.end_date}
+                anchorDate={activeDetail?.trip.start_date}
+                onChange={(iso) => setPlaceModal((m) => ({ ...m, endDate: iso }))}
+              />
+            </label>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button type="submit" disabled={saving} className={PRIMARY_BUTTON_CLASSES}>
+              {saving ? "Saving…" : placeModal.editId != null ? "Update" : "Add"}
+            </button>
+            <button type="button" disabled={saving} className={SECONDARY_BUTTON_CLASSES} onClick={closePlaceModal}>
+              Cancel
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Entry modal (flight / transit / activity / stay) */}
+      <Modal open={entryModal.open} onClose={closeEntryModal} ariaLabelledBy="travel-entry-title">
+        <div className="mb-4 flex items-start justify-between gap-2">
+          <h2 id="travel-entry-title" className="text-lg font-semibold text-ink">
+            {entryModal.editId != null ? "Edit " : "Add "}
+            {kindLabels[entryModal.kind]}
+          </h2>
+          <button type="button" className={CLOSE_BUTTON_CLASSES} onClick={closeEntryModal}>
+            Close
+          </button>
+        </div>
+        <form onSubmit={submitEntry} className="flex flex-col gap-4">
+          {entryError && (
+            <div className={ERROR_ALERT_CLASSES} role="alert">
+              {entryError}
+            </div>
+          )}
+
+          <label className="flex flex-col gap-1 text-sm">
+            <span className={LABEL_CLASSES}>Day</span>
+            <DatePickerField
+              value={activeDetail ? addDaysIso(activeDetail.trip.start_date, entryModal.dayIndex) : ""}
+              disabled={saving}
+              minDate={activeDetail?.trip.start_date}
+              maxDate={activeDetail?.trip.end_date}
+              onChange={(iso) =>
+                activeDetail &&
+                setEntryModal((m) => ({ ...m, dayIndex: dayIndexFor(activeDetail.trip.start_date, iso) }))
+              }
+            />
+            {activeDetail &&
+              (() => {
+                const city = cityForDate(activeDetail.cities, addDaysIso(activeDetail.trip.start_date, entryModal.dayIndex));
+                return city ? <p className="text-xs text-ink-3">{city}</p> : null;
+              })()}
+          </label>
+
+          {isTransit && (
+            <div className="flex gap-2">
+              {(["train", "bus", "ferry"] as const).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => setEntryModal((m) => ({ ...m, kind: mode }))}
+                  className={`rounded-lg border px-3.5 py-1.5 text-sm font-semibold capitalize transition-colors ${
+                    entryModal.kind === mode
+                      ? "border-brand bg-brand text-white"
+                      : "border-line-strong bg-surface text-ink-2 hover:bg-surface-2"
+                  }`}
+                >
+                  {mode}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {entryModal.kind === "flight" && (
+            <label className="flex flex-col gap-1 text-sm">
+              <span className={LABEL_CLASSES}>Flight number</span>
               <input
                 required
                 type="text"
                 className={INPUT_CLASSES}
-                value={flightModal.flightNumber}
+                value={entryModal.flightNumber}
                 disabled={saving}
-                placeholder="e.g. PR102"
-                onChange={(e) =>
-                  setFlightModal((m) => ({ ...m, flightNumber: e.target.value }))
-                }
+                placeholder="e.g. DL 234"
+                onChange={(e) => setEntryModal((m) => ({ ...m, flightNumber: e.target.value }))}
               />
             </label>
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="text-ink-2">
-                Date <span className="font-normal text-ink-4">(optional)</span>
-              </span>
-              <DatePickerField
-                value={flightModal.flightDate}
-                disabled={saving}
-                onChange={(iso) => setFlightModal((m) => ({ ...m, flightDate: iso }))}
-              />
-            </label>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="text-ink-2">
-                Departure time (24h) <span className="font-normal text-ink-4">(optional)</span>
-              </span>
-              <TimeField
-                value={flightModal.departureTime}
-                disabled={saving}
-                onChange={(hhmm) => setFlightModal((m) => ({ ...m, departureTime: hhmm }))}
-              />
-            </label>
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="text-ink-2">
-                Arrival time (24h) <span className="font-normal text-ink-4">(optional)</span>
-              </span>
-              <TimeField
-                value={flightModal.arrivalTime}
-                disabled={saving}
-                onChange={(hhmm) => setFlightModal((m) => ({ ...m, arrivalTime: hhmm }))}
-              />
-            </label>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="text-ink-2">
-                From <span className="font-normal text-ink-4">(optional)</span>
-              </span>
-              <input
-                type="text"
-                className={INPUT_CLASSES}
-                value={flightModal.fromLocation}
-                disabled={saving}
-                placeholder="e.g. Manila (MNL)"
-                onChange={(e) =>
-                  setFlightModal((m) => ({ ...m, fromLocation: e.target.value }))
-                }
-              />
-            </label>
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="text-ink-2">
-                From maps link <span className="font-normal text-ink-4">(optional)</span>
-              </span>
-              <input
-                type="url"
-                className={INPUT_CLASSES}
-                value={flightModal.fromMapUrl}
-                disabled={saving}
-                placeholder="Auto-built from the name if blank"
-                onChange={(e) => setFlightModal((m) => ({ ...m, fromMapUrl: e.target.value }))}
-              />
-            </label>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="text-ink-2">
-                To <span className="font-normal text-ink-4">(optional)</span>
-              </span>
-              <input
-                type="text"
-                className={INPUT_CLASSES}
-                value={flightModal.toLocation}
-                disabled={saving}
-                placeholder="e.g. Tokyo (NRT)"
-                onChange={(e) => setFlightModal((m) => ({ ...m, toLocation: e.target.value }))}
-              />
-            </label>
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="text-ink-2">
-                To maps link <span className="font-normal text-ink-4">(optional)</span>
-              </span>
-              <input
-                type="url"
-                className={INPUT_CLASSES}
-                value={flightModal.toMapUrl}
-                disabled={saving}
-                placeholder="Auto-built from the name if blank"
-                onChange={(e) => setFlightModal((m) => ({ ...m, toMapUrl: e.target.value }))}
-              />
-            </label>
-          </div>
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-ink-2">
-              Notes <span className="font-normal text-ink-4">(optional)</span>
-            </span>
-            <textarea
-              rows={2}
-              className={INPUT_CLASSES}
-              value={flightModal.notes}
-              disabled={saving}
-              onChange={(e) => setFlightModal((m) => ({ ...m, notes: e.target.value }))}
-            />
-          </label>
-          <div className="flex flex-wrap gap-2">
-            <button type="submit" disabled={saving} className={PRIMARY_BUTTON_CLASSES}>
-              {saving ? "Saving…" : flightModal.editId != null ? "Update" : "Add"}
-            </button>
-            <button
-              type="button"
-              disabled={saving}
-              className={SECONDARY_BUTTON_CLASSES}
-              onClick={closeFlightModal}
-            >
-              Cancel
-            </button>
-          </div>
-        </form>
-      </Modal>
-
-      {/* Transport (bus/train) modal */}
-      <Modal
-        open={transportModal.open}
-        onClose={closeTransportModal}
-        ariaLabelledBy="travel-transport-title"
-      >
-        <div className="mb-4 flex items-start justify-between gap-2">
-          <h2
-            id="travel-transport-title"
-            className="text-lg font-semibold text-ink"
-          >
-            {transportModal.editId != null ? "Edit bus/train leg" : "Add bus/train leg"}
-          </h2>
-          <button type="button" className={CLOSE_BUTTON_CLASSES} onClick={closeTransportModal}>
-            Close
-          </button>
-        </div>
-        <form onSubmit={submitTransport} className="flex flex-col gap-4">
-          {transportError && (
-            <div className={ERROR_ALERT_CLASSES} role="alert">
-              {transportError}
-            </div>
           )}
-          <div className="grid grid-cols-2 gap-3">
+
+          {isTransit && (
             <label className="flex flex-col gap-1 text-sm">
-              <span className="text-ink-2">Mode</span>
-              <select
-                className={INPUT_CLASSES}
-                value={transportModal.mode}
-                disabled={saving}
-                onChange={(e) =>
-                  setTransportModal((m) => ({ ...m, mode: e.target.value as "bus" | "train" }))
-                }
-              >
-                <option value="bus">Bus</option>
-                <option value="train">Train</option>
-              </select>
-            </label>
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="text-ink-2">
+              <span className={LABEL_CLASSES}>
                 Number <span className="font-normal text-ink-4">(optional)</span>
               </span>
               <input
                 type="text"
                 className={INPUT_CLASSES}
-                value={transportModal.number}
+                value={entryModal.number}
                 disabled={saving}
-                placeholder="e.g. Nozomi 23"
-                onChange={(e) => setTransportModal((m) => ({ ...m, number: e.target.value }))}
+                placeholder="e.g. FR 9454"
+                onChange={(e) => setEntryModal((m) => ({ ...m, number: e.target.value }))}
               />
             </label>
-          </div>
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-ink-2">
-              Date <span className="font-normal text-ink-4">(optional)</span>
-            </span>
-            <DatePickerField
-              value={transportModal.travelDate}
-              disabled={saving}
-              onChange={(iso) => setTransportModal((m) => ({ ...m, travelDate: iso }))}
-            />
-          </label>
-          <div className="grid grid-cols-2 gap-3">
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="text-ink-2">
-                Departure time (24h) <span className="font-normal text-ink-4">(optional)</span>
-              </span>
-              <TimeField
-                value={transportModal.departureTime}
-                disabled={saving}
-                onChange={(hhmm) => setTransportModal((m) => ({ ...m, departureTime: hhmm }))}
-              />
-            </label>
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="text-ink-2">
-                Arrival time (24h) <span className="font-normal text-ink-4">(optional)</span>
-              </span>
-              <TimeField
-                value={transportModal.arrivalTime}
-                disabled={saving}
-                onChange={(hhmm) => setTransportModal((m) => ({ ...m, arrivalTime: hhmm }))}
-              />
-            </label>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="text-ink-2">
-                From <span className="font-normal text-ink-4">(optional)</span>
-              </span>
-              <input
-                type="text"
-                className={INPUT_CLASSES}
-                value={transportModal.fromLocation}
-                disabled={saving}
-                placeholder="e.g. Tokyo Station"
-                onChange={(e) =>
-                  setTransportModal((m) => ({ ...m, fromLocation: e.target.value }))
-                }
-              />
-            </label>
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="text-ink-2">
-                From maps link <span className="font-normal text-ink-4">(optional)</span>
-              </span>
-              <input
-                type="url"
-                className={INPUT_CLASSES}
-                value={transportModal.fromMapUrl}
-                disabled={saving}
-                placeholder="Auto-built from the name if blank"
-                onChange={(e) =>
-                  setTransportModal((m) => ({ ...m, fromMapUrl: e.target.value }))
-                }
-              />
-            </label>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="text-ink-2">
-                To <span className="font-normal text-ink-4">(optional)</span>
-              </span>
-              <input
-                type="text"
-                className={INPUT_CLASSES}
-                value={transportModal.toLocation}
-                disabled={saving}
-                placeholder="e.g. Kyoto Station"
-                onChange={(e) => setTransportModal((m) => ({ ...m, toLocation: e.target.value }))}
-              />
-            </label>
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="text-ink-2">
-                To maps link <span className="font-normal text-ink-4">(optional)</span>
-              </span>
-              <input
-                type="url"
-                className={INPUT_CLASSES}
-                value={transportModal.toMapUrl}
-                disabled={saving}
-                placeholder="Auto-built from the name if blank"
-                onChange={(e) => setTransportModal((m) => ({ ...m, toMapUrl: e.target.value }))}
-              />
-            </label>
-          </div>
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-ink-2">
-              Notes <span className="font-normal text-ink-4">(optional)</span>
-            </span>
-            <textarea
-              rows={2}
-              className={INPUT_CLASSES}
-              value={transportModal.notes}
-              disabled={saving}
-              onChange={(e) => setTransportModal((m) => ({ ...m, notes: e.target.value }))}
-            />
-          </label>
-          <div className="flex flex-wrap gap-2">
-            <button type="submit" disabled={saving} className={PRIMARY_BUTTON_CLASSES}>
-              {saving ? "Saving…" : transportModal.editId != null ? "Update" : "Add"}
-            </button>
-            <button
-              type="button"
-              disabled={saving}
-              className={SECONDARY_BUTTON_CLASSES}
-              onClick={closeTransportModal}
-            >
-              Cancel
-            </button>
-          </div>
-        </form>
-      </Modal>
+          )}
 
-      {/* Itinerary modal */}
-      <Modal
-        open={itineraryModal.open}
-        onClose={closeItineraryModal}
-        ariaLabelledBy="travel-itinerary-title"
-      >
-        <div className="mb-4 flex items-start justify-between gap-2">
-          <h2
-            id="travel-itinerary-title"
-            className="text-lg font-semibold text-ink"
-          >
-            {itineraryModal.editId != null ? "Edit itinerary item" : "Add itinerary item"}
-          </h2>
-          <button
-            type="button"
-            className={CLOSE_BUTTON_CLASSES}
-            onClick={closeItineraryModal}
-          >
-            Close
-          </button>
-        </div>
-        <form onSubmit={submitItinerary} className="flex flex-col gap-4">
-          {itineraryError && (
-            <div className={ERROR_ALERT_CLASSES} role="alert">
-              {itineraryError}
+          {entryModal.kind === "activity" && (
+            <label className="flex flex-col gap-1 text-sm">
+              <span className={LABEL_CLASSES}>Activity</span>
+              <input
+                required
+                type="text"
+                className={INPUT_CLASSES}
+                value={entryModal.activity}
+                disabled={saving}
+                placeholder="e.g. Colosseum tour"
+                onChange={(e) => setEntryModal((m) => ({ ...m, activity: e.target.value }))}
+              />
+            </label>
+          )}
+
+          {entryModal.kind === "accommodation" && (
+            <label className="flex flex-col gap-1 text-sm">
+              <span className={LABEL_CLASSES}>Name</span>
+              <input
+                required
+                type="text"
+                className={INPUT_CLASSES}
+                value={entryModal.name}
+                disabled={saving}
+                placeholder="e.g. Hotel Artemide"
+                onChange={(e) => setEntryModal((m) => ({ ...m, name: e.target.value }))}
+              />
+            </label>
+          )}
+
+          <div className="grid grid-cols-2 gap-3">
+            <label className="flex flex-col gap-1 text-sm">
+              <span className={LABEL_CLASSES}>
+                {entryModal.kind === "accommodation" ? "Check-in time" : entryModal.kind === "activity" ? "Start time" : "Departure time"}{" "}
+                <span className="font-normal text-ink-4">(optional)</span>
+              </span>
+              <TimeField
+                value={entryModal.time1}
+                disabled={saving}
+                onChange={(hhmm) => setEntryModal((m) => ({ ...m, time1: hhmm }))}
+              />
+            </label>
+            {entryModal.kind !== "accommodation" && (
+              <label className="flex flex-col gap-1 text-sm">
+                <span className={LABEL_CLASSES}>
+                  {entryModal.kind === "activity" ? "End time" : "Arrival time"}{" "}
+                  <span className="font-normal text-ink-4">(optional)</span>
+                </span>
+                <TimeField
+                  value={entryModal.time2}
+                  disabled={saving}
+                  onChange={(hhmm) => setEntryModal((m) => ({ ...m, time2: hhmm }))}
+                />
+              </label>
+            )}
+          </div>
+
+          {(entryModal.kind === "flight" || isTransit) && (
+            <div className="grid grid-cols-2 gap-3">
+              <label className="flex flex-col gap-1 text-sm">
+                <span className={LABEL_CLASSES}>
+                  From{" "}
+                  <span className="font-normal text-ink-4">
+                    {resolvingMapField === "fromLocation" ? "(resolving…)" : "(optional)"}
+                  </span>
+                </span>
+                <input
+                  type="text"
+                  className={INPUT_CLASSES}
+                  value={entryModal.fromLocation}
+                  disabled={saving}
+                  onChange={(e) =>
+                    setEntryModal((m) => ({ ...m, fromLocation: e.target.value, fromMapUrl: "", fromCity: "", fromCountry: "" }))
+                  }
+                  onBlur={() => void resolveLocationFieldOnBlur("fromLocation", "fromMapUrl", "fromCity", "fromCountry")}
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-sm">
+                <span className={LABEL_CLASSES}>
+                  To{" "}
+                  <span className="font-normal text-ink-4">
+                    {resolvingMapField === "toLocation" ? "(resolving…)" : "(optional)"}
+                  </span>
+                </span>
+                <input
+                  type="text"
+                  className={INPUT_CLASSES}
+                  value={entryModal.toLocation}
+                  disabled={saving}
+                  onChange={(e) =>
+                    setEntryModal((m) => ({ ...m, toLocation: e.target.value, toMapUrl: "", toCity: "", toCountry: "" }))
+                  }
+                  onBlur={() => void resolveLocationFieldOnBlur("toLocation", "toMapUrl", "toCity", "toCountry")}
+                />
+              </label>
             </div>
           )}
-          <div className="grid grid-cols-2 gap-3">
+
+          {(entryModal.kind === "flight" || isTransit) && (
             <label className="flex flex-col gap-1 text-sm">
-              <span className="text-ink-2">Date</span>
-              <DatePickerField
-                value={itineraryModal.itemDate}
-                disabled={saving}
-                onChange={(iso) =>
-                  setItineraryModal((m) => ({
-                    ...m,
-                    itemDate: iso,
-                    // Keep a set end date from trailing behind a later start
-                    // date, same as the trip's start/end month fields.
-                    itemEndDate: m.itemEndDate && m.itemEndDate < iso ? iso : m.itemEndDate,
-                  }))
-                }
-              />
-            </label>
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="text-ink-2">
-                End date <span className="font-normal text-ink-4">(optional)</span>
+              <span className={LABEL_CLASSES}>
+                Arrival date <span className="font-normal text-ink-4">(if different — optional)</span>
               </span>
               <DatePickerField
-                value={itineraryModal.itemEndDate}
+                value={entryModal.arrivalDate}
                 disabled={saving}
                 placeholder="Same day"
-                onChange={(iso) => setItineraryModal((m) => ({ ...m, itemEndDate: iso }))}
+                minDate={addDaysIso(activeDetail?.trip.start_date ?? "", entryModal.dayIndex)}
+                anchorDate={addDaysIso(activeDetail?.trip.start_date ?? "", entryModal.dayIndex)}
+                onChange={(iso) => setEntryModal((m) => ({ ...m, arrivalDate: iso }))}
               />
             </label>
-          </div>
-          <p className="-mt-2 text-xs text-ink-3">
-            Only needed when the item spans past its start date — an overnight train, a
-            multi-day trek.
-          </p>
-          <div className="grid grid-cols-2 gap-3">
+          )}
+
+          {(entryModal.kind === "activity" || entryModal.kind === "accommodation") && (
             <label className="flex flex-col gap-1 text-sm">
-              <span className="text-ink-2">
-                Start time (24h) <span className="font-normal text-ink-4">(optional)</span>
-              </span>
-              <TimeField
-                value={itineraryModal.startTime}
-                disabled={saving}
-                onChange={(hhmm) => setItineraryModal((m) => ({ ...m, startTime: hhmm }))}
-              />
-            </label>
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="text-ink-2">
-                End time (24h) <span className="font-normal text-ink-4">(optional)</span>
-              </span>
-              <TimeField
-                value={itineraryModal.endTime}
-                disabled={saving}
-                onChange={(hhmm) => setItineraryModal((m) => ({ ...m, endTime: hhmm }))}
-              />
-            </label>
-          </div>
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-ink-2">Activity</span>
-            <input
-              required
-              type="text"
-              className={INPUT_CLASSES}
-              value={itineraryModal.activity}
-              disabled={saving}
-              placeholder="e.g. Visit Senso-ji Temple"
-              onChange={(e) => setItineraryModal((m) => ({ ...m, activity: e.target.value }))}
-            />
-          </label>
-          <div className="grid grid-cols-2 gap-3">
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="text-ink-2">
-                Location <span className="font-normal text-ink-4">(optional)</span>
+              <span className={LABEL_CLASSES}>
+                Location{" "}
+                <span className="font-normal text-ink-4">
+                  {resolvingMapField === "locationName" ? "(resolving…)" : "(optional)"}
+                </span>
               </span>
               <input
                 type="text"
                 className={INPUT_CLASSES}
-                value={itineraryModal.locationName}
+                value={entryModal.locationName}
                 disabled={saving}
-                onChange={(e) =>
-                  setItineraryModal((m) => ({ ...m, locationName: e.target.value }))
-                }
+                placeholder="Address, place, or a Google Maps link"
+                onChange={(e) => setEntryModal((m) => ({ ...m, locationName: e.target.value, locationMapUrl: "" }))}
+                onBlur={() => void resolveLocationFieldOnBlur("locationName", "locationMapUrl")}
               />
             </label>
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="text-ink-2">
-                Maps link <span className="font-normal text-ink-4">(optional)</span>
-              </span>
-              <input
-                type="url"
-                className={INPUT_CLASSES}
-                value={itineraryModal.locationMapUrl}
-                disabled={saving}
-                placeholder="Auto-built from the name if blank"
-                onChange={(e) =>
-                  setItineraryModal((m) => ({ ...m, locationMapUrl: e.target.value }))
-                }
-              />
-            </label>
-          </div>
+          )}
+
+          {entryModal.kind === "accommodation" && (
+            <>
+              <div className="grid grid-cols-2 gap-3">
+                <label className="flex flex-col gap-1 text-sm">
+                  <span className={LABEL_CLASSES}>Check-out date</span>
+                  <DatePickerField
+                    value={entryModal.checkoutDate}
+                    disabled={saving}
+                    minDate={activeDetail ? addDaysIso(activeDetail.trip.start_date, entryModal.dayIndex) : undefined}
+                    anchorDate={activeDetail ? addDaysIso(activeDetail.trip.start_date, entryModal.dayIndex) : undefined}
+                    onChange={(iso) => setEntryModal((m) => ({ ...m, checkoutDate: iso }))}
+                  />
+                </label>
+                <label className="flex flex-col gap-1 text-sm">
+                  <span className={LABEL_CLASSES}>
+                    Check-out time <span className="font-normal text-ink-4">(optional)</span>
+                  </span>
+                  <TimeField
+                    value={entryModal.checkoutTime}
+                    disabled={saving}
+                    onChange={(hhmm) => setEntryModal((m) => ({ ...m, checkoutTime: hhmm }))}
+                  />
+                </label>
+              </div>
+              <label className="flex flex-col gap-1 text-sm">
+                <span className={LABEL_CLASSES}>
+                  Booking confirmation <span className="font-normal text-ink-4">(optional)</span>
+                </span>
+                <input
+                  type="text"
+                  className={INPUT_CLASSES}
+                  value={entryModal.bookingConfirmation}
+                  disabled={saving}
+                  onChange={(e) => setEntryModal((m) => ({ ...m, bookingConfirmation: e.target.value }))}
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-sm">
+                <span className={LABEL_CLASSES}>
+                  Instructions <span className="font-normal text-ink-4">(optional)</span>
+                </span>
+                <textarea
+                  rows={2}
+                  className={INPUT_CLASSES}
+                  value={entryModal.instructions}
+                  disabled={saving}
+                  onChange={(e) => setEntryModal((m) => ({ ...m, instructions: e.target.value }))}
+                />
+              </label>
+            </>
+          )}
+
           <label className="flex flex-col gap-1 text-sm">
-            <span className="text-ink-2">
+            <span className={LABEL_CLASSES}>
               Notes <span className="font-normal text-ink-4">(optional)</span>
             </span>
             <textarea
               rows={2}
               className={INPUT_CLASSES}
-              value={itineraryModal.notes}
+              value={entryModal.notes}
               disabled={saving}
-              onChange={(e) => setItineraryModal((m) => ({ ...m, notes: e.target.value }))}
+              placeholder="Confirmation number, tips, etc."
+              onChange={(e) => setEntryModal((m) => ({ ...m, notes: e.target.value }))}
             />
           </label>
-          <div className="flex flex-wrap gap-2">
+
+          <div className="flex flex-wrap items-center gap-2">
             <button type="submit" disabled={saving} className={PRIMARY_BUTTON_CLASSES}>
-              {saving ? "Saving…" : itineraryModal.editId != null ? "Update" : "Add"}
+              {saving ? "Saving…" : entryModal.editId != null ? "Update" : "Add"}
             </button>
-            <button
-              type="button"
-              disabled={saving}
-              className={SECONDARY_BUTTON_CLASSES}
-              onClick={closeItineraryModal}
-            >
+            <button type="button" disabled={saving} className={SECONDARY_BUTTON_CLASSES} onClick={closeEntryModal}>
               Cancel
             </button>
+            {entryModal.editId != null && entryModal.tripId != null && (
+              <button
+                type="button"
+                disabled={saving}
+                className={`${DELETE_BUTTON_CLASSES} ml-auto`}
+                onClick={() => void onDeleteEntry(entryModal.tripId!, entryModal.kind, entryModal.editId!)}
+              >
+                Delete
+              </button>
+            )}
           </div>
         </form>
       </Modal>
 
-      {/* Accommodation modal */}
+      {/* View modal — read-only, opens into the entry modal on Edit */}
       <Modal
-        open={accommodationModal.open}
-        onClose={closeAccommodationModal}
-        ariaLabelledBy="travel-accommodation-title"
+        open={viewing != null}
+        onClose={() => setViewing(null)}
+        ariaLabelledBy="travel-view-title"
+        dialogClassName="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-xl border border-line bg-surface p-6 shadow-pop sm:p-8"
       >
-        <div className="mb-4 flex items-start justify-between gap-2">
-          <h2
-            id="travel-accommodation-title"
-            className="text-lg font-semibold text-ink"
-          >
-            {accommodationModal.editId != null ? "Edit stay" : "Add stay"}
-          </h2>
-          <button
-            type="button"
-            className={CLOSE_BUTTON_CLASSES}
-            onClick={closeAccommodationModal}
-          >
-            Close
-          </button>
-        </div>
-        <form onSubmit={submitAccommodation} className="flex flex-col gap-4">
-          {accommodationError && (
-            <div className={ERROR_ALERT_CLASSES} role="alert">
-              {accommodationError}
+        {viewing && activeDetail && (
+          <>
+            <div className="mb-4 flex items-baseline justify-between gap-2">
+              <span className={`text-sm font-bold tracking-wide ${TYPE_META[viewing.entry.kind].text}`}>
+                {TYPE_META[viewing.entry.kind].label}
+              </span>
+              {viewing.entry.timeLabel && (
+                <span className="text-lg font-semibold text-ink-2">{viewing.entry.timeLabel}</span>
+              )}
             </div>
-          )}
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-ink-2">Name</span>
-            <input
-              required
-              type="text"
-              className={INPUT_CLASSES}
-              value={accommodationModal.name}
-              disabled={saving}
-              placeholder="e.g. Park Hotel Tokyo"
-              onChange={(e) => setAccommodationModal((m) => ({ ...m, name: e.target.value }))}
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-ink-2">Check-in / check-out dates</span>
-            <DateRangePickerField
-              startValue={accommodationModal.checkinDate}
-              endValue={accommodationModal.checkoutDate}
-              disabled={saving}
-              placeholder="Select check-in and check-out dates"
-              onChange={(start, end) =>
-                setAccommodationModal((m) => ({ ...m, checkinDate: start, checkoutDate: end }))
-              }
-            />
-          </label>
-          {accommodationPreview && (
-            <p className="-mt-2 text-xs text-ink-3">
-              {accommodationPreview.nights} night{accommodationPreview.nights === 1 ? "" : "s"} ·{" "}
-              {accommodationPreview.days} day{accommodationPreview.days === 1 ? "" : "s"}
-            </p>
-          )}
-          <div className="grid grid-cols-2 gap-3">
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="text-ink-2">
-                Check-in time (24h) <span className="font-normal text-ink-4">(optional)</span>
-              </span>
-              <TimeField
-                value={accommodationModal.checkinTime}
+            <h2 id="travel-view-title" className="font-serif text-3xl font-semibold leading-snug text-ink">
+              {viewing.entry.title}
+            </h2>
+            {viewing.entry.route && (
+              <div className="mt-3 flex flex-wrap items-center gap-2 text-base">
+                <LocationLink name={viewing.entry.route.from} url={viewing.entry.route.fromUrl} />
+                {viewing.entry.route.from && viewing.entry.route.to && <span className="text-ink-4">→</span>}
+                <LocationLink name={viewing.entry.route.to} url={viewing.entry.route.toUrl} />
+              </div>
+            )}
+            {viewing.entry.location && (
+              <div className="mt-3 text-base">
+                <LocationLink name={viewing.entry.location} url={viewing.entry.locationUrl} />
+              </div>
+            )}
+            {viewing.entry.meta && (
+              <div className="mt-4 flex flex-wrap gap-5 border-t border-line pt-4">
+                {viewing.entry.meta.map((m) => (
+                  <div key={m.k} className="text-sm text-ink-2">
+                    <span className="text-ink-4">{m.k}:</span> {m.v}
+                  </div>
+                ))}
+              </div>
+            )}
+            {viewing.entry.notes && (
+              <div className="mt-4 whitespace-pre-line text-base italic text-ink-3">{viewing.entry.notes}</div>
+            )}
+
+            <div className="mt-8 flex items-center gap-3">
+              <button
+                type="button"
+                aria-label="Delete"
                 disabled={saving}
-                onChange={(hhmm) => setAccommodationModal((m) => ({ ...m, checkinTime: hhmm }))}
-              />
-            </label>
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="text-ink-2">
-                Check-out time (24h) <span className="font-normal text-ink-4">(optional)</span>
-              </span>
-              <TimeField
-                value={accommodationModal.checkoutTime}
+                className={VIEW_DELETE_ICON_CLASSES}
+                onClick={() => void onDeleteEntry(activeDetail.trip.id, viewing.entry.kind, viewing.entry.id)}
+              >
+                <TrashIcon className="size-6" />
+              </button>
+              <button
+                type="button"
+                aria-label="Edit"
                 disabled={saving}
-                onChange={(hhmm) => setAccommodationModal((m) => ({ ...m, checkoutTime: hhmm }))}
-              />
-            </label>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="text-ink-2">
-                Location <span className="font-normal text-ink-4">(optional)</span>
-              </span>
-              <input
-                type="text"
-                className={INPUT_CLASSES}
-                value={accommodationModal.locationName}
-                disabled={saving}
-                onChange={(e) =>
-                  setAccommodationModal((m) => ({ ...m, locationName: e.target.value }))
-                }
-              />
-            </label>
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="text-ink-2">
-                Maps link <span className="font-normal text-ink-4">(optional)</span>
-              </span>
-              <input
-                type="url"
-                className={INPUT_CLASSES}
-                value={accommodationModal.locationMapUrl}
-                disabled={saving}
-                placeholder="Auto-built from the name if blank"
-                onChange={(e) =>
-                  setAccommodationModal((m) => ({ ...m, locationMapUrl: e.target.value }))
-                }
-              />
-            </label>
-          </div>
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-ink-2">
-              Booking confirmation <span className="font-normal text-ink-4">(optional)</span>
-            </span>
-            <input
-              type="text"
-              className={INPUT_CLASSES}
-              value={accommodationModal.bookingConfirmation}
-              disabled={saving}
-              onChange={(e) =>
-                setAccommodationModal((m) => ({ ...m, bookingConfirmation: e.target.value }))
-              }
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-ink-2">
-              Instructions <span className="font-normal text-ink-4">(optional)</span>
-            </span>
-            <textarea
-              rows={2}
-              className={INPUT_CLASSES}
-              value={accommodationModal.instructions}
-              disabled={saving}
-              placeholder="e.g. Ring the bell at the side entrance"
-              onChange={(e) =>
-                setAccommodationModal((m) => ({ ...m, instructions: e.target.value }))
-              }
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-ink-2">
-              Notes <span className="font-normal text-ink-4">(optional)</span>
-            </span>
-            <textarea
-              rows={2}
-              className={INPUT_CLASSES}
-              value={accommodationModal.notes}
-              disabled={saving}
-              onChange={(e) => setAccommodationModal((m) => ({ ...m, notes: e.target.value }))}
-            />
-          </label>
-          <div className="flex flex-wrap gap-2">
-            <button type="submit" disabled={saving} className={PRIMARY_BUTTON_CLASSES}>
-              {saving ? "Saving…" : accommodationModal.editId != null ? "Update" : "Add"}
-            </button>
-            <button
-              type="button"
-              disabled={saving}
-              className={SECONDARY_BUTTON_CLASSES}
-              onClick={closeAccommodationModal}
-            >
-              Cancel
-            </button>
-          </div>
-        </form>
+                className={ICON_BUTTON_CLASSES}
+                onClick={() => {
+                  const entry = viewing.entry;
+                  setViewing(null);
+                  openEditEntry(activeDetail.trip.id, entry.kind, entry.id);
+                }}
+              >
+                <PencilIcon className="size-6" />
+              </button>
+            </div>
+          </>
+        )}
       </Modal>
     </div>
   );

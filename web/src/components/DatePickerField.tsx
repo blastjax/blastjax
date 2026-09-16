@@ -13,6 +13,16 @@ export type DatePickerFieldProps = {
   disabled?: boolean;
   placeholder?: string;
   id?: string;
+  /** Dates outside [minDate, maxDate] (inclusive, either end optional)
+   * render dimmed and can't be picked — e.g. restricting to a trip's own
+   * date range. */
+  minDate?: string;
+  maxDate?: string;
+  /** Reference date used instead of the real "today" for the default view
+   * month (when `value` is blank) and the ring-highlighted day — e.g. the
+   * day being edited, so an unset arrival-date field opens on that day
+   * instead of today's date. */
+  anchorDate?: string;
 };
 
 const POPOVER_WIDTH = 320;
@@ -29,8 +39,11 @@ export function DatePickerField({
   disabled,
   placeholder = "Select date",
   id,
+  minDate,
+  maxDate,
+  anchorDate,
 }: DatePickerFieldProps) {
-  const today = toIsoDateLocal(new Date());
+  const today = anchorDate || toIsoDateLocal(new Date());
   const base = value || today;
   const [viewYear, setViewYear] = useState(() => Number(base.slice(0, 4)));
   const [viewMonth, setViewMonth] = useState(() => Number(base.slice(5, 7)));
@@ -113,6 +126,7 @@ export function DatePickerField({
               close();
             }}
             dayState={(iso) => (iso === value ? "selected" : iso === today ? "today" : "none")}
+            disabledDay={(iso) => (!!minDate && iso < minDate) || (!!maxDate && iso > maxDate)}
             onPrev={() => {
               const p = addMonths(viewYear, viewMonth, -1);
               setViewYear(p.y);

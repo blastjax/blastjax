@@ -21,6 +21,9 @@ export type CalendarMonthProps = {
    * used to put a single prev/next pair on the outer edges of a multi-month picker. */
   onPrev?: () => void;
   onNext?: () => void;
+  /** Days this returns `true` for render dimmed and can't be picked — e.g.
+   * restricting a trip's day picker to dates within the trip's own range. */
+  disabledDay?: (iso: string) => boolean;
 };
 
 /** One month's day grid: header (title + optional prev/next) and a 7-column grid of
@@ -33,6 +36,7 @@ export function CalendarMonth({
   dayState,
   onPrev,
   onNext,
+  disabledDay,
 }: CalendarMonthProps) {
   const firstWeekday = new Date(year, month - 1, 1).getDay();
   const daysInMonth = new Date(year, month, 0).getDate();
@@ -82,6 +86,7 @@ export function CalendarMonth({
           if (day == null) return <div key={i} className="h-11" />;
           const iso = `${year}-${pad(month)}-${pad(day)}`;
           const state = dayState(iso);
+          const disabled = disabledDay?.(iso) ?? false;
           const col = i % 7;
           const isCap = state === "selected" || state === "range-start" || state === "range-end";
           const inRangeBg = state === "range-middle" || state === "range-start" || state === "range-end";
@@ -99,13 +104,16 @@ export function CalendarMonth({
               <button
                 type="button"
                 onClick={() => onSelectDay(iso)}
+                disabled={disabled}
                 className={[
                   "flex h-10 w-10 items-center justify-center rounded-full text-base font-medium transition-colors duration-150",
-                  isCap
-                    ? "bg-indigo-600 font-semibold text-white"
-                    : state === "today"
-                      ? "font-semibold text-indigo-600 ring-1 ring-inset ring-indigo-400 dark:text-indigo-400"
-                      : "text-ink-2 hover:bg-zinc-200/60 dark:hover:bg-zinc-700/60",
+                  disabled
+                    ? "cursor-not-allowed text-ink-4/50"
+                    : isCap
+                      ? "bg-indigo-600 font-semibold text-white"
+                      : state === "today"
+                        ? "font-semibold text-indigo-600 ring-1 ring-inset ring-indigo-400 dark:text-indigo-400"
+                        : "text-ink-2 hover:bg-zinc-200/60 dark:hover:bg-zinc-700/60",
                 ].join(" ")}
               >
                 {day}
