@@ -142,6 +142,17 @@ function cityChipLabel(c: TravelCityRow): string {
   return c.name;
 }
 
+/** Place chips in date order — undated ones (no start_date set) sort last,
+ * by name among themselves. */
+function sortCitiesByDate(cities: TravelCityRow[]): TravelCityRow[] {
+  return [...cities].sort((a, b) => {
+    if (a.start_date && b.start_date) return a.start_date < b.start_date ? -1 : a.start_date > b.start_date ? 1 : 0;
+    if (a.start_date) return -1;
+    if (b.start_date) return 1;
+    return a.name.localeCompare(b.name);
+  });
+}
+
 type EntryKind = "flight" | "train" | "bus" | "ferry" | "activity" | "accommodation";
 
 const TYPE_META: Record<EntryKind, { label: string; dot: string; text: string; border: string }> = {
@@ -1149,7 +1160,7 @@ export default function TravelsClient() {
         </div>
         {cities.length > 0 && (
           <div className="mt-3 flex flex-wrap gap-1.5">
-            {cities.map((c) => (
+            {sortCitiesByDate(cities).map((c) => (
               <span
                 key={c.id}
                 className="rounded-full bg-brand-soft px-2.5 py-1 text-xs font-medium text-brand-text"
@@ -1239,7 +1250,7 @@ export default function TravelsClient() {
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            {cities.map((c) => (
+            {sortCitiesByDate(cities).map((c) => (
               <span
                 key={c.id}
                 onDoubleClick={() => setRevealedCityId((cur) => (cur === c.id ? null : c.id))}
