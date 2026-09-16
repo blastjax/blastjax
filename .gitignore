@@ -13,4 +13,4 @@ docker-compose.override.yml
 graphify-out/
 .agents/
 skills-lock.json
-run-dev.bat
+run-dev.sh

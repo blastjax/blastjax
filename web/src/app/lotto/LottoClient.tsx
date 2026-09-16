@@ -2110,7 +2110,7 @@ export default function LottoClient() {
                   <section className={CARD_CLASSES}>
                     <h2 className="text-sm font-semibold text-ink">Board coverage</h2>
                     <p className="mt-1 text-xs text-ink-3">
-                      Every number, 1–58. Brighter means you play it more often. Ringed
+                      Every number, 1–58. Darker means you play it more often. Green
                       numbers were in the most recent result.
                     </p>
                     <div className="mt-4 grid grid-cols-[repeat(auto-fill,minmax(2.25rem,1fr))] gap-1.5">
@@ -2118,22 +2118,22 @@ export default function LottoClient() {
                         const isLatest = ins.latestDrawSet.has(c.n);
                         const pct =
                           ins.maxPlayed > 0
-                            ? Math.round((Math.min(c.played, ins.maxPlayed) / ins.maxPlayed) * 55)
+                            ? Math.round((Math.min(c.played, ins.maxPlayed) / ins.maxPlayed) * 70)
                             : 0;
                         return (
                           <div
                             key={c.n}
                             className={`flex aspect-square items-center justify-center rounded-md text-xs font-semibold tabular-nums transition-colors duration-150 ${
                               isLatest
-                                ? "border border-success-line bg-success-soft text-success-text"
-                                : "border border-transparent text-ink-2"
+                                ? "bg-emerald-500/20 text-emerald-700 dark:text-emerald-300"
+                                : "text-ink-2"
                             }`}
                             style={
                               !isLatest
                                 ? {
                                     backgroundColor:
                                       c.played > 0
-                                        ? `color-mix(in srgb, var(--brand) ${12 + pct}%, var(--surface-2))`
+                                        ? `color-mix(in srgb, black ${20 + pct}%, var(--surface-2))`
                                         : "var(--surface-2)",
                                   }
                                 : undefined
