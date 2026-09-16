@@ -173,6 +173,76 @@ export function activeDestination(pathname: string): NavDestination | null {
   return NAV_DESTINATIONS.find((d) => d.href === href) ?? null;
 }
 
+/** A user account's page-visibility state (see Settings → Users). */
+export type PageAccess = {
+  isSuperuser: boolean;
+  /** `null` means no restriction — every page. */
+  allowedPages: readonly string[] | null;
+};
+
+/** Every href a per-user restriction can target: one per top-level
+ * NAV_SECTIONS item, not their children (a child is shown/hidden with its
+ * parent). ``blastjax`` (and anyone with ``isSuperuser``) always bypasses
+ * this. */
+export const RESTRICTABLE_PAGES: readonly { href: string; label: string; section: string }[] =
+  NAV_SECTIONS.flatMap((section) =>
+    section.items.map((item) => ({
+      href: item.href,
+      label: item.label,
+      section: section.title ?? "General",
+    })),
+  );
+
+const _RESTRICTABLE_HREFS = new Set(RESTRICTABLE_PAGES.map((p) => p.href));
+
+/** Sections/items a restricted user can see. Unrestricted users (superusers,
+ * or an ``allowedPages: null`` account) get every section back untouched.
+ *
+ * ponytail: company payslip entries (spliced in dynamically — see
+ * payslipNavItem/SidebarNav) aren't in RESTRICTABLE_PAGES, so they always
+ * pass through here regardless of restriction. Add a "/payslip" bucket to
+ * RESTRICTABLE_PAGES if those need to be gated too.
+ */
+export function filterNavSections(
+  sections: readonly NavSection[],
+  user: PageAccess | null,
+): NavSection[] {
+  if (!user || user.isSuperuser || user.allowedPages === null) return [...sections];
+  const allowed = new Set(user.allowedPages);
+  return sections
+    .map((section) => ({
+      ...section,
+      items: section.items.filter(
+        (item) => !_RESTRICTABLE_HREFS.has(item.href) || allowed.has(item.href),
+      ),
+    }))
+    .filter((section) => section.items.length > 0);
+}
+
+/** The top-level NAV_SECTIONS item a pathname belongs to (its own href, or
+ * its parent's if it's a sub-page) — or `null` for a path outside the static
+ * nav map (e.g. a per-company payslip page), which page restrictions don't
+ * cover (see `filterNavSections`). */
+export function topLevelHrefForPathname(pathname: string): string | null {
+  for (const section of NAV_SECTIONS) {
+    for (const item of section.items) {
+      if (pathname === item.href || pathname.startsWith(`${item.href}/`)) return item.href;
+      for (const child of item.children ?? []) {
+        if (pathname === child.href || pathname.startsWith(`${child.href}/`)) return item.href;
+      }
+    }
+  }
+  return null;
+}
+
+/** Whether `user` may navigate directly to `pathname` — the route-guard
+ * counterpart to `filterNavSections` hiding the link. */
+export function isPageAllowed(pathname: string, user: PageAccess | null): boolean {
+  if (!user || user.isSuperuser || user.allowedPages === null) return true;
+  const href = topLevelHrefForPathname(pathname);
+  return href === null || user.allowedPages.includes(href);
+}
+
 /** Case-insensitive substring match over labels, parents and sections. */
 export function searchDestinations(query: string): readonly NavDestination[] {
   const q = query.trim().toLowerCase();

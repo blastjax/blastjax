@@ -11,7 +11,14 @@ import {
 } from "@/components/Icons";
 import { dataApiBase, getCompanies } from "@/lib/api";
 import { clearSessionToken, getSessionToken } from "@/lib/auth";
-import { matchingNavHref, payslipNavItem, NAV_SECTIONS, type NavItem } from "@/lib/nav";
+import { useCurrentUser } from "@/components/AuthGate";
+import {
+  filterNavSections,
+  matchingNavHref,
+  payslipNavItem,
+  NAV_SECTIONS,
+  type NavItem,
+} from "@/lib/nav";
 import { useShellLayout } from "@/lib/shellLayoutContext";
 import { ICON_BUTTON_CLASSES } from "@/lib/ui";
 
@@ -149,6 +156,7 @@ export function SidebarNav() {
   // correct for the component's whole lifetime.
   const [hasSession] = useState(() => getSessionToken() !== null);
   const [companyItems, setCompanyItems] = useState<NavItem[]>([]);
+  const currentUser = useCurrentUser();
 
   useEffect(() => {
     closeMobileNav();
@@ -166,19 +174,22 @@ export function SidebarNav() {
 
   const sections = useMemo(
     () =>
-      NAV_SECTIONS.map((section) =>
-        section.title === "Finances"
-          ? {
-              ...section,
-              items: [
-                ...section.items.slice(0, 1),
-                ...companyItems,
-                ...section.items.slice(1),
-              ],
-            }
-          : section,
+      filterNavSections(
+        NAV_SECTIONS.map((section) =>
+          section.title === "Finances"
+            ? {
+                ...section,
+                items: [
+                  ...section.items.slice(0, 1),
+                  ...companyItems,
+                  ...section.items.slice(1),
+                ],
+              }
+            : section,
+        ),
+        currentUser,
       ),
-    [companyItems],
+    [companyItems, currentUser],
   );
 
   const activeHref = useMemo(() => matchingNavHref(pathname), [pathname]);

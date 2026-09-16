@@ -147,9 +147,9 @@ def _session_ttl_seconds() -> int:
     return int(os.environ.get("BUDGET_SESSION_TTL_SECONDS", str(12 * 3600)))
 
 
-def create_session() -> str:
+def create_session(user_id: int) -> str:
     token = secrets.token_urlsafe(32)
-    _store_set(f"{_SESSION_PREFIX}:{token}", True, _session_ttl_seconds())
+    _store_set(f"{_SESSION_PREFIX}:{token}", user_id, _session_ttl_seconds())
     return token
 
 
@@ -157,6 +157,14 @@ def session_is_valid(token: str) -> bool:
     if not token:
         return False
     return _store_get(f"{_SESSION_PREFIX}:{token}") is not None
+
+
+def session_user_id(token: str) -> int | None:
+    """The ``app_user.id`` a valid session token belongs to, for
+    ``/api/auth/status`` to report who's logged in (see ``app/routers/auth.py``)."""
+    if not token:
+        return None
+    return _store_get(f"{_SESSION_PREFIX}:{token}")
 
 
 def revoke_session(token: str) -> None:

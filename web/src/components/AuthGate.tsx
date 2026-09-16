@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useState } from "react";
 import { dataApiBase } from "@/lib/api";
 import {
   AUTH_UNAUTHORIZED_EVENT,
@@ -8,6 +8,7 @@ import {
   getSessionToken,
   setSessionToken,
 } from "@/lib/auth";
+import type { PageAccess } from "@/lib/nav";
 import {
   CARD_CLASSES,
   INPUT_CLASSES,
@@ -17,6 +18,19 @@ import {
 } from "@/lib/ui";
 
 type Status = "checking" | "unreachable" | "unauthenticated" | "authenticated";
+
+type StatusUser = { username: string; is_superuser: boolean; allowed_pages: string[] | null } | null;
+
+/** The logged-in user's page-visibility state (see Settings → Users), for
+ * SidebarNav/Home to filter nav by and AppShell to route-guard with. `null`
+ * while unauthenticated, or once logged in when login isn't restricted to
+ * named users at all (`/api/auth/status` didn't return a `user`) — both
+ * cases mean "show everything". */
+const CurrentUserContext = createContext<PageAccess | null>(null);
+
+export function useCurrentUser(): PageAccess | null {
+  return useContext(CurrentUserContext);
+}
 
 const CARD_CLASS = `w-full max-w-sm ${CARD_CLASSES}`;
 
@@ -38,6 +52,7 @@ function Screen({ children }: { children: React.ReactNode }) {
 
 export function AuthGate({ children }: { children: React.ReactNode }) {
   const [status, setStatus] = useState<Status>("checking");
+  const [currentUser, setCurrentUser] = useState<PageAccess | null>(null);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -55,8 +70,14 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       const data = (await res.json()) as {
         authenticated: boolean;
         login_required: boolean;
+        user?: StatusUser;
       };
       if (!data.login_required || data.authenticated) {
+        setCurrentUser(
+          data.user
+            ? { isSuperuser: data.user.is_superuser, allowedPages: data.user.allowed_pages }
+            : null,
+        );
         setStatus("authenticated");
         return;
       }
@@ -181,5 +202,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     );
   }
 
-  return <>{children}</>;
+  return (
+    <CurrentUserContext.Provider value={currentUser}>{children}</CurrentUserContext.Provider>
+  );
 }

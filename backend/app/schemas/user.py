@@ -29,6 +29,16 @@ class AppUserUpdate(BaseModel):
         return self
 
 
+class AppUserAccessUpdate(BaseModel):
+    """Which nav pages (hrefs from web/src/lib/nav.ts) a user can see.
+    Replaces the stored set wholesale — not a partial patch like
+    ``AppUserUpdate`` — since Settings → Users always submits the full
+    checkbox state at once."""
+
+    is_superuser: bool
+    allowed_pages: list[str] | None = None
+
+
 class AppUserVerify(BaseModel):
     """Checked against the stored hash, not used to authenticate a session —
     just lets Settings confirm a password was saved correctly. No minimum

@@ -1,4 +1,7 @@
+"use client";
+
 import Link from "next/link";
+import { useCurrentUser } from "@/components/AuthGate";
 import {
   CalendarIcon,
   ChartBarIcon,
@@ -14,6 +17,7 @@ import {
   TicketIcon,
   type IconProps,
 } from "@/components/Icons";
+import { isPageAllowed } from "@/lib/nav";
 import { CARD_CLASSES, SECTION_LABEL_CLASSES } from "@/lib/ui";
 
 type Shortcut = { href: string; label: string; icon: (p: IconProps) => React.ReactElement };
@@ -86,6 +90,9 @@ const AREAS: readonly Area[] = [
 ];
 
 export default function Home() {
+  const currentUser = useCurrentUser();
+  const areas = AREAS.filter((a) => isPageAllowed(a.href, currentUser));
+
   return (
     <div className="relative mx-auto flex w-full min-w-0 max-w-[1536px] flex-col gap-6 px-4 pb-16 pt-6 sm:px-6 xl:px-8">
       <div>
@@ -98,7 +105,7 @@ export default function Home() {
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {AREAS.map(({ href, title, description, icon: Icon, tone, shortcuts }) => (
+        {areas.map(({ href, title, description, icon: Icon, tone, shortcuts }) => (
           <div key={href} className={`${CARD_CLASSES} flex flex-col`}>
             <Link href={href} className="group flex items-start gap-4">
               <span

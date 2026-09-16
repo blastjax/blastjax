@@ -67,6 +67,7 @@ Two changes below cut that to one:
 
 from __future__ import annotations
 
+import json
 import os
 import threading
 import time as _time
@@ -2418,7 +2419,15 @@ def delete_lotto_attempt(draw_id: int, attempt_id: int) -> dict[str, Any] | None
             return _lotto_draw_detail(cur, draw_id)
 
 
-_APP_USER_PUBLIC_COLS = "id, username, created_at"
+_APP_USER_PUBLIC_COLS = "id, username, is_superuser, allowed_pages, created_at"
+
+
+def _decode_app_user_row(row: dict[str, Any]) -> dict[str, Any]:
+    """``allowed_pages`` is stored as a JSON array (or NULL for "no
+    restriction" — every page). Decode it back to a list/``None`` for callers."""
+    raw = row.get("allowed_pages")
+    row["allowed_pages"] = json.loads(raw) if raw else None
+    return row
 
 
 def any_app_users() -> bool:
@@ -2444,7 +2453,7 @@ def list_app_users() -> list[dict[str, Any]]:
                 # COLLATE NOCASE has to be spelled out.
                 f"SELECT {_APP_USER_PUBLIC_COLS} FROM app_user ORDER BY LOWER(username) ASC"
             )
-            return [_row_to_dict(cur, r) for r in cur.fetchall()]
+            return [_decode_app_user_row(_row_to_dict(cur, r)) for r in cur.fetchall()]
 
 
 def insert_app_user(username: str, password_hash: str) -> dict[str, Any]:
@@ -2463,24 +2472,37 @@ def insert_app_user(username: str, password_hash: str) -> dict[str, Any]:
                 """,
                 (username, password_hash),
             )
-            return _row_to_dict(cur, cur.fetchone())
+            return _decode_app_user_row(_row_to_dict(cur, cur.fetchone()))
 
 
 def get_app_user_by_username(username: str) -> dict[str, Any] | None:
-    """Full row (including ``password_hash``) for credential checks. Not used
-    by any endpoint yet — kept for the login wiring this table is meant for."""
+    """Full row (including ``password_hash``), for the login check in
+    app/routers/auth.py."""
     with get_connection() as conn:
         with db_cursor(conn) as cur:
             cur.execute(
                 # LOWER() on both sides: SQLite matched case-insensitively via
                 # the column's COLLATE NOCASE, and login must keep doing so.
                 # The unique index on LOWER(username) serves this lookup.
-                "SELECT id, username, password_hash, created_at FROM app_user "
-                "WHERE LOWER(username) = LOWER(?)",
+                "SELECT id, username, password_hash, is_superuser, allowed_pages, created_at "
+                "FROM app_user WHERE LOWER(username) = LOWER(?)",
                 (username,),
             )
             row = cur.fetchone()
-            return _row_to_dict(cur, row) if row else None
+            return _decode_app_user_row(_row_to_dict(cur, row)) if row else None
+
+
+def get_app_user_by_id(user_id: int) -> dict[str, Any] | None:
+    """Public row for the user a session belongs to (see app/security.py),
+    used by ``/api/auth/status`` to report who's logged in."""
+    with get_connection() as conn:
+        with db_cursor(conn) as cur:
+            cur.execute(
+                f"SELECT {_APP_USER_PUBLIC_COLS} FROM app_user WHERE id = ?",
+                (user_id,),
+            )
+            row = cur.fetchone()
+            return _decode_app_user_row(_row_to_dict(cur, row)) if row else None
 
 
 def update_app_user(
@@ -2510,7 +2532,33 @@ def update_app_user(
                 (user_id,),
             )
             row = cur.fetchone()
-            return _row_to_dict(cur, row) if row else None
+            return _decode_app_user_row(_row_to_dict(cur, row)) if row else None
+
+
+def update_app_user_access(
+    user_id: int,
+    is_superuser: bool,
+    allowed_pages: list[str] | None,
+) -> dict[str, Any] | None:
+    """Set which nav pages (see web/src/lib/nav.ts) a user can see.
+
+    ``allowed_pages=None`` means no restriction (every page) — same as a
+    freshly-added user. A superuser always sees every page regardless of
+    ``allowed_pages``; the two are independent so unchecking "Superuser"
+    later restores whatever pages were last set rather than resetting them.
+    """
+    with get_connection() as conn:
+        with db_cursor(conn) as cur:
+            cur.execute(
+                "UPDATE app_user SET is_superuser = ?, allowed_pages = ? WHERE id = ?",
+                (is_superuser, json.dumps(allowed_pages) if allowed_pages is not None else None, user_id),
+            )
+            cur.execute(
+                f"SELECT {_APP_USER_PUBLIC_COLS} FROM app_user WHERE id = ?",
+                (user_id,),
+            )
+            row = cur.fetchone()
+            return _decode_app_user_row(_row_to_dict(cur, row)) if row else None
 
 
 def delete_app_user(user_id: int) -> bool:

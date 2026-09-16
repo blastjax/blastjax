@@ -13,13 +13,14 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from app.deps import require_db
 from app.passwords import hash_password, verify_password
-from app.schemas.user import AppUserCreate, AppUserUpdate, AppUserVerify
+from app.schemas.user import AppUserAccessUpdate, AppUserCreate, AppUserUpdate, AppUserVerify
 from db import (
     delete_app_user,
     get_app_user_by_username,
     insert_app_user,
     list_app_users,
     update_app_user,
+    update_app_user_access,
 )
 
 router = APIRouter(prefix="/api/users", tags=["users"], dependencies=[Depends(require_db)])
@@ -68,6 +69,14 @@ def users_update(user_id: int, body: AppUserUpdate) -> dict[str, Any]:
         row = update_app_user(user_id, username, password_hash)
     except psycopg2.IntegrityError:
         raise HTTPException(status_code=409, detail="That username is already taken.")
+    if row is None:
+        raise HTTPException(status_code=404, detail="User not found.")
+    return {"user": _serialize(row)}
+
+
+@router.put("/{user_id}/access")
+def users_update_access(user_id: int, body: AppUserAccessUpdate) -> dict[str, Any]:
+    row = update_app_user_access(user_id, body.is_superuser, body.allowed_pages)
     if row is None:
         raise HTTPException(status_code=404, detail="User not found.")
     return {"user": _serialize(row)}

@@ -1111,6 +1111,11 @@ export async function importLottoDrawResultsText(text: string) {
 export type AppUserRow = {
   id: number;
   username: string;
+  /** Bypasses `allowed_pages` — always sees every page. */
+  is_superuser: boolean;
+  /** Nav hrefs (see lib/nav.ts) this user's sidebar/home page is limited to.
+   * `null` means no restriction — every page, same as a freshly-added user. */
+  allowed_pages: string[] | null;
   created_at: string;
 };
 
@@ -1124,6 +1129,11 @@ export type AppUserUpdateBody = {
   password?: string;
 };
 
+export type AppUserAccessBody = {
+  is_superuser: boolean;
+  allowed_pages: string[] | null;
+};
+
 export async function getAppUsers() {
   return getJson<{ users: AppUserRow[] }>("/api/users");
 }
@@ -1134,6 +1144,10 @@ export async function createAppUser(body: AppUserCreateBody) {
 
 export async function updateAppUser(id: number, body: AppUserUpdateBody) {
   return sendJson<{ user: AppUserRow }>("PUT", `/api/users/${id}`, body);
+}
+
+export async function updateAppUserAccess(id: number, body: AppUserAccessBody) {
+  return sendJson<{ user: AppUserRow }>("PUT", `/api/users/${id}/access`, body);
 }
 
 export async function deleteAppUser(id: number) {

@@ -1,8 +1,11 @@
 "use client";
 
-import { Suspense } from "react";
+import { usePathname, useRouter } from "next/navigation";
+import { Suspense, useEffect } from "react";
+import { useCurrentUser } from "@/components/AuthGate";
 import { Header } from "@/components/Header";
 import { SidebarNav } from "@/components/SidebarNav";
+import { isPageAllowed } from "@/lib/nav";
 import {
   ShellLayoutProvider,
   useShellLayout,
@@ -21,7 +24,25 @@ function MobileNavBackdrop() {
   );
 }
 
+/** Blocks direct navigation (typed URL, bookmark, back/forward) to a page
+ * Settings → Users has hidden from this user — SidebarNav/Home already don't
+ * link to it, but a URL still reaches it without this. */
+function usePageAccessGuard() {
+  const pathname = usePathname();
+  const router = useRouter();
+  const currentUser = useCurrentUser();
+  const allowed = isPageAllowed(pathname, currentUser);
+
+  useEffect(() => {
+    if (!allowed) router.replace("/");
+  }, [allowed, router]);
+
+  return allowed;
+}
+
 function AppShellInner({ children }: { children: React.ReactNode }) {
+  const allowed = usePageAccessGuard();
+
   return (
     // Scrolling happens at the document level so both the sidebar and the
     // header can be plain `sticky` elements instead of fixed overlays the
@@ -32,7 +53,7 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
       <div className="flex min-w-0 flex-1 flex-col">
         <Header />
         <main id="main-content" tabIndex={-1} className="min-w-0 flex-1">
-          {children}
+          {allowed ? children : null}
         </main>
       </div>
     </div>

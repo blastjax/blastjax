@@ -15,9 +15,10 @@ from app.security import (
     record_failed_attempt,
     revoke_session,
     session_is_valid,
+    session_user_id,
     too_many_failed_attempts,
 )
-from db import get_app_user_by_username
+from db import get_app_user_by_id, get_app_user_by_username
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -48,14 +49,30 @@ def auth_login(body: LoginBody, request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=401, detail="Invalid username or password.")
 
     clear_failed_attempts(ip)
-    return {"token": create_session()}
+    return {"token": create_session(row["id"])}
 
 
 @router.get("/status")
 def auth_status(request: Request) -> dict[str, Any]:
     if not login_required():
-        return {"authenticated": True, "login_required": False}
-    return {"authenticated": session_is_valid(_bearer_token(request)), "login_required": True}
+        return {"authenticated": True, "login_required": False, "user": None}
+
+    token = _bearer_token(request)
+    if not session_is_valid(token):
+        return {"authenticated": False, "login_required": True, "user": None}
+
+    user_id = session_user_id(token)
+    user = get_app_user_by_id(user_id) if user_id is not None else None
+    public_user = (
+        {
+            "username": user["username"],
+            "is_superuser": user["is_superuser"],
+            "allowed_pages": user["allowed_pages"],
+        }
+        if user
+        else None
+    )
+    return {"authenticated": True, "login_required": True, "user": public_user}
 
 
 @router.post("/logout")

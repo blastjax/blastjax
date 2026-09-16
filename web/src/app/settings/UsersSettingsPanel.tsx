@@ -6,9 +6,11 @@ import {
   deleteAppUser,
   getAppUsers,
   updateAppUser,
+  updateAppUserAccess,
   verifyAppUserPassword,
   type AppUserRow,
 } from "@/lib/api";
+import { RESTRICTABLE_PAGES } from "@/lib/nav";
 import {
   ACTION_BUTTON_CLASSES,
   CARD_CLASSES,
@@ -28,6 +30,77 @@ type EditState = { username: string; password: string; confirm: string };
 
 function emptyEdit(username: string): EditState {
   return { username, password: "", confirm: "" };
+}
+
+/** Settings → Users → per-user page visibility. `allowed_pages: null` means
+ * unrestricted (every page) — the default for a freshly-added user; a
+ * superuser bypasses the list entirely. */
+function AccessControls({
+  user,
+  onSaved,
+}: {
+  user: AppUserRow;
+  onSaved: (u: AppUserRow) => void;
+}) {
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const allowed = new Set(user.allowed_pages ?? RESTRICTABLE_PAGES.map((p) => p.href));
+
+  async function save(next: { is_superuser: boolean; allowed_pages: string[] | null }) {
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await updateAppUserAccess(user.id, next);
+      onSaved(res.user);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to update access.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function togglePage(href: string) {
+    const next = new Set(allowed);
+    if (next.has(href)) next.delete(href);
+    else next.add(href);
+    save({ is_superuser: user.is_superuser, allowed_pages: [...next] });
+  }
+
+  return (
+    <div className="mt-3 rounded-lg border border-line bg-zinc-50/60 px-3 py-3 dark:bg-zinc-900/30">
+      <label className="flex items-center gap-2 text-xs font-medium text-ink">
+        <input
+          type="checkbox"
+          checked={user.is_superuser}
+          disabled={saving}
+          onChange={(e) =>
+            save({ is_superuser: e.target.checked, allowed_pages: user.allowed_pages })
+          }
+        />
+        Superuser (sees every page)
+      </label>
+      {!user.is_superuser && (
+        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1.5">
+          {RESTRICTABLE_PAGES.map((p) => (
+            <label key={p.href} className="flex items-center gap-1.5 text-xs text-ink-2">
+              <input
+                type="checkbox"
+                checked={allowed.has(p.href)}
+                disabled={saving}
+                onChange={() => togglePage(p.href)}
+              />
+              {p.label}
+            </label>
+          ))}
+        </div>
+      )}
+      {error && (
+        <div className={`mt-2 ${ERROR_ALERT_CLASSES}`} role="alert">
+          {error}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function UsersSettingsPanel() {
@@ -289,6 +362,12 @@ export function UsersSettingsPanel() {
                     </div>
                   </div>
                 )}
+                <AccessControls
+                  user={user}
+                  onSaved={(updated) =>
+                    setUsers((rows) => rows.map((r) => (r.id === updated.id ? updated : r)))
+                  }
+                />
               </li>
             ))}
           </ul>
