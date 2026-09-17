@@ -553,15 +553,15 @@ export default function CommissionClient({ company = "Sophos" }: { company?: str
             </p>
 
             <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              <div className="rounded-lg border border-emerald-200 bg-emerald-50/60 p-4 dark:border-emerald-800 dark:bg-emerald-950/30">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-400">
+              <div className="rounded-lg border border-success-line bg-success-soft p-4">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-success-text">
                   Next month predicted
                 </p>
-                <p className="mt-2 text-2xl font-bold tabular-nums text-emerald-800 dark:text-emerald-200">
+                <p className="mt-2 text-2xl font-bold tabular-nums text-success-text">
                   {forecast.nextMonthPredicted != null ? fmtMoney(forecast.nextMonthPredicted) : "–"}
                 </p>
               </div>
-              <div className="rounded-lg border border-line bg-zinc-50/90 p-4 dark:bg-zinc-900/50">
+              <div className="rounded-lg border border-line bg-surface-2 p-4">
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-ink-3">
                   Predicted total ({horizon} mo)
                 </p>
@@ -569,7 +569,7 @@ export default function CommissionClient({ company = "Sophos" }: { company?: str
                   {fmtMoney(forecast.horizonTotal)}
                 </p>
               </div>
-              <div className="rounded-lg border border-line bg-zinc-50/90 p-4 dark:bg-zinc-900/50">
+              <div className="rounded-lg border border-line bg-surface-2 p-4">
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-ink-3">
                   Same month last year
                 </p>
@@ -579,7 +579,7 @@ export default function CommissionClient({ company = "Sophos" }: { company?: str
                     : "–"}
                 </p>
               </div>
-              <div className="rounded-lg border border-line bg-zinc-50/90 p-4 dark:bg-zinc-900/50">
+              <div className="rounded-lg border border-line bg-surface-2 p-4">
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-ink-3">
                   All-time monthly average
                 </p>
@@ -670,7 +670,7 @@ export default function CommissionClient({ company = "Sophos" }: { company?: str
                     >
                       <h3 className="mb-4 flex items-center justify-between gap-2 border-b border-line pb-3 text-base font-semibold text-ink">
                         <span>{year}</span>
-                        <span className="text-base font-normal tabular-nums text-emerald-700 dark:text-emerald-300">
+                        <span className="text-base font-normal tabular-nums text-success-text">
                           {fmtMoney(yearTotal)}
                         </span>
                       </h3>
@@ -684,7 +684,7 @@ export default function CommissionClient({ company = "Sophos" }: { company?: str
                               key={month}
                               className={`flex min-h-[3.75rem] min-w-0 flex-col items-center justify-center gap-1 rounded-lg border px-1.5 py-2 text-center ${
                                 hasValue
-                                  ? "border-emerald-200 bg-emerald-50/80 dark:border-emerald-900 dark:bg-emerald-950/40"
+                                  ? "border-success-line bg-success-soft"
                                   : "border-dashed border-line bg-zinc-50/50 dark:bg-zinc-900/40"
                               }`}
                             >
@@ -694,7 +694,7 @@ export default function CommissionClient({ company = "Sophos" }: { company?: str
                               <span
                                 className={`min-w-0 truncate text-xs tabular-nums leading-tight ${
                                   hasValue
-                                    ? "font-semibold text-emerald-800 dark:text-emerald-200"
+                                    ? "font-semibold text-success-text"
                                     : "text-ink-4"
                                 }`}
                               >

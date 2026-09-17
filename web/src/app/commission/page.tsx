@@ -28,7 +28,7 @@ export default function CommissionRedirectPage() {
 
   return (
     <div className={PAGE_CONTAINER_CLASSES}>
-      <p className={error ? "text-sm text-red-700 dark:text-red-400" : LOADING_TEXT_CLASSES}>
+      <p className={error ? "text-sm text-danger-text" : LOADING_TEXT_CLASSES}>
         {error ?? "Loading…"}
       </p>
     </div>

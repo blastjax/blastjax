@@ -1024,9 +1024,9 @@ export default function InstallmentsClient() {
                       void openDetail(r.id);
                     }
                   }}
-                  className={`min-w-0 cursor-pointer rounded-lg border p-3 transition-colors duration-150 hover:ring-2 hover:ring-indigo-300/60 sm:p-4 dark:hover:ring-indigo-700/50 ${
+                  className={`min-w-0 cursor-pointer rounded-lg border p-3 transition-colors duration-150 hover:ring-2 hover:ring-brand/30 sm:p-4 ${
                     due
-                      ? "border-emerald-300 bg-emerald-50/50 dark:border-emerald-800 dark:bg-emerald-950/20"
+                      ? "border-success-line bg-success-soft"
                       : "border-line bg-surface"
                   }`}
                 >
@@ -1041,7 +1041,7 @@ export default function InstallmentsClient() {
                           {nn}
                         </span>
                         {due && (
-                          <span className="ml-2 rounded-md bg-emerald-600 px-2 py-0.5 text-xs font-medium text-white">
+                          <span className="ml-2 rounded-md bg-success px-2 py-0.5 text-xs font-medium text-white">
                             Due this month
                           </span>
                         )}
@@ -1113,14 +1113,14 @@ export default function InstallmentsClient() {
                     </div>
                     <div>
                       <dt className="text-xs text-ink-3">Remaining</dt>
-                      <dd className="tabular-nums font-semibold text-amber-800 dark:text-amber-200">
+                      <dd className="tabular-nums font-semibold text-warning-text">
                         {fmtMoney(r.remaining)}
                       </dd>
                     </div>
                   </dl>
-                  <div className="mt-3 h-2 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
+                  <div className="mt-3 h-2 overflow-hidden rounded-full bg-line-strong">
                     <div
-                      className="h-full rounded-full bg-indigo-500 transition-[width] dark:bg-indigo-600"
+                      className="h-full rounded-full bg-brand transition-[width]"
                       style={{ width: `${pct}%` }}
                     />
                   </div>
@@ -1160,7 +1160,7 @@ export default function InstallmentsClient() {
                       void openDetail(r.id);
                     }
                   }}
-                  className="min-w-0 cursor-pointer rounded-lg border border-line bg-surface-2 p-3 opacity-70 transition-colors duration-150 hover:opacity-100 hover:ring-2 hover:ring-indigo-300/60 sm:p-4 dark:hover:ring-indigo-700/50"
+                  className="min-w-0 cursor-pointer rounded-lg border border-line bg-surface-2 p-3 opacity-70 transition-colors duration-150 hover:opacity-100 hover:ring-2 hover:ring-brand/30 sm:p-4"
                 >
                   <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between sm:gap-3">
                     <div className="min-w-0">
@@ -1169,7 +1169,7 @@ export default function InstallmentsClient() {
                       </h3>
                       <p className="mt-1 text-xs text-ink-3 sm:text-sm">
                         {r.installment_total}/{r.installment_total} payments ·{" "}
-                        <span className="rounded-md bg-zinc-300 px-2 py-0.5 text-xs font-medium text-ink-2 dark:bg-zinc-700">
+                        <span className="rounded-md bg-line-strong px-2 py-0.5 text-xs font-medium text-ink-2">
                           Paid off
                         </span>
                       </p>
@@ -1218,9 +1218,9 @@ export default function InstallmentsClient() {
                       <dd className="tabular-nums">{fmtMonthYear(r.finish_date)}</dd>
                     </div>
                   </dl>
-                  <div className="mt-3 h-2 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
+                  <div className="mt-3 h-2 overflow-hidden rounded-full bg-line-strong">
                     <div
-                      className="h-full rounded-full bg-zinc-400 transition-[width] dark:bg-zinc-500"
+                      className="h-full rounded-full bg-ink-4 transition-[width]"
                       style={{ width: `${pct}%` }}
                     />
                   </div>
@@ -1338,7 +1338,7 @@ export default function InstallmentsClient() {
                           draggable
                           className={`cursor-grab active:cursor-grabbing ${TABLE_ROW_CLASSES} ${
                             isNext
-                              ? "bg-indigo-50/80 hover:bg-indigo-50/80 dark:bg-indigo-950/30 dark:hover:bg-indigo-950/30"
+                              ? "bg-brand-soft hover:bg-brand-soft"
                               : ""
                           }`}
                           title="Drag row to reorder"
@@ -1388,7 +1388,7 @@ export default function InstallmentsClient() {
                           <td className={`${TABLE_CELL_CLASSES} font-mono`}>
                             {visPos}
                             {isNext && (
-                              <span className="ml-1 text-[10px] font-sans text-indigo-600 dark:text-indigo-300">
+                              <span className="ml-1 text-[10px] font-sans text-brand-text">
                                 (next)
                               </span>
                             )}
@@ -1504,7 +1504,7 @@ export default function InstallmentsClient() {
               <p className="text-[11px] font-medium uppercase text-ink-3">
                 To be made
               </p>
-              <p className="mt-0.5 text-base font-semibold tabular-nums text-amber-700 dark:text-amber-300">
+              <p className="mt-0.5 text-base font-semibold tabular-nums text-warning-text">
                 {fmtMoney(paymentsByMonth.grandToPay)}
               </p>
             </div>
@@ -1552,8 +1552,8 @@ export default function InstallmentsClient() {
                           key={m}
                           className={`flex min-h-[5rem] flex-col rounded-lg border px-2 py-2 ${
                             allDone
-                              ? "border-emerald-200 bg-emerald-50/60 dark:border-emerald-900/60 dark:bg-emerald-950/20"
-                              : "border-amber-200 bg-amber-50/60 dark:border-amber-900/60 dark:bg-amber-950/20"
+                              ? "border-success-line bg-success-soft"
+                              : "border-warning-line bg-warning-soft"
                           }`}
                         >
                           <div className="flex items-baseline justify-between gap-1">
@@ -1574,8 +1574,8 @@ export default function InstallmentsClient() {
                                 <span
                                   className={`min-w-0 truncate ${
                                     it.paid
-                                      ? "text-emerald-700 line-through dark:text-emerald-400"
-                                      : "text-amber-800 dark:text-amber-300"
+                                      ? "text-success-text line-through"
+                                      : "text-warning-text"
                                   }`}
                                 >
                                   {it.planName}

@@ -467,7 +467,7 @@ export default function CreditCardClient() {
               </div>
               <div>
                 <dt className="text-xs text-ink-3">Current balance</dt>
-                <dd className="tabular-nums font-semibold text-amber-800 dark:text-amber-200">
+                <dd className="tabular-nums font-semibold text-warning-text">
                   {fmtMoney(card.current_balance)}
                 </dd>
               </div>
@@ -476,13 +476,13 @@ export default function CreditCardClient() {
                   Available limit
                   <button
                     type="button"
-                    className="text-indigo-600 underline hover:no-underline dark:text-indigo-400"
+                    className="text-brand-text underline hover:no-underline"
                     onClick={openBalanceModal}
                   >
                     Edit
                   </button>
                 </dt>
-                <dd className="tabular-nums font-semibold text-emerald-700 dark:text-emerald-300">
+                <dd className="tabular-nums font-semibold text-success-text">
                   {fmtMoney(card.available_limit)}
                 </dd>
               </div>
@@ -528,11 +528,11 @@ export default function CreditCardClient() {
                   {fmtMoney(installmentDues)}
                 </dd>
               </div>
-              <div className="rounded-lg border border-emerald-200 bg-emerald-50/80 p-3 dark:border-emerald-900/50 dark:bg-emerald-950/30">
-                <dt className="text-xs font-medium text-emerald-800 dark:text-emerald-200">
+              <div className="rounded-lg border border-success-line bg-success-soft p-3">
+                <dt className="text-xs font-medium text-success-text">
                   Total this month
                 </dt>
-                <dd className="tabular-nums font-semibold text-emerald-900 dark:text-emerald-100">
+                <dd className="tabular-nums font-semibold text-success-text">
                   {fmtMoney(card.monthly_dues)}
                 </dd>
               </div>
@@ -562,7 +562,7 @@ export default function CreditCardClient() {
                     </div>
                     <div className="flex items-baseline justify-between">
                       <dt className="text-xs text-ink-3">Est. interest</dt>
-                      <dd className="tabular-nums font-medium text-amber-800 dark:text-amber-200">
+                      <dd className="tabular-nums font-medium text-warning-text">
                         {fmtMoney(projections.half.interest)}
                       </dd>
                     </div>
@@ -587,7 +587,7 @@ export default function CreditCardClient() {
                     </div>
                     <div className="flex items-baseline justify-between">
                       <dt className="text-xs text-ink-3">Est. interest</dt>
-                      <dd className="tabular-nums font-medium text-amber-800 dark:text-amber-200">
+                      <dd className="tabular-nums font-medium text-warning-text">
                         {fmtMoney(projections.minimum.interest)}
                       </dd>
                     </div>
@@ -613,7 +613,7 @@ export default function CreditCardClient() {
             </p>
 
             {card.current_balance <= 0 ? (
-              <p className="mt-4 text-sm text-emerald-700 dark:text-emerald-300">
+              <p className="mt-4 text-sm text-success-text">
                 Your balance is already paid off — nothing to calculate.
               </p>
             ) : (
@@ -657,11 +657,11 @@ export default function CreditCardClient() {
                           Enter a monthly payment to see how long it&apos;ll take.
                         </p>
                       ) : payoffByPayment == null ? (
-                        <p className="text-red-700 dark:text-red-300">
+                        <p className="text-danger-text">
                           Enter a valid amount greater than zero.
                         </p>
                       ) : !payoffByPayment.reachable ? (
-                        <p className="text-red-700 dark:text-red-300">
+                        <p className="text-danger-text">
                           That payment doesn&apos;t cover the monthly interest, so the balance
                           would never be paid off. Try a higher amount.
                         </p>
@@ -676,7 +676,7 @@ export default function CreditCardClient() {
                           </div>
                           <div className="flex items-baseline justify-between">
                             <dt className="text-xs text-ink-3">Total interest</dt>
-                            <dd className="tabular-nums font-medium text-amber-800 dark:text-amber-200">
+                            <dd className="tabular-nums font-medium text-warning-text">
                               {fmtMoney(payoffByPayment.totalInterest)}
                             </dd>
                           </div>
@@ -710,7 +710,7 @@ export default function CreditCardClient() {
                           Enter a number of months to see the required payment.
                         </p>
                       ) : payoffByMonths == null ? (
-                        <p className="text-red-700 dark:text-red-300">
+                        <p className="text-danger-text">
                           Enter a valid number of months greater than zero.
                         </p>
                       ) : (
@@ -723,7 +723,7 @@ export default function CreditCardClient() {
                           </div>
                           <div className="flex items-baseline justify-between">
                             <dt className="text-xs text-ink-3">Total interest</dt>
-                            <dd className="tabular-nums font-medium text-amber-800 dark:text-amber-200">
+                            <dd className="tabular-nums font-medium text-warning-text">
                               {fmtMoney(payoffByMonths.totalInterest)}
                             </dd>
                           </div>
@@ -749,7 +749,7 @@ export default function CreditCardClient() {
               </h2>
               <Link
                 href="/installments"
-                className="text-sm text-indigo-600 underline hover:no-underline dark:text-indigo-400"
+                className="text-sm text-brand-text underline hover:no-underline"
               >
                 Manage on Installments page →
               </Link>
@@ -773,7 +773,7 @@ export default function CreditCardClient() {
                         Installment {ins.installment_current}/{ins.installment_total}
                       </p>
                     </div>
-                    <span className="shrink-0 text-sm font-semibold tabular-nums text-amber-800 dark:text-amber-200">
+                    <span className="shrink-0 text-sm font-semibold tabular-nums text-warning-text">
                       {fmtMoney(ins.remaining)}
                     </span>
                   </li>
@@ -813,7 +813,7 @@ export default function CreditCardClient() {
                       )}
                     </div>
                     <div className="flex shrink-0 items-center gap-2">
-                      <span className="text-sm font-semibold tabular-nums text-emerald-700 dark:text-emerald-300">
+                      <span className="text-sm font-semibold tabular-nums text-success-text">
                         {fmtMoney(p.amount)}
                       </span>
                       <button
