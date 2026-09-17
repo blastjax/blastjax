@@ -1692,7 +1692,7 @@ export default function TravelsClient() {
                   onClick={() => setEntryModal((m) => ({ ...m, kind: mode }))}
                   className={`rounded-lg border px-3.5 py-1.5 text-sm font-semibold capitalize transition-colors ${
                     entryModal.kind === mode
-                      ? "border-brand bg-brand text-white"
+                      ? "border-brand bg-brand text-brand-on"
                       : "border-line-strong bg-surface text-ink-2 hover:bg-surface-2"
                   }`}
                 >

@@ -5,8 +5,8 @@
  * Design language: NextAdmin (demo.nextadmin.co). A grey page floor carries
  * white, hairline-bordered cards at `rounded-xl` with almost no shadow —
  * separation comes from the border and the floor beneath, not from elevation.
- * Type runs on four ink steps (`ink` → `ink-4`); one brand violet (#5750f1)
- * owns every affirmative action.
+ * Type runs on four ink steps (`ink` → `ink-4`); one brand teal (oklch hue
+ * 195, the Payslip page redesign's accent) owns every affirmative action.
  *
  * Buttons are restrained on purpose: a *single* filled brand button per view,
  * neutral outlines beside it, ghosts for row-level chrome, and red reserved
@@ -101,7 +101,7 @@ const BUTTON_BASE =
 const BUTTON_MD = `${BUTTON_BASE} h-10 px-4 text-sm`;
 const BUTTON_SM = `${BUTTON_BASE} h-8 px-3 text-xs`;
 
-const FILL_BRAND = "bg-brand text-white shadow-xs hover:bg-brand-hover";
+const FILL_BRAND = "bg-brand text-brand-on shadow-xs hover:bg-brand-hover";
 const OUTLINE_NEUTRAL =
   "border border-line-strong bg-surface text-ink-2 hover:bg-surface-2 hover:text-ink";
 const SOFT_BRAND = "bg-brand-soft text-brand-text hover:bg-brand-soft-hover";
@@ -150,7 +150,7 @@ export const SEGMENTED_WRAPPER_CLASSES =
 export const SEGMENTED_BUTTON_CLASSES =
   "rounded-md px-3.5 py-1.5 text-sm font-medium transition-colors duration-150";
 export const SEGMENTED_BUTTON_ACTIVE_CLASSES =
-  "bg-brand text-white shadow-xs";
+  "bg-brand text-brand-on shadow-xs";
 export const SEGMENTED_BUTTON_INACTIVE_CLASSES =
   "text-ink-3 hover:text-ink";
 

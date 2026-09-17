@@ -354,7 +354,7 @@ function LineRangeMonthPicker({
                   type="button"
                   className={`rounded-lg border px-1.5 py-2 text-center text-xs font-medium transition-colors duration-150 sm:px-2 sm:text-sm ${
                     selected
-                      ? "border-brand bg-brand text-white"
+                      ? "border-brand bg-brand text-brand-on"
                       : "border-line-strong bg-surface text-ink-2 hover:bg-surface-2 hover:text-ink"
                   }`}
                   onClick={() => {

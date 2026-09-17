@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { IBM_Plex_Mono, Manrope } from "next/font/google";
 import { AppShell } from "@/components/AppShell";
 import { AuthGate } from "@/components/AuthGate";
 import { ThemeInitScript } from "@/components/ThemeInitScript";
@@ -7,14 +7,16 @@ import { ThemeProvider } from "@/components/ThemeProvider";
 import { THEME_COLOR } from "@/lib/theme";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+const sans = Manrope({
+  variable: "--font-sans",
   subsets: ["latin"],
+  weight: ["400", "500", "600", "700", "800"],
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+const mono = IBM_Plex_Mono({
+  variable: "--font-mono",
   subsets: ["latin"],
+  weight: ["400", "500", "600"],
 });
 
 export const metadata: Metadata = {
@@ -41,12 +43,12 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body
-        className={`${geistSans.variable} ${geistMono.variable} bg-page font-sans text-base leading-normal text-ink antialiased max-sm:text-[16px] max-sm:leading-[1.6] sm:leading-normal`}
+        className={`${sans.variable} ${mono.variable} bg-page font-sans text-base leading-normal text-ink antialiased max-sm:text-[16px] max-sm:leading-[1.6] sm:leading-normal`}
       >
         <ThemeInitScript />
         <a
           href="#main-content"
-          className="fixed left-3 top-3 z-[100] -translate-y-16 rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white transition-transform duration-150 focus-visible:translate-y-0"
+          className="fixed left-3 top-3 z-[100] -translate-y-16 rounded-lg bg-brand px-4 py-2 text-sm font-medium text-brand-on transition-transform duration-150 focus-visible:translate-y-0"
         >
           Skip to content
         </a>

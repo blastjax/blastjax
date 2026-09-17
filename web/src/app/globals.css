@@ -41,13 +41,14 @@
   --ink-3: #71717a;
   --ink-4: #a1a1aa;
 
-  /* Brand */
-  --brand: #5750f1;
-  --brand-hover: #3c35d8;
-  --brand-text: #5750f1;
-  --brand-soft: rgba(87, 80, 241, 0.08);
-  --brand-soft-hover: rgba(87, 80, 241, 0.14);
-  --brand-ring: rgba(87, 80, 241, 0.2);
+  /* Brand — teal, matching the Payslip page redesign. */
+  --brand: oklch(0.511 0.096 186.391);
+  --brand-hover: oklch(0.437 0.078 188.216);
+  --brand-text: oklch(0.511 0.096 186.391);
+  --brand-soft: oklch(0.511 0.096 186.391 / 0.08);
+  --brand-soft-hover: oklch(0.511 0.096 186.391 / 0.14);
+  --brand-ring: oklch(0.511 0.096 186.391 / 0.2);
+  --brand-on: #ffffff;
 
   /* Status */
   --success: #16a34a;
@@ -71,8 +72,8 @@
   --shell: #ffffff;
   --shell-line: #e8e8e8;
   --nav-hover: rgba(0, 0, 0, 0.05);
-  --nav-active-bg: rgba(87, 80, 241, 0.08);
-  --nav-active-text: #5750f1;
+  --nav-active-bg: oklch(0.511 0.096 186.391 / 0.08);
+  --nav-active-text: oklch(0.511 0.096 186.391);
   --nav-icon: #71717a;
 
   /* Controls */
@@ -97,36 +98,40 @@
 .dark {
   color-scheme: dark;
 
-  --page: #09090b;
-  --surface: #171718;
-  --surface-2: #27272a;
-  --surface-3: #18181b;
-  --surface-inset: #0f0f0f;
+  /* Surfaces, borders and ink match the Payslip page redesign exactly
+   * (see the former payslipTheme.ts) — that page now sets the sitewide
+   * dark theme instead of a one-off override. */
+  --page: oklch(0.15 0.004 260);
+  --surface: oklch(0.18 0.005 260);
+  --surface-2: oklch(0.19 0.005 260);
+  --surface-3: oklch(0.21 0.006 260);
+  --surface-inset: oklch(0.16 0.004 260);
 
-  --line: #2b2c2e;
-  --line-soft: #1d1d1f;
-  --line-strong: #3f3f46;
+  --line: oklch(1 0 0 / 0.07);
+  --line-soft: oklch(1 0 0 / 0.06);
+  --line-strong: oklch(1 0 0 / 0.14);
 
-  --ink: rgba(255, 255, 255, 0.92);
-  --ink-2: #a1a1aa;
-  --ink-3: #8a8a93;
-  --ink-4: #71717a;
+  --ink: oklch(0.94 0.005 260);
+  --ink-2: oklch(0.75 0.01 260);
+  --ink-3: oklch(0.6 0.01 260);
+  --ink-4: oklch(0.5 0.01 260);
 
-  --brand: #5750f1;
-  --brand-hover: #6f69f4;
-  --brand-text: #a5b4fc;
-  --brand-soft: rgba(87, 80, 241, 0.16);
-  --brand-soft-hover: rgba(87, 80, 241, 0.24);
-  --brand-ring: rgba(87, 80, 241, 0.35);
+  --brand: oklch(0.72 0.11 195);
+  --brand-hover: oklch(0.8 0.11 195);
+  --brand-text: oklch(0.72 0.11 195);
+  --brand-soft: oklch(0.72 0.11 195 / 0.16);
+  --brand-soft-hover: oklch(0.72 0.11 195 / 0.24);
+  --brand-ring: oklch(0.72 0.11 195 / 0.35);
+  --brand-on: oklch(0.12 0.004 260);
 
   --success: #22c55e;
   --success-text: #4ade80;
   --success-soft: rgba(34, 197, 94, 0.1);
   --success-line: #14532d;
-  --danger: #ef4444;
-  --danger-text: #f87171;
-  --danger-soft: rgba(239, 68, 68, 0.1);
-  --danger-line: #7f1d1d;
+  --danger: oklch(0.68 0.19 25);
+  --danger-text: oklch(0.68 0.19 25);
+  --danger-soft: oklch(0.68 0.19 25 / 0.12);
+  --danger-line: oklch(0.68 0.19 25 / 0.4);
   --warning: #eab308;
   --warning-text: #facc15;
   --warning-soft: rgba(234, 179, 8, 0.1);
@@ -136,16 +141,16 @@
   --info-soft: rgba(14, 165, 233, 0.1);
   --info-line: #0c4a6e;
 
-  --shell: #09090b;
-  --shell-line: #1d1d1f;
-  --nav-hover: rgba(255, 255, 255, 0.05);
-  --nav-active-bg: rgba(87, 80, 241, 0.18);
-  --nav-active-text: #a5b4fc;
-  --nav-icon: #a1a1aa;
+  --shell: oklch(0.15 0.004 260);
+  --shell-line: oklch(1 0 0 / 0.06);
+  --nav-hover: oklch(1 0 0 / 0.06);
+  --nav-active-bg: oklch(0.72 0.11 195 / 0.18);
+  --nav-active-text: oklch(0.72 0.11 195);
+  --nav-icon: oklch(0.75 0.01 260);
 
-  --input-bg: rgba(255, 255, 255, 0.04);
-  --input-line: #3f3f46;
-  --placeholder: #71717a;
+  --input-bg: oklch(0.16 0.004 260);
+  --input-line: oklch(1 0 0 / 0.14);
+  --placeholder: oklch(0.45 0.01 260);
 
   --shadow-xs: 0 1px 2px 0 rgba(0, 0, 0, 0.4);
   --shadow-sm: 0 1px 3px 0 rgba(0, 0, 0, 0.5);
@@ -160,32 +165,35 @@
 /* --------------------------------------------------------------------------
  * Palette overrides.
  *
- * `indigo` is re-anchored on the NextAdmin brand (#5750f1) so accent colors
- * already spelled `indigo-600` across the app move with the theme. Dark-mode
- * `zinc` is nudged onto NextAdmin's card / border pair (#171718 / #2b2c2e);
- * the page floor keeps zinc-950's near-black (#09090b), so the OLED-friendly
- * base survives while cards gain the separation the reference design has.
+ * `indigo` is re-anchored on the Payslip page's teal accent (oklch hue 195)
+ * so accent colors already spelled `indigo-600`/`indigo-400`/etc. across the
+ * app move with the theme, without touching every call site. `indigo-600`
+ * stays a single accessible value in both themes (it's used directly with
+ * hardcoded `text-white`, e.g. the calendar's "today" marker); `indigo-400`
+ * is the exact bright teal the Payslip page uses for dark-mode text.
+ * Dark-mode `zinc` mirrors the semantic surface/line tokens below, so the
+ * app's raw `zinc-*` usage lands on the redesigned dark palette too.
  * ----------------------------------------------------------------------- */
 @theme {
-  --color-indigo-50: #eef2ff;
-  --color-indigo-100: #e0e7ff;
-  --color-indigo-200: #c7d2fe;
-  --color-indigo-300: #a5b4fc;
-  --color-indigo-400: #818cf8;
-  --color-indigo-500: #6f69f4;
-  --color-indigo-600: #5750f1;
-  --color-indigo-700: #3c35d8;
-  --color-indigo-800: #322cb4;
-  --color-indigo-900: #2b278f;
-  --color-indigo-950: #1c1957;
+  --color-indigo-50: oklch(0.984 0.014 180.72);
+  --color-indigo-100: oklch(0.953 0.051 180.801);
+  --color-indigo-200: oklch(0.91 0.096 180.426);
+  --color-indigo-300: oklch(0.855 0.138 181.071);
+  --color-indigo-400: oklch(0.72 0.11 195);
+  --color-indigo-500: oklch(0.704 0.14 182.503);
+  --color-indigo-600: oklch(0.511 0.096 186.391);
+  --color-indigo-700: oklch(0.437 0.078 188.216);
+  --color-indigo-800: oklch(0.386 0.063 188.416);
+  --color-indigo-900: oklch(0.32 0.05 190);
+  --color-indigo-950: oklch(0.24 0.04 192);
 }
 
 @layer theme {
   .dark {
-    --color-zinc-950: #09090b;
-    --color-zinc-900: #171718;
-    --color-zinc-800: #2b2c2e;
-    --color-zinc-700: #3f3f46;
+    --color-zinc-950: var(--page);
+    --color-zinc-900: var(--surface);
+    --color-zinc-800: var(--line);
+    --color-zinc-700: var(--line-strong);
   }
 }
 
@@ -216,6 +224,7 @@
   --color-brand-text: var(--brand-text);
   --color-brand-soft: var(--brand-soft);
   --color-brand-soft-hover: var(--brand-soft-hover);
+  --color-brand-on: var(--brand-on);
   --color-success: var(--success);
   --color-success-text: var(--success-text);
   --color-success-soft: var(--success-soft);
@@ -251,8 +260,6 @@
   --shadow-card: var(--shadow-xs);
   --shadow-pop: var(--shadow-pop);
 
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
 }
 
 body {

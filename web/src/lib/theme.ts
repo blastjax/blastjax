@@ -37,7 +37,7 @@ export function resolveInitialTheme(): BudgetTheme {
 /** Page background per theme — must match `--page` in globals.css. */
 export const THEME_COLOR: Record<BudgetTheme, string> = {
   light: "#fafafa",
-  dark: "#09090b",
+  dark: "#0b0b0c",
 };
 
 export function applyThemeToDocument(theme: BudgetTheme): void {
