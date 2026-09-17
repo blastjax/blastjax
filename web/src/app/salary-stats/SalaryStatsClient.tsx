@@ -305,7 +305,7 @@ function LineRangeMonthPicker({
       </div>
       {open && (
         <div
-          className={`absolute z-30 mt-1 min-w-[16.5rem] max-w-[calc(100vw-2rem)] rounded-lg border border-line bg-surface p-3 shadow-lg dark:shadow-none dark:ring-1 dark:ring-white/10 ${
+          className={`absolute z-30 mt-1 min-w-[16.5rem] max-w-[calc(100vw-2rem)] rounded-lg border border-line bg-surface p-3 shadow-lg dark:shadow-none dark:ring-1 dark:ring-line-strong ${
             align === "right" ? "right-0" : "left-0"
           }`}
           role="dialog"
@@ -913,20 +913,20 @@ export default function SalaryStatsClient({ company = "Sophos" }: { company?: st
               </p>
             )}
             <div className="mt-5 grid gap-4 sm:grid-cols-2">
-              <div className="rounded-lg border border-emerald-200 bg-emerald-50/60 p-4 dark:border-emerald-800 dark:bg-emerald-950/30">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-400">
+              <div className="rounded-lg border border-success-line bg-success-soft p-4">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-success-text">
                   Total Income
                   <span className="ml-2 normal-case font-normal tracking-normal text-ink-4">net / gross</span>
                 </p>
                 <div className="mt-2 flex items-baseline justify-between gap-4">
-                  <span className="text-2xl font-bold tabular-nums text-emerald-800 dark:text-emerald-200">
+                  <span className="text-2xl font-bold tabular-nums text-success-text">
                     {fmtMoney(allTimeTotals.income)}
                   </span>
-                  <span className="text-2xl font-light tabular-nums text-emerald-700/70 dark:text-emerald-300/60">
+                  <span className="text-2xl font-light tabular-nums text-success-text/70">
                     {fmtMoney(allTimeTotals.income + allTimeTotals.deductions)}
                   </span>
                 </div>
-                <div className="mt-3 space-y-1.5 border-t border-emerald-200 pt-3 dark:border-emerald-800">
+                <div className="mt-3 space-y-1.5 border-t border-success-line pt-3">
                   {allTimeTotals.sortedIncomeKeys.map((k) => (
                     <div key={k} className="flex items-center justify-between gap-4 text-sm">
                       <span className="text-ink-2">{CHART_SERIES_LABEL[k]}</span>
@@ -937,14 +937,14 @@ export default function SalaryStatsClient({ company = "Sophos" }: { company?: st
                   ))}
                 </div>
               </div>
-              <div className="rounded-lg border border-red-200 bg-red-50/60 p-4 dark:border-red-800 dark:bg-red-950/30">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-red-700 dark:text-red-400">
+              <div className="rounded-lg border border-danger-line bg-danger-soft p-4">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-danger-text">
                   Total Deductions
                 </p>
-                <p className="mt-2 text-2xl font-bold tabular-nums text-red-800 dark:text-red-200">
+                <p className="mt-2 text-2xl font-bold tabular-nums text-danger-text">
                   {fmtMoney(allTimeTotals.deductions)}
                 </p>
-                <div className="mt-3 space-y-1.5 border-t border-red-200 pt-3 dark:border-red-800">
+                <div className="mt-3 space-y-1.5 border-t border-danger-line pt-3">
                   {allTimeTotals.sortedDeductionKeys.map((k) => (
                     <div key={k} className="flex items-center justify-between gap-4 text-sm">
                       <span className="text-ink-2">{CHART_SERIES_LABEL[k]}</span>
