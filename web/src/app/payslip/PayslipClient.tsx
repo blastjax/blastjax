@@ -1,6 +1,5 @@
 "use client";
 
-import { PageHeader } from "@/components/PageHeader";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   apiFetch,
@@ -43,42 +42,26 @@ import type { Nav } from "./payslipNav";
 import { PayslipClientModal } from "./PayslipClientModal";
 import { PayslipYearStatsSection } from "./PayslipYearStatsSection";
 import { YearPayslipBlock } from "./YearPayslipBlock";
-import { Modal } from "@/components/Modal";
+import { PAGE_CONTAINER_CLASSES } from "@/lib/ui";
 import {
-  ACTION_BUTTON_CLASSES,
-  CARD_CLASSES,
-  CLOSE_BUTTON_CLASSES,
-  DELETE_BUTTON_CLASSES,
-  DETAIL_BUTTON_CLASSES,
-  EDIT_BUTTON_CLASSES,
-  ERROR_ALERT_CLASSES,
-  ICON_BUTTON_CLASSES,
-  PAGE_CONTAINER_CLASSES,
-} from "@/lib/ui";
-import { PdfBulkUploadClient } from "./pdfs/PdfBulkUploadClient";
+  PAYSLIP_ACCENT_TEXT,
+  PAYSLIP_BG_0,
+  PAYSLIP_BORDER,
+  PAYSLIP_BORDER_SOFT,
+  PAYSLIP_DANGER_BUTTON,
+  PAYSLIP_ERROR_ALERT,
+  PAYSLIP_FONT_CLASS,
+  PAYSLIP_GHOST_BUTTON,
+  PAYSLIP_ICON_BUTTON,
+  PAYSLIP_MONO,
+  PAYSLIP_SECONDARY_BUTTON,
+  PAYSLIP_TEXT_2,
+  PAYSLIP_TEXT_DIM,
+  PAYSLIP_TEXT_INK,
+} from "./payslipTheme";
 
 /** localStorage key for the show/hide-gross toggle on the calendar. */
 const LS_PAYSLIP_SHOW_GROSS = "blastjax:payslip:showGross";
-
-function PdfUploadIcon({ className = "h-4 w-4" }: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-      aria-hidden
-    >
-      <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
-      <polyline points="14 2 14 8 20 8" />
-      <path d="M12 18v-6" />
-      <path d="m9 15 3-3 3 3" />
-    </svg>
-  );
-}
 
 /** Outline eye icon (visible state). */
 function EyeIcon({ className = "h-4 w-4" }: { className?: string }) {
@@ -129,10 +112,10 @@ export default function PayslipClient({ company = "Sophos" }: { company?: string
   const [nav, setNav] = useState<Nav | null>(null);
   const [modalForm, setModalForm] = useState<FormState>(emptyForm());
   const [showGross, setShowGross] = useState(true);
-  const [pdfModalOpen, setPdfModalOpen] = useState(false);
   // Bulk/less-common actions tucked behind one toggle instead of competing
   // with the page's actual content for attention (same pattern as Lotto).
   const [showDataTools, setShowDataTools] = useState(false);
+  const [showEarlierYears, setShowEarlierYears] = useState(false);
   const modalFormRef = useRef(modalForm);
   modalFormRef.current = modalForm;
   const navRef = useRef(nav);
@@ -425,37 +408,40 @@ export default function PayslipClient({ company = "Sophos" }: { company?: string
   }, [nav, rows]);
 
   const index = useMemo(() => buildPayslipIndex(rows), [rows]);
-  const years = index.years;
+  const allYears = index.years;
+  const currentYear = new Date().getFullYear();
+  const recentYears = allYears.filter((y) => y >= currentYear);
+  const earlierYears = allYears.filter((y) => y < currentYear);
   const unsorted = index.unscheduled;
   const flags = companyColumnFlags(companies, company);
 
   return (
     <div className={PAGE_CONTAINER_CLASSES}>
-      <header>
-        <PageHeader
-          title={`${company} Payslip`}
-          description={
-            <>
+      <div className={`${PAYSLIP_FONT_CLASS} rounded-2xl border ${PAYSLIP_BORDER} ${PAYSLIP_BG_0} p-4 sm:p-6 lg:p-8`}>
+        <header className="mb-6 flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h1 className={`text-[26px] font-extrabold tracking-tight ${PAYSLIP_TEXT_INK}`}>
+              {company} Payslip
+            </h1>
+            <p className={`mt-1.5 text-sm ${PAYSLIP_TEXT_DIM}`}>
               Browse payslips by year and month, split by pay period.
-            </>
-          }
-          actions={
-            <button
-              type="button"
-              className={ACTION_BUTTON_CLASSES}
-              aria-expanded={showDataTools}
-              onClick={() => setShowDataTools((v) => !v)}
-            >
-              Data tools <span aria-hidden>{showDataTools ? "▴" : "▾"}</span>
-            </button>
-          }
-        />
+            </p>
+          </div>
+          <button
+            type="button"
+            className={PAYSLIP_SECONDARY_BUTTON}
+            aria-expanded={showDataTools}
+            onClick={() => setShowDataTools((v) => !v)}
+          >
+            Data tools <span aria-hidden>{showDataTools ? "▴" : "▾"}</span>
+          </button>
+        </header>
 
         {showDataTools && (
-          <div className="mt-3 flex flex-wrap gap-2">
+          <div className="mb-6 flex flex-wrap gap-2">
             <button
               type="button"
-              className={`${ACTION_BUTTON_CLASSES} px-3 py-1.5 text-sm`}
+              className={PAYSLIP_SECONDARY_BUTTON}
               onClick={openAddPayslipFreeform}
               title="Add a payslip for any year/month, without picking a calendar slot first"
             >
@@ -463,28 +449,18 @@ export default function PayslipClient({ company = "Sophos" }: { company?: string
             </button>
           </div>
         )}
-      </header>
 
-      {error && (
-        <div className={ERROR_ALERT_CLASSES} role="alert">
-          {error}
-        </div>
-      )}
+        {error && (
+          <div className={`mb-6 ${PAYSLIP_ERROR_ALERT}`} role="alert">
+            {error}
+          </div>
+        )}
 
-      <section className={CARD_CLASSES}>
-        <div className="mb-8 flex items-center justify-between gap-4">
-          <h2 className="text-lg font-medium text-ink">
+        <div className="mb-6 flex items-center justify-between gap-4">
+          <h2 className={`text-lg font-semibold ${PAYSLIP_TEXT_INK}`}>
             Pay period calendar
           </h2>
           <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setPdfModalOpen(true)}
-              className={`flex h-9 items-center gap-1.5 ${ACTION_BUTTON_CLASSES}`}
-            >
-              <PdfUploadIcon className="h-4 w-4" />
-              Upload PDFs
-            </button>
             <button
               type="button"
               onClick={() => setShowGross((v) => !v)}
@@ -499,7 +475,7 @@ export default function PayslipClient({ company = "Sophos" }: { company?: string
                   ? "Hide gross amounts in calendar"
                   : "Show gross amounts in calendar"
               }
-              className={`${ICON_BUTTON_CLASSES} shrink-0 border-2 border-line-strong`}
+              className={PAYSLIP_ICON_BUTTON}
             >
               {showGross ? <EyeIcon /> : <EyeOffIcon />}
             </button>
@@ -511,39 +487,65 @@ export default function PayslipClient({ company = "Sophos" }: { company?: string
         )}
 
         {!loading && (
-          <div className="grid grid-cols-1 gap-x-6 gap-y-10 sm:grid-cols-2">
-            {years.map((year) => (
-              <div key={year} className="min-w-0">
-                <YearPayslipBlock
-                  year={year}
-                  yearSlots={yearSlotsFromIndex(index, year)}
-                  saving={saving}
-                  showGross={showGross}
-                  onOpenSlot={openSlot}
-                />
-              </div>
+          <div className="flex flex-col gap-6">
+            {recentYears.map((year) => (
+              <YearPayslipBlock
+                key={year}
+                year={year}
+                yearSlots={yearSlotsFromIndex(index, year)}
+                saving={saving}
+                showGross={showGross}
+                onOpenSlot={openSlot}
+              />
+            ))}
+          </div>
+        )}
+
+        {!loading && earlierYears.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setShowEarlierYears((v) => !v)}
+            className={`${PAYSLIP_SECONDARY_BUTTON} mb-6 mt-6`}
+          >
+            {showEarlierYears
+              ? "Hide earlier years"
+              : `Show earlier years (${earlierYears[0]}–${earlierYears[earlierYears.length - 1]})`}
+          </button>
+        )}
+
+        {!loading && showEarlierYears && earlierYears.length > 0 && (
+          <div className="flex flex-col gap-6">
+            {earlierYears.map((year) => (
+              <YearPayslipBlock
+                key={year}
+                year={year}
+                yearSlots={yearSlotsFromIndex(index, year)}
+                saving={saving}
+                showGross={showGross}
+                onOpenSlot={openSlot}
+              />
             ))}
           </div>
         )}
 
         {!loading && unsorted.length > 0 && (
-          <div className="mt-10 border-t border-amber-200 pt-8 dark:border-amber-900/50">
-            <h3 className="mb-2 text-sm font-semibold text-amber-900 dark:text-amber-200">
+          <div className={`mt-8 border-t ${PAYSLIP_BORDER_SOFT} pt-6`}>
+            <h3 className={`mb-3 text-sm font-semibold ${PAYSLIP_ACCENT_TEXT}`}>
               Without pay period ({unsorted.length})
             </h3>
             <ul className="flex flex-col gap-2">
               {unsorted.map((r) => (
                 <li
                   key={r.id}
-                  className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-line bg-zinc-50/80 px-3 py-2 text-sm dark:bg-zinc-900/50"
+                  className={`flex flex-wrap items-center justify-between gap-2 rounded-lg border ${PAYSLIP_BORDER} p-3 text-sm`}
                 >
-                  <span className="tabular-nums text-ink">
+                  <span className={`${PAYSLIP_MONO} ${PAYSLIP_TEXT_2}`}>
                     #{r.id} · Total {fmtNum(r.total)}
                   </span>
                   <div className="flex gap-2">
                     <button
                       type="button"
-                      className={DETAIL_BUTTON_CLASSES}
+                      className={PAYSLIP_GHOST_BUTTON}
                       onClick={() =>
                         setNav({ screen: "detail", row: r })
                       }
@@ -552,7 +554,7 @@ export default function PayslipClient({ company = "Sophos" }: { company?: string
                     </button>
                     <button
                       type="button"
-                      className={EDIT_BUTTON_CLASSES}
+                      className={PAYSLIP_SECONDARY_BUTTON}
                       onClick={() => {
                         setModalForm(formFromRow(r));
                         setNav({ screen: "edit", row: r });
@@ -562,7 +564,7 @@ export default function PayslipClient({ company = "Sophos" }: { company?: string
                     </button>
                     <button
                       type="button"
-                      className={DELETE_BUTTON_CLASSES}
+                      className={PAYSLIP_DANGER_BUTTON}
                       onClick={() => void handleDelete(r.id)}
                     >
                       Delete
@@ -573,7 +575,7 @@ export default function PayslipClient({ company = "Sophos" }: { company?: string
             </ul>
           </div>
         )}
-      </section>
+      </div>
 
       {nav && (
         <PayslipClientModal
@@ -592,29 +594,6 @@ export default function PayslipClient({ company = "Sophos" }: { company?: string
           handleDelete={handleDelete}
           onPdfChange={setRowPdfFlag}
         />
-      )}
-
-      {pdfModalOpen && (
-        <Modal
-          open
-          onClose={() => setPdfModalOpen(false)}
-          backdropClassName="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-5 backdrop-blur-sm sm:items-center sm:p-6"
-          dialogClassName="max-h-[95vh] w-full max-w-2xl overflow-y-auto rounded-xl border border-line bg-surface p-6 sm:p-8 shadow-pop"
-        >
-          <div className="mb-5 flex items-center justify-between gap-2">
-            <h2 className="text-lg font-semibold text-ink">
-              Upload Payslip PDFs
-            </h2>
-            <button
-              type="button"
-              className={CLOSE_BUTTON_CLASSES}
-              onClick={() => setPdfModalOpen(false)}
-            >
-              Close
-            </button>
-          </div>
-          <PdfBulkUploadClient />
-        </Modal>
       )}
     </div>
   );

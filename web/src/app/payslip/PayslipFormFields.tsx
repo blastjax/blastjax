@@ -12,6 +12,13 @@ import { AmountInput } from "@/components/AmountInput";
 import { YearPickerField } from "@/components/YearPickerField";
 import type { FormState } from "./payslipModalForm";
 import { MONTHS } from "./payslipModalForm";
+import {
+  PAYSLIP_BG_4,
+  PAYSLIP_INPUT_OVERRIDE,
+  PAYSLIP_TEXT_DIM,
+} from "./payslipTheme";
+
+const INPUT_CLS = `${INPUT_CLASSES} ${PAYSLIP_INPUT_OVERRIDE}`;
 
 export function PayslipFormFields({
   form,
@@ -56,63 +63,69 @@ export function PayslipFormFields({
     <>
       {flags.show_withholding_tax && (
         <label className="flex flex-col gap-1 text-sm">
-          <span className="text-ink-2">Withholding tax</span>
+          <span className={PAYSLIP_TEXT_DIM}>Withholding tax</span>
           <AmountInput
             value={form.withholding_tax}
             onChange={onAmountChange("withholding_tax")}
             disabled={disabled}
+            className={PAYSLIP_INPUT_OVERRIDE}
           />
         </label>
       )}
       {flags.show_sss_contribution && (
         <label className="flex flex-col gap-1 text-sm">
-          <span className="text-ink-2">SSS contribution</span>
+          <span className={PAYSLIP_TEXT_DIM}>SSS contribution</span>
           <AmountInput
             value={form.sss_contribution}
             onChange={onAmountChange("sss_contribution")}
             disabled={disabled}
+            className={PAYSLIP_INPUT_OVERRIDE}
           />
         </label>
       )}
       {flags.show_philhealth && (
         <label className="flex flex-col gap-1 text-sm">
-          <span className="text-ink-2">Philhealth</span>
+          <span className={PAYSLIP_TEXT_DIM}>Philhealth</span>
           <AmountInput
             value={form.philhealth}
             onChange={onAmountChange("philhealth")}
             disabled={disabled}
+            className={PAYSLIP_INPUT_OVERRIDE}
           />
         </label>
       )}
       {flags.show_pag_ibig && (
         <label className="flex flex-col gap-1 text-sm">
-          <span className="text-ink-2">
+          <span className={PAYSLIP_TEXT_DIM}>
             Pag-ibig (Employee HDMF)
           </span>
           <AmountInput
             value={form.pag_ibig}
             onChange={onAmountChange("pag_ibig")}
             disabled={disabled}
+            className={PAYSLIP_INPUT_OVERRIDE}
           />
         </label>
       )}
       {flags.show_mp2 && (
         <label className="flex flex-col gap-1 text-sm">
-          <span className="text-ink-2">MP2</span>
+          <span className={PAYSLIP_TEXT_DIM}>MP2</span>
           <AmountInput
             value={form.mp2}
             onChange={onAmountChange("mp2")}
             disabled={disabled}
+            className={PAYSLIP_INPUT_OVERRIDE}
           />
         </label>
       )}
       {flags.show_trust_fund && (
         <label className="flex flex-col gap-1 text-sm">
-          <span className="text-ink-2">Trust Fund</span>
+          <span className={PAYSLIP_TEXT_DIM}>Trust Fund</span>
           <AmountInput
             value={form.trust_fund}
             onChange={onAmountChange("trust_fund")}
             disabled={disabled}
+            className={PAYSLIP_INPUT_OVERRIDE}
           />
         </label>
       )}
@@ -124,9 +137,9 @@ export function PayslipFormFields({
       <div className="grid min-w-0 gap-5 sm:grid-cols-2 lg:grid-cols-3">
         {companies && (
           <label className="flex flex-col gap-1 text-sm">
-            <span className="text-ink-2">Company</span>
+            <span className={PAYSLIP_TEXT_DIM}>Company</span>
             <select
-              className={INPUT_CLASSES}
+              className={INPUT_CLS}
               value={form.company}
               onChange={(e) =>
                 setForm((f) => ({ ...f, company: e.target.value }))
@@ -148,7 +161,7 @@ export function PayslipFormFields({
         {showPeriodYearMonth && (
           <>
             <label className="flex flex-col gap-1 text-sm">
-              <span className="text-ink-2">Period year</span>
+              <span className={PAYSLIP_TEXT_DIM}>Period year</span>
               <YearPickerField
                 value={form.period_year}
                 onChange={(period_year) =>
@@ -158,9 +171,9 @@ export function PayslipFormFields({
               />
             </label>
             <label className="flex flex-col gap-1 text-sm">
-              <span className="text-ink-2">Month</span>
+              <span className={PAYSLIP_TEXT_DIM}>Month</span>
               <select
-                className={INPUT_CLASSES}
+                className={INPUT_CLS}
                 value={form.period_month}
                 onChange={(e) =>
                   setForm((f) => ({ ...f, period_month: e.target.value }))
@@ -178,9 +191,9 @@ export function PayslipFormFields({
           </>
         )}
         <label className="flex flex-col gap-1 text-sm">
-          <span className="text-ink-2">Half of month</span>
+          <span className={PAYSLIP_TEXT_DIM}>Half of month</span>
           <select
-            className={INPUT_CLASSES}
+            className={INPUT_CLS}
             value={
               requirePeriodHalf
                 ? form.period_half === "2"
@@ -223,11 +236,12 @@ export function PayslipFormFields({
         .filter(([, , shown]) => shown)
         .map(([key, label]) => (
           <label key={key} className="flex flex-col gap-1 text-sm">
-            <span className="text-ink-2">{label}</span>
+            <span className={PAYSLIP_TEXT_DIM}>{label}</span>
             <AmountInput
               value={form[key]}
               onChange={onAmountChange(key)}
               disabled={disabled}
+              className={PAYSLIP_INPUT_OVERRIDE}
             />
           </label>
         ))}
@@ -235,18 +249,19 @@ export function PayslipFormFields({
           form.period_month === "11" &&
           form.period_half === "2" && (
           <label className="flex flex-col gap-1 text-sm">
-            <span className="text-ink-2">13th Month</span>
+            <span className={PAYSLIP_TEXT_DIM}>13th Month</span>
             <AmountInput
               value={form.thirteenth_month}
               onChange={onAmountChange("thirteenth_month")}
               disabled={disabled}
+              className={PAYSLIP_INPUT_OVERRIDE}
             />
           </label>
         )}
         <label className="flex flex-col gap-1 text-sm sm:col-span-2 lg:col-span-3">
-          <span className="text-ink-2">Notes</span>
+          <span className={PAYSLIP_TEXT_DIM}>Notes</span>
           <textarea
-            className={`min-h-[4rem] ${INPUT_CLASSES}`}
+            className={`min-h-[4rem] ${INPUT_CLS}`}
             value={form.notes}
             onChange={(e) =>
               setForm((f) => ({ ...f, notes: e.target.value }))
@@ -255,8 +270,8 @@ export function PayslipFormFields({
           />
         </label>
       </div>
-      <aside className="flex min-w-0 flex-col gap-4 rounded-lg border border-line bg-zinc-50/90 p-4 dark:bg-zinc-900/50">
-        <p className="text-xs font-semibold uppercase tracking-wide text-ink-3">
+      <aside className={`flex min-w-0 flex-col gap-4 rounded-lg ${PAYSLIP_BG_4} p-4`}>
+        <p className={`text-xs font-semibold uppercase tracking-wide ${PAYSLIP_TEXT_DIM}`}>
           Deductions
         </p>
         <div className="flex flex-col gap-4">{deductionFields}</div>

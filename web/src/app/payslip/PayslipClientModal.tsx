@@ -34,13 +34,22 @@ import { fmtNum, fmtPayPeriod, slotTitle } from "./payslipDisplay";
 import type { FormState } from "./payslipModalForm";
 import type { Nav } from "./payslipNav";
 import {
-  ACTION_BUTTON_CLASSES,
-  CLOSE_BUTTON_CLASSES,
-  DELETE_BUTTON_CLASSES,
-  ERROR_ALERT_CLASSES,
-  PRIMARY_BUTTON_CLASSES,
-  SECONDARY_BUTTON_CLASSES,
-} from "@/lib/ui";
+  PAYSLIP_BG_0,
+  PAYSLIP_BG_4,
+  PAYSLIP_BORDER,
+  PAYSLIP_BORDER_STRONG,
+  PAYSLIP_DANGER_BUTTON,
+  PAYSLIP_DANGER_TEXT,
+  PAYSLIP_ERROR_ALERT,
+  PAYSLIP_FONT_CLASS,
+  PAYSLIP_ICON_BUTTON,
+  PAYSLIP_MONO,
+  PAYSLIP_PRIMARY_BUTTON,
+  PAYSLIP_SECONDARY_BUTTON,
+  PAYSLIP_TEXT_2,
+  PAYSLIP_TEXT_DIM,
+  PAYSLIP_TEXT_INK,
+} from "./payslipTheme";
 
 export function PayslipClientModal({
   nav,
@@ -85,7 +94,7 @@ export function PayslipClientModal({
       open
       onClose={onCloseDialog}
       backdropClassName="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-5 backdrop-blur-sm sm:items-center sm:p-6"
-      dialogClassName="max-h-[95vh] w-full max-w-5xl overflow-y-auto rounded-xl border border-line bg-surface p-6 shadow-pop sm:p-8 lg:max-w-6xl"
+      dialogClassName={`${PAYSLIP_FONT_CLASS} max-h-[95vh] w-full max-w-5xl overflow-y-auto rounded-xl border ${PAYSLIP_BORDER_STRONG} ${PAYSLIP_BG_0} p-6 shadow-pop sm:p-8 lg:max-w-6xl`}
     >
             {nav.screen === "detail" && (() => {
               const row = rows.find((r) => r.id === nav.row.id) ?? nav.row;
@@ -99,13 +108,11 @@ export function PayslipClientModal({
                         rows,
                         row.id,
                       );
-                      const btnCls =
-                        "flex h-9 min-w-[2.25rem] shrink-0 items-center justify-center rounded-md border border-line-strong bg-surface text-sm font-medium text-ink-2 transition-colors duration-150 hover:bg-surface-2 disabled:pointer-events-none disabled:opacity-40";
                       return (
                         <>
                           <button
                             type="button"
-                            className={btnCls}
+                            className={PAYSLIP_ICON_BUTTON}
                             aria-label="Older payslip"
                             disabled={!older}
                             onClick={() =>
@@ -115,12 +122,12 @@ export function PayslipClientModal({
                           >
                             ‹
                           </button>
-                          <h2 className="min-w-0 text-lg font-semibold text-ink">
+                          <h2 className={`min-w-0 text-lg font-semibold ${PAYSLIP_TEXT_INK}`}>
                             Details
                           </h2>
                           <button
                             type="button"
-                            className={btnCls}
+                            className={PAYSLIP_ICON_BUTTON}
                             aria-label="Newer payslip"
                             disabled={!newer}
                             onClick={() =>
@@ -136,13 +143,13 @@ export function PayslipClientModal({
                   </div>
                   <button
                     type="button"
-                    className={`shrink-0 ${CLOSE_BUTTON_CLASSES}`}
+                    className={`shrink-0 ${PAYSLIP_SECONDARY_BUTTON}`}
                     onClick={() => setNav(null)}
                   >
                     Close
                   </button>
                 </div>
-                <p className="mb-4 text-sm text-ink-2">
+                <p className={`mb-4 text-sm ${PAYSLIP_TEXT_2}`}>
                   {fmtPayPeriod(
                     row.period_year,
                     row.period_month,
@@ -163,7 +170,7 @@ export function PayslipClientModal({
                   const n = rowsForSlot(rows, y, m, h).length;
                   if (n <= 1) return null;
                   return (
-                    <p className="mb-4 rounded-md border border-amber-200 bg-amber-50/90 px-3 py-2 text-xs text-amber-950 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
+                    <p className={`mb-4 rounded-md border ${PAYSLIP_BORDER_STRONG} bg-[oklch(0.72_0.11_195/0.1)] px-3 py-2 text-xs ${PAYSLIP_TEXT_2}`}>
                       {n} entries in this half — use ‹ › or arrow keys for other
                       payslips, or close and open that calendar slot to see the full
                       list.
@@ -172,18 +179,18 @@ export function PayslipClientModal({
                 })()}
                 <div className="grid min-w-0 gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,17.5rem)] lg:items-start lg:gap-8">
                   <div className="min-w-0">
-                    <dl className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
+                    <dl className={`grid grid-cols-1 gap-2 text-sm sm:grid-cols-2 ${PAYSLIP_MONO}`}>
                       {detailFlags.show_total && (
                         <>
                           <div>
-                            <dt className="text-xs text-ink-3">Gross total</dt>
-                            <dd className="tabular-nums font-medium text-ink">
+                            <dt className={`text-xs ${PAYSLIP_TEXT_DIM}`}>Gross total</dt>
+                            <dd className={`font-medium ${PAYSLIP_TEXT_INK}`}>
                               {fmtNum(grossTotalFromRow(row))}
                             </dd>
                           </div>
                           <div>
-                            <dt className="text-xs text-ink-3">Net total</dt>
-                            <dd className="tabular-nums font-medium text-ink">
+                            <dt className={`text-xs ${PAYSLIP_TEXT_DIM}`}>Net total</dt>
+                            <dd className={`font-medium ${PAYSLIP_TEXT_INK}`}>
                               {fmtNum(row.total)}
                             </dd>
                           </div>
@@ -191,8 +198,8 @@ export function PayslipClientModal({
                       )}
                       {detailFlags.show_basic_salary && (
                         <div>
-                          <dt className="text-xs text-ink-3">Basic salary</dt>
-                          <dd className="tabular-nums text-ink">
+                          <dt className={`text-xs ${PAYSLIP_TEXT_DIM}`}>Basic salary</dt>
+                          <dd className={PAYSLIP_TEXT_2}>
                             {fmtNum(row.basic_salary)}
                           </dd>
                         </div>
@@ -219,8 +226,8 @@ export function PayslipClientModal({
                       })
                       .map(([k, lab]) => (
                         <div key={k}>
-                          <dt className="text-xs text-ink-3">{lab}</dt>
-                          <dd className="tabular-nums text-ink">
+                          <dt className={`text-xs ${PAYSLIP_TEXT_DIM}`}>{lab}</dt>
+                          <dd className={PAYSLIP_TEXT_2}>
                             {fmtNum(row[k])}
                           </dd>
                         </div>
@@ -229,8 +236,8 @@ export function PayslipClientModal({
                         row.period_month === 11 &&
                         row.period_half === 2 && (
                         <div>
-                          <dt className="text-xs text-ink-3">13th Month</dt>
-                          <dd className="tabular-nums text-ink">
+                          <dt className={`text-xs ${PAYSLIP_TEXT_DIM}`}>13th Month</dt>
+                          <dd className={PAYSLIP_TEXT_2}>
                             {fmtNum(row.thirteenth_month)}
                           </dd>
                         </div>
@@ -238,77 +245,77 @@ export function PayslipClientModal({
                     </dl>
                     {row.notes && (
                       <div className="mt-3">
-                        <dt className="text-xs text-ink-3">Notes</dt>
-                        <dd className="mt-1 whitespace-pre-wrap text-sm text-ink">
+                        <dt className={`text-xs ${PAYSLIP_TEXT_DIM}`}>Notes</dt>
+                        <dd className={`mt-1 whitespace-pre-wrap text-sm ${PAYSLIP_TEXT_2}`}>
                           {row.notes}
                         </dd>
                       </div>
                     )}
                   </div>
-                  <aside className="flex min-w-0 flex-col gap-4 rounded-lg border border-line bg-zinc-50/90 p-4 dark:bg-zinc-900/50">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-ink-3">
+                  <aside className={`flex min-w-0 flex-col gap-4 rounded-lg ${PAYSLIP_BG_4} p-4`}>
+                    <p className={`text-xs font-semibold uppercase tracking-wide ${PAYSLIP_TEXT_DIM}`}>
                       Deductions
                     </p>
-                    <dl className="flex flex-col gap-3 text-sm">
+                    <dl className={`flex flex-col gap-3 text-sm ${PAYSLIP_MONO}`}>
                       {detailFlags.show_withholding_tax && (
                         <div>
-                          <dt className="text-xs text-ink-3">
+                          <dt className={`text-xs ${PAYSLIP_TEXT_DIM}`}>
                             Withholding tax
                           </dt>
-                          <dd className="tabular-nums text-red-600 dark:text-red-400">
+                          <dd className={PAYSLIP_DANGER_TEXT}>
                             {fmtNum(row.withholding_tax)}
                           </dd>
                         </div>
                       )}
                       {detailFlags.show_sss_contribution && (
                         <div>
-                          <dt className="text-xs text-ink-3">
+                          <dt className={`text-xs ${PAYSLIP_TEXT_DIM}`}>
                             SSS contribution
                           </dt>
-                          <dd className="tabular-nums text-red-600 dark:text-red-400">
+                          <dd className={PAYSLIP_DANGER_TEXT}>
                             {fmtNum(row.sss_contribution)}
                           </dd>
                         </div>
                       )}
                       {detailFlags.show_philhealth && (
                         <div>
-                          <dt className="text-xs text-ink-3">Philhealth</dt>
-                          <dd className="tabular-nums text-red-600 dark:text-red-400">
+                          <dt className={`text-xs ${PAYSLIP_TEXT_DIM}`}>Philhealth</dt>
+                          <dd className={PAYSLIP_DANGER_TEXT}>
                             {fmtNum(row.philhealth)}
                           </dd>
                         </div>
                       )}
                       {detailFlags.show_pag_ibig && (
                         <div>
-                          <dt className="text-xs text-ink-3">
+                          <dt className={`text-xs ${PAYSLIP_TEXT_DIM}`}>
                             Pag-ibig (Employee HDMF)
                           </dt>
-                          <dd className="tabular-nums text-red-600 dark:text-red-400">
+                          <dd className={PAYSLIP_DANGER_TEXT}>
                             {fmtNum(row.pag_ibig)}
                           </dd>
                         </div>
                       )}
                       {detailFlags.show_mp2 && (
                         <div>
-                          <dt className="text-xs text-ink-3">MP2</dt>
-                          <dd className="tabular-nums text-red-600 dark:text-red-400">
+                          <dt className={`text-xs ${PAYSLIP_TEXT_DIM}`}>MP2</dt>
+                          <dd className={PAYSLIP_DANGER_TEXT}>
                             {fmtNum(row.mp2)}
                           </dd>
                         </div>
                       )}
                       {detailFlags.show_trust_fund && (
                         <div>
-                          <dt className="text-xs text-ink-3">Trust Fund</dt>
-                          <dd className="tabular-nums text-red-600 dark:text-red-400">
+                          <dt className={`text-xs ${PAYSLIP_TEXT_DIM}`}>Trust Fund</dt>
+                          <dd className={PAYSLIP_DANGER_TEXT}>
                             {fmtNum(row.trust_fund)}
                           </dd>
                         </div>
                       )}
-                      <div className="mt-1 border-t border-line pt-3 dark:border-zinc-600">
-                        <dt className="text-xs font-semibold text-ink-2">
+                      <div className={`mt-1 border-t ${PAYSLIP_BORDER} pt-3`}>
+                        <dt className={`text-xs font-semibold ${PAYSLIP_TEXT_2}`}>
                           Deductions total
                         </dt>
-                        <dd className="mt-0.5 text-sm font-semibold tabular-nums text-red-700 dark:text-red-300">
+                        <dd className={`mt-0.5 text-sm font-semibold ${PAYSLIP_DANGER_TEXT}`}>
                           {fmtNum(deductionsTotalFromRow(row))}
                         </dd>
                       </div>
@@ -323,7 +330,7 @@ export function PayslipClientModal({
                 <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
                   <button
                     type="button"
-                    className={PRIMARY_BUTTON_CLASSES}
+                    className={PAYSLIP_PRIMARY_BUTTON}
                     onClick={() => {
                       setModalForm(formFromRow(row));
                       setNav({ screen: "edit", row });
@@ -333,7 +340,7 @@ export function PayslipClientModal({
                   </button>
                   <button
                     type="button"
-                    className={DELETE_BUTTON_CLASSES}
+                    className={PAYSLIP_DANGER_BUTTON}
                     onClick={() => void handleDelete(row.id)}
                   >
                     Delete
@@ -347,7 +354,7 @@ export function PayslipClientModal({
               <>
                 <div className="mb-4 flex items-start justify-between gap-2">
                   <div className="min-w-0">
-                    <h2 className="text-lg font-semibold leading-snug text-ink">
+                    <h2 className={`text-lg font-semibold leading-snug ${PAYSLIP_TEXT_INK}`}>
                       {(() => {
                         const r = nav.row;
                         const y = r.period_year;
@@ -384,7 +391,7 @@ export function PayslipClientModal({
                         (h === 1 || h === 2);
                       if (scheduled) return null;
                       return (
-                        <p className="mt-1 text-sm font-normal text-ink-2">
+                        <p className={`mt-1 text-sm font-normal ${PAYSLIP_TEXT_2}`}>
                           {fmtPayPeriod(y, m, h)}
                         </p>
                       );
@@ -392,7 +399,7 @@ export function PayslipClientModal({
                   </div>
                   <button
                     type="button"
-                    className={CLOSE_BUTTON_CLASSES}
+                    className={PAYSLIP_SECONDARY_BUTTON}
                     onClick={goBack}
                   >
                     Back
@@ -413,21 +420,21 @@ export function PayslipClientModal({
                     flags={flags}
                   />
                   {error && (
-                    <p className={`mt-3 ${ERROR_ALERT_CLASSES}`} role="alert">
+                    <p className={`mt-3 ${PAYSLIP_ERROR_ALERT}`} role="alert">
                       {error}
                     </p>
                   )}
                   <div className="mt-4 flex flex-wrap gap-2">
                     <button
                       type="submit"
-                      className={PRIMARY_BUTTON_CLASSES}
+                      className={PAYSLIP_PRIMARY_BUTTON}
                       disabled={saving}
                     >
                       {saving ? "Saving…" : "Save changes"}
                     </button>
                     <button
                       type="button"
-                      className={SECONDARY_BUTTON_CLASSES}
+                      className={PAYSLIP_SECONDARY_BUTTON}
                       onClick={() => {
                         clearPayslipModalDraft(nav);
                         setNav({ screen: "detail", row: nav.row });
@@ -443,14 +450,14 @@ export function PayslipClientModal({
             {nav.screen === "add" && (
               <>
                 <div className="mb-4 flex items-start justify-between gap-2">
-                  <h2 className="text-lg font-semibold text-ink">
+                  <h2 className={`text-lg font-semibold ${PAYSLIP_TEXT_INK}`}>
                     {nav.freeform
                       ? "New payslip"
                       : `New · ${slotTitle(nav.year, nav.month, nav.half)}`}
                   </h2>
                   <button
                     type="button"
-                    className={CLOSE_BUTTON_CLASSES}
+                    className={PAYSLIP_SECONDARY_BUTTON}
                     onClick={goBack}
                   >
                     Back
@@ -473,14 +480,14 @@ export function PayslipClientModal({
                     flags={flags}
                   />
                   {error && (
-                    <p className={`mt-3 ${ERROR_ALERT_CLASSES}`} role="alert">
+                    <p className={`mt-3 ${PAYSLIP_ERROR_ALERT}`} role="alert">
                       {error}
                     </p>
                   )}
                   <div className="mt-4 flex flex-wrap gap-2">
                     <button
                       type="submit"
-                      className={PRIMARY_BUTTON_CLASSES}
+                      className={PAYSLIP_PRIMARY_BUTTON}
                       disabled={saving}
                     >
                       {saving ? "Saving…" : "Save"}
@@ -589,22 +596,22 @@ function PayslipPdfPanel({
   };
 
   return (
-    <div className="mt-6 border-t border-line pt-4">
+    <div className={`mt-6 border-t ${PAYSLIP_BORDER} pt-4`}>
       <div className="flex flex-wrap items-center gap-2">
-        <span className="mr-1 text-xs font-semibold uppercase tracking-wide text-ink-3">
+        <span className={`mr-1 text-xs font-semibold uppercase tracking-wide ${PAYSLIP_TEXT_DIM}`}>
           Payslip PDF
         </span>
         {hasPdf ? (
           <>
             <button
               type="button"
-              className={PRIMARY_BUTTON_CLASSES}
+              className={PAYSLIP_PRIMARY_BUTTON}
               onClick={() => setShowing((s) => !s)}
             >
               {showing ? "Hide payslip" : "Show payslip"}
             </button>
             <a
-              className={`${SECONDARY_BUTTON_CLASSES}${blobUrl ? "" : " pointer-events-none opacity-50"}`}
+              className={`${PAYSLIP_SECONDARY_BUTTON}${blobUrl ? "" : " pointer-events-none opacity-50"}`}
               href={blobUrl ?? undefined}
               target="_blank"
               rel="noreferrer"
@@ -613,7 +620,7 @@ function PayslipPdfPanel({
             </a>
             <button
               type="button"
-              className={ACTION_BUTTON_CLASSES}
+              className={PAYSLIP_SECONDARY_BUTTON}
               onClick={() => fileRef.current?.click()}
               disabled={busy}
             >
@@ -621,7 +628,7 @@ function PayslipPdfPanel({
             </button>
             <button
               type="button"
-              className={DELETE_BUTTON_CLASSES}
+              className={PAYSLIP_DANGER_BUTTON}
               onClick={() => void handleRemove()}
               disabled={busy}
             >
@@ -631,7 +638,7 @@ function PayslipPdfPanel({
         ) : (
           <button
             type="button"
-            className={ACTION_BUTTON_CLASSES}
+            className={PAYSLIP_SECONDARY_BUTTON}
             onClick={() => fileRef.current?.click()}
             disabled={busy}
           >
@@ -652,19 +659,19 @@ function PayslipPdfPanel({
         />
       </div>
       {err && (
-        <p className="mt-2 text-xs text-red-600 dark:text-red-400">{err}</p>
+        <p className={`mt-2 text-xs ${PAYSLIP_DANGER_TEXT}`}>{err}</p>
       )}
       {hasPdf && blobUrl && (
         <div className={`mt-3${showing ? "" : " hidden"}`}>
-          <p className="mb-1.5 text-xs text-ink-3">
+          <p className={`mb-1.5 text-xs ${PAYSLIP_TEXT_DIM}`}>
             Preview
           </p>
-          <div className="overflow-hidden rounded-lg border border-line">
+          <div className={`overflow-hidden rounded-lg border ${PAYSLIP_BORDER}`}>
             <iframe
               key={blobUrl}
               src={blobUrl}
               title="Payslip PDF"
-              className="h-[75vh] w-full bg-surface"
+              className={`h-[75vh] w-full ${PAYSLIP_BG_0}`}
             />
           </div>
         </div>

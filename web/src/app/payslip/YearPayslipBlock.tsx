@@ -5,10 +5,20 @@ import { MONTH_NAMES_FULL } from "@/lib/dateFormat";
 import { MONTHS } from "./payslipModalForm";
 import { fmtNum } from "./payslipDisplay";
 import type { YearSlots } from "./payslipAggregates";
-
-/** Match the year-stats Total card: white-ish for net, muted zinc for gross. */
-const NET_TEXT_CLASSES = "text-slate-950 dark:text-slate-50";
-const GROSS_TEXT_CLASSES = "text-ink-3";
+import {
+  PAYSLIP_BORDER_DASHED,
+  PAYSLIP_BORDER_SOFT,
+  PAYSLIP_CARD,
+  PAYSLIP_DANGER_TEXT,
+  PAYSLIP_MINI_CARD,
+  PAYSLIP_MONO,
+  PAYSLIP_MONTH_CARD,
+  PAYSLIP_TEXT_2,
+  PAYSLIP_TEXT_DIM,
+  PAYSLIP_TEXT_FAINT,
+  PAYSLIP_TEXT_GHOST,
+  PAYSLIP_TEXT_INK,
+} from "./payslipTheme";
 
 function YearPayslipBlockInner({
   year,
@@ -23,176 +33,108 @@ function YearPayslipBlockInner({
   showGross: boolean;
   onOpenSlot: (y: number, m: number, h: 1 | 2) => void;
 }) {
-  const yearSum = yearSlots.netSum;
-  const yearGross = showGross ? yearSlots.grossSum : null;
+  const yearNet = yearSlots.netSum;
+  const yearGross = yearSlots.grossSum;
+
   return (
-    <div className="@container flex w-full min-w-0 flex-col rounded-lg border border-line bg-zinc-50/40 p-4 sm:p-5 dark:bg-zinc-900/30">
-      <h3 className="mb-4 flex min-w-0 items-start justify-between gap-2 border-b border-line pb-3 text-base font-semibold text-ink">
-        <span className="shrink-0 whitespace-nowrap">{year}</span>
-        {(yearSum != null || yearGross != null) && (
-          <span className="flex min-w-0 flex-col items-end">
-            {yearSum != null && (
-              <span
-                className={`min-w-0 truncate text-base font-normal tabular-nums ${NET_TEXT_CLASSES}`}
-                title={`Net ${fmtNum(yearSum)}`}
-              >
-                {fmtNum(yearSum)}
-              </span>
-            )}
-            {yearGross != null && (
-              <span
-                className={`min-w-0 truncate text-base font-normal tabular-nums ${GROSS_TEXT_CLASSES}`}
-                title={`Gross ${fmtNum(yearGross)}`}
-              >
-                {fmtNum(yearGross)}
-              </span>
-            )}
-            {yearGross != null && yearSum != null && (
-              <span
-                className="min-w-0 truncate text-base font-normal tabular-nums text-red-600 dark:text-red-400"
-                title={`Deductions ${fmtNum(yearGross - yearSum)}`}
-              >
-                -{fmtNum(yearGross - yearSum)}
-              </span>
-            )}
+    <div className={`${PAYSLIP_CARD} p-5`}>
+      <div className={`mb-4 flex items-baseline justify-between gap-3 border-b ${PAYSLIP_BORDER_SOFT} pb-3.5`}>
+        <div className="flex items-baseline gap-3.5">
+          <span className={`${PAYSLIP_MONO} text-xl font-extrabold ${PAYSLIP_TEXT_INK}`}>{year}</span>
+          {(yearNet != null || yearGross != null) && (
+            <span className={`text-[13px] ${PAYSLIP_TEXT_DIM}`}>
+              {yearNet != null && <>Net {fmtNum(yearNet)}</>}
+              {yearGross != null && <> · Gross {fmtNum(yearGross)}</>}
+            </span>
+          )}
+        </div>
+        {yearGross != null && yearNet != null && (
+          <span className={`${PAYSLIP_MONO} shrink-0 text-[13px] ${PAYSLIP_DANGER_TEXT}`}>
+            −{fmtNum(yearGross - yearNet)}
           </span>
         )}
-      </h3>
-      {/* Always 3 months per row × 4 rows. Gap widens once the card itself has room, keyed off the
-          card's own width via a container query (not the viewport) so it reflows correctly
-          regardless of how much space the sidebar leaves it. */}
-      <div className="grid w-full min-w-0 grid-cols-3 gap-2 @lg:gap-3.5">
+      </div>
+
+      <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
         {MONTHS.map((month) => {
           const ms = yearSlots.months.get(month);
-          const monthSum = ms?.netSum ?? null;
-          const monthGross = showGross ? (ms?.grossSum ?? null) : null;
+          const hasData = ms != null && ms.netSum != null;
           const monthLabel = MONTH_NAMES_FULL[month - 1];
+
+          if (!hasData) {
+            return (
+              <div key={month} className={`rounded-lg border ${PAYSLIP_BORDER_DASHED} p-4`}>
+                <div className={`mb-3 text-sm ${PAYSLIP_TEXT_GHOST}`}>{monthLabel}</div>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    disabled={saving}
+                    onClick={() => onOpenSlot(year, month, 1)}
+                    className={`flex-1 rounded-md border ${PAYSLIP_BORDER_DASHED} px-2.5 py-1.5 text-xs font-semibold ${PAYSLIP_TEXT_DIM} transition-colors duration-150 hover:border-[oklch(1_0_0/0.16)] hover:${PAYSLIP_TEXT_2}`}
+                  >
+                    + 1st half
+                  </button>
+                  <button
+                    type="button"
+                    disabled={saving}
+                    onClick={() => onOpenSlot(year, month, 2)}
+                    className={`flex-1 rounded-md border ${PAYSLIP_BORDER_DASHED} px-2.5 py-1.5 text-xs font-semibold ${PAYSLIP_TEXT_DIM} transition-colors duration-150 hover:border-[oklch(1_0_0/0.16)] hover:${PAYSLIP_TEXT_2}`}
+                  >
+                    + 2nd half
+                  </button>
+                </div>
+              </div>
+            );
+          }
+
+          const net = ms.netSum;
+          const gross = showGross ? ms.grossSum : null;
+
           return (
-            <div
-              key={month}
-              className="flex min-w-0 flex-col gap-2 rounded-lg border border-line bg-surface p-2.5 dark:bg-zinc-900/90"
-            >
-            <div className="flex min-w-0 items-start justify-between gap-1.5 border-b border-line-soft pb-1.5">
-              <span className="shrink-0 whitespace-nowrap text-xs font-semibold leading-tight text-ink">
-                {monthLabel}
-              </span>
-              {(monthSum != null || monthGross != null || showGross) && (
-                <span className="flex min-w-0 flex-1 flex-col">
-                  {monthSum != null ? (
-                    <span
-                      className={`block w-full min-w-0 truncate text-right text-[10px] tabular-nums leading-tight @lg:text-xs ${NET_TEXT_CLASSES}`}
-                      title={`Net ${fmtNum(monthSum)}`}
-                    >
-                      {fmtNum(monthSum)}
-                    </span>
-                  ) : showGross ? (
-                    <span className="invisible block w-full text-right text-[10px] @lg:text-xs" aria-hidden>0.00</span>
-                  ) : null}
-                  {showGross ? (
-                    monthGross != null ? (
-                      <span
-                        className={`block w-full min-w-0 truncate text-right text-[10px] tabular-nums leading-tight @lg:text-xs ${GROSS_TEXT_CLASSES}`}
-                        title={`Gross ${fmtNum(monthGross)}`}
-                      >
-                        {fmtNum(monthGross)}
-                      </span>
-                    ) : (
-                      <span className="invisible block w-full text-right text-[10px] @lg:text-xs" aria-hidden>0.00</span>
-                    )
-                  ) : null}
-                  {showGross ? (
-                    monthGross != null && monthSum != null ? (
-                      <span
-                        className="block w-full min-w-0 truncate text-right text-[10px] tabular-nums leading-tight text-red-600 @lg:text-xs dark:text-red-400"
-                        title={`Deductions ${fmtNum(monthGross - monthSum)}`}
-                      >
-                        -{fmtNum(monthGross - monthSum)}
-                      </span>
-                    ) : (
-                      <span className="invisible block w-full text-right text-[10px] @lg:text-xs" aria-hidden>0.00</span>
-                    )
-                  ) : null}
-                </span>
-              )}
-            </div>
-              <div className="flex flex-col gap-1.5">
-                {[1, 2].map((half) => {
-                  const isFirst = half === 1;
-                  const rs = isFirst
-                    ? (ms?.rows1 ?? null)
-                    : (ms?.rows2 ?? null);
-                  const st = isFirst
-                    ? (ms?.netSum1 ?? null)
-                    : (ms?.netSum2 ?? null);
-                  const stGrossRaw = isFirst
-                    ? (ms?.grossSum1 ?? null)
-                    : (ms?.grossSum2 ?? null);
-                  const stGross = showGross ? stGrossRaw : null;
-                  const hasRows = rs != null && rs.length > 0;
-                  const label = `${monthLabel} ${year} · ${isFirst ? "1st" : "2nd"} half`;
-                  const netStr = st != null ? fmtNum(st) : "";
-                  const grossStr = stGross != null ? fmtNum(stGross) : "";
-                  const ariaLabel =
-                    st != null
-                      ? stGross != null
-                        ? `${label}, net ${netStr}, gross ${grossStr}`
-                        : `${label}, ${netStr}`
-                      : label;
-                  const titleText =
-                    st != null
-                      ? stGross != null
-                        ? `Net ${netStr} · Gross ${grossStr}`
-                        : netStr
-                      : label;
+            <div key={month} className={`${PAYSLIP_MONTH_CARD} p-4`}>
+              <div className="flex items-baseline justify-between gap-2">
+                <span className={`text-sm font-bold ${PAYSLIP_TEXT_INK}`}>{monthLabel}</span>
+                <span className={`${PAYSLIP_MONO} text-base font-semibold ${PAYSLIP_TEXT_INK}`}>{fmtNum(net)}</span>
+              </div>
+              <div className={`mt-1 flex justify-end gap-3.5 ${PAYSLIP_MONO} text-xs`}>
+                {gross != null && <span className={PAYSLIP_TEXT_FAINT}>Gross {fmtNum(gross)}</span>}
+                {gross != null && net != null && (
+                  <span className={PAYSLIP_DANGER_TEXT}>−{fmtNum(gross - net)}</span>
+                )}
+              </div>
+
+              <div className={`mt-3.5 flex flex-col gap-2.5 border-t ${PAYSLIP_BORDER_SOFT} pt-3`}>
+                {([1, 2] as const).map((half) => {
+                  const rs = half === 1 ? ms.rows1 : ms.rows2;
+                  if (rs.length === 0) return null;
+                  const periodNet = half === 1 ? ms.netSum1 : ms.netSum2;
+                  const periodGross = half === 1 ? ms.grossSum1 : ms.grossSum2;
                   return (
-                    <button
+                    <div
                       key={half}
-                      type="button"
-                      disabled={saving}
-                      aria-label={ariaLabel}
-                      title={titleText}
-                      onClick={() => onOpenSlot(year, month, half as 1 | 2)}
-                      className={`flex min-h-[2.5rem] w-full min-w-0 items-center justify-end rounded-md border px-1 py-2 text-right tabular-nums leading-tight transition-colors duration-150 break-all @lg:px-1.5 @lg:leading-none ${
-                        hasRows
-                          ? "border-indigo-200 bg-indigo-50/90 hover:bg-indigo-100 dark:border-indigo-900 dark:bg-indigo-950/50 dark:hover:bg-indigo-900/60"
-                          : "border-dashed border-line bg-zinc-50/50 text-ink-3 hover:border-line-strong hover:bg-surface-2 dark:bg-zinc-900/40"
-                      }`}
+                      className={`${PAYSLIP_MINI_CARD} cursor-pointer p-3`}
+                      onClick={() => onOpenSlot(year, month, half)}
                     >
-                      <span className="flex w-full min-w-0 flex-col items-end gap-0 px-0.5">
-                        {st != null ? (
-                          <span
-                            className={`min-w-0 truncate text-right text-[10px] @lg:text-sm ${NET_TEXT_CLASSES}`}
-                          >
-                            {netStr}
-                          </span>
-                        ) : showGross ? (
-                          <span className="invisible text-[10px] @lg:text-sm" aria-hidden>0.00</span>
-                        ) : null}
-                        {showGross ? (
-                          stGross != null ? (
-                            <span
-                              className={`min-w-0 truncate text-right text-[10px] @lg:text-sm ${GROSS_TEXT_CLASSES}`}
-                            >
-                              {grossStr}
-                            </span>
-                          ) : (
-                            <span className="invisible text-[10px] @lg:text-sm" aria-hidden>0.00</span>
-                          )
-                        ) : null}
-                        {showGross ? (
-                          stGross != null && st != null ? (
-                            <span
-                              className="min-w-0 truncate text-right text-[10px] text-red-600 @lg:text-sm dark:text-red-400"
-                              title={`Deductions ${fmtNum(stGrossRaw! - st)}`}
-                            >
-                              -{fmtNum(stGrossRaw! - st)}
-                            </span>
-                          ) : (
-                            <span className="invisible text-[10px] @lg:text-sm" aria-hidden>0.00</span>
-                          )
-                        ) : null}
-                      </span>
-                    </button>
+                      <div className={`mb-1.5 text-[11px] ${PAYSLIP_TEXT_DIM}`}>
+                        {half === 1 ? "1st half" : "2nd half"}
+                      </div>
+                      <div className={`flex justify-between ${PAYSLIP_MONO} text-[13px]`}>
+                        <span className={PAYSLIP_TEXT_2}>Net</span>
+                        <span className={`font-semibold ${PAYSLIP_TEXT_INK}`}>{fmtNum(periodNet)}</span>
+                      </div>
+                      {periodGross != null && (
+                        <div className={`flex justify-between ${PAYSLIP_MONO} text-xs ${PAYSLIP_TEXT_FAINT}`}>
+                          <span>Gross</span>
+                          <span>{fmtNum(periodGross)}</span>
+                        </div>
+                      )}
+                      {periodGross != null && periodNet != null && (
+                        <div className={`flex justify-between ${PAYSLIP_MONO} text-xs ${PAYSLIP_DANGER_TEXT}`}>
+                          <span>Deductions</span>
+                          <span>−{fmtNum(periodGross - periodNet)}</span>
+                        </div>
+                      )}
+                    </div>
                   );
                 })}
               </div>
