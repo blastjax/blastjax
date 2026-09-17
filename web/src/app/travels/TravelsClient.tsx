@@ -12,7 +12,6 @@ import {
   ADD_BUTTON_CLASSES,
   CLOSE_BUTTON_CLASSES,
   DASHED_EMPTY_CLASSES,
-  DELETE_BUTTON_CLASSES,
   ERROR_ALERT_CLASSES,
   ICON_BUTTON_CLASSES,
   INPUT_CLASSES,
@@ -194,9 +193,12 @@ const CHIP_DELETE_ICON_CLASSES =
  * double-click reveals edit/delete actions instead. */
 const DBLCLICK_WINDOW_MS = 220;
 
-/** Width of one day column in the trip calendar grid, in pixels — also the
- * step used by the calendar's arrow-key horizontal scroll. */
-const DAY_COLUMN_WIDTH = 260;
+/** Minimum width of one day column in the trip calendar grid, in pixels.
+ * Columns otherwise divide the available width evenly (`1fr` each) so a
+ * full week fits the screen without horizontal scrolling on typical
+ * viewports — this floor only kicks in, and horizontal scroll along with
+ * it, once the container gets too narrow to show all 7 legibly. */
+const DAY_COLUMN_MIN_WIDTH = 130;
 
 /** True for text that looks like a pasted URL, e.g. a Google Maps link. */
 function looksLikeUrl(s: string): boolean {
@@ -373,9 +375,7 @@ function buildTimelineEntries(detail: TravelTripDetail): TimelineEntry[] {
       locationUrl: mapsUrlFor(item.location_name, item.location_map_url),
       meta: spans ? [{ k: "Ends", v: formatDate(item.item_end_date) }] : null,
       notes: item.notes,
-      // Activities aren't part of the day-spanning alignment (only
-      // flights/transit/stays are) — "Ends" above covers a multi-day one.
-      spanEndDate: null,
+      spanEndDate: item.item_end_date,
     });
   }
 
@@ -407,8 +407,9 @@ function buildTimelineEntries(detail: TravelTripDetail): TimelineEntry[] {
 }
 
 /** How many day columns sit in one horizontal band before wrapping to the
- * next — keeps a long trip readable instead of one very wide scrolling strip. */
-const DAYS_PER_BAND = 5;
+ * next — a full calendar week, keeping a long trip readable instead of one
+ * very wide scrolling strip. */
+const DAYS_PER_BAND = 7;
 
 type PackedEntry = TimelineEntry & {
   startDay: number;
@@ -586,6 +587,9 @@ type EntryFormState = {
   flightNumber: string;
   number: string;
   activity: string;
+  /** Activity only — set only when it spans past its start date (an
+   * overnight trek, a multi-day tour). */
+  activityEndDate: string;
   name: string;
   locationName: string;
   checkoutDate: string;
@@ -615,6 +619,7 @@ const emptyEntryForm = (tripId: number, kind: EntryKind): EntryFormState => ({
   flightNumber: "",
   number: "",
   activity: "",
+  activityEndDate: "",
   name: "",
   locationName: "",
   checkoutDate: "",
@@ -727,9 +732,9 @@ export default function TravelsClient() {
     const el = calendarScrollRef.current;
     if (!el) return;
     if (e.key === "ArrowRight") {
-      el.scrollBy({ left: DAY_COLUMN_WIDTH + 16, behavior: "smooth" });
+      el.scrollBy({ left: el.clientWidth * 0.9, behavior: "smooth" });
     } else if (e.key === "ArrowLeft") {
-      el.scrollBy({ left: -(DAY_COLUMN_WIDTH + 16), behavior: "smooth" });
+      el.scrollBy({ left: -(el.clientWidth * 0.9), behavior: "smooth" });
     } else {
       return;
     }
@@ -968,6 +973,7 @@ export default function TravelsClient() {
         time1: formatTimeLabel(item.start_time) ?? "",
         time2: formatTimeLabel(item.end_time) ?? "",
         activity: item.activity,
+        activityEndDate: item.item_end_date ?? "",
         locationName: item.location_name ?? "",
         locationMapUrl: item.location_map_url ?? "",
         notes: item.notes ?? "",
@@ -1027,6 +1033,11 @@ export default function TravelsClient() {
     const arrivalDate = optOrUndefined(m.arrivalDate) ?? null;
     if (arrivalDate && arrivalDate < date) {
       setEntryError("Arrival date must be on or after the departure date.");
+      return;
+    }
+    const activityEndDate = optOrUndefined(m.activityEndDate) ?? null;
+    if (activityEndDate && activityEndDate < date) {
+      setEntryError("End date must be on or after the start date.");
       return;
     }
     let time1: string | undefined;
@@ -1101,6 +1112,7 @@ export default function TravelsClient() {
         if (!activity) throw new Error("Enter an activity.");
         const body = {
           item_date: date,
+          item_end_date: activityEndDate,
           start_time: time1 ?? null,
           end_time: time2 ?? null,
           activity,
@@ -1298,11 +1310,23 @@ export default function TravelsClient() {
 
   const renderTripView = (detail: TravelTripDetail) => {
     const { trip, cities } = detail;
-    const days = isoDateRange(trip.start_date, trip.end_date);
+    const tripDays = isoDateRange(trip.start_date, trip.end_date);
+    // Rows align to real calendar weeks (Sun–Sat) without padding the
+    // calendar with fake pre-trip days: the first row is just whatever's
+    // left of that week (as short as a single day if the trip starts on a
+    // Saturday), so it renders as real, full-width columns instead of a
+    // mostly-empty week with the trip's start squeezed into one slot — every
+    // row after that is a full Sunday-to-Saturday week since the short
+    // first row already lands them on a Sunday.
+    const startWeekday = parseDateOnlyLocal(trip.start_date)?.getDay() ?? 0;
+    const firstBandLength = Math.min(tripDays.length, 7 - startWeekday);
     const entries = buildTimelineEntries(detail);
-    const bands: { days: string[]; startDay: number; endDay: number }[] = [];
-    for (let i = 0; i < days.length; i += DAYS_PER_BAND) {
-      bands.push({ days: days.slice(i, i + DAYS_PER_BAND), startDay: i, endDay: Math.min(i + DAYS_PER_BAND, days.length) - 1 });
+    const bands: { days: string[]; startDay: number; endDay: number }[] = [
+      { days: tripDays.slice(0, firstBandLength), startDay: 0, endDay: firstBandLength - 1 },
+    ];
+    for (let i = firstBandLength; i < tripDays.length; i += DAYS_PER_BAND) {
+      const chunk = tripDays.slice(i, i + DAYS_PER_BAND);
+      bands.push({ days: chunk, startDay: i, endDay: i + chunk.length - 1 });
     }
 
     return (
@@ -1322,8 +1346,8 @@ export default function TravelsClient() {
           <div>
             <h2 className="font-serif text-3xl font-semibold text-ink">{trip.title}</h2>
             <div className="mt-1.5 text-sm text-ink-3">
-              {formatDate(trip.start_date)} – {formatDate(trip.end_date)} · {days.length} day
-              {days.length === 1 ? "" : "s"}
+              {formatDate(trip.start_date)} – {formatDate(trip.end_date)} · {tripDays.length} day
+              {tripDays.length === 1 ? "" : "s"}
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -1431,7 +1455,7 @@ export default function TravelsClient() {
               <div
                 key={`band-${band.startDay}`}
                 className="grid items-start gap-x-4 gap-y-4"
-                style={{ gridTemplateColumns: `repeat(${band.days.length}, ${DAY_COLUMN_WIDTH}px)` }}
+                style={{ gridTemplateColumns: `repeat(${band.days.length}, minmax(${DAY_COLUMN_MIN_WIDTH}px, 1fr))` }}
               >
                 {band.days.map((iso, i) => {
                   const { weekday, label } = dayHeaderParts(iso);
@@ -1452,18 +1476,14 @@ export default function TravelsClient() {
 
                 {packed.map((entry) => renderEntryCard(entry, bandIdx, band.startDay, placeRows))}
 
-                {band.days.map(
-                  (iso, i) =>
-                    !daysWithEntries.has(band.startDay + i) && (
-                      <p
-                        key={`empty-${iso}`}
-                        style={{ gridColumn: i + 1, gridRow: 2 + placeRows }}
-                        className="px-0.5 py-3 text-xs text-ink-4"
-                      >
-                        No items yet
-                      </p>
-                    ),
-                )}
+                {band.days.map((iso, i) => {
+                  if (daysWithEntries.has(band.startDay + i)) return null;
+                  return (
+                    <p key={`empty-${iso}`} style={{ gridColumn: i + 1, gridRow: 2 + placeRows }} className="px-0.5 py-3 text-xs text-ink-4">
+                      No items yet
+                    </p>
+                  );
+                })}
               </div>
             );
           })}
@@ -1570,7 +1590,7 @@ export default function TravelsClient() {
           </label>
           <div className="flex flex-wrap gap-2">
             <button type="submit" disabled={saving} className={PRIMARY_BUTTON_CLASSES}>
-              {saving ? "Saving…" : tripModal.editId != null ? "Update" : "Create"}
+              {saving ? "Saving…" : tripModal.editId != null ? "Save" : "Create"}
             </button>
             <button type="button" disabled={saving} className={SECONDARY_BUTTON_CLASSES} onClick={closeTripModal}>
               Cancel
@@ -1637,7 +1657,7 @@ export default function TravelsClient() {
           </div>
           <div className="flex flex-wrap gap-2">
             <button type="submit" disabled={saving} className={PRIMARY_BUTTON_CLASSES}>
-              {saving ? "Saving…" : placeModal.editId != null ? "Update" : "Add"}
+              {saving ? "Saving…" : placeModal.editId != null ? "Save" : "Add"}
             </button>
             <button type="button" disabled={saving} className={SECONDARY_BUTTON_CLASSES} onClick={closePlaceModal}>
               Cancel
@@ -1744,6 +1764,22 @@ export default function TravelsClient() {
                 disabled={saving}
                 placeholder="e.g. Colosseum tour"
                 onChange={(e) => setEntryModal((m) => ({ ...m, activity: e.target.value }))}
+              />
+            </label>
+          )}
+
+          {entryModal.kind === "activity" && (
+            <label className="flex flex-col gap-1 text-sm">
+              <span className={LABEL_CLASSES}>
+                End date <span className="font-normal text-ink-4">(if different — optional)</span>
+              </span>
+              <DatePickerField
+                value={entryModal.activityEndDate}
+                disabled={saving}
+                placeholder="Same day"
+                minDate={addDaysIso(activeDetail?.trip.start_date ?? "", entryModal.dayIndex)}
+                anchorDate={addDaysIso(activeDetail?.trip.start_date ?? "", entryModal.dayIndex)}
+                onChange={(iso) => setEntryModal((m) => ({ ...m, activityEndDate: iso }))}
               />
             </label>
           )}
@@ -1934,7 +1970,7 @@ export default function TravelsClient() {
 
           <div className="flex flex-wrap items-center gap-2">
             <button type="submit" disabled={saving} className={PRIMARY_BUTTON_CLASSES}>
-              {saving ? "Saving…" : entryModal.editId != null ? "Update" : "Add"}
+              {saving ? "Saving…" : entryModal.editId != null ? "Save" : "Add"}
             </button>
             <button type="button" disabled={saving} className={SECONDARY_BUTTON_CLASSES} onClick={closeEntryModal}>
               Cancel
@@ -1942,11 +1978,12 @@ export default function TravelsClient() {
             {entryModal.editId != null && entryModal.tripId != null && (
               <button
                 type="button"
+                aria-label="Delete"
                 disabled={saving}
-                className={`${DELETE_BUTTON_CLASSES} ml-auto`}
+                className={`${VIEW_DELETE_ICON_CLASSES} ml-auto`}
                 onClick={() => void onDeleteEntry(entryModal.tripId!, entryModal.kind, entryModal.editId!)}
               >
-                Delete
+                <TrashIcon className="size-5" />
               </button>
             )}
           </div>
@@ -1999,15 +2036,6 @@ export default function TravelsClient() {
             )}
 
             <div className="mt-8 flex items-center gap-3">
-              <button
-                type="button"
-                aria-label="Delete"
-                disabled={saving}
-                className={VIEW_DELETE_ICON_CLASSES}
-                onClick={() => void onDeleteEntry(activeDetail.trip.id, viewing.entry.kind, viewing.entry.id)}
-              >
-                <TrashIcon className="size-6" />
-              </button>
               <button
                 type="button"
                 aria-label="Edit"
