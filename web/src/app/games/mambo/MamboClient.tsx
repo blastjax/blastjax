@@ -5,8 +5,10 @@ import {
   ACTION_BUTTON_CLASSES,
   CARD_CLASSES,
   INPUT_CLASSES,
+  PAGE_CONTAINER_CLASSES,
   PRIMARY_BUTTON_CLASSES,
   SECONDARY_BUTTON_CLASSES,
+  SECTION_LABEL_CLASSES,
 } from "@/lib/ui";
 import {
   generateMamboPuzzle,
@@ -511,14 +513,15 @@ export default function MamboClient() {
     [],
   );
 
-  // The board sits on its own white panel in both themes, so its labels,
-  // cells and signs keep their light-mode colours throughout.
+  // The board panel follows the page theme (bg-surface/bg-surface-2), while
+  // these edge-label tints and the circle/square piece colours stay fixed so
+  // they read the same in both modes.
   const labelClass = (state: string) =>
     `flex items-center justify-center overflow-hidden text-[10px] font-medium ${
       state === "over"
-        ? "text-red-600"
+        ? "text-danger-text"
         : state === "done"
-          ? "text-emerald-600"
+          ? "text-success-text"
           : "text-ink-3"
     }`;
 
@@ -561,12 +564,12 @@ export default function MamboClient() {
         }.`
       : null;
 
-  const disabledSecondary = `${SECONDARY_BUTTON_CLASSES} disabled:cursor-not-allowed disabled:opacity-50`;
-  const disabledPrimary = `${PRIMARY_BUTTON_CLASSES} disabled:cursor-not-allowed`;
+  const disabledSecondary = SECONDARY_BUTTON_CLASSES;
+  const disabledPrimary = PRIMARY_BUTTON_CLASSES;
 
   const rootClasses = fullscreen
-    ? "fixed inset-0 z-[100] flex h-[100dvh] w-screen flex-col gap-3 overflow-hidden bg-[var(--background)] p-3"
-    : "box-border flex w-full min-w-0 flex-col gap-10 px-4 pb-28 pt-10 sm:px-6 lg:px-8";
+    ? "fixed inset-0 z-[100] flex h-[100dvh] w-screen flex-col gap-3 overflow-hidden bg-page p-3"
+    : PAGE_CONTAINER_CLASSES;
   const layoutClasses = fullscreen
     ? "flex min-h-0 flex-1 flex-nowrap items-start gap-4 overflow-hidden"
     : "flex flex-col items-stretch gap-6 lg:flex-row lg:flex-wrap lg:items-start";
@@ -577,8 +580,7 @@ export default function MamboClient() {
     ? "flex h-full min-h-0 flex-1 min-w-0 flex-col items-center justify-center gap-4 overflow-auto"
     : "flex w-full min-w-0 flex-col items-center gap-4 lg:flex-1";
 
-  const sectionHeading =
-    "text-xs font-semibold uppercase tracking-wider text-ink-4";
+  const sectionHeading = SECTION_LABEL_CLASSES;
 
   return (
     <div className={rootClasses}>
@@ -676,7 +678,7 @@ export default function MamboClient() {
               <p className="text-xs text-ink-3">{generateStatus}</p>
             )}
             {generateError && (
-              <p className="text-xs font-medium text-red-600 dark:text-red-400">
+              <p className="text-xs font-medium text-danger-text">
                 ⚠ {generateError}
               </p>
             )}
@@ -699,7 +701,7 @@ export default function MamboClient() {
             <p className="text-xs text-ink-3">
               {filled} / {rows * cols} filled
               {conflicts.messages.length > 0 && (
-                <span className="font-medium text-red-600 dark:text-red-400">
+                <span className="font-medium text-danger-text">
                   {" "}
                   · {conflicts.messages.length} rule break
                   {conflicts.messages.length === 1 ? "" : "s"}
@@ -707,7 +709,7 @@ export default function MamboClient() {
               )}
             </p>
             {conflicts.messages.slice(0, 3).map((m) => (
-              <p key={m} className="text-xs text-red-600 dark:text-red-400">
+              <p key={m} className="text-xs text-danger-text">
                 ⚠ {m}
               </p>
             ))}
@@ -745,7 +747,7 @@ export default function MamboClient() {
               <p className="text-xs text-ink-3">{solveStatus}</p>
             )}
             {solveError && (
-              <p className="text-xs font-medium text-red-600 dark:text-red-400">⚠ {solveError}</p>
+              <p className="text-xs font-medium text-danger-text">⚠ {solveError}</p>
             )}
 
             {steps && (
