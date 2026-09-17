@@ -5,8 +5,10 @@ import {
   ACTION_BUTTON_CLASSES,
   CARD_CLASSES,
   INPUT_CLASSES,
+  PAGE_CONTAINER_CLASSES,
   PRIMARY_BUTTON_CLASSES,
   SECONDARY_BUTTON_CLASSES,
+  SECTION_LABEL_CLASSES,
 } from "@/lib/ui";
 import {
   generateMosaicPuzzle,
@@ -617,8 +619,8 @@ export default function MosaicClient() {
   );
 
   const rootClasses = fullscreen
-    ? "fixed inset-0 z-[100] flex h-[100dvh] w-screen flex-col gap-3 overflow-hidden bg-[var(--background)] p-3"
-    : "box-border flex w-full min-w-0 flex-col gap-10 px-4 pb-28 pt-10 sm:px-6 lg:px-8";
+    ? "fixed inset-0 z-[100] flex h-[100dvh] w-screen flex-col gap-3 overflow-hidden bg-page p-3"
+    : PAGE_CONTAINER_CLASSES;
 
   const layoutClasses = fullscreen
     ? "flex min-h-0 flex-1 flex-nowrap items-start gap-4 overflow-hidden"
@@ -667,7 +669,7 @@ export default function MosaicClient() {
       <div className={layoutClasses}>
         <section className={panelClasses}>
           <div className="flex flex-col gap-3">
-            <h2 className="text-xs font-semibold uppercase tracking-wider text-ink-4">
+            <h2 className={SECTION_LABEL_CLASSES}>
               Board
             </h2>
             <div className="flex gap-2">
@@ -714,7 +716,7 @@ export default function MosaicClient() {
           </div>
 
           <div className="flex flex-col gap-3 border-t border-line pt-4">
-            <h2 className="text-xs font-semibold uppercase tracking-wider text-ink-4">
+            <h2 className={SECTION_LABEL_CLASSES}>
               Edit
             </h2>
             <div className="flex gap-2">
@@ -738,7 +740,7 @@ export default function MosaicClient() {
             </button>
             <p className="text-xs text-ink-3">{modeLabel}</p>
             {!painted && (
-              <p className="text-xs font-medium text-indigo-600 dark:text-indigo-400">
+              <p className="text-xs font-medium text-brand-text">
                 🖌 {blankCount} tile{blankCount === 1 ? "" : "s"} left to paint before you can
                 solve.
               </p>
@@ -746,7 +748,7 @@ export default function MosaicClient() {
           </div>
 
           <div className="flex flex-col gap-3 border-t border-line pt-4">
-            <h2 className="text-xs font-semibold uppercase tracking-wider text-ink-4">
+            <h2 className={SECTION_LABEL_CLASSES}>
               Puzzle code
             </h2>
             <label className="flex flex-col gap-1 text-xs text-ink-2">
@@ -772,7 +774,7 @@ export default function MosaicClient() {
               <p className="text-xs text-ink-3">{generateStatus}</p>
             )}
             {generateError && (
-              <p className="text-xs font-medium text-red-600 dark:text-red-400">
+              <p className="text-xs font-medium text-danger-text">
                 ⚠ {generateError}
               </p>
             )}
@@ -810,12 +812,12 @@ export default function MosaicClient() {
               </button>
             </div>
             {codeError && (
-              <p className="text-xs font-medium text-red-600 dark:text-red-400">⚠ {codeError}</p>
+              <p className="text-xs font-medium text-danger-text">⚠ {codeError}</p>
             )}
           </div>
 
           <div className="flex flex-col gap-3 border-t border-line pt-4">
-            <h2 className="text-xs font-semibold uppercase tracking-wider text-ink-4">
+            <h2 className={SECTION_LABEL_CLASSES}>
               Solve
             </h2>
             <button
@@ -847,21 +849,19 @@ export default function MosaicClient() {
               <p className="text-xs text-ink-3">{solveStatusText}</p>
             )}
             {nextMoveHint && (
-              <p className="text-xs font-medium text-indigo-600 dark:text-indigo-400">
+              <p className="text-xs font-medium text-brand-text">
                 {nextMoveHint}
               </p>
             )}
             {solveError && (
-              <p className="text-xs font-medium text-red-600 dark:text-red-400">
+              <p className="text-xs font-medium text-danger-text">
                 ⚠ {solveError}
               </p>
             )}
             {targetCheck && (
               <p
                 className={`text-xs font-medium ${
-                  targetCheck.passed
-                    ? "text-emerald-600 dark:text-emerald-400"
-                    : "text-amber-600 dark:text-amber-400"
+                  targetCheck.passed ? "text-success-text" : "text-warning-text"
                 }`}
               >
                 {targetCheck.text}
@@ -1008,7 +1008,7 @@ export default function MosaicClient() {
                     active
                       ? "ring-2 ring-zinc-900 dark:ring-zinc-100"
                       : suggested
-                        ? "ring-2 ring-emerald-600 ring-offset-2 ring-offset-white dark:ring-offset-zinc-950"
+                        ? "ring-2 ring-success ring-offset-2 ring-offset-page"
                         : "dark:ring-1 dark:ring-white/10"
                   }`}
                   style={{ background: color }}

@@ -7,6 +7,7 @@ import {
   CARD_CLASSES,
   PAGE_CONTAINER_CLASSES,
   PRIMARY_BUTTON_CLASSES,
+  SECTION_LABEL_CLASSES,
 } from "@/lib/ui";
 import {
   breakdownSet,
@@ -24,15 +25,15 @@ import {
 import { CardTile, SetSymbol } from "./shapes";
 
 const EMPTY_BUILDER: Card = { symbol: 0, color: 0, texture: 0, count: 0 };
-const sectionHeading = "text-xs font-semibold uppercase tracking-wider text-ink-4";
+const sectionHeading = SECTION_LABEL_CLASSES;
 
-/** Tone-classed banner box, matching ui.ts's `ERROR_ALERT_CLASSES` pattern
- * (border + tinted background + tinted text, no shadow) for the tones it
- * doesn't cover. */
+/** Tone → semantic token classes for the banner boxes, the same
+ * border/background/text triad `alertClasses()` in ui.ts builds, just
+ * without its fixed padding so each banner can size itself. */
 const ALERT_TONE_CLASSES: Record<"good" | "warn" | "bad", string> = {
-  good: "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200",
-  warn: "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200",
-  bad: "border-red-200 bg-red-50 text-red-800 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200",
+  good: "border-success-line bg-success-soft text-success-text",
+  warn: "border-warning-line bg-warning-soft text-warning-text",
+  bad: "border-danger-line bg-danger-soft text-danger-text",
 };
 
 type Relation = "same" | "different" | "broken";
@@ -158,7 +159,7 @@ export default function SetsClient() {
                 Add to board
               </button>
             </div>
-            {addError && <p className="text-xs text-red-600 dark:text-red-400">{addError}</p>}
+            {addError && <p className="text-xs text-danger-text">{addError}</p>}
           </div>
 
           <div className="flex flex-col gap-2 border-t border-line pt-4">
@@ -211,7 +212,7 @@ export default function SetsClient() {
                   onClick={() => removeCard(idx)}
                   aria-label={`Remove card ${idx + 1}`}
                   title="Remove"
-                  className="absolute -right-2 -top-2 flex h-5 w-5 items-center justify-center rounded-full border border-line-strong bg-surface text-[10px] leading-none text-ink-2 shadow transition-colors duration-150 hover:bg-red-50 hover:text-red-600 dark:bg-zinc-800 dark:shadow-none dark:ring-1 dark:ring-white/10"
+                  className="absolute -right-2 -top-2 flex h-5 w-5 items-center justify-center rounded-full border border-line-strong bg-surface text-[10px] leading-none text-ink-2 shadow transition-colors duration-150 hover:bg-danger-soft hover:text-danger-text dark:shadow-none dark:ring-1 dark:ring-white/10"
                 >
                   ×
                 </button>
@@ -341,9 +342,7 @@ function OptionTile({
 function FeatureRow({ label, relation }: { label: string; relation: Relation }) {
   const text = relation === "broken" ? "mismatched" : relation;
   const tone =
-    relation === "broken"
-      ? "text-red-600 dark:text-red-400"
-      : "text-emerald-700 dark:text-emerald-400";
+    relation === "broken" ? "text-danger-text" : "text-success-text";
   return (
     <p className="text-sm text-ink-2">
       {label}: <span className={`font-semibold ${tone}`}>{text}</span>
