@@ -347,13 +347,13 @@ export default function BloodPressureClient() {
               {Number.isFinite(summary.avgSpo2) ? `${fmtNum(summary.avgSpo2)}%` : "—"}
             </p>
           </div>
-          <div className="rounded-lg border border-emerald-200 bg-emerald-50/80 p-4 dark:border-emerald-900/50 dark:bg-emerald-950/30">
-            <p className="text-xs font-medium uppercase text-emerald-800 dark:text-emerald-200">
+          <div className="rounded-xl border border-success-line bg-success-soft p-5 shadow-xs sm:p-6">
+            <p className="text-xs font-medium uppercase text-success-text">
               Healthy
             </p>
-            <p className="mt-1 text-2xl font-semibold tabular-nums text-emerald-900 dark:text-emerald-100">
+            <p className="mt-1 text-2xl font-semibold tabular-nums text-success-text">
               {fmtNum(summary.healthy)}
-              <span className="ml-1 text-sm font-normal text-emerald-700 dark:text-emerald-300">
+              <span className="ml-1 text-sm font-normal text-success-text/70">
                 / {fmtNum(summary.count)}
               </span>
             </p>
@@ -522,9 +522,7 @@ export default function BloodPressureClient() {
                     {healthy != null && (
                       <span
                         className={`text-sm font-semibold ${
-                          healthy
-                            ? "text-emerald-600 dark:text-emerald-400"
-                            : "text-red-600 dark:text-red-400"
+                          healthy ? "text-success-text" : "text-danger-text"
                         }`}
                       >
                         {healthy ? "Healthy" : "Bad"}

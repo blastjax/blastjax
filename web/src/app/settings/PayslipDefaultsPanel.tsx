@@ -120,10 +120,10 @@ export function PayslipDefaultsPanel() {
         half.
       </p>
 
-      <fieldset className="mt-8 rounded-lg border border-line bg-zinc-50/80 px-4 py-4 dark:bg-zinc-900/40">
+      <fieldset className="mt-8 rounded-lg border border-line bg-surface-2/60 px-4 py-4">
         <legend className="px-1 text-sm font-medium text-ink">Company</legend>
         {companiesError ? (
-          <div className="mt-2 text-sm text-red-700 dark:text-red-400">{companiesError}</div>
+          <div className="mt-2 text-sm text-danger-text">{companiesError}</div>
         ) : !companiesLoaded ? (
           <p className={LOADING_TEXT_CLASSES}>Loading companies…</p>
         ) : companies.length === 0 ? (
@@ -147,7 +147,7 @@ export function PayslipDefaultsPanel() {
 
       {company && (
         <>
-          <fieldset className="mt-8 rounded-lg border border-line bg-zinc-50/80 px-4 py-4 dark:bg-zinc-900/40">
+          <fieldset className="mt-8 rounded-lg border border-line bg-surface-2/60 px-4 py-4">
             <legend className="px-1 text-sm font-medium text-ink">
               Edit defaults for
             </legend>
@@ -241,12 +241,12 @@ export function PayslipDefaultsPanel() {
               Reload saved
             </button>
             {saveMsg && (
-              <span className="text-sm text-emerald-700 dark:text-emerald-400">
+              <span className="text-sm text-success-text">
                 {saveMsg}
               </span>
             )}
             {errorMsg && (
-              <span className="text-sm text-red-700 dark:text-red-400">
+              <span className="text-sm text-danger-text">
                 {errorMsg}
               </span>
             )}

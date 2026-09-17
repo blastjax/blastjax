@@ -292,13 +292,13 @@ export default function HousePaymentsClient() {
       {!loading && (
         <section>
           <div className={`${alertClasses("success")} !p-4`}>
-            <p className="text-xs font-medium uppercase text-emerald-800 dark:text-emerald-200">
+            <p className="text-xs font-medium uppercase text-success-text">
               Total amount paid
             </p>
-            <p className="mt-1 text-3xl font-semibold tabular-nums text-emerald-900 dark:text-emerald-100">
+            <p className="mt-1 text-3xl font-semibold tabular-nums text-success-text">
               {fmtMoney(summary.sum_total_paid)}
             </p>
-            <p className="mt-1 text-xs text-emerald-800/80 dark:text-emerald-200/80">
+            <p className="mt-1 text-xs text-success-text/80">
               Across {fmtCount(summary.plan_count)} plan
               {summary.plan_count === 1 ? "" : "s"} ·{" "}
               {fmtCount(summary.total_entries)} payment
@@ -408,7 +408,7 @@ export default function HousePaymentsClient() {
                     void openEntries(r.id);
                   }
                 }}
-                className="min-w-0 cursor-pointer rounded-lg border border-line bg-surface p-3 transition-colors duration-150 hover:ring-2 hover:ring-indigo-300/60 sm:p-4 dark:hover:ring-indigo-700/50"
+                className="min-w-0 cursor-pointer rounded-lg border border-line bg-surface p-3 transition-colors duration-150 hover:ring-2 hover:ring-brand/30 sm:p-4"
               >
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
                   <div className="min-w-0">
@@ -597,7 +597,7 @@ export default function HousePaymentsClient() {
                                 key={entry.id}
                                 className={`${TABLE_ROW_CLASSES} ${
                                   isEditing
-                                    ? "bg-indigo-50/80 hover:bg-indigo-50/80 dark:bg-indigo-950/30 dark:hover:bg-indigo-950/30"
+                                    ? "bg-brand-soft hover:bg-brand-soft"
                                     : ""
                                 }`}
                               >

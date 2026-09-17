@@ -67,7 +67,7 @@ function AccessControls({
   }
 
   return (
-    <div className="mt-3 rounded-lg border border-line bg-zinc-50/60 px-3 py-3 dark:bg-zinc-900/30">
+    <div className="mt-3 rounded-lg border border-line bg-surface-2/50 px-3 py-3">
       <label className="flex items-center gap-2 text-xs font-medium text-ink">
         <input
           type="checkbox"
@@ -267,7 +267,7 @@ export function UsersSettingsPanel() {
         ) : users.length === 0 ? (
           <div className={DASHED_EMPTY_CLASSES}>No users yet.</div>
         ) : (
-          <ul className="divide-y divide-zinc-200 rounded-lg border border-line dark:divide-zinc-900">
+          <ul className="divide-y divide-line rounded-lg border border-line">
             {users.map((user) => (
               <li key={user.id} className="p-4">
                 {editingId === user.id ? (
@@ -374,7 +374,7 @@ export function UsersSettingsPanel() {
         )}
       </div>
 
-      <fieldset className="mt-8 rounded-lg border border-line bg-zinc-50/80 px-4 py-4 dark:bg-zinc-900/40">
+      <fieldset className="mt-8 rounded-lg border border-line bg-surface-2/60 px-4 py-4">
         <legend className="px-1 text-sm font-medium text-ink">
           Verify a password
         </legend>
@@ -425,19 +425,19 @@ export function UsersSettingsPanel() {
             {verifying ? "Checking…" : "Check password"}
           </button>
           {verifyResult === "valid" && (
-            <span className="text-sm font-medium text-emerald-700 dark:text-emerald-400">
+            <span className="text-sm font-medium text-success-text">
               ✓ Matches the stored password.
             </span>
           )}
           {verifyResult === "invalid" && (
-            <span className="text-sm font-medium text-red-700 dark:text-red-400">
+            <span className="text-sm font-medium text-danger-text">
               ✗ Doesn&apos;t match.
             </span>
           )}
         </div>
       </fieldset>
 
-      <fieldset className="mt-8 rounded-lg border border-line bg-zinc-50/80 px-4 py-4 dark:bg-zinc-900/40">
+      <fieldset className="mt-8 rounded-lg border border-line bg-surface-2/60 px-4 py-4">
         <legend className="px-1 text-sm font-medium text-ink">
           Add a user
         </legend>
@@ -490,7 +490,7 @@ export function UsersSettingsPanel() {
             {adding ? "Adding…" : "Add user"}
           </button>
           {infoMsg && (
-            <span className="text-sm text-emerald-700 dark:text-emerald-400">{infoMsg}</span>
+            <span className="text-sm text-success-text">{infoMsg}</span>
           )}
         </div>
       </fieldset>

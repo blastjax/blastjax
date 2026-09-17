@@ -297,7 +297,7 @@ export function CompaniesSettingsPanel() {
             {reorderError && (
               <div className={`mb-3 ${ERROR_ALERT_CLASSES}`} role="alert">{reorderError}</div>
             )}
-            <ul className="divide-y divide-zinc-200 rounded-lg border border-line dark:divide-zinc-900">
+            <ul className="divide-y divide-line rounded-lg border border-line">
               {companies.map((company) => (
                 <li
                   key={company.id}
@@ -377,7 +377,7 @@ export function CompaniesSettingsPanel() {
         )}
       </div>
 
-      <fieldset className="mt-8 rounded-lg border border-line bg-zinc-50/80 px-4 py-4 dark:bg-zinc-900/40">
+      <fieldset className="mt-8 rounded-lg border border-line bg-surface-2/60 px-4 py-4">
         <legend className="px-1 text-sm font-medium text-ink">
           Add a company
         </legend>
@@ -408,7 +408,7 @@ export function CompaniesSettingsPanel() {
             {adding ? "Adding…" : "Add company"}
           </button>
           {infoMsg && (
-            <span className="text-sm text-emerald-700 dark:text-emerald-400">{infoMsg}</span>
+            <span className="text-sm text-success-text">{infoMsg}</span>
           )}
         </div>
       </fieldset>

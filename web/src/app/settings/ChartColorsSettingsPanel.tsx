@@ -90,7 +90,7 @@ export function ChartColorsSettingsPanel() {
         {CHART_SERIES_COLOR_KEYS.map((k) => (
           <label
             key={k}
-            className="flex min-w-0 items-center justify-between gap-4 rounded-lg border border-line bg-zinc-50/80 px-3 py-2.5 dark:bg-zinc-900/40"
+            className="flex min-w-0 items-center justify-between gap-4 rounded-lg border border-line bg-surface-2/60 px-3 py-2.5"
           >
             <span className="text-sm text-ink-2">
               {CHART_SERIES_LABEL[k]}
@@ -168,7 +168,7 @@ export function ChartColorsSettingsPanel() {
           Reload saved
         </button>
         {paletteSaveMsg && (
-          <span className="text-sm text-emerald-700 dark:text-emerald-400">
+          <span className="text-sm text-success-text">
             {paletteSaveMsg}
           </span>
         )}

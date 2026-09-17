@@ -253,7 +253,7 @@ export default function MonthlyExpensesClient() {
                           openEditModal(exp);
                         }
                       }}
-                      className="flex cursor-pointer items-start justify-between gap-2 rounded-lg border border-line p-3 transition-colors duration-150 hover:ring-2 hover:ring-indigo-300/60 dark:hover:ring-indigo-700/50"
+                      className="flex cursor-pointer items-start justify-between gap-2 rounded-lg border border-line p-3 transition-colors duration-150 hover:ring-2 hover:ring-brand/30"
                     >
                       <div className="min-w-0">
                         <p className="truncate text-sm font-medium text-ink">
@@ -264,7 +264,7 @@ export default function MonthlyExpensesClient() {
                             {exp.description}
                           </p>
                         )}
-                        <p className="mt-0.5 text-xs text-indigo-600 dark:text-indigo-400">
+                        <p className="mt-0.5 text-xs text-brand-text">
                           {exp.is_recurring
                             ? "Recurring every month"
                             : formatMonthYearShort(exp.period_year, exp.period_month)}

@@ -92,7 +92,7 @@ export function CalendarMonth({
           const inRangeBg = state === "range-middle" || state === "range-start" || state === "range-end";
           const bgClasses = inRangeBg
             ? [
-                "bg-indigo-50 dark:bg-indigo-950/40",
+                "bg-brand-soft",
                 (state === "range-start" || col === 0) && "rounded-l-full",
                 (state === "range-end" || col === 6) && "rounded-r-full",
               ]
@@ -110,10 +110,10 @@ export function CalendarMonth({
                   disabled
                     ? "cursor-not-allowed text-ink-4/50"
                     : isCap
-                      ? "bg-indigo-600 font-semibold text-white"
+                      ? "bg-brand font-semibold text-white"
                       : state === "today"
-                        ? "font-semibold text-indigo-600 ring-1 ring-inset ring-indigo-400 dark:text-indigo-400"
-                        : "text-ink-2 hover:bg-zinc-200/60 dark:hover:bg-zinc-700/60",
+                        ? "font-semibold text-brand-text ring-1 ring-inset ring-brand/40"
+                        : "text-ink-2 hover:bg-surface-2",
                 ].join(" ")}
               >
                 {day}

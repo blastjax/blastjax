@@ -230,7 +230,7 @@ function formatMonthKeyButtonLabel(key: string): string {
 }
 
 const pickerBtnClass = `w-full min-w-[10rem] text-left ${ACTION_BUTTON_CLASSES}`;
-const pickerYearNavBtnClass = `${CHART_ZOOM_BUTTON_CLASSES} focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-indigo-500`;
+const pickerYearNavBtnClass = `${CHART_ZOOM_BUTTON_CLASSES} focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-brand`;
 
 type LineRangePickerAlign = "left" | "right";
 
@@ -714,7 +714,7 @@ export default function SalaryStatsClient({ company = "Sophos" }: { company?: st
               />
             )}
 
-            <div className="mt-6 rounded-lg border border-line bg-zinc-50/90 p-4 dark:bg-zinc-900/50">
+            <div className="mt-6 rounded-lg border border-line bg-surface-2 p-4">
               <h3 className="text-[11px] font-semibold uppercase tracking-wide text-ink-3">
                 Deductions ({pieMode === "year" ? `year ${pieYear}` : "selected month"})
               </h3>
@@ -722,7 +722,7 @@ export default function SalaryStatsClient({ company = "Sophos" }: { company?: st
                 {DEDUCTION_KEYS.map((k) => (
                   <div
                     key={k}
-                    className="flex items-center justify-between gap-4 rounded-md border border-transparent px-0.5 py-1 sm:border-zinc-200/80 sm:px-2 sm:py-1.5 dark:sm:border-zinc-700/80"
+                    className="flex items-center justify-between gap-4 rounded-md border border-transparent px-0.5 py-1 sm:border-line sm:px-2 sm:py-1.5"
                   >
                     <span className="text-ink-2">
                       {CHART_SERIES_LABEL[k]}
@@ -732,7 +732,7 @@ export default function SalaryStatsClient({ company = "Sophos" }: { company?: st
                     </span>
                   </div>
                 ))}
-                <div className="col-span-full mt-2 flex flex-col gap-1 border-t border-line pt-3 dark:border-zinc-600 sm:flex-row sm:items-center sm:justify-between">
+                <div className="col-span-full mt-2 flex flex-col gap-1 border-t border-line pt-3 sm:flex-row sm:items-center sm:justify-between">
                   <span className="text-xs font-semibold text-ink-2">
                     Deductions total
                   </span>
@@ -828,7 +828,7 @@ export default function SalaryStatsClient({ company = "Sophos" }: { company?: st
                     data={linePoints}
                     margin={{ top: 8, right: 20, bottom: 8, left: 8 }}
                   >
-                    <CartesianGrid strokeDasharray="3 3" className="stroke-zinc-200 dark:stroke-zinc-700" />
+                    <CartesianGrid strokeDasharray="3 3" className="stroke-line-strong" />
                     <XAxis
                       dataKey="label"
                       tick={{ fontSize: 11, fill: axisTickFill }}
@@ -892,7 +892,7 @@ export default function SalaryStatsClient({ company = "Sophos" }: { company?: st
             </div>
 
             {!lineStart || !lineEnd || compareMonthKeys(lineStart, lineEnd) > 0 ? null : (
-              <div className="mt-4 flex flex-col gap-1 rounded-lg border border-line bg-zinc-50/90 px-4 py-3 dark:bg-zinc-900/50 sm:flex-row sm:items-center sm:justify-between">
+              <div className="mt-4 flex flex-col gap-1 rounded-lg border border-line bg-surface-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
                 <span className="text-xs font-semibold uppercase tracking-wide text-ink-3">
                   Deductions total (sum over chart range)
                 </span>

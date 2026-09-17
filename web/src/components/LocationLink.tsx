@@ -14,7 +14,7 @@ export function LocationLink({ name, url }: { name: string | null; url: string |
       target="_blank"
       rel="noopener noreferrer"
       title="Open in Google Maps"
-      className="inline-flex items-center gap-1 text-indigo-600 underline-offset-2 hover:underline dark:text-indigo-400"
+      className="inline-flex items-center gap-1 text-brand-text underline-offset-2 hover:underline"
     >
       <span aria-hidden>📍</span>
       {name}

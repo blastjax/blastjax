@@ -310,16 +310,12 @@ const DayGridCell = memo(function DayGridCell({
 }: DayGridCellProps) {
   const { day, iso, periodHalf, isPast, isToday, dailyBudget } = cell;
   const draggable = dailyBudget != null;
-  /** Orange for the 1st-half pay period, blue for the 2nd — always visible so the
-   *  boundary between periods reads at a glance, even on past/today cells. */
+  /** Warning (amber) for the 1st-half pay period, info (blue) for the 2nd —
+   *  always visible so the boundary between periods reads at a glance, even
+   *  on past/today cells. */
   const halfBorderClasses =
-    periodHalf === 1
-      ? "border-orange-400 dark:border-orange-600"
-      : "border-blue-400 dark:border-blue-600";
-  const halfBgClasses =
-    periodHalf === 1
-      ? "bg-orange-50/50 dark:bg-orange-950/20"
-      : "bg-blue-50/50 dark:bg-blue-950/20";
+    periodHalf === 1 ? "border-warning-line" : "border-info-line";
+  const halfBgClasses = periodHalf === 1 ? "bg-warning-soft" : "bg-info-soft";
   return (
     <div
       role={draggable ? "button" : undefined}
@@ -345,18 +341,18 @@ const DayGridCell = memo(function DayGridCell({
         draggable ? "cursor-grab active:cursor-grabbing" : ""
       } ${
         isDragOverTarget
-          ? "border-indigo-500 bg-indigo-100 ring-2 ring-indigo-500/60 dark:border-indigo-400 dark:bg-indigo-950/70"
+          ? "border-brand bg-brand-soft-hover ring-2 ring-brand/60"
           : isToday
-            ? `${halfBorderClasses} bg-indigo-50 ring-2 ring-indigo-500/50 dark:bg-indigo-950/30`
+            ? `${halfBorderClasses} bg-brand-soft ring-2 ring-brand/50`
             : isPast
-              ? `border-dashed ${halfBorderClasses} bg-zinc-50/60 opacity-60 dark:bg-zinc-900/30`
+              ? `border-dashed ${halfBorderClasses} bg-surface-2 opacity-60`
               : `${halfBorderClasses} ${halfBgClasses}`
       } ${isDragSource ? "opacity-40" : ""}`}
     >
       <span
         className={`text-sm font-semibold tabular-nums ${
           isToday
-            ? "text-indigo-900 dark:text-indigo-100"
+            ? "text-brand-text"
             : isPast
               ? "text-ink-4"
               : "text-ink"
@@ -368,7 +364,7 @@ const DayGridCell = memo(function DayGridCell({
         title={dailyBudget != null ? fmtMoney(dailyBudget) : undefined}
         className={`w-full min-w-0 truncate text-xs tabular-nums leading-tight ${
           isToday
-            ? "font-semibold text-indigo-700 dark:text-indigo-300"
+            ? "font-semibold text-brand-text"
             : isPast
               ? "text-ink-4"
               : "text-ink-2"
@@ -1433,20 +1429,20 @@ export default function CalendarClient() {
                 return (
                   <div
                     key={half}
-                    className="group relative rounded-lg border border-emerald-200 bg-emerald-50/60 p-4 dark:border-emerald-800 dark:bg-emerald-950/30"
+                    className="group relative rounded-lg border border-success-line bg-success-soft p-4"
                   >
                     <button
                       type="button"
                       onClick={() => openExpenseModal(half)}
                       className="block w-full rounded-md text-left transition-opacity duration-150 hover:opacity-90"
                     >
-                      <p className="pr-16 text-[11px] font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-400">
+                      <p className="pr-16 text-[11px] font-semibold uppercase tracking-wide text-success-text">
                         {rangeLabel}
                       </p>
-                      <p className="mt-2 text-sm font-medium tabular-nums text-emerald-700 dark:text-emerald-300">
+                      <p className="mt-2 text-sm font-medium tabular-nums text-success-text">
                         {payslip?.total != null ? fmtMoney(payslip.total) : "–"} net pay
                       </p>
-                      <p className="text-2xl font-bold tabular-nums text-emerald-800 dark:text-emerald-200">
+                      <p className="text-2xl font-bold tabular-nums text-success-text">
                         {netAfter != null ? fmtMoney(netAfter) : "–"}
                       </p>
                       <p className="mt-1 text-xs text-ink-3">
@@ -1455,16 +1451,16 @@ export default function CalendarClient() {
                           : "No payslip recorded yet"}
                       </p>
                       {total > 0 && (
-                        <p className="mt-1 text-xs text-red-600 dark:text-red-400">
+                        <p className="mt-1 text-xs text-danger-text">
                           −{fmtMoney(total)} fixed expenses
                         </p>
                       )}
                       {monthlyTotal > 0 && (
-                        <p className="mt-1 text-xs text-red-600 dark:text-red-400">
+                        <p className="mt-1 text-xs text-danger-text">
                           −{fmtMoney(monthlyTotal)} monthly expenses
                         </p>
                       )}
-                      <p className="mt-2 text-[11px] font-medium text-emerald-700 group-hover:underline dark:text-emerald-400">
+                      <p className="mt-2 text-[11px] font-medium text-success-text group-hover:underline">
                         View expenses →
                       </p>
                     </button>
@@ -1490,7 +1486,7 @@ export default function CalendarClient() {
               What&apos;s left across each pay period&apos;s still-active days (today onward).
             </p>
             <div className="mt-5 grid gap-4 sm:grid-cols-2">
-              <div className="rounded-lg border border-line bg-zinc-50/90 p-4 dark:bg-zinc-900/50">
+              <div className="rounded-lg border border-line bg-surface-2 p-4">
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-ink-3">
                   {formatDayRangeLabel(periodInfo.p1Start, periodInfo.p1End)}
                 </p>
@@ -1499,7 +1495,7 @@ export default function CalendarClient() {
                 </p>
                 <p className="mt-1 text-xs text-ink-3">remaining</p>
               </div>
-              <div className="rounded-lg border border-line bg-zinc-50/90 p-4 dark:bg-zinc-900/50">
+              <div className="rounded-lg border border-line bg-surface-2 p-4">
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-ink-3">
                   {formatDayRangeLabel(periodInfo.p2Start, periodInfo.p2End)}
                 </p>
@@ -1520,7 +1516,7 @@ export default function CalendarClient() {
               days.
             </p>
             <div className="mt-5 grid gap-4 sm:grid-cols-2">
-              <div className="rounded-lg border border-line bg-zinc-50/90 p-4 dark:bg-zinc-900/50">
+              <div className="rounded-lg border border-line bg-surface-2 p-4">
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-ink-3">
                   {formatDayRangeLabel(periodInfo.p1Start, periodInfo.p1End)} ({periodInfo.firstHalfDays}{" "}
                   days)
@@ -1530,7 +1526,7 @@ export default function CalendarClient() {
                 </p>
                 <p className="mt-1 text-xs text-ink-3">per day</p>
               </div>
-              <div className="rounded-lg border border-line bg-zinc-50/90 p-4 dark:bg-zinc-900/50">
+              <div className="rounded-lg border border-line bg-surface-2 p-4">
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-ink-3">
                   {formatDayRangeLabel(periodInfo.p2Start, periodInfo.p2End)} ({periodInfo.secondHalfDays}{" "}
                   days)
@@ -1682,7 +1678,7 @@ export default function CalendarClient() {
               <p className="text-[11px] uppercase text-ink-3">
                 Fixed expenses
               </p>
-              <p className="mt-1 font-semibold tabular-nums text-red-600 dark:text-red-400">
+              <p className="mt-1 font-semibold tabular-nums text-danger-text">
                 −{fmtMoney(modalExpensesTotal)}
               </p>
             </div>
@@ -1690,13 +1686,13 @@ export default function CalendarClient() {
               <p className="text-[11px] uppercase text-ink-3">
                 Monthly expenses
               </p>
-              <p className="mt-1 font-semibold tabular-nums text-red-600 dark:text-red-400">
+              <p className="mt-1 font-semibold tabular-nums text-danger-text">
                 −{fmtMoney(modalMonthlyExpensesTotal)}
               </p>
             </div>
             <div>
               <p className="text-[11px] uppercase text-ink-3">Left</p>
-              <p className="mt-1 font-semibold tabular-nums text-emerald-700 dark:text-emerald-300">
+              <p className="mt-1 font-semibold tabular-nums text-success-text">
                 {modalNetAfter != null ? fmtMoney(modalNetAfter) : "–"}
               </p>
             </div>
@@ -1779,7 +1775,7 @@ export default function CalendarClient() {
             </h3>
             <Link
               href="/monthly-expenses"
-              className="text-xs font-medium text-indigo-600 hover:underline dark:text-indigo-400"
+              className="text-xs font-medium text-brand-text hover:underline"
             >
               Manage monthly expenses →
             </Link>
