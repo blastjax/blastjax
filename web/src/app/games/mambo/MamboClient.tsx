@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ACTION_BUTTON_CLASSES,
+  alertClasses,
   CARD_CLASSES,
   INPUT_CLASSES,
   PAGE_CONTAINER_CLASSES,
@@ -793,7 +794,7 @@ export default function MamboClient() {
                   Step {stepIndex} / {steps.length}
                 </p>
                 {nextStep ? (
-                  <div className="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs text-indigo-900 dark:border-indigo-900 dark:bg-indigo-950/40 dark:text-indigo-100">
+                  <div className="rounded-lg border border-info-line bg-info-soft px-3 py-2 text-xs text-info-text">
                     <p className="font-semibold">
                       Next · {techniqueLabel(nextStep.technique)} → r{nextStep.r + 1}c
                       {nextStep.c + 1} is a {SYMBOL_LABELS[nextStep.value]}
@@ -801,7 +802,7 @@ export default function MamboClient() {
                     <p className="mt-1">{nextStep.detail}</p>
                   </div>
                 ) : (
-                  <p className="text-xs font-medium text-emerald-600 dark:text-emerald-400">
+                  <p className="text-xs font-medium text-success-text">
                     Every forced cell has been filled.
                   </p>
                 )}
@@ -844,7 +845,7 @@ export default function MamboClient() {
               </button>
             </div>
             {codeError && (
-              <p className="text-xs font-medium text-red-600 dark:text-red-400">⚠ {codeError}</p>
+              <p className="text-xs font-medium text-danger-text">⚠ {codeError}</p>
             )}
           </div>
 
@@ -867,18 +868,16 @@ export default function MamboClient() {
 
         <section className={boardSectionClasses}>
           {fullBoardWarning && (
-            <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+            <div className={`${alertClasses("warning")} font-medium`}>
               {fullBoardWarning}
             </div>
           )}
 
-          {/* The board itself stays a white "paper" panel in both themes (see
-              SymbolMark / labelClass) so its labels and pieces keep their
-              light-mode colours — but it sits inside a dark-aware bezel so it
-              reads as an intentional inset on AMOLED instead of an unstyled
-              white rectangle floating on black. */}
+          {/* The board panel follows the theme (bg-surface-2 / bg-surface),
+              while the circle/square piece colours (see SymbolMark) stay
+              fixed so they always read the same in both modes. */}
           <div className="max-w-full rounded-lg border border-line bg-surface-2 p-2">
-            <div className="flex max-w-full flex-col items-start overflow-x-auto rounded-md bg-surface p-3 ring-1 ring-black/10">
+            <div className="flex max-w-full flex-col items-start overflow-x-auto rounded-md bg-surface p-3 ring-1 ring-line">
               {colLabels}
               <div className="flex">
                 {rowLabels}
@@ -911,15 +910,15 @@ export default function MamboClient() {
                           style={{ gridRow: 2 * r + 1, gridColumn: 2 * c + 1 }}
                           className={`flex items-center justify-center rounded-md border transition-colors duration-150 ${
                             isClue
-                              ? "border-zinc-400 bg-surface-2"
+                              ? "border-ink-4 bg-surface-2"
                               : "border-line-strong bg-surface hover:bg-surface-2"
                           } ${
-                            bad ? "!border-red-500 bg-red-50 ring-2 ring-inset ring-red-500" : ""
+                            bad ? "!border-danger bg-danger-soft ring-2 ring-inset ring-danger" : ""
                           } ${
                             isNext
-                              ? "!border-emerald-500 ring-2 ring-inset ring-emerald-500"
+                              ? "!border-success ring-2 ring-inset ring-success"
                               : isLast
-                                ? "!border-indigo-400 ring-2 ring-inset ring-indigo-400"
+                                ? "!border-brand ring-2 ring-inset ring-brand"
                                 : ""
                           }`}
                         >
@@ -1006,9 +1005,9 @@ function SignSlot({
   const fontSize = Math.max(8, Math.round(gapPx * 0.95));
   const classes = `flex items-center justify-center leading-none ${
     bad
-      ? "font-bold text-red-600"
+      ? "font-bold text-danger-text"
       : sign === SIGN_NONE
-        ? "text-zinc-300"
+        ? "text-ink-4"
         : "font-bold text-ink"
   }`;
 
@@ -1019,7 +1018,7 @@ function SignSlot({
       aria-label={label}
       title="Click to cycle: none → = → ✕"
       style={{ ...style, fontSize }}
-      className={`${classes} rounded hover:bg-indigo-100`}
+      className={`${classes} rounded hover:bg-brand-soft`}
     >
       {glyph || "·"}
     </button>

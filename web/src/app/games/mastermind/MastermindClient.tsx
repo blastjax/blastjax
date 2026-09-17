@@ -8,6 +8,7 @@ import {
   INPUT_CLASSES,
   PAGE_CONTAINER_CLASSES,
   PRIMARY_BUTTON_CLASSES,
+  SECTION_LABEL_CLASSES,
 } from "@/lib/ui";
 import {
   allCodes,
@@ -34,13 +35,13 @@ const COLOR_COUNTS = Array.from(
   (_, i) => MIN_COLORS + i,
 );
 
-/** Tone-classed banner box, matching ui.ts's `ERROR_ALERT_CLASSES` pattern
- * (border + tinted background + tinted text, no shadow) for the two tones
- * it doesn't cover. */
+/** Tone → semantic token classes for the banner box, reusing the same
+ * border/background/text triad `alertClasses()` in ui.ts builds, just
+ * without its fixed padding so this banner can size itself. */
 const BANNER_TONE_CLASSES: Record<"good" | "bad" | "warn", string> = {
-  good: "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200",
-  bad: "border-red-200 bg-red-50 text-red-800 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200",
-  warn: "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200",
+  good: "border-success-line bg-success-soft text-success-text",
+  bad: "border-danger-line bg-danger-soft text-danger-text",
+  warn: "border-warning-line bg-warning-soft text-warning-text",
 };
 
 /** `colorMap[slot]` is the palette index displayed for legend slot `slot` —
@@ -198,8 +199,7 @@ export default function MastermindClient() {
     setPointer(0);
   }
 
-  const sectionHeading =
-    "text-xs font-semibold uppercase tracking-wider text-ink-4";
+  const sectionHeading = SECTION_LABEL_CLASSES;
 
   const banner = solved
     ? {
@@ -287,7 +287,7 @@ export default function MastermindClient() {
               left
             </p>
             {remaining.length === 1 && (
-              <div className="flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1.5 dark:border-emerald-900 dark:bg-emerald-950/40">
+              <div className="flex items-center gap-1.5 rounded-lg border border-success-line bg-success-soft px-2 py-1.5">
                 {remaining[0].map((v, i) => (
                   <span
                     key={i}
@@ -296,7 +296,7 @@ export default function MastermindClient() {
                     title={colorName(v, colorMap)}
                   />
                 ))}
-                <span className="text-xs font-medium text-emerald-800 dark:text-emerald-200">
+                <span className="text-xs font-medium text-success-text">
                   must be it
                 </span>
               </div>
@@ -332,12 +332,11 @@ export default function MastermindClient() {
             </div>
           )}
 
-          {/* Always a white panel, in both themes, so the grade circles (a
-              white fill vs. a black fill) stay legible against it — framed in
-              a dark bezel so it reads as an intentional inset on AMOLED
-              instead of an unstyled white rectangle floating on black. */}
+          {/* The panel itself follows the theme (bg-surface-2 / bg-surface);
+              the grade circles below are always literally white/black (see
+              FeedbackPeg) so that distinction reads the same in both modes. */}
           <div className="w-full max-w-md rounded-lg border border-line bg-surface-2 p-2">
-            <div className="flex flex-col-reverse gap-2 overflow-x-auto rounded-md bg-surface p-3 ring-1 ring-black/10">
+            <div className="flex flex-col-reverse gap-2 overflow-x-auto rounded-md bg-surface p-3 ring-1 ring-line">
               {Array.from({ length: MAX_ATTEMPTS }, (_, idx) => {
                 const isActive = idx === activeIdx && !gameOver;
                 const isSubmitted = idx < submittedCount;
@@ -351,9 +350,9 @@ export default function MastermindClient() {
                     key={idx}
                     className={`flex items-center gap-3 rounded-lg border px-3 py-2 ${
                       isActive
-                        ? "border-indigo-300 bg-indigo-50/60"
+                        ? "border-brand/40 bg-brand-soft"
                         : needsGrading
-                          ? "border-amber-300 bg-amber-50/60"
+                          ? "border-warning-line bg-warning-soft"
                           : "border-transparent"
                     }`}
                   >
@@ -396,7 +395,7 @@ export default function MastermindClient() {
               </button>
               <button
                 type="button"
-                className={`${PRIMARY_BUTTON_CLASSES} disabled:cursor-not-allowed`}
+                className={PRIMARY_BUTTON_CLASSES}
                 onClick={submit}
                 disabled={!activeGuessComplete}
               >
@@ -406,7 +405,7 @@ export default function MastermindClient() {
           )}
           <button
             type="button"
-            className={`${ACTION_BUTTON_CLASSES} disabled:cursor-not-allowed disabled:opacity-50`}
+            className={ACTION_BUTTON_CLASSES}
             onClick={undoLast}
             disabled={submittedCount === 0}
           >
@@ -474,9 +473,9 @@ function GuessPeg({
       aria-label={`Guess peg: ${colorName(value, colorMap)}. Click to target it, then pick a colour below.`}
       title="Click to target this peg, then click a colour in the legend"
       className={`${base} cursor-pointer ${
-        empty ? "border-dashed border-zinc-400 hover:border-indigo-400" : "border-zinc-400 hover:brightness-110"
+        empty ? "border-dashed border-ink-4 hover:border-brand" : "border-ink-4 hover:brightness-110"
       } ${ghost ? "opacity-40" : ""} ${
-        selected ? "ring-2 ring-indigo-500 ring-offset-2 ring-offset-white" : ""
+        selected ? "ring-2 ring-brand ring-offset-2 ring-offset-surface" : ""
       }`}
       style={{ background: empty ? "transparent" : colorHex(value, colorMap) }}
     />
@@ -494,9 +493,13 @@ function FeedbackPeg({
 }) {
   const isExact = value === FB_EXACT;
   const isColorOnly = value === FB_COLOR_ONLY;
+  // The two grading pegs mirror the real black/white Mastermind feedback
+  // pegs, so their fill is deliberately fixed (not theme tokens) — that's
+  // the one pair of colours here that has to stay the same in both modes for
+  // the black/white distinction itself to keep meaning anything.
   const classes = `h-6 w-6 rounded-full border-2 transition-colors duration-150 ${
     isExact
-      ? "border-zinc-600 bg-surface shadow-sm"
+      ? "border-zinc-600 bg-[#ffffff] shadow-sm"
       : isColorOnly
         ? "border-zinc-600 bg-black shadow-sm"
         : "border-dashed border-line-strong bg-transparent"
@@ -511,7 +514,7 @@ function FeedbackPeg({
       onClick={onClick}
       aria-label={`Feedback peg: ${label}. Click to cycle.`}
       title="Click to cycle: none → correct spot → correct colour only"
-      className={`${classes} cursor-pointer hover:border-indigo-500`}
+      className={`${classes} cursor-pointer hover:border-brand`}
     />
   );
 }
