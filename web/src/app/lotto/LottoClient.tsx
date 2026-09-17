@@ -525,6 +525,11 @@ function bumpMatches<T>(items: T[], shouldBump: (item: T) => boolean): T[] {
  * them. Computed fresh from `draws` each time the tab is viewed rather than
  * memoized: the corpus is a personal lotto history (thousands of attempts at
  * most), so a plain pass over it is cheap enough not to bother caching. */
+/** Board-coverage banding, least-played to most-played. `never` is the only
+ * one that's an absolute (zero attempts ever); the other four are quartiles
+ * of the numbers that *have* been played — see `buildInsights`. */
+type BoardTier = "never" | "least" | "secondLeast" | "sometimes" | "most";
+
 type InsightsData = {
   histCounts: number[];
   totalScored: number;
@@ -532,10 +537,63 @@ type InsightsData = {
   hitRate3: number;
   neverDrawnCount: number;
   favourites: { n: number; played: number; drawn: number }[];
-  board: { n: number; played: number }[];
-  maxPlayed: number;
+  board: { n: number; played: number; tier: BoardTier }[];
   latestDrawSet: Set<number>;
 };
+
+/** A cell's look: its frequency band, or `latest` when the number came up
+ * in the most recent result — that overrides the band, since "this just got
+ * drawn" is the thing you want to spot first. */
+type BoardSwatch = BoardTier | "latest";
+
+/** One place for each swatch, so the board cells and the legend under them
+ * can't drift apart.
+ *
+ * Steps are two full zinc stops apart and run in opposite directions per
+ * theme — brighter means more-played against dark mode's near-black card,
+ * darker means more-played against light mode's white one. Earlier passes
+ * tried to do this with opacities off one grey (`/10`, `/90`) and the
+ * middle bands were impossible to tell apart; at the ends, a fill close to
+ * the card color read as an empty cell. Each band also carries its own text
+ * color, flipping once the fill gets lighter than the text would be. */
+const BOARD_SWATCH_CLASSES: Record<BoardSwatch, string> = {
+  never: "border border-dashed border-line-strong text-ink-4",
+  least: "bg-zinc-200 text-zinc-900 dark:bg-zinc-800 dark:text-zinc-300",
+  secondLeast: "bg-zinc-400 text-zinc-900 dark:bg-zinc-600 dark:text-zinc-100",
+  sometimes: "bg-zinc-600 text-white dark:bg-zinc-400 dark:text-zinc-900",
+  most: "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900",
+  latest: "bg-emerald-700 text-white dark:bg-emerald-400 dark:text-emerald-950",
+};
+
+const BOARD_SWATCH_LABELS: Record<BoardSwatch, string> = {
+  never: "Never played",
+  least: "Least",
+  secondLeast: "Second least",
+  sometimes: "Sometimes",
+  most: "Most",
+  latest: "In latest result",
+};
+
+/** Legend order: the frequency ramp least-to-most, then the overlay. */
+const BOARD_LEGEND: BoardSwatch[] = [
+  "never",
+  "least",
+  "secondLeast",
+  "sometimes",
+  "most",
+  "latest",
+];
+
+/** Linear-interpolated quantile over an ascending list — the same method
+ * `numpy`/`statistics.quantiles(..., method="inclusive")` use, so the
+ * boundaries match what you'd get checking this against the database. */
+function quantile(ascending: number[], q: number): number {
+  if (ascending.length === 0) return 0;
+  const pos = (ascending.length - 1) * q;
+  const lo = Math.floor(pos);
+  const hi = Math.ceil(pos);
+  return lo === hi ? ascending[lo] : ascending[lo] + (ascending[hi] - ascending[lo]) * (pos - lo);
+}
 
 function buildInsights(draws: LottoDrawDetail[]): InsightsData {
   const played = new Map<number, number>();
@@ -574,11 +632,31 @@ function buildInsights(draws: LottoDrawDetail[]): InsightsData {
     .slice(0, 8)
     .map(([n, p]) => ({ n, played: p, drawn: drawn.get(n) ?? 0 }));
 
-  const board = Array.from({ length: 58 }, (_, i) => ({
+  // Band by quartile of the *observed* play counts, not by a fraction of
+  // the single most-played number. Play counts bunch up (every number gets
+  // picked sooner or later — a real history runs something like 30-63 plays
+  // each), so slicing 0..max into quarters puts every number in the top two
+  // bands and leaves the bottom two permanently empty. Quartiles of the
+  // numbers actually played put ~a quarter of the board in each band, which
+  // is what "least played" vs "most played" is supposed to mean.
+  const counts = Array.from({ length: 58 }, (_, i) => played.get(i + 1) ?? 0);
+  const playedAscending = counts.filter((v) => v > 0).sort((a, b) => a - b);
+  const q1 = quantile(playedAscending, 0.25);
+  const q2 = quantile(playedAscending, 0.5);
+  const q3 = quantile(playedAscending, 0.75);
+  const board = counts.map((count, i) => ({
     n: i + 1,
-    played: played.get(i + 1) ?? 0,
+    played: count,
+    tier: (count === 0
+      ? "never"
+      : count <= q1
+        ? "least"
+        : count <= q2
+          ? "secondLeast"
+          : count <= q3
+            ? "sometimes"
+            : "most") as BoardTier,
   }));
-  const maxPlayed = Math.max(1, ...board.map((c) => c.played));
   const neverDrawnCount = [...played.keys()].filter((n) => !drawn.has(n)).length;
 
   return {
@@ -589,7 +667,6 @@ function buildInsights(draws: LottoDrawDetail[]): InsightsData {
     neverDrawnCount,
     favourites,
     board,
-    maxPlayed,
     latestDrawSet,
   };
 }
@@ -2110,40 +2187,37 @@ export default function LottoClient() {
                   <section className={CARD_CLASSES}>
                     <h2 className="text-sm font-semibold text-ink">Board coverage</h2>
                     <p className="mt-1 text-xs text-ink-3">
-                      Every number, 1–58. Darker means you play it more often. Green
-                      numbers were in the most recent result.
+                      Every number, 1–58, split into quarters by how often you&apos;ve played
+                      it. Green numbers were in the most recent result.
                     </p>
                     <div className="mt-4 grid grid-cols-[repeat(auto-fill,minmax(2.25rem,1fr))] gap-1.5">
                       {ins.board.map((c) => {
-                        const isLatest = ins.latestDrawSet.has(c.n);
-                        const pct =
-                          ins.maxPlayed > 0
-                            ? Math.round((Math.min(c.played, ins.maxPlayed) / ins.maxPlayed) * 70)
-                            : 0;
+                        const swatch: BoardSwatch = ins.latestDrawSet.has(c.n)
+                          ? "latest"
+                          : c.tier;
                         return (
                           <div
                             key={c.n}
-                            className={`flex aspect-square items-center justify-center rounded-md text-xs font-semibold tabular-nums transition-colors duration-150 ${
-                              isLatest
-                                ? "bg-emerald-500/20 text-emerald-700 dark:text-emerald-300"
-                                : "text-ink-2"
+                            className={`flex aspect-square items-center justify-center rounded-md text-xs font-semibold tabular-nums transition-colors duration-150 ${BOARD_SWATCH_CLASSES[swatch]}`}
+                            title={`Played ${c.played} time${c.played === 1 ? "" : "s"}${
+                              swatch === "latest" ? " · in the latest result" : ""
                             }`}
-                            style={
-                              !isLatest
-                                ? {
-                                    backgroundColor:
-                                      c.played > 0
-                                        ? `color-mix(in srgb, black ${20 + pct}%, var(--surface-2))`
-                                        : "var(--surface-2)",
-                                  }
-                                : undefined
-                            }
-                            title={`Played ${c.played} time${c.played === 1 ? "" : "s"}`}
                           >
                             {String(c.n).padStart(2, "0")}
                           </div>
                         );
                       })}
+                    </div>
+                    <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-ink-3">
+                      {BOARD_LEGEND.map((swatch) => (
+                        <span key={swatch} className="flex items-center gap-1.5">
+                          <span
+                            className={`h-4 w-4 shrink-0 rounded ${BOARD_SWATCH_CLASSES[swatch]}`}
+                            aria-hidden
+                          />
+                          {BOARD_SWATCH_LABELS[swatch]}
+                        </span>
+                      ))}
                     </div>
                   </section>
                 </div>
