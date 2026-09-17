@@ -10,6 +10,7 @@ import { TimeField } from "@/components/TimeField";
 import {
   ACTION_BUTTON_CLASSES,
   ADD_BUTTON_CLASSES,
+  CARD_CLASSES,
   CLOSE_BUTTON_CLASSES,
   DASHED_EMPTY_CLASSES,
   DELETE_BUTTON_CLASSES,
@@ -1196,7 +1197,7 @@ export default function TravelsClient() {
         onKeyDown={(e) => {
           if (e.key === "Enter") openTrip();
         }}
-        className={`cursor-pointer rounded-xl border border-line bg-surface p-5 shadow-xs transition-shadow hover:shadow-pop border-l-4 ${TRIP_ACCENTS[index % TRIP_ACCENTS.length]}`}
+        className={`${CARD_CLASSES} cursor-pointer transition-shadow hover:shadow-pop border-l-4 ${TRIP_ACCENTS[index % TRIP_ACCENTS.length]}`}
       >
         <div className="flex items-start justify-between gap-2">
           <h3 className="min-w-0 flex-1 truncate text-lg font-semibold text-ink">{trip.title}</h3>
