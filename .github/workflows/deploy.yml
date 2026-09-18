@@ -138,8 +138,10 @@ jobs:
           docker compose pull --policy always api web
           docker compose up -d --remove-orphans
           # `up` doesn't restart caddy when only the bind-mounted Caddyfile
-          # changed, so reload it to pick up edits. No-op if unchanged.
-          docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile
+          # changed. A `caddy reload` isn't enough either: git pull replaces
+          # the file (new inode), and a single-file bind mount keeps pointing
+          # at the old one. Restarting re-binds the mount to the new file.
+          docker compose restart caddy
           docker image prune -f
           docker logout ghcr.io
 
