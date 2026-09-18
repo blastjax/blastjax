@@ -1,4 +1,4 @@
-blastjax.maiacruz.com {
+blastjax.maiacruz.com, http://18.138.5.2 {
 	encode gzip
 
 	handle /api/* {

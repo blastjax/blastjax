@@ -137,6 +137,9 @@ jobs:
           # This flag forces the actual GHCR image to be pulled instead.
           docker compose pull --policy always api web
           docker compose up -d --remove-orphans
+          # `up` doesn't restart caddy when only the bind-mounted Caddyfile
+          # changed, so reload it to pick up edits. No-op if unchanged.
+          docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile
           docker image prune -f
           docker logout ghcr.io
 

@@ -55,7 +55,7 @@ function YearPayslipBlockInner({
         )}
       </div>
 
-      <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-4">
         {MONTHS.map((month) => {
           const ms = yearSlots.months.get(month);
           const hasData = ms != null && ms.netSum != null;
