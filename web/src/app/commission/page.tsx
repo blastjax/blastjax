@@ -6,7 +6,7 @@ import { getCompanies } from "@/lib/api";
 import { LOADING_TEXT_CLASSES, PAGE_CONTAINER_CLASSES } from "@/lib/ui";
 
 /** `/commission` has no company of its own — send visitors to the first
- * company's Commission page (Settings → Companies decides which one). */
+ * company with commission turned on (Settings → Companies decides which one). */
 export default function CommissionRedirectPage() {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
@@ -14,11 +14,11 @@ export default function CommissionRedirectPage() {
   useEffect(() => {
     getCompanies()
       .then((r) => {
-        const first = r.companies[0]?.name;
+        const first = r.companies.find((c) => c.show_commission)?.name;
         if (first) {
           router.replace(`/commission/${encodeURIComponent(first)}`);
         } else {
-          setError("Add a company under Settings → Companies to see its commission.");
+          setError("Turn on Commission for a company under Settings → Companies to see its commission.");
         }
       })
       .catch((e: unknown) =>

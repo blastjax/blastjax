@@ -94,17 +94,19 @@ export const NAV_SECTIONS: readonly NavSection[] = [
 ];
 
 /** The "<Company> Payslip" nav item for one company (Settings → Companies),
- * with its own Commission and Salary Stats pages nested under it. Built at
- * render time in SidebarNav rather than listed here statically, since
- * companies are data. */
-export function payslipNavItem(company: string): NavItem {
+ * with its own Commission (only if that company has commission turned on)
+ * and Salary Stats pages nested under it. Built at render time in SidebarNav
+ * rather than listed here statically, since companies are data. */
+export function payslipNavItem(company: string, showCommission: boolean): NavItem {
   const slug = encodeURIComponent(company);
   return {
     href: `/payslip/${slug}`,
     label: `${company} Payslip`,
     icon: DocumentIcon,
     children: [
-      { href: `/commission/${slug}`, label: "Commission", icon: TrendingUpIcon },
+      ...(showCommission
+        ? [{ href: `/commission/${slug}`, label: "Commission", icon: TrendingUpIcon }]
+        : []),
       { href: `/salary-stats/${slug}`, label: "Salary Stats", icon: ChartBarIcon },
     ],
   };

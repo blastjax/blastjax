@@ -166,7 +166,7 @@ export function SidebarNav() {
   // there's no build-time list of these, so the sidebar fetches it directly.
   useEffect(() => {
     getCompanies()
-      .then((r) => setCompanyItems(r.companies.map((c) => payslipNavItem(c.name))))
+      .then((r) => setCompanyItems(r.companies.map((c) => payslipNavItem(c.name, c.show_commission))))
       .catch(() => {
         /* sidebar just shows Finances without any company entries */
       });
