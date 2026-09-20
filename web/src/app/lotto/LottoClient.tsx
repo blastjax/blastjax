@@ -1002,14 +1002,14 @@ export default function LottoClient() {
     }
   };
 
-  const openAddAttempts = (drawId: number, ticket: number | null = null) => {
+  const openAddAttempts = (drawId: number) => {
     setAttemptsFormError(null);
     setAttemptsModal({
       open: true,
       drawId,
       editingIds: [],
       attemptsText: "",
-      ticketText: ticket != null ? String(ticket) : "",
+      ticketText: "",
       mode: "add",
     });
   };
@@ -1054,15 +1054,75 @@ export default function LottoClient() {
     setAttemptsFormError(null);
   };
 
+  /** Creates every attempt in `blocks` against `drawId`. A block with no
+   * explicit "Ticket N" header is numbered after whatever's already on the
+   * draw, so a second add (or paste) doesn't collide with tickets from the
+   * first. Returns the last detail the API handed back, or null if the
+   * blocks were empty. Shared by "Add attempt" and "Paste attempts" so both
+   * number tickets identically. */
+  const createTicketBlocks = async (
+    drawId: number,
+    blocks: TicketBlock[],
+    existingAttempts: LottoAttemptRow[],
+  ): Promise<LottoDrawDetail | null> => {
+    const priorMaxTicket = existingAttempts.reduce(
+      (max, a) => (a.ticket != null && a.ticket > max ? a.ticket : max),
+      0,
+    );
+    let nextAutoTicket = priorMaxTicket + 1;
+    let detail: LottoDrawDetail | null = null;
+    for (const block of blocks) {
+      const ticket = block.ticket ?? nextAutoTicket;
+      nextAutoTicket = Math.max(nextAutoTicket, ticket + 1);
+      for (const numbers of block.attempts) {
+        detail = await createLottoAttempt(drawId, numbers, ticket);
+      }
+    }
+    return detail;
+  };
+
   /** Adds new attempts, or replaces an edited set — see `AttemptsModalState`.
-   * A replace deletes every attempt in `editingIds` first and recreates the
-   * parsed lines fresh, rather than diffing line-by-line against what was
-   * there before — simpler, since there's no way to know which surviving
-   * line "was" which old attempt once the line count changes. */
+   *
+   * Adding reads the same ticket-block grammar "Paste attempts" does — a
+   * blank line starts a new ticket — so several tickets can go onto a draw
+   * in one pass, numbered automatically. (The parser still honors an
+   * explicit "Ticket N" header, which is what makes pasted export text
+   * round-trip, but the add form doesn't ask anyone to write one.)
+   *
+   * Editing stays single-ticket: it's replacing *this* ticket's board plays
+   * (or one ungrouped attempt), so it deletes every attempt in `editingIds`
+   * and recreates the parsed lines fresh rather than diffing line-by-line —
+   * there's no way to know which surviving line "was" which old attempt
+   * once the line count changes. */
   const submitAttemptsModal = async (e: React.FormEvent) => {
     e.preventDefault();
     setAttemptsFormError(null);
-    if (attemptsModal.drawId == null) return;
+    const drawId = attemptsModal.drawId;
+    if (drawId == null) return;
+
+    if (attemptsModal.mode === "add") {
+      let blocks: TicketBlock[];
+      try {
+        blocks = parseTicketsText(attemptsModal.attemptsText);
+      } catch (err) {
+        setAttemptsFormError(err instanceof Error ? err.message : "Invalid input");
+        return;
+      }
+      setSaving(true);
+      setError(null);
+      try {
+        const existing = draws.find((d) => d.draw.id === drawId);
+        const detail = await createTicketBlocks(drawId, blocks, existing?.attempts ?? []);
+        if (detail) upsertLocalDraw(detail);
+        closeAttemptsModal();
+      } catch (err) {
+        setAttemptsFormError(err instanceof Error ? err.message : "Save failed");
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
+
     let numbersList: number[][];
     let ticket: number | null;
     try {
@@ -1077,10 +1137,10 @@ export default function LottoClient() {
     try {
       let detail: LottoDrawDetail | null = null;
       for (const id of attemptsModal.editingIds) {
-        detail = await deleteLottoAttempt(attemptsModal.drawId, id);
+        detail = await deleteLottoAttempt(drawId, id);
       }
       for (const numbers of numbersList) {
-        detail = await createLottoAttempt(attemptsModal.drawId, numbers, ticket);
+        detail = await createLottoAttempt(drawId, numbers, ticket);
       }
       if (detail) upsertLocalDraw(detail);
       closeAttemptsModal();
@@ -1169,22 +1229,7 @@ export default function LottoClient() {
         drawId = created.draw.id;
         upsertLocalDraw(created);
       }
-      // Tickets without an explicit "ticket N" header are numbered after
-      // whatever's already on this draw (so a second paste doesn't collide
-      // with tickets from the first), in the order they're pasted.
-      const priorMaxTicket = (existing?.attempts ?? []).reduce(
-        (max, a) => (a.ticket != null && a.ticket > max ? a.ticket : max),
-        0,
-      );
-      let nextAutoTicket = priorMaxTicket + 1;
-      let detail: LottoDrawDetail | null = null;
-      for (const block of blocks) {
-        const ticket = block.ticket ?? nextAutoTicket;
-        nextAutoTicket = Math.max(nextAutoTicket, ticket + 1);
-        for (const numbers of block.attempts) {
-          detail = await createLottoAttempt(drawId, numbers, ticket);
-        }
-      }
+      const detail = await createTicketBlocks(drawId, blocks, existing?.attempts ?? []);
       if (detail) upsertLocalDraw(detail);
       closePasteModal();
     } catch (err) {
@@ -2337,9 +2382,15 @@ export default function LottoClient() {
             <span className="text-ink-2">Your numbers</span>
             <textarea
               required
-              rows={attemptsModal.editingIds.length > 1 ? 6 : 3}
+              rows={
+                attemptsModal.mode === "add" ? 10 : attemptsModal.editingIds.length > 1 ? 6 : 3
+              }
               className={`${INPUT_CLASSES} font-mono`}
-              placeholder={"03 12 19 27 41 58\n01 02 34 37 52 57"}
+              placeholder={
+                attemptsModal.mode === "add"
+                  ? "01 02 34 37 52 57\n03 12 19 27 41 58\n\n07 14 21 28 35 42"
+                  : "03 12 19 27 41 58\n01 02 34 37 52 57"
+              }
               value={attemptsModal.attemptsText}
               disabled={saving}
               onChange={(e) =>
@@ -2347,27 +2398,39 @@ export default function LottoClient() {
               }
             />
             <span className="text-xs text-ink-3">
-              One attempt per line, {NUMBERS_HELP} — add more lines for more attempts on the
-              same ticket.
+              {attemptsModal.mode === "add" ? (
+                <>
+                  One attempt per line, {NUMBERS_HELP} — a blank line starts a new ticket,
+                  so each group of lines becomes one ticket&apos;s attempts. Ticket numbers
+                  are worked out for you, carrying on from the ones already on this draw.
+                </>
+              ) : (
+                <>
+                  One attempt per line, {NUMBERS_HELP} — add more lines for more attempts on
+                  the same ticket.
+                </>
+              )}
             </span>
           </label>
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-ink-2">
-              Ticket # <span className="font-normal text-ink-4">(optional)</span>
-            </span>
-            <input
-              type="text"
-              inputMode="numeric"
-              className={INPUT_CLASSES}
-              value={attemptsModal.ticketText}
-              disabled={saving}
-              onChange={(e) => setAttemptsModal((m) => ({ ...m, ticketText: e.target.value }))}
-            />
-            <span className="text-xs text-ink-3">
-              Groups every line above onto the same physical ticket, so they cluster
-              together — leave blank if they aren&apos;t part of a ticket.
-            </span>
-          </label>
+          {attemptsModal.mode === "edit" && (
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="text-ink-2">
+                Ticket # <span className="font-normal text-ink-4">(optional)</span>
+              </span>
+              <input
+                type="text"
+                inputMode="numeric"
+                className={INPUT_CLASSES}
+                value={attemptsModal.ticketText}
+                disabled={saving}
+                onChange={(e) => setAttemptsModal((m) => ({ ...m, ticketText: e.target.value }))}
+              />
+              <span className="text-xs text-ink-3">
+                Groups every line above onto the same physical ticket, so they cluster
+                together — leave blank if they aren&apos;t part of a ticket.
+              </span>
+            </label>
+          )}
           <div className="flex flex-wrap gap-2">
             <button type="submit" disabled={saving} className={PRIMARY_BUTTON_CLASSES}>
               {saving ? "Saving…" : attemptsModal.mode === "edit" ? "Save changes" : "Add"}
