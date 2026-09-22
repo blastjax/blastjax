@@ -2,13 +2,15 @@
 
 ## Database
 
-The API stores everything in a local SQLite file. Compose sets `DATABASE_URL=sqlite:////app/data/budget.sqlite`
-for the **`api`** service and bind-mounts the repo-root **`./data`** directory to **`/app/data`**, so the same
-file the app uses when run locally with `uvicorn` (`<repo root>/data/budget.sqlite`) is what the container reads
-and writes too — nothing to provision or migrate before starting the container. This value is fixed in
-`docker-compose.yml` and can't be overridden from `.env`: it has to match the bind mount, and a stray
-`DATABASE_URL` in `.env` (left over from local dev, say) pointing anywhere else would silently not persist
-across container restarts.
+The API stores everything in a cloud PostgreSQL database (Neon). **`DATABASE_URL` is required**: compose
+passes it to the **`api`** service from the environment (or a repo-root `.env`) via
+`${DATABASE_URL:?...}`, so `docker compose up` fails outright when it is unset rather than starting an API
+that cannot reach its database. Use the *pooled* endpoint — the host containing `-pooler` — since the API
+opens many short-lived connections.
+
+The container talks to the same database a local `uvicorn` run does, so there is no separate container
+state to provision. The repo-root **`./data`** directory is still bind-mounted to **`/app/data`**, but the
+app neither reads nor writes it; it is only somewhere for exports written from inside the container.
 
 Every other setting the `api` container receives (`REDIS_URL`, `BUDGET_CORS_ORIGINS`, `BUDGET_SESSION_TTL_SECONDS`, …) is
 listed explicitly under that service's `environment:` in `docker-compose.yml`, each as `${VAR:-default}`. There's
@@ -33,7 +35,7 @@ docker compose up
 
 - Web: `http://localhost:3000`
 - API: `http://127.0.0.1:8000`
-- Database file: `./data/budget.sqlite` on the host (bind-mounted into the `api` container)
+- Database: cloud PostgreSQL (Neon), addressed by `DATABASE_URL` — nothing is stored on the host
 
 The web bundle is built with `NEXT_PUBLIC_API_URL` (default `http://127.0.0.1:8000`). To change it, set the variable when building, for example:
 

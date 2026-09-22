@@ -1,12 +1,12 @@
 # blastjax
 
-Personal dashboard app: browse and edit transactions in a web UI, with calendar views, category stats, accounts, installments, and payslip helpers, plus blood-pressure tracking and a handful of small games. The **API reads from a local SQLite file**; payslips can be bulk-imported from nested JSON (`POST /api/payslip/import-json`).
+Personal dashboard app: browse and edit transactions in a web UI, with calendar views, category stats, accounts, installments, and payslip helpers, plus blood-pressure tracking and a handful of small games. The **API reads from a cloud PostgreSQL database** (Neon, via `DATABASE_URL`); payslips can be bulk-imported from nested JSON (`POST /api/payslip/import-json`).
 
 ## Stack
 
 - **Backend:** Python, FastAPI, Uvicorn (`backend/`)
 - **Frontend:** Next.js 15, React 19, TypeScript (`web/`)
-- **Data:** SQLite (`data/budget.sqlite`, self-creating; override with `DATABASE_URL` in `.env`)
+- **Data:** PostgreSQL (Neon) — required, set `DATABASE_URL` in `.env` (see `.env.example`)
 - **Cache:** Redis (optional; speeds up repeated reads, defaults to `localhost:6379` / the `redis` compose service)
 
 ## Prerequisites
@@ -33,13 +33,13 @@ Personal dashboard app: browse and edit transactions in a web UI, with calendar 
    pip install -r backend/requirements.txt
    ```
 
-3. **Environment file** (optional — the app runs with no `.env` at all, using a self-creating `data/budget.sqlite`)
+3. **Environment file** (required — the API will not start without a `DATABASE_URL`)
 
    ```bash
    cp .env.example .env
    ```
 
-   Only edit `.env` if you want the SQLite file somewhere other than `data/budget.sqlite`.
+   Set `DATABASE_URL` to your Neon Postgres connection string, using the *pooled* endpoint (the host containing `-pooler`). Startup verifies the expected tables exist and fails loudly if they don't; [`backend/schema.py`](backend/schema.py) owns the schema and its `create_all()` builds it on an empty database.
 
 4. **Frontend dependencies**
 
@@ -69,7 +69,7 @@ Then open the URL Next.js prints (usually `http://localhost:3000`).
 
 ## Docker
 
-`docker-compose.yml` is tuned for the EC2/Caddy deploy: **Caddy** is the sole public entry point (ports **80**/**443**, auto-HTTPS), and the `api`/`web` containers publish no host ports of their own. For a local run, `docker-compose.override.yml` is auto-merged in and adds direct host ports for `web` (**3000**) and `api` (**8000**) so you don't need Caddy or a domain — just run `docker compose up --build` from the repo root. The API container reads/writes the same `data/budget.sqlite` file as local runs, bind-mounted from the repo root. See [`docker/README.md`](docker/README.md) for commands and environment variables.
+`docker-compose.yml` is tuned for the EC2/Caddy deploy: **Caddy** is the sole public entry point (ports **80**/**443**, auto-HTTPS), and the `api`/`web` containers publish no host ports of their own. For a local run, `docker-compose.override.yml` is auto-merged in and adds direct host ports for `web` (**3000**) and `api` (**8000**) so you don't need Caddy or a domain — just run `docker compose up --build` from the repo root. The API container reads and writes the same Neon database as local runs, so `DATABASE_URL` must be set for it too. See [`docker/README.md`](docker/README.md) for commands and environment variables.
 
 ## Configuration
 

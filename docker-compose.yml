@@ -42,10 +42,8 @@ services:
     # Explicit allow-list instead of `env_file: .env` — the container only
     # ever gets exactly these variables, substituted from a root `.env` if
     # one exists (compose auto-loads it for ${...} interpolation; no file is
-    # copied into the image or container). DATABASE_URL is fixed, not
-    # user-configurable here, because it has to match the ./data bind mount
-    # below — a value from .env pointing elsewhere would silently not
-    # persist across restarts.
+    # copied into the image or container). DATABASE_URL comes from that
+    # environment and is required — see the `:?` form below.
     environment:
       # Neon Postgres. Supplied by the deploy environment (never committed —
       # the URL embeds the database password). The `:?` form fails the

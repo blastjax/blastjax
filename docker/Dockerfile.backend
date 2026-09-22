@@ -11,8 +11,8 @@ ENV PYTHONUNBUFFERED=1 \
 WORKDIR /app
 
 # Run unprivileged. uid/gid 1000 matches the default `ubuntu` user on EC2, so
-# the bind-mounted ./data directory (which holds budget.sqlite plus its -wal
-# and -shm files) stays writable; the deploy workflow chowns it to match.
+# the bind-mounted ./data directory stays writable for anything exported from
+# inside the container; the deploy workflow chowns it to match.
 #
 # Created before the source is copied so the layer stays cached across code
 # changes. It used to run last, after `COPY . .`, which meant every push to

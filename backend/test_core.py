@@ -1,0 +1,325 @@
+#!/usr/bin/env python
+"""Self-checks for the logic that would fail silently if it broke.
+
+Plain asserts, stdlib only -- run with ``python backend/test_core.py``.
+No database is touched: everything here is pure.
+
+Scope is deliberate. The SQL translation and write-detection helpers decide
+whether a statement reaches Postgres correctly and whether it runs inside a
+transaction, so a regression there corrupts data rather than raising. The
+travel checks pin the column-list/serializer equivalence that the travel
+layer's table-driven form depends on.
+"""
+
+from __future__ import annotations
+
+import datetime as dt
+import re
+import sys
+from contextlib import contextmanager
+from decimal import Decimal
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import db
+import schema
+from app.routers import travel
+
+
+def check_translate_sql() -> None:
+    t = db._translate_sql
+    assert t("SELECT a FROM t WHERE id = ?", True) == "SELECT a FROM t WHERE id = %s"
+    assert t("SELECT 1", False) == "SELECT 1"
+
+    # A ? inside a string literal or quoted identifier is data, not a placeholder.
+    assert t("SELECT '?' FROM t", False) == "SELECT '?' FROM t"
+    assert t('SELECT "we?rd" FROM t', False) == 'SELECT "we?rd" FROM t'
+    # Doubled-quote escape must not end the literal early.
+    assert t("SELECT 'it''s ?' FROM t WHERE a = ?", True) == "SELECT 'it''s ?' FROM t WHERE a = %s"
+
+    # Comments are copied through verbatim.
+    assert t("SELECT a -- ? not a param\nFROM t WHERE b = ?", True) == (
+        "SELECT a -- ? not a param\nFROM t WHERE b = %s"
+    )
+    assert t("SELECT /* ? */ a FROM t WHERE b = ?", True) == "SELECT /* ? */ a FROM t WHERE b = %s"
+
+    # psycopg2 only %-interpolates when params are supplied, so a literal %
+    # is doubled exactly then -- and never inside a string literal.
+    assert t("SELECT 50 % 7", False) == "SELECT 50 % 7"
+    assert t("SELECT 50 % 7 WHERE a = ?", True) == "SELECT 50 %% 7 WHERE a = %s"
+    assert t("SELECT a FROM t WHERE b LIKE '100%'", True) == "SELECT a FROM t WHERE b LIKE '100%'"
+
+
+def check_is_write() -> None:
+    w = db._is_write
+    assert w("SELECT * FROM payslip") is False
+    assert w("  \n  select 1") is False
+    assert w("-- comment\nSELECT 1") is False
+    assert w("/* block */ SELECT 1") is False
+
+    assert w("INSERT INTO t VALUES (1)") is True
+    assert w("UPDATE t SET a = 1") is True
+    assert w("DELETE FROM t") is True
+
+    # A read that holds locks still needs a transaction.
+    assert w("SELECT * FROM t FOR UPDATE") is True
+    assert w("SELECT * FROM t FOR SHARE") is True
+
+    # An identifier that merely starts with "select" is not a SELECT.
+    # Misreading one as a read would run a write outside its transaction.
+    assert w("selectivity_refresh()") is True
+    assert w("SELECTED_INTO t") is True
+
+
+def check_normalize() -> None:
+    n = db._normalize
+    # datetime must be tested before date: datetime subclasses date, and
+    # checking date first would truncate every timestamp to its day.
+    assert n(dt.datetime(2026, 4, 13, 2, 6, 38)) == "2026-04-13T02:06:38"
+    assert n(dt.date(2026, 4, 13)) == "2026-04-13"
+    assert n(dt.time(2, 6, 38)) == "02:06:38"
+    assert n(Decimal("12.50")) == 12.5
+    assert isinstance(n(Decimal("12.50")), float)
+    assert n(memoryview(b"pdf")) == b"pdf"
+    assert n(None) is None
+    assert n("plain") == "plain"
+    assert n(7) == 7
+
+
+def check_nights_and_days() -> None:
+    # Both dates are required by TravelAccommodationCreate and NOT NULL in the
+    # table, so this only ever sees two real dates -- no None cases to pin.
+    nd = travel._nights_and_days
+    assert nd("2026-04-13", "2026-04-16") == (3, 4)
+    # Same-day stay counts the check-in day: 0 nights, 1 day.
+    assert nd("2026-04-13", "2026-04-13") == (0, 1)
+    # Crossing a month and a year boundary.
+    assert nd("2026-01-30", "2026-02-02") == (3, 4)
+    assert nd("2026-12-30", "2027-01-02") == (3, 4)
+
+
+def check_request_models_match_writable_columns() -> None:
+    """Each trip sub-resource's request model must carry exactly the columns
+    its table takes from the body.
+
+    The travel writes build their SQL from ``db.travel_child_columns``, so a
+    model field added without its column -- or a column renamed without the
+    field -- would otherwise be dropped on save with no error. Note what is
+    deliberately absent: ``id``/``trip_id``/``created_at`` are server-set, and
+    ``sort_order`` is computed by the INSERT rather than sent by the client.
+    """
+    from app.schemas.travel import (
+        TravelAccommodationCreate,
+        TravelCityCreate,
+        TravelFlightCreate,
+        TravelItineraryCreate,
+        TravelTransportCreate,
+    )
+
+    models = {
+        "cities": TravelCityCreate,
+        "flights": TravelFlightCreate,
+        "transport": TravelTransportCreate,
+        "itinerary": TravelItineraryCreate,
+        "accommodations": TravelAccommodationCreate,
+    }
+    assert set(models) == set(db._TRAVEL_CHILDREN), "a child kind has no request model"
+    for kind, model in models.items():
+        fields = set(model.model_fields)
+        cols = set(db.travel_child_columns(kind))
+        assert fields == cols, f"{kind}: model/column mismatch {fields ^ cols}"
+
+    # The city's sort_order is the one column the INSERT computes itself.
+    assert "sort_order" not in db.travel_child_columns("cities")
+    assert set(db.travel_child_columns("cities")) == {"name", "start_date", "end_date"}
+
+
+def check_write_values_rejects_drift() -> None:
+    """A write whose keys do not match the table's columns must fail loudly."""
+    for bad in ({"name": "x"}, {"name": "x", "start_date": None, "end_date": None, "oops": 1}):
+        try:
+            db._travel_write_values("cities", bad)
+        except ValueError:
+            continue
+        raise AssertionError(f"accepted mismatched write values: {bad}")
+
+    ok = {"name": "x", "start_date": None, "end_date": None}
+    assert db._travel_write_values("cities", ok) == ("name", "start_date", "end_date")
+
+
+def _capture_sql(fn, *args) -> list[tuple[str, tuple]]:
+    """Run a db write with the connection stubbed out, returning the SQL it
+    built and the parameters it bound.
+
+    ``fetchone`` answers ``None``, so each write returns at its
+    "row not found" branch without needing a database.
+    """
+
+    calls: list[tuple[str, tuple]] = []
+
+    class _Cursor:
+        def execute(self, sql, params=None):
+            calls.append((" ".join(sql.split()), params))
+
+        def fetchone(self):
+            return None
+
+    @contextmanager
+    def _conn():
+        yield None
+
+    @contextmanager
+    def _cursor(_):
+        yield _Cursor()
+
+    saved = db.get_connection, db.db_cursor
+    db.get_connection, db.db_cursor = _conn, _cursor
+    try:
+        assert fn(*args) is None
+    finally:
+        db.get_connection, db.db_cursor = saved
+    return calls
+
+
+def check_child_write_sql() -> None:
+    """Pin the SQL and, above all, the parameter order of the generic writes.
+
+    Parameters are positional, so a column list and a value list that drift
+    apart would write the right number of values into the wrong columns --
+    silently, since the types mostly match.
+    """
+    city = {"name": "Osaka", "start_date": "2026-04-13", "end_date": "2026-04-16"}
+
+    (sql, params), = _capture_sql(db.insert_travel_child, "cities", 7, city)
+    assert sql.startswith(
+        "INSERT INTO travel_city (trip_id, name, start_date, end_date, sort_order) SELECT ?, ?, ?, ?,"
+    ), sql
+    assert "WHERE EXISTS (SELECT 1 FROM travel_trip WHERE id = ?) RETURNING id" in sql
+    # trip_id, the three values, the sort_order subquery's trip_id, the EXISTS guard.
+    assert params == (7, "Osaka", "2026-04-13", "2026-04-16", 7, 7), params
+
+    (sql, params), = _capture_sql(db.update_travel_child, "cities", 7, 5, city)
+    assert sql == (
+        "UPDATE travel_city SET name = ?, start_date = ?, end_date = ? "
+        "WHERE id = ? AND trip_id = ? RETURNING id"
+    ), sql
+    # Values first, then the record id, then the parent id.
+    assert params == ("Osaka", "2026-04-13", "2026-04-16", 5, 7), params
+
+    (sql, params), = _capture_sql(db.delete_travel_child, "cities", 7, 5)
+    assert sql == "DELETE FROM travel_city WHERE id = ? AND trip_id = ? RETURNING id"
+    assert params == (5, 7), params
+
+    # A table with no computed column binds trip_id exactly twice: the row's
+    # own parent link and the EXISTS guard.
+    item = dict.fromkeys(db.travel_child_columns("itinerary"), None)
+    (sql, params), = _capture_sql(db.insert_travel_child, "itinerary", 3, item)
+    assert sql.startswith("INSERT INTO travel_itinerary (trip_id, "), sql
+    assert params == (3, *([None] * len(item)), 3), params
+
+
+def check_serialize_detail_shape() -> None:
+    """The response carries stored columns through untouched and adds only the
+    accommodation's derived stay length."""
+    detail: dict[str, object] = {"trip": {"id": 1, "title": "Osaka"}}
+    for kind in db._TRAVEL_CHILDREN:
+        detail[kind] = []
+    detail["accommodations"] = [
+        {"id": 9, "name": "Hotel", "checkin_date": "2026-04-13", "checkout_date": "2026-04-16"}
+    ]
+
+    out = travel._serialize_detail(detail)
+    assert set(out) == set(detail), "response gained or lost a top-level field"
+    assert out["trip"] == detail["trip"]
+    acc = out["accommodations"][0]
+    assert (acc["nights"], acc["days"]) == (3, 4)
+    # Stored fields survive the derivation.
+    assert acc["id"] == 9 and acc["name"] == "Hotel"
+
+
+def _schema_columns() -> dict[str, set[str]]:
+    """Table -> column names, as schema.py's DDL declares them."""
+    tables: dict[str, set[str]] = {}
+    for name, ddl in schema.SCHEMA:
+        cols = set()
+        for line in ddl.strip().splitlines():
+            word = re.match(r"[A-Za-z_][A-Za-z0-9_]*", line.strip())
+            if word is None:
+                continue
+            # Match the leading word exactly: a prefix test would read the
+            # column `checkin_date` as a CHECK constraint and drop it.
+            if word.group(0).upper() in ("CHECK", "UNIQUE", "PRIMARY", "FOREIGN"):
+                continue
+            cols.add(word.group(0))
+        tables[name] = cols
+    return tables
+
+
+def _plain_columns(cols_sql: str) -> set[str]:
+    """The bare column names in a SELECT list, skipping computed expressions
+    such as ``(pdf_data IS NOT NULL) AS has_pdf``."""
+    return {
+        part for part in (c.strip() for c in cols_sql.split(","))
+        if part.replace("_", "").isalnum()
+    }
+
+
+def check_schema_covers_what_the_app_queries() -> None:
+    """The DDL must define every column the query layer selects.
+
+    schema.py is called the single owner of the schema, but that only holds if
+    something checks it. It had already drifted while the DDL lived inside the
+    migration script: the whole ``company`` table, ``payslip.trust_fund`` and
+    ``payslip_default.trust_fund`` were live and queried while absent from it,
+    so rebuilding would have produced a database the app errors against on
+    first use.
+
+    Startup needs no separate check here -- ``init_schema`` derives the tables
+    it requires from this same DDL.
+    """
+    columns = _schema_columns()
+
+    selected = {
+        "company": db._COMPANY_PUBLIC_COLS,
+        "payslip": db._PAYSLIP_RETURN_COLS,
+        "travel_trip": db._TRAVEL_TRIP_COLS,
+        "travel_city": db._TRAVEL_CITY_COLS,
+        "travel_flight": db._TRAVEL_FLIGHT_COLS,
+        "travel_transport": db._TRAVEL_TRANSPORT_COLS,
+        "travel_itinerary": db._TRAVEL_ITINERARY_COLS,
+        "travel_accommodation": db._TRAVEL_ACCOMMODATION_COLS,
+    }
+    for table, cols_sql in selected.items():
+        missing = _plain_columns(cols_sql) - columns[table]
+        assert not missing, f"{table}: selected but not in the DDL: {sorted(missing)}"
+
+    # Written by save_payslip_defaults; it has no single column constant to
+    # derive from, and it is exactly what drifted before.
+    assert "trust_fund" in columns["payslip_default"]
+
+    # Every company visibility flag must exist as a column.
+    missing_flags = set(db._COMPANY_FLAG_COLUMNS) - columns["company"]
+    assert not missing_flags, f"company flags not in the DDL: {sorted(missing_flags)}"
+
+
+def check_clean_city() -> None:
+    c = travel._clean_city
+    assert c("Makati City Municipality") == "Makati"
+    assert c("Bangkok Metropolitan Area") == "Bangkok"
+    assert c("Cebu") == "Cebu"
+    # A name that is only the suffix keeps its name rather than emptying out.
+    assert c("Municipality") == "Municipality"
+
+
+def main() -> int:
+    checks = [v for k, v in sorted(globals().items()) if k.startswith("check_")]
+    for fn in checks:
+        fn()
+        print(f"  ok  {fn.__name__}")
+    print(f"\n{len(checks)} checks passed")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

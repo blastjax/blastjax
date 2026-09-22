@@ -25,8 +25,7 @@ what they saw under SQLite -- JSON-safe primitives:
 The timestamp columns are ``TIMESTAMPTZ(0)`` -- whole seconds -- so every
 rendered value has the same shape. At microsecond precision ``.isoformat()``
 drops the fractional part when it happens to be zero, which had one column
-emitting both ``...T02:06:38.428777+00:00`` and ``...T08:56:00+00:00``. See
-``backend/scripts/normalize_time_types.py``.
+emitting both ``...T02:06:38.428777+00:00`` and ``...T08:56:00+00:00``.
 
 That matters beyond tidiness: ``cache.set`` serialises responses with
 ``json.dumps(..., default=str)``, which renders a ``datetime`` as
@@ -35,9 +34,13 @@ That matters beyond tidiness: ``cache.set`` serialises responses with
 depending on whether it came from Redis or the database. Normalising here
 gives one representation everywhere.
 
-The schema itself is owned by ``backend/scripts/migrate_sqlite_to_postgres.py``,
-not by this module -- ``init_schema()`` only verifies that the expected tables
-are present, so there is no second copy of the DDL to drift out of sync.
+The schema itself is owned by ``backend/schema.py``, not by this module --
+``init_schema()`` only verifies that the tables it defines are present, and
+reads the list from that same DDL, so there is no second copy to drift out of
+sync. ``backend/test_core.py`` checks the DDL against every column the queries
+below select. That is not a theoretical risk: the ``company`` table and both
+``trust_fund`` columns were live and queried while missing from the DDL
+entirely.
 
 Round trips
 -----------
@@ -76,13 +79,15 @@ from datetime import date, datetime, time
 from decimal import Decimal
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 import psycopg2
 import psycopg2.extensions
 from psycopg2 import pool as _pg_pool
 
 from dotenv import load_dotenv
+
+import schema
 
 _BACKEND_DIR = Path(__file__).resolve().parent
 _REPO_ROOT = _BACKEND_DIR.parent
@@ -478,37 +483,17 @@ def _row_to_dict(cur: Any, row: Any) -> dict[str, Any]:
     return {d[0]: _normalize(v) for d, v in zip(cur.description, row)}
 
 
-def _with_bool(row: dict[str, Any], key: str) -> dict[str, Any]:
-    """Kept for callers below. Postgres already returns a real ``bool`` for
-    BOOLEAN columns and boolean expressions such as ``(pdf_data IS NOT NULL)``,
-    so this is now a no-op guard rather than the coercion it was under SQLite."""
-    if key in row and row[key] is not None:
-        row[key] = bool(row[key])
-    return row
-
-
 # ------------------------------------------------------------------ schema
-
-# The migration script owns the DDL; this is only what startup asserts is
-# present, so the two cannot drift into two different schemas.
-_EXPECTED_TABLES = (
-    "_app_meta", "app_user", "blood_pressure", "calendar_day_override",
-    "credit_card", "credit_card_payment", "fixed_expense", "house_payment",
-    "house_payment_entry", "installment", "installment_line", "lotto_attempt",
-    "lotto_draw", "monthly_expense", "pay_period_start_override", "payslip",
-    "payslip_default", "payslip_default_settings", "travel_accommodation",
-    "travel_city", "travel_flight", "travel_itinerary", "travel_transport",
-    "travel_trip",
-)
 
 
 def init_schema() -> None:
-    """Verify the expected tables exist. Does not create anything.
+    """Verify every table ``schema.py`` defines is present. Creates nothing.
 
-    The schema is created and populated by
-    ``backend/scripts/migrate_sqlite_to_postgres.py``. Failing loudly here beats
-    silently auto-creating an empty table and serving a blank app as if the
-    data had never existed.
+    The expected list is read straight from the DDL rather than restated here,
+    so a table cannot be added to the schema and silently go unchecked.
+    Failing loudly beats auto-creating an empty table and serving a blank app
+    as if the data had never existed; ``schema.create_all`` builds an empty
+    database.
     """
     with get_connection() as conn:
         with db_cursor(conn) as cur:
@@ -516,12 +501,12 @@ def init_schema() -> None:
                 "SELECT tablename FROM pg_tables WHERE schemaname = 'public'"
             )
             present = {r[0] for r in cur.fetchall()}
-    missing = [t for t in _EXPECTED_TABLES if t not in present]
+    missing = [t for t in schema.table_names() if t not in present]
     if missing:
         raise RuntimeError(
             "Postgres is missing "
             f"{len(missing)} expected table(s): {', '.join(missing)}. "
-            "Run: python backend/scripts/migrate_sqlite_to_postgres.py"
+            "Build them with backend/schema.py's create_all()."
         )
 
 
@@ -604,7 +589,7 @@ def insert_payslip(
                     company,
                 ),
             )
-            return _with_bool(_row_to_dict(cur, cur.fetchone()), "has_pdf")
+            return _row_to_dict(cur, cur.fetchone())
 
 
 _PAYSLIP_INSERT_COLS: tuple[str, ...] = (
@@ -679,7 +664,7 @@ def list_payslips(limit: int = 200, company: str | None = None) -> list[dict[str
                 params,
             )
             cols = [d[0] for d in cur.description]
-            return [_with_bool(_zip_row(cols, r), "has_pdf") for r in cur.fetchall()]
+            return [_zip_row(cols, r) for r in cur.fetchall()]
 
 
 def get_payslip(payslip_id: int) -> dict[str, Any] | None:
@@ -690,7 +675,7 @@ def get_payslip(payslip_id: int) -> dict[str, Any] | None:
                 (payslip_id,),
             )
             row = cur.fetchone()
-            return _with_bool(_row_to_dict(cur, row), "has_pdf") if row else None
+            return _row_to_dict(cur, row) if row else None
 
 
 def update_payslip(
@@ -768,7 +753,7 @@ def update_payslip(
                 ),
             )
             row = cur.fetchone()
-            return _with_bool(_row_to_dict(cur, row), "has_pdf") if row else None
+            return _row_to_dict(cur, row) if row else None
 
 
 def delete_payslip(payslip_id: int) -> bool:
@@ -1685,7 +1670,7 @@ def list_monthly_expenses(
                 """,
                 tuple(params),
             )
-            return [_with_bool(_row_to_dict(cur, r), "is_recurring") for r in cur.fetchall()]
+            return [_row_to_dict(cur, r) for r in cur.fetchall()]
 
 
 def insert_monthly_expense(
@@ -1709,7 +1694,7 @@ def insert_monthly_expense(
                 """,
                 (name, description, amount, period_half, period_year, period_month, is_recurring),
             )
-            return _with_bool(_row_to_dict(cur, cur.fetchone()), "is_recurring")
+            return _row_to_dict(cur, cur.fetchone())
 
 
 def update_monthly_expense(
@@ -1744,7 +1729,7 @@ def update_monthly_expense(
                 ),
             )
             row = cur.fetchone()
-            return _with_bool(_row_to_dict(cur, row), "is_recurring") if row else None
+            return _row_to_dict(cur, row) if row else None
 
 
 def delete_monthly_expense(expense_id: int) -> bool:
@@ -2736,61 +2721,101 @@ _TRAVEL_ACCOMMODATION_COLS = (
 )
 
 
-def _travel_flights_rows(cur: Any, trip_id: int) -> list[dict[str, Any]]:
-    cur.execute(
-        f"""
-        SELECT {_TRAVEL_FLIGHT_COLS} FROM travel_flight
-        WHERE trip_id = ?
-        ORDER BY flight_date ASC NULLS LAST, created_at ASC, id ASC
-        """,
-        (trip_id,),
+class _TravelChild(NamedTuple):
+    """One of the nested record kinds a trip holds.
+
+    Every trip sub-table is read, written and ordered the same way, so only
+    the parts that actually differ live here instead of in five copies of
+    each operation. The dict key is also the URL segment the router registers
+    and the field name in the response, so those cannot drift apart.
+    """
+
+    table: str
+    cols: str
+    order: str
+    # A column the INSERT computes in SQL rather than taking from the request
+    # body, as (column, expression). Any ``?`` in the expression is filled
+    # with the trip id.
+    insert_expr: tuple[str, str] | None = None
+
+
+# Insertion order is the order these appear in a trip's detail response.
+_TRAVEL_CHILDREN: dict[str, _TravelChild] = {
+    "cities": _TravelChild(
+        "travel_city",
+        _TRAVEL_CITY_COLS,
+        "sort_order ASC, id ASC",
+        (
+            "sort_order",
+            "COALESCE((SELECT MAX(sort_order) + 1 FROM travel_city WHERE trip_id = ?), 0)",
+        ),
+    ),
+    "flights": _TravelChild(
+        "travel_flight",
+        _TRAVEL_FLIGHT_COLS,
+        "flight_date ASC NULLS LAST, created_at ASC, id ASC",
+    ),
+    "transport": _TravelChild(
+        "travel_transport",
+        _TRAVEL_TRANSPORT_COLS,
+        "travel_date ASC NULLS LAST, created_at ASC, id ASC",
+    ),
+    "itinerary": _TravelChild(
+        "travel_itinerary",
+        _TRAVEL_ITINERARY_COLS,
+        "item_date ASC, start_time ASC NULLS LAST, created_at ASC, id ASC",
+    ),
+    "accommodations": _TravelChild(
+        "travel_accommodation",
+        _TRAVEL_ACCOMMODATION_COLS,
+        "checkin_date ASC, created_at ASC, id ASC",
+    ),
+}
+
+# Selected columns the client never supplies: the identity, the parent link
+# and the server-set timestamp.
+_TRAVEL_SERVER_COLS = frozenset({"id", "trip_id", "created_at"})
+
+
+def travel_child_columns(kind: str) -> tuple[str, ...]:
+    """The columns a write to ``kind`` takes from the request body.
+
+    Derived from the SELECT list rather than written out again, so adding a
+    column to a table cannot leave a stale hand-written copy behind.
+    """
+    spec = _TRAVEL_CHILDREN[kind]
+    computed = {spec.insert_expr[0]} if spec.insert_expr else set()
+    return tuple(
+        name
+        for name in (c.strip() for c in spec.cols.split(","))
+        if name not in _TRAVEL_SERVER_COLS and name not in computed
     )
-    return [_row_to_dict(cur, r) for r in cur.fetchall()]
 
 
-def _travel_transport_rows(cur: Any, trip_id: int) -> list[dict[str, Any]]:
+def _travel_write_values(kind: str, values: dict[str, Any]) -> tuple[str, ...]:
+    """Validate ``values`` against the writable columns of ``kind``.
+
+    Rejects both missing and unknown keys. The SQL below is built from that
+    column tuple and never from the caller's keys, so this is drift detection
+    rather than injection defence: a schema field renamed without its column
+    would otherwise quietly stop being persisted.
+    """
+    cols = travel_child_columns(kind)
+    missing = [c for c in cols if c not in values]
+    unknown = [k for k in values if k not in cols]
+    if missing or unknown:
+        raise ValueError(
+            f"travel {kind} write mismatch"
+            + (f"; missing {', '.join(missing)}" if missing else "")
+            + (f"; unknown {', '.join(unknown)}" if unknown else "")
+        )
+    return cols
+
+
+def _travel_child_rows(cur: Any, kind: str, trip_id: int) -> list[dict[str, Any]]:
+    spec = _TRAVEL_CHILDREN[kind]
     cur.execute(
-        f"""
-        SELECT {_TRAVEL_TRANSPORT_COLS} FROM travel_transport
-        WHERE trip_id = ?
-        ORDER BY travel_date ASC NULLS LAST, created_at ASC, id ASC
-        """,
-        (trip_id,),
-    )
-    return [_row_to_dict(cur, r) for r in cur.fetchall()]
-
-
-def _travel_itinerary_rows(cur: Any, trip_id: int) -> list[dict[str, Any]]:
-    cur.execute(
-        f"""
-        SELECT {_TRAVEL_ITINERARY_COLS} FROM travel_itinerary
-        WHERE trip_id = ?
-        ORDER BY item_date ASC, start_time ASC NULLS LAST, created_at ASC, id ASC
-        """,
-        (trip_id,),
-    )
-    return [_row_to_dict(cur, r) for r in cur.fetchall()]
-
-
-def _travel_accommodations_rows(cur: Any, trip_id: int) -> list[dict[str, Any]]:
-    cur.execute(
-        f"""
-        SELECT {_TRAVEL_ACCOMMODATION_COLS} FROM travel_accommodation
-        WHERE trip_id = ?
-        ORDER BY checkin_date ASC, created_at ASC, id ASC
-        """,
-        (trip_id,),
-    )
-    return [_row_to_dict(cur, r) for r in cur.fetchall()]
-
-
-def _travel_cities_rows(cur: Any, trip_id: int) -> list[dict[str, Any]]:
-    cur.execute(
-        f"""
-        SELECT {_TRAVEL_CITY_COLS} FROM travel_city
-        WHERE trip_id = ?
-        ORDER BY sort_order ASC, id ASC
-        """,
+        f"SELECT {spec.cols} FROM {spec.table} WHERE trip_id = ? ORDER BY {spec.order}",
         (trip_id,),
     )
     return [_row_to_dict(cur, r) for r in cur.fetchall()]
@@ -2801,21 +2826,15 @@ def _travel_trip_detail(cur: Any, trip_id: int) -> dict[str, Any] | None:
     row = cur.fetchone()
     if row is None:
         return None
-    trip = _row_to_dict(cur, row)
-    return {
-        "trip": trip,
-        "cities": _travel_cities_rows(cur, trip_id),
-        "flights": _travel_flights_rows(cur, trip_id),
-        "transport": _travel_transport_rows(cur, trip_id),
-        "itinerary": _travel_itinerary_rows(cur, trip_id),
-        "accommodations": _travel_accommodations_rows(cur, trip_id),
-    }
+    detail: dict[str, Any] = {"trip": _row_to_dict(cur, row)}
+    for kind in _TRAVEL_CHILDREN:
+        detail[kind] = _travel_child_rows(cur, kind, trip_id)
+    return detail
 
 
 def list_travel_trips(limit: int = 500) -> list[dict[str, Any]]:
-    """Every trip (newest entry-period first), each with its flights,
-    itinerary, and accommodations nested — one query per sub-table rather
-    than N+1 per-trip queries."""
+    """Every trip (newest entry-period first) with its nested records — one
+    query per child table rather than N+1 per trip."""
     limit = max(1, min(limit, 2000))
     with get_connection() as conn:
         with db_cursor(conn) as cur:
@@ -2833,79 +2852,26 @@ def list_travel_trips(limit: int = 500) -> list[dict[str, Any]]:
             ids = [t["id"] for t in trips]
             placeholders = ",".join("?" * len(ids))
 
-            cur.execute(
-                f"""
-                SELECT {_TRAVEL_CITY_COLS} FROM travel_city
-                WHERE trip_id IN ({placeholders})
-                ORDER BY sort_order ASC, id ASC
-                """,
-                ids,
-            )
-            cities_by_trip: dict[int, list[dict[str, Any]]] = {}
-            for r in cur.fetchall():
-                c = _row_to_dict(cur, r)
-                cities_by_trip.setdefault(c["trip_id"], []).append(c)
-
-            cur.execute(
-                f"""
-                SELECT {_TRAVEL_FLIGHT_COLS} FROM travel_flight
-                WHERE trip_id IN ({placeholders})
-                ORDER BY flight_date ASC NULLS LAST, created_at ASC, id ASC
-                """,
-                ids,
-            )
-            flights_by_trip: dict[int, list[dict[str, Any]]] = {}
-            for r in cur.fetchall():
-                f = _row_to_dict(cur, r)
-                flights_by_trip.setdefault(f["trip_id"], []).append(f)
-
-            cur.execute(
-                f"""
-                SELECT {_TRAVEL_TRANSPORT_COLS} FROM travel_transport
-                WHERE trip_id IN ({placeholders})
-                ORDER BY travel_date ASC NULLS LAST, created_at ASC, id ASC
-                """,
-                ids,
-            )
-            transport_by_trip: dict[int, list[dict[str, Any]]] = {}
-            for r in cur.fetchall():
-                tr = _row_to_dict(cur, r)
-                transport_by_trip.setdefault(tr["trip_id"], []).append(tr)
-
-            cur.execute(
-                f"""
-                SELECT {_TRAVEL_ITINERARY_COLS} FROM travel_itinerary
-                WHERE trip_id IN ({placeholders})
-                ORDER BY item_date ASC, start_time ASC NULLS LAST, created_at ASC, id ASC
-                """,
-                ids,
-            )
-            itinerary_by_trip: dict[int, list[dict[str, Any]]] = {}
-            for r in cur.fetchall():
-                i = _row_to_dict(cur, r)
-                itinerary_by_trip.setdefault(i["trip_id"], []).append(i)
-
-            cur.execute(
-                f"""
-                SELECT {_TRAVEL_ACCOMMODATION_COLS} FROM travel_accommodation
-                WHERE trip_id IN ({placeholders})
-                ORDER BY checkin_date ASC, created_at ASC, id ASC
-                """,
-                ids,
-            )
-            accommodations_by_trip: dict[int, list[dict[str, Any]]] = {}
-            for r in cur.fetchall():
-                a = _row_to_dict(cur, r)
-                accommodations_by_trip.setdefault(a["trip_id"], []).append(a)
+            by_kind: dict[str, dict[int, list[dict[str, Any]]]] = {}
+            for kind, spec in _TRAVEL_CHILDREN.items():
+                cur.execute(
+                    f"""
+                    SELECT {spec.cols} FROM {spec.table}
+                    WHERE trip_id IN ({placeholders})
+                    ORDER BY {spec.order}
+                    """,
+                    ids,
+                )
+                grouped: dict[int, list[dict[str, Any]]] = {}
+                for r in cur.fetchall():
+                    row = _row_to_dict(cur, r)
+                    grouped.setdefault(row["trip_id"], []).append(row)
+                by_kind[kind] = grouped
 
             return [
                 {
                     "trip": t,
-                    "cities": cities_by_trip.get(t["id"], []),
-                    "flights": flights_by_trip.get(t["id"], []),
-                    "transport": transport_by_trip.get(t["id"], []),
-                    "itinerary": itinerary_by_trip.get(t["id"], []),
-                    "accommodations": accommodations_by_trip.get(t["id"], []),
+                    **{kind: by_kind[kind].get(t["id"], []) for kind in _TRAVEL_CHILDREN},
                 }
                 for t in trips
             ]
@@ -2963,412 +2929,75 @@ def delete_travel_trip(trip_id: int) -> bool:
             return cur.rowcount > 0
 
 
-def insert_travel_flight(
-    trip_id: int,
-    flight_number: str,
-    flight_date: Any,
-    arrival_date: Any,
-    departure_time: str | None,
-    arrival_time: str | None,
-    from_location: str | None,
-    from_map_url: str | None,
-    from_city: str | None,
-    from_country: str | None,
-    to_location: str | None,
-    to_map_url: str | None,
-    to_city: str | None,
-    to_country: str | None,
-    notes: str | None,
+def insert_travel_child(
+    kind: str, trip_id: int, values: dict[str, Any]
 ) -> dict[str, Any] | None:
+    """Add one nested record to a trip.
+
+    Returns the trip's refreshed detail, or ``None`` when the trip does not
+    exist — the INSERT is guarded by an EXISTS on the parent, so a bad trip id
+    writes nothing rather than orphaning a row.
+    """
+    spec = _TRAVEL_CHILDREN[kind]
+    cols = _travel_write_values(kind, values)
+    names = ["trip_id", *cols]
+    slots = ["?"] * len(names)
+    params: list[Any] = [trip_id, *(values[c] for c in cols)]
+    if spec.insert_expr:
+        extra_col, extra_sql = spec.insert_expr
+        names.append(extra_col)
+        slots.append(extra_sql)
+        params.extend([trip_id] * extra_sql.count("?"))
+    params.append(trip_id)  # the EXISTS guard
     with get_connection() as conn:
         with db_cursor(conn) as cur:
             cur.execute(
-                """
-                INSERT INTO travel_flight (
-                    trip_id, flight_number, flight_date, arrival_date, departure_time, arrival_time,
-                    from_location, from_map_url, from_city, from_country,
-                    to_location, to_map_url, to_city, to_country, notes
-                )
-                SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                f"""
+                INSERT INTO {spec.table} ({", ".join(names)})
+                SELECT {", ".join(slots)}
                 WHERE EXISTS (SELECT 1 FROM travel_trip WHERE id = ?)
                 RETURNING id
                 """,
-                (
-                    trip_id, flight_number, flight_date, arrival_date, departure_time, arrival_time,
-                    from_location, from_map_url, from_city, from_country,
-                    to_location, to_map_url, to_city, to_country, notes, trip_id,
-                ),
+                tuple(params),
             )
             if not cur.fetchone():
                 return None
             return _travel_trip_detail(cur, trip_id)
 
 
-def update_travel_flight(
-    trip_id: int,
-    flight_id: int,
-    flight_number: str,
-    flight_date: Any,
-    arrival_date: Any,
-    departure_time: str | None,
-    arrival_time: str | None,
-    from_location: str | None,
-    from_map_url: str | None,
-    from_city: str | None,
-    from_country: str | None,
-    to_location: str | None,
-    to_map_url: str | None,
-    to_city: str | None,
-    to_country: str | None,
-    notes: str | None,
+def update_travel_child(
+    kind: str, trip_id: int, child_id: int, values: dict[str, Any]
 ) -> dict[str, Any] | None:
+    """Overwrite one nested record, returning the trip's refreshed detail, or
+    ``None`` when no such record belongs to that trip."""
+    spec = _TRAVEL_CHILDREN[kind]
+    cols = _travel_write_values(kind, values)
+    assignments = ", ".join(f"{c} = ?" for c in cols)
+    params = [*(values[c] for c in cols), child_id, trip_id]
     with get_connection() as conn:
         with db_cursor(conn) as cur:
             cur.execute(
-                """
-                UPDATE travel_flight SET
-                    flight_number = ?, flight_date = ?, arrival_date = ?, departure_time = ?,
-                    arrival_time = ?, from_location = ?, from_map_url = ?, from_city = ?,
-                    from_country = ?, to_location = ?, to_map_url = ?, to_city = ?,
-                    to_country = ?, notes = ?
+                f"""
+                UPDATE {spec.table} SET {assignments}
                 WHERE id = ? AND trip_id = ?
                 RETURNING id
                 """,
-                (
-                    flight_number, flight_date, arrival_date, departure_time, arrival_time,
-                    from_location, from_map_url, from_city, from_country,
-                    to_location, to_map_url, to_city, to_country, notes,
-                    flight_id, trip_id,
-                ),
+                tuple(params),
             )
             if not cur.fetchone():
                 return None
             return _travel_trip_detail(cur, trip_id)
 
 
-def delete_travel_flight(trip_id: int, flight_id: int) -> dict[str, Any] | None:
+def delete_travel_child(kind: str, trip_id: int, child_id: int) -> dict[str, Any] | None:
+    """Remove one nested record, returning the trip's refreshed detail, or
+    ``None`` when no such record belongs to that trip."""
+    spec = _TRAVEL_CHILDREN[kind]
     with get_connection() as conn:
         with db_cursor(conn) as cur:
             cur.execute(
-                "DELETE FROM travel_flight WHERE id = ? AND trip_id = ? RETURNING id",
-                (flight_id, trip_id),
-            )
-            if not cur.fetchone():
-                return None
-            return _travel_trip_detail(cur, trip_id)
-
-
-def insert_travel_transport(
-    trip_id: int,
-    mode: str,
-    number: str | None,
-    travel_date: Any,
-    arrival_date: Any,
-    departure_time: str | None,
-    arrival_time: str | None,
-    from_location: str | None,
-    from_map_url: str | None,
-    from_city: str | None,
-    from_country: str | None,
-    to_location: str | None,
-    to_map_url: str | None,
-    to_city: str | None,
-    to_country: str | None,
-    notes: str | None,
-) -> dict[str, Any] | None:
-    with get_connection() as conn:
-        with db_cursor(conn) as cur:
-            cur.execute(
-                """
-                INSERT INTO travel_transport (
-                    trip_id, mode, number, travel_date, arrival_date, departure_time, arrival_time,
-                    from_location, from_map_url, from_city, from_country,
-                    to_location, to_map_url, to_city, to_country, notes
-                )
-                SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-                WHERE EXISTS (SELECT 1 FROM travel_trip WHERE id = ?)
-                RETURNING id
-                """,
-                (
-                    trip_id, mode, number, travel_date, arrival_date, departure_time, arrival_time,
-                    from_location, from_map_url, from_city, from_country,
-                    to_location, to_map_url, to_city, to_country, notes, trip_id,
-                ),
-            )
-            if not cur.fetchone():
-                return None
-            return _travel_trip_detail(cur, trip_id)
-
-
-def update_travel_transport(
-    trip_id: int,
-    transport_id: int,
-    mode: str,
-    number: str | None,
-    travel_date: Any,
-    arrival_date: Any,
-    departure_time: str | None,
-    arrival_time: str | None,
-    from_location: str | None,
-    from_map_url: str | None,
-    from_city: str | None,
-    from_country: str | None,
-    to_location: str | None,
-    to_map_url: str | None,
-    to_city: str | None,
-    to_country: str | None,
-    notes: str | None,
-) -> dict[str, Any] | None:
-    with get_connection() as conn:
-        with db_cursor(conn) as cur:
-            cur.execute(
-                """
-                UPDATE travel_transport SET
-                    mode = ?, number = ?, travel_date = ?, arrival_date = ?, departure_time = ?,
-                    arrival_time = ?, from_location = ?, from_map_url = ?, from_city = ?,
-                    from_country = ?, to_location = ?, to_map_url = ?, to_city = ?,
-                    to_country = ?, notes = ?
-                WHERE id = ? AND trip_id = ?
-                RETURNING id
-                """,
-                (
-                    mode, number, travel_date, arrival_date, departure_time, arrival_time,
-                    from_location, from_map_url, from_city, from_country,
-                    to_location, to_map_url, to_city, to_country, notes,
-                    transport_id, trip_id,
-                ),
-            )
-            if not cur.fetchone():
-                return None
-            return _travel_trip_detail(cur, trip_id)
-
-
-def delete_travel_transport(trip_id: int, transport_id: int) -> dict[str, Any] | None:
-    with get_connection() as conn:
-        with db_cursor(conn) as cur:
-            cur.execute(
-                "DELETE FROM travel_transport WHERE id = ? AND trip_id = ? RETURNING id",
-                (transport_id, trip_id),
-            )
-            if not cur.fetchone():
-                return None
-            return _travel_trip_detail(cur, trip_id)
-
-
-def insert_travel_itinerary(
-    trip_id: int,
-    item_date: Any,
-    item_end_date: Any,
-    start_time: str | None,
-    end_time: str | None,
-    activity: str,
-    location_name: str | None,
-    location_map_url: str | None,
-    notes: str | None,
-) -> dict[str, Any] | None:
-    with get_connection() as conn:
-        with db_cursor(conn) as cur:
-            cur.execute(
-                """
-                INSERT INTO travel_itinerary (
-                    trip_id, item_date, item_end_date, start_time, end_time, activity,
-                    location_name, location_map_url, notes
-                )
-                SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?
-                WHERE EXISTS (SELECT 1 FROM travel_trip WHERE id = ?)
-                RETURNING id
-                """,
-                (
-                    trip_id, item_date, item_end_date, start_time, end_time, activity,
-                    location_name, location_map_url, notes, trip_id,
-                ),
-            )
-            if not cur.fetchone():
-                return None
-            return _travel_trip_detail(cur, trip_id)
-
-
-def update_travel_itinerary(
-    trip_id: int,
-    item_id: int,
-    item_date: Any,
-    item_end_date: Any,
-    start_time: str | None,
-    end_time: str | None,
-    activity: str,
-    location_name: str | None,
-    location_map_url: str | None,
-    notes: str | None,
-) -> dict[str, Any] | None:
-    with get_connection() as conn:
-        with db_cursor(conn) as cur:
-            cur.execute(
-                """
-                UPDATE travel_itinerary SET
-                    item_date = ?, item_end_date = ?, start_time = ?, end_time = ?, activity = ?,
-                    location_name = ?, location_map_url = ?, notes = ?
-                WHERE id = ? AND trip_id = ?
-                RETURNING id
-                """,
-                (
-                    item_date, item_end_date, start_time, end_time, activity,
-                    location_name, location_map_url, notes,
-                    item_id, trip_id,
-                ),
-            )
-            if not cur.fetchone():
-                return None
-            return _travel_trip_detail(cur, trip_id)
-
-
-def delete_travel_itinerary(trip_id: int, item_id: int) -> dict[str, Any] | None:
-    with get_connection() as conn:
-        with db_cursor(conn) as cur:
-            cur.execute(
-                "DELETE FROM travel_itinerary WHERE id = ? AND trip_id = ? RETURNING id",
-                (item_id, trip_id),
-            )
-            if not cur.fetchone():
-                return None
-            return _travel_trip_detail(cur, trip_id)
-
-
-def insert_travel_accommodation(
-    trip_id: int,
-    name: str,
-    checkin_date: Any,
-    checkout_date: Any,
-    checkin_time: str | None,
-    checkout_time: str | None,
-    booking_confirmation: str | None,
-    instructions: str | None,
-    location_name: str | None,
-    location_map_url: str | None,
-    notes: str | None,
-) -> dict[str, Any] | None:
-    with get_connection() as conn:
-        with db_cursor(conn) as cur:
-            cur.execute(
-                """
-                INSERT INTO travel_accommodation (
-                    trip_id, name, checkin_date, checkout_date, checkin_time, checkout_time,
-                    booking_confirmation, instructions, location_name, location_map_url, notes
-                )
-                SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-                WHERE EXISTS (SELECT 1 FROM travel_trip WHERE id = ?)
-                RETURNING id
-                """,
-                (
-                    trip_id, name, checkin_date, checkout_date, checkin_time, checkout_time,
-                    booking_confirmation, instructions, location_name, location_map_url, notes,
-                    trip_id,
-                ),
-            )
-            if not cur.fetchone():
-                return None
-            return _travel_trip_detail(cur, trip_id)
-
-
-def update_travel_accommodation(
-    trip_id: int,
-    accommodation_id: int,
-    name: str,
-    checkin_date: Any,
-    checkout_date: Any,
-    checkin_time: str | None,
-    checkout_time: str | None,
-    booking_confirmation: str | None,
-    instructions: str | None,
-    location_name: str | None,
-    location_map_url: str | None,
-    notes: str | None,
-) -> dict[str, Any] | None:
-    with get_connection() as conn:
-        with db_cursor(conn) as cur:
-            cur.execute(
-                """
-                UPDATE travel_accommodation SET
-                    name = ?, checkin_date = ?, checkout_date = ?, checkin_time = ?,
-                    checkout_time = ?, booking_confirmation = ?, instructions = ?,
-                    location_name = ?, location_map_url = ?, notes = ?
-                WHERE id = ? AND trip_id = ?
-                RETURNING id
-                """,
-                (
-                    name, checkin_date, checkout_date, checkin_time, checkout_time,
-                    booking_confirmation, instructions, location_name, location_map_url, notes,
-                    accommodation_id, trip_id,
-                ),
-            )
-            if not cur.fetchone():
-                return None
-            return _travel_trip_detail(cur, trip_id)
-
-
-def delete_travel_accommodation(trip_id: int, accommodation_id: int) -> dict[str, Any] | None:
-    with get_connection() as conn:
-        with db_cursor(conn) as cur:
-            cur.execute(
-                "DELETE FROM travel_accommodation WHERE id = ? AND trip_id = ? RETURNING id",
-                (accommodation_id, trip_id),
-            )
-            if not cur.fetchone():
-                return None
-            return _travel_trip_detail(cur, trip_id)
-
-
-def insert_travel_city(
-    trip_id: int,
-    name: str,
-    start_date: Any,
-    end_date: Any,
-) -> dict[str, Any] | None:
-    with get_connection() as conn:
-        with db_cursor(conn) as cur:
-            cur.execute(
-                """
-                INSERT INTO travel_city (trip_id, name, start_date, end_date, sort_order)
-                SELECT ?, ?, ?, ?, COALESCE(
-                    (SELECT MAX(sort_order) + 1 FROM travel_city WHERE trip_id = ?), 0
-                )
-                WHERE EXISTS (SELECT 1 FROM travel_trip WHERE id = ?)
-                RETURNING id
-                """,
-                (trip_id, name, start_date, end_date, trip_id, trip_id),
-            )
-            if not cur.fetchone():
-                return None
-            return _travel_trip_detail(cur, trip_id)
-
-
-def update_travel_city(
-    trip_id: int,
-    city_id: int,
-    name: str,
-    start_date: Any,
-    end_date: Any,
-) -> dict[str, Any] | None:
-    with get_connection() as conn:
-        with db_cursor(conn) as cur:
-            cur.execute(
-                """
-                UPDATE travel_city SET name = ?, start_date = ?, end_date = ?
-                WHERE id = ? AND trip_id = ?
-                RETURNING id
-                """,
-                (name, start_date, end_date, city_id, trip_id),
-            )
-            if not cur.fetchone():
-                return None
-            return _travel_trip_detail(cur, trip_id)
-
-
-def delete_travel_city(trip_id: int, city_id: int) -> dict[str, Any] | None:
-    with get_connection() as conn:
-        with db_cursor(conn) as cur:
-            cur.execute(
-                "DELETE FROM travel_city WHERE id = ? AND trip_id = ? RETURNING id",
-                (city_id, trip_id),
+                f"DELETE FROM {spec.table} WHERE id = ? AND trip_id = ? RETURNING id",
+                (child_id, trip_id),
             )
             if not cur.fetchone():
                 return None
