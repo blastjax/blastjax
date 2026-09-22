@@ -64,6 +64,10 @@ services:
       BUDGET_DB_POOL_KEEP: ${BUDGET_DB_POOL_KEEP:-6}
       BUDGET_DB_POOL_MAX: ${BUDGET_DB_POOL_MAX:-10}
       BUDGET_DB_PROBE_AFTER_SECONDS: ${BUDGET_DB_PROBE_AFTER_SECONDS:-20}
+      # Seconds the pool may sit unused before every connection is closed, so
+      # Neon's compute can scale to zero instead of being billed all night.
+      # 0 disables it and holds connections open indefinitely.
+      BUDGET_DB_IDLE_CLOSE_SECONDS: ${BUDGET_DB_IDLE_CLOSE_SECONDS:-120}
     volumes:
       - ./data:/app/data
     depends_on:

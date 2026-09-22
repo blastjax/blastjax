@@ -65,12 +65,12 @@ function YearPayslipBlockInner({
             return (
               <div key={month} className={`rounded-lg border ${PAYSLIP_BORDER_DASHED} p-4`}>
                 <div className={`mb-3 text-sm ${PAYSLIP_TEXT_GHOST}`}>{monthLabel}</div>
-                <div className="flex gap-2">
+                <div className="flex flex-col gap-2">
                   <button
                     type="button"
                     disabled={saving}
                     onClick={() => onOpenSlot(year, month, 1)}
-                    className={`flex-1 rounded-md border ${PAYSLIP_BORDER_DASHED} px-2.5 py-1.5 text-xs font-semibold ${PAYSLIP_TEXT_DIM} transition-colors duration-150 hover:border-[oklch(1_0_0/0.16)] hover:${PAYSLIP_TEXT_2}`}
+                    className={`w-full rounded-md border ${PAYSLIP_BORDER_DASHED} px-2.5 py-1.5 text-xs font-semibold ${PAYSLIP_TEXT_DIM} transition-colors duration-150 hover:border-[oklch(1_0_0/0.16)] hover:${PAYSLIP_TEXT_2}`}
                   >
                     + 1st half
                   </button>
@@ -78,7 +78,7 @@ function YearPayslipBlockInner({
                     type="button"
                     disabled={saving}
                     onClick={() => onOpenSlot(year, month, 2)}
-                    className={`flex-1 rounded-md border ${PAYSLIP_BORDER_DASHED} px-2.5 py-1.5 text-xs font-semibold ${PAYSLIP_TEXT_DIM} transition-colors duration-150 hover:border-[oklch(1_0_0/0.16)] hover:${PAYSLIP_TEXT_2}`}
+                    className={`w-full rounded-md border ${PAYSLIP_BORDER_DASHED} px-2.5 py-1.5 text-xs font-semibold ${PAYSLIP_TEXT_DIM} transition-colors duration-150 hover:border-[oklch(1_0_0/0.16)] hover:${PAYSLIP_TEXT_2}`}
                   >
                     + 2nd half
                   </button>
@@ -106,7 +106,20 @@ function YearPayslipBlockInner({
               <div className={`mt-3.5 flex flex-col gap-2.5 border-t ${PAYSLIP_BORDER_SOFT} pt-3`}>
                 {([1, 2] as const).map((half) => {
                   const rs = half === 1 ? ms.rows1 : ms.rows2;
-                  if (rs.length === 0) return null;
+                  const halfLabel = half === 1 ? "1st half" : "2nd half";
+                  if (rs.length === 0) {
+                    return (
+                      <button
+                        key={half}
+                        type="button"
+                        disabled={saving}
+                        onClick={() => onOpenSlot(year, month, half)}
+                        className={`rounded-lg border ${PAYSLIP_BORDER_DASHED} px-2.5 py-1.5 text-xs font-semibold ${PAYSLIP_TEXT_DIM} transition-colors duration-150 hover:border-[oklch(1_0_0/0.16)] hover:${PAYSLIP_TEXT_2}`}
+                      >
+                        + {halfLabel}
+                      </button>
+                    );
+                  }
                   const periodNet = half === 1 ? ms.netSum1 : ms.netSum2;
                   const periodGross = half === 1 ? ms.grossSum1 : ms.grossSum2;
                   return (
@@ -116,7 +129,7 @@ function YearPayslipBlockInner({
                       onClick={() => onOpenSlot(year, month, half)}
                     >
                       <div className={`mb-1.5 text-[11px] ${PAYSLIP_TEXT_DIM}`}>
-                        {half === 1 ? "1st half" : "2nd half"}
+                        {halfLabel}
                       </div>
                       <div className={`flex justify-between ${PAYSLIP_MONO} text-[13px]`}>
                         <span className={PAYSLIP_TEXT_2}>Net</span>

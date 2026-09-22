@@ -126,7 +126,13 @@ def storage_kind() -> str:
 # ---------------------------------------------------------------- connections
 
 _POOL: Any = None
-_POOL_LOCK = threading.Lock()
+# Reentrant: ``get_connection`` claims an in-flight slot and calls ``_pool()``
+# under a single acquisition, and ``_pool()`` takes the lock itself.
+_POOL_LOCK = threading.RLock()
+_INFLIGHT = 0
+_LAST_ACTIVITY = _time.monotonic()
+_REAPER: Any = None
+_REAP_TICK_SECONDS = 15.0
 
 
 def _probe_after_seconds() -> float:
@@ -203,7 +209,74 @@ def _pool() -> Any:
                 )
                 pool.minconn = max(1, min(keep, maxconn))
                 _POOL = pool
+                _start_reaper()
     return _POOL
+
+
+def _idle_close_after() -> float:
+    """How long the pool may sit unused before every connection is dropped.
+
+    Neon bills compute by the hour and only suspends a compute that nothing is
+    talking to, so a pool held open across a quiet night is not free. Letting
+    the connections go lets the compute scale to zero; the next request after
+    that pays one reconnect, which is the right trade for an app that is idle
+    far more than it is busy.
+
+    Comfortably longer than a person clicking around the app, so an active
+    session never pays that reconnect. 0 disables the reaper.
+    """
+    return float(os.environ.get("BUDGET_DB_IDLE_CLOSE_SECONDS", "120"))
+
+
+def _take_idle_pool() -> Any:
+    """Detach and return the pool if it has gone unused -- otherwise ``None``.
+
+    Only ever hands one back with no checkout outstanding: ``get_connection``
+    claims its in-flight slot under ``_POOL_LOCK`` before it touches the pool,
+    so a zero count here means no request is holding -- or is about to hold --
+    a connection from the pool being handed over.
+
+    Detaching under the lock is what makes closing safe afterwards: ``_POOL``
+    is already ``None``, so the caller owns the last reference and the next
+    request lazily builds a fresh pool instead.
+    """
+    global _POOL
+    if _idle_close_after() <= 0:
+        return None
+    with _POOL_LOCK:
+        if _POOL is None or _INFLIGHT:
+            return None
+        if _time.monotonic() - _LAST_ACTIVITY < _idle_close_after():
+            return None
+        pool, _POOL = _POOL, None
+        return pool
+
+
+def _reap_idle_pool() -> None:
+    """Close the pool once it has gone ``_idle_close_after()`` unused.
+
+    ``closeall()`` runs outside the lock -- it is a syscall per socket, and
+    nothing can reach the pool once ``_take_idle_pool`` has detached it.
+    """
+    while True:
+        _time.sleep(_REAP_TICK_SECONDS)
+        pool = _take_idle_pool()
+        if pool is None:
+            continue
+        try:
+            pool.closeall()
+        except Exception:
+            pass
+
+
+def _start_reaper() -> None:
+    """Run the reaper once per process. Caller holds ``_POOL_LOCK``."""
+    global _REAPER
+    if _REAPER is None or not _REAPER.is_alive():
+        _REAPER = threading.Thread(
+            target=_reap_idle_pool, name="db-idle-reaper", daemon=True
+        )
+        _REAPER.start()
 
 
 def close_connection_pool() -> None:
@@ -280,32 +353,34 @@ def get_connection():
     exception, so a failed multi-statement write (e.g. insert + recompute)
     never leaves a partial change committed.
     """
-    pool = _pool()
-    conn = _checkout(pool)
+    global _INFLIGHT, _LAST_ACTIVITY
+    # Claim the slot under the same acquisition that hands out the pool, so the
+    # reaper cannot close a pool this block is about to check out from.
+    with _POOL_LOCK:
+        pool = _pool()
+        _INFLIGHT += 1
     try:
+        conn = _checkout(pool)
         try:
-            yield conn
-            if not conn.autocommit:
-                conn.commit()
-        except Exception:
-            if not conn.closed and not conn.autocommit:
-                conn.rollback()
-            raise
+            try:
+                yield conn
+                if not conn.autocommit:
+                    conn.commit()
+            except Exception:
+                if not conn.closed and not conn.autocommit:
+                    conn.rollback()
+                raise
+        finally:
+            if not conn.closed:
+                conn.autocommit = True
+                conn.last_used = _time.monotonic()
+            pool.putconn(conn)
     finally:
-        if not conn.closed:
-            conn.autocommit = True
-            conn.last_used = _time.monotonic()
-        pool.putconn(conn)
-
-
-def check_connection() -> bool:
-    try:
-        with get_connection() as conn:
-            with db_cursor(conn) as cur:
-                cur.execute("SELECT 1")
-        return True
-    except Exception:
-        return False
+        with _POOL_LOCK:
+            _INFLIGHT -= 1
+            # Stamped on release, not on checkout: the idle clock should start
+            # from the end of the last query, not the start of a long one.
+            _LAST_ACTIVITY = _time.monotonic()
 
 
 # -------------------------------------------------------------- transactions

@@ -17,6 +17,7 @@ import datetime as dt
 import os
 import re
 import sys
+import time
 from contextlib import contextmanager
 from decimal import Decimal
 from pathlib import Path
@@ -409,6 +410,58 @@ def check_lotto_game_seed() -> None:
     assert db._is_write(
         'INSERT INTO "lotto_game" (id, name) VALUES (%s, %s) ON CONFLICT DO NOTHING'
     )
+
+
+def check_db_idle_reaper() -> None:
+    """The reaper must free the pool only when it is genuinely unused.
+
+    Both directions cost something real: closing a pool with a checkout
+    outstanding yanks a connection out of a live request, and never closing
+    one leaves Neon's compute billed through every idle night, which is what
+    exhausted the quota and took the API down.
+    """
+
+    class _FakePool:
+        def __init__(self) -> None:
+            self.closed = False
+
+        def closeall(self) -> None:
+            self.closed = True
+
+    saved = (db._POOL, db._INFLIGHT, db._LAST_ACTIVITY)
+    prior = os.environ.get("BUDGET_DB_IDLE_CLOSE_SECONDS")
+    try:
+        os.environ["BUDGET_DB_IDLE_CLOSE_SECONDS"] = "120"
+
+        # Just used: nothing to reap.
+        db._POOL, db._INFLIGHT = _FakePool(), 0
+        db._LAST_ACTIVITY = time.monotonic()
+        assert db._take_idle_pool() is None, "reaped a pool still in use"
+
+        # Idle long enough, but a request is holding a connection.
+        db._LAST_ACTIVITY = time.monotonic() - 600
+        db._INFLIGHT = 1
+        assert db._take_idle_pool() is None, "reaped under a live checkout"
+        assert db._POOL is not None
+
+        # Idle with nothing in flight: hand it over and detach it.
+        db._INFLIGHT = 0
+        pool = db._take_idle_pool()
+        assert isinstance(pool, _FakePool), "idle pool was not reaped"
+        assert db._POOL is None, "reaped pool stayed attached"
+        assert db._take_idle_pool() is None, "handed the same pool out twice"
+
+        # Opt-out must hold a pool open however long it has idled.
+        os.environ["BUDGET_DB_IDLE_CLOSE_SECONDS"] = "0"
+        db._POOL = _FakePool()
+        db._LAST_ACTIVITY = time.monotonic() - 600
+        assert db._take_idle_pool() is None, "reaped while disabled"
+    finally:
+        db._POOL, db._INFLIGHT, db._LAST_ACTIVITY = saved
+        if prior is None:
+            os.environ.pop("BUDGET_DB_IDLE_CLOSE_SECONDS", None)
+        else:
+            os.environ["BUDGET_DB_IDLE_CLOSE_SECONDS"] = prior
 
 
 def main() -> int:
