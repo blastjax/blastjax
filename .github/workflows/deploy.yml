@@ -51,7 +51,7 @@ jobs:
           context: ${{ matrix.context }}
           file: ${{ matrix.file }}
           push: true
-          build-args: ${{ matrix.name == 'web' && format('NEXT_PUBLIC_API_URL={0}', secrets.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000') || '' }}
+          build-args: ${{ matrix.name == 'web' && format('NEXT_PUBLIC_API_URL={0}', secrets.NEXT_PUBLIC_API_URL || '') || '' }}
           tags: |
             ${{ matrix.image }}:latest
             ${{ matrix.image }}:${{ github.sha }}

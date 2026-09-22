@@ -94,7 +94,7 @@ services:
       context: ./web
       dockerfile: ../docker/Dockerfile.web
       args:
-        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://127.0.0.1:8000}
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}
     # No host port publish - only reachable through Caddy (see below).
     depends_on:
       api:

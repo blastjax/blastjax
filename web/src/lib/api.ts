@@ -1,11 +1,15 @@
 import { AUTH_UNAUTHORIZED_EVENT, clearSessionToken, getSessionToken } from "@/lib/auth";
 
-/** API origin (FastAPI); override with `NEXT_PUBLIC_API_URL` for hosted UIs. */
+/**
+ * API origin (FastAPI). Defaults to same-origin ("") since Caddy already
+ * reverse-proxies /api/* to the backend on the page's own host - a browser
+ * on any device just hits the origin it loaded the page from. Only set
+ * `NEXT_PUBLIC_API_URL` if the API is genuinely served from a different
+ * origin than the UI.
+ */
 export function dataApiBase(): string {
   const rawApi = process.env.NEXT_PUBLIC_API_URL?.trim();
-  return rawApi && rawApi.length > 0
-    ? rawApi.replace(/\/$/, "")
-    : "http://127.0.0.1:8000";
+  return rawApi && rawApi.length > 0 ? rawApi.replace(/\/$/, "") : "";
 }
 
 export async function apiFetch(
