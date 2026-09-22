@@ -97,6 +97,11 @@ def _run_extra_invalidators(path: str) -> None:
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     init_schema()
     cache.init_cache()
+    # Startup may have just added a lotto_game row (schema.sync_lotto_games),
+    # and the games list is cached for a day with nothing to invalidate it --
+    # no request wrote to /api/lotto. Without this the new game stays hidden
+    # until the TTL lapses.
+    cache.invalidate("lotto")
     try:
         yield
     finally:

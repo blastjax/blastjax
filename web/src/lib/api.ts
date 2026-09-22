@@ -1001,6 +1001,9 @@ export async function deleteCreditCardPayment(paymentId: number) {
 export type LottoGame = {
   id: number;
   name: string;
+  /** The game's current jackpot — its newest draw that has one. Null until a
+   * draw with a prize is logged. */
+  jackpot_prize: number | null;
 };
 
 export async function getLottoGames() {

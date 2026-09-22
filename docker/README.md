@@ -18,6 +18,18 @@ no `env_file: .env` passing the whole file through — compose only auto-loads `
 those `${...}` placeholders (nothing is copied into the image or container), so adding a new setting means adding
 a line to `docker-compose.yml`, not just to `.env`.
 
+## Login
+
+`docker-compose.override.yml` (gitignored, auto-merged only on a local `docker compose up`) sets
+**`BUDGET_DISABLE_AUTH=1`** on the `api` service, so a local run never asks for a username/password —
+`login_required()` in `backend/app/security.py` short-circuits and every route is open. It is needed
+because the container reads the same Neon database as the deploy, which already has users, so login
+would otherwise be demanded on each browser restart.
+
+Delete that block from the override to test the real login flow. Never set the variable on a host that
+is reachable from anywhere else: it unauthenticates the whole API. The deployed stack can't pick it up
+by accident — the EC2 host deploys from `git pull`, which never brings the ignored override file with it.
+
 ## Builds (cache + image size)
 
 - **Compose** uses a **small build context per service** (`./backend` for API, `./web` for the UI) so unrelated file changes do not invalidate the other image’s layers.

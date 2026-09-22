@@ -14,6 +14,7 @@ layer's table-driven form depends on.
 from __future__ import annotations
 
 import datetime as dt
+import os
 import re
 import sys
 from contextlib import contextmanager
@@ -24,6 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import db
 import schema
+from app import security
 from app.routers import travel
 
 
@@ -373,6 +375,40 @@ def check_clean_city() -> None:
     assert c("Cebu") == "Cebu"
     # A name that is only the suffix keeps its name rather than emptying out.
     assert c("Municipality") == "Municipality"
+
+
+def check_auth_disable_flag() -> None:
+    # The local docker override sets this to skip the login screen; anything
+    # that made an unset/off value read as "on" would silently unauthenticate
+    # the deployed API, so pin both directions.
+    d = security._auth_disabled
+    for on in ("1", "true", "TRUE", "yes", " 1 "):
+        os.environ["BUDGET_DISABLE_AUTH"] = on
+        assert d() is True, on
+    for off in ("", "0", "false", "no", "maybe"):
+        os.environ["BUDGET_DISABLE_AUTH"] = off
+        assert d() is False, off
+    del os.environ["BUDGET_DISABLE_AUTH"]
+    assert d() is False
+
+
+def check_lotto_game_seed() -> None:
+    """The seed rows must stay unique, and their INSERT must read as a write.
+
+    ``init_schema`` runs ``sync_lotto_games`` on a connection that starts in
+    autocommit: were the statement misread as a read, it would never open a
+    transaction to commit and a newly added game would vanish on restart.
+    """
+    ids = [i for i, _ in schema.SEED_LOTTO_GAMES]
+    names = [n for _, n in schema.SEED_LOTTO_GAMES]
+    assert len(set(ids)) == len(ids), f"duplicate seed ids: {ids}"
+    assert len(set(names)) == len(names), f"duplicate seed names: {names}"
+    # list_lotto_games orders by the trailing field size, so every name needs one.
+    for name in names:
+        assert re.search(r"/\d+$", name), f"no field size in {name!r}"
+    assert db._is_write(
+        'INSERT INTO "lotto_game" (id, name) VALUES (%s, %s) ON CONFLICT DO NOTHING'
+    )
 
 
 def main() -> int:

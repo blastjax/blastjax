@@ -19,7 +19,7 @@ import {
   type LottoDrawDetail,
 } from "@/lib/api";
 import { formatDate, formatMonthDayShort } from "@/lib/dateFormat";
-import { fmtAmountOrDash, fmtCount } from "@/lib/formatNumber";
+import { fmtAmountOrDash, fmtCount, fmtJackpotCompact } from "@/lib/formatNumber";
 import {
   ACTION_BUTTON_CLASSES,
   ADD_BUTTON_CLASSES,
@@ -112,14 +112,6 @@ function numbersToText(numbers: number[]): string {
  * export (historic results and attempts alike) writes numbers in. */
 function numbersToDashString(numbers: number[]): string {
   return numbers.map((n) => String(n).padStart(2, "0")).join("-");
-}
-
-/** `292772750.79` -> "292.77M" — the current-jackpot tile's own compact
- * form, since a nine-figure jackpot is the one amount on this page too big
- * for `fmtAmountOrDash`'s full-precision dollar figure to sit next to a
- * bare match score. Below a million, just the plain amount. */
-function fmtJackpotCompact(n: number): string {
-  return n >= 1_000_000 ? `${(n / 1_000_000).toFixed(2)}M` : fmtAmountOrDash(n);
 }
 
 /** The stored "YYYY-MM-DD" -> "M/D/YYYY", for a txt export row. Distinct

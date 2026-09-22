@@ -72,6 +72,13 @@ export function fmtAxisMoneyTick(value: unknown): string {
   return n >= 1000 ? `${AMOUNT_FORMAT.format(n / 1000)}k` : AMOUNT_FORMAT.format(n);
 }
 
+/** `292772750.79` -> "292.77M" — for the jackpot figures, the one amount in
+ * this app too big to sit next to anything else at full precision (a
+ * nine-figure peso jackpot). Below a million, the plain amount. */
+export function fmtJackpotCompact(n: number): string {
+  return n >= 1_000_000 ? `${(n / 1_000_000).toFixed(2)}M` : fmtAmountOrDash(n);
+}
+
 /** `450`, `1.6k`, `12.3k` — whole-ish amount for tight spots (e.g. a calendar day
  * cell) where a full `1,579.51` never fits without truncating mid-number. */
 const COMPACT_MONEY_FORMAT = new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 });

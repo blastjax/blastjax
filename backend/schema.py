@@ -490,11 +490,31 @@ SEED_LOTTO_GAMES = [
     (2, "Megalotto 6/45"),
     (3, "Ultra Lotto 6/58"),
     (4, "Superlotto 6/49"),
+    (5, "Lotto 6/42"),
 ]
 
 
 def table_names() -> list[str]:
     return [name for name, _ in SCHEMA]
+
+
+def sync_lotto_games(cur: Any) -> None:
+    """Insert any SEED_LOTTO_GAMES row the database is missing.
+
+    Runs on every startup (``db.init_schema``), not only on a fresh build: a
+    game added to the list afterwards would otherwise be absent from an
+    existing database, and the Lotto page lists whatever ``lotto_game`` holds,
+    so that game simply would not appear. Rows already present are left
+    alone -- both id and name are unique.
+    """
+    cur.executemany(
+        'INSERT INTO "lotto_game" (id, name) VALUES (%s, %s) ON CONFLICT DO NOTHING',
+        SEED_LOTTO_GAMES,
+    )
+    cur.execute(
+        "SELECT setval(pg_get_serial_sequence('lotto_game', 'id'), "
+        "(SELECT max(id) FROM lotto_game))"
+    )
 
 
 def create_all(cur: Any) -> None:
@@ -505,13 +525,7 @@ def create_all(cur: Any) -> None:
     """
     for name, body in SCHEMA:
         cur.execute(f'CREATE TABLE "{name}" (\n{body}\n)')
-    cur.executemany(
-        'INSERT INTO "lotto_game" (id, name) VALUES (%s, %s)', SEED_LOTTO_GAMES
-    )
-    cur.execute(
-        "SELECT setval(pg_get_serial_sequence('lotto_game', 'id'), "
-        "(SELECT max(id) FROM lotto_game))"
-    )
+    sync_lotto_games(cur)
     for tbl, col, ref_tbl, ref_col, on_delete in FOREIGN_KEYS:
         cur.execute(
             f'ALTER TABLE "{tbl}" ADD CONSTRAINT "fk_{tbl}_{col}" '

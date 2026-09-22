@@ -105,6 +105,19 @@ def _store_delete(key: str) -> None:
 _users_exist_local: tuple[float, bool] | None = None
 
 
+def _auth_disabled() -> bool:
+    """Local-only escape hatch: never ask for a username/password.
+
+    Set by ``docker-compose.override.yml``, which is gitignored and so never
+    reaches the deployed host (the EC2 box runs ``docker compose up`` off a
+    plain ``git pull``). It exists because a local ``docker compose up`` talks
+    to the same Neon database as production, which already has users -- so
+    login would otherwise be demanded on every browser restart while
+    developing. Do not set it anywhere reachable from off the machine.
+    """
+    return (os.environ.get("BUDGET_DISABLE_AUTH") or "").strip().lower() in ("1", "true", "yes")
+
+
 def login_required() -> bool:
     """Whether any user has been added, i.e. whether login is switched on.
 
@@ -122,6 +135,8 @@ def login_required() -> bool:
     TTL is what bounds staleness if a second worker ever changes the flag, so
     it stays small.
     """
+    if _auth_disabled():
+        return False
     global _users_exist_local
     now = time.monotonic()
     if _users_exist_local is not None and _users_exist_local[0] > now:

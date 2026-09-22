@@ -26,10 +26,10 @@ depending on whether it came from Redis or the database. Normalising here
 gives one representation everywhere.
 
 The schema itself is owned by ``backend/schema.py``, not by this module --
-``init_schema()`` only verifies that the tables it defines are present, and
-reads the list from that same DDL, so there is no second copy to drift out of
-sync. ``backend/test_core.py`` checks the DDL against every column the queries
-below select. That is not a theoretical risk: the ``company`` table and both
+``init_schema()`` only verifies that the tables it defines are present (plus
+tops up the fixed ``lotto_game`` rows), and reads the list from that same DDL,
+so there is no second copy to drift out of sync. ``backend/test_core.py``
+checks the DDL against every column the queries below select. That is not a theoretical risk: the ``company`` table and both
 ``trust_fund`` columns were live and queried while missing from the DDL
 entirely.
 
@@ -416,7 +416,8 @@ def _row_to_dict(cur: Any, row: Any) -> dict[str, Any]:
 
 
 def init_schema() -> None:
-    """Verify every table ``schema.py`` defines is present. Creates nothing.
+    """Verify every table ``schema.py`` defines is present, then top up the
+    fixed ``lotto_game`` lookup rows. Creates no tables.
 
     The expected list is read straight from the DDL rather than restated here,
     so a table cannot be added to the schema and silently go unchecked.
@@ -437,6 +438,9 @@ def init_schema() -> None:
             f"{len(missing)} expected table(s): {', '.join(missing)}. "
             "Build them with backend/schema.py's create_all()."
         )
+    with get_connection() as conn:
+        with db_cursor(conn) as cur:
+            schema.sync_lotto_games(cur)
 
 
 _PAYSLIP_RETURN_COLS = """
@@ -2077,14 +2081,32 @@ _LOTTO_ATTEMPT_COLS = "id, draw_id, ticket, n1, n2, n3, n4, n5, n6, created_at"
 
 
 def list_lotto_games() -> list[dict[str, Any]]:
-    """The fixed set of lotto games (see schema.SEED_LOTTO_GAMES), ordered by
-    field size (6/45, 6/49, 6/55, 6/58) rather than by id -- id order is
-    creation order, not display order (see ``lotto_draw.game_id``'s DEFAULT,
-    which pins id=3 to Ultra Lotto 6/58 for existing rows)."""
+    """The fixed set of lotto games (see schema.SEED_LOTTO_GAMES), each with
+    its current jackpot, ordered by field size (6/42, 6/45, 6/49, 6/55, 6/58)
+    rather than by id -- id order is creation order, not display order (see
+    ``lotto_draw.game_id``'s DEFAULT, which pins id=3 to Ultra Lotto 6/58 for
+    existing rows).
+
+    ``jackpot_prize`` is the newest draw that carries one, matching what the
+    per-game page calls the current jackpot, and is null for a game whose
+    draws have no prize recorded yet. The lateral rides on
+    ``idx_lotto_draw_game_date``, so labelling the game picker stays one
+    query rather than one per game.
+    """
     with get_connection() as conn:
         with db_cursor(conn) as cur:
             cur.execute(
-                r"SELECT id, name FROM lotto_game ORDER BY substring(name from '/(\d+)$')::int"
+                r"""
+                SELECT g.id, g.name, latest.jackpot_prize
+                FROM lotto_game g
+                LEFT JOIN LATERAL (
+                    SELECT jackpot_prize FROM lotto_draw
+                    WHERE game_id = g.id AND jackpot_prize IS NOT NULL
+                    ORDER BY draw_date DESC
+                    LIMIT 1
+                ) latest ON TRUE
+                ORDER BY substring(g.name from '/(\d+)$')::int
+                """
             )
             return [_row_to_dict(cur, r) for r in cur.fetchall()]
 
