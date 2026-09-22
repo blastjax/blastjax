@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { AmountInput } from "@/components/AmountInput";
 import { PencilIcon, TrashIcon } from "@/components/Icons";
 import { PageHeader } from "@/components/PageHeader";
@@ -10,6 +11,7 @@ import {
   deleteLottoAttempt,
   deleteLottoDraw,
   getLottoDraws,
+  getLottoGames,
   importLottoDrawResultsText,
   setLottoDraw,
   updateLottoDraw,
@@ -758,7 +760,8 @@ type RevealedActions =
   | { type: "attempt"; drawId: number; attemptId: number }
   | null;
 
-export default function LottoClient() {
+export default function LottoClient({ gameId }: { gameId: number }) {
+  const [gameName, setGameName] = useState<string | null>(null);
   const [draws, setDraws] = useState<LottoDrawDetail[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -895,7 +898,7 @@ export default function LottoClient() {
       // 2000 is the API's own hard cap (see `lotto_list`/`list_lotto_draws` in
       // the backend) — comfortably above the 1500+ historic draws currently
       // loaded, so nothing gets silently cut off further back than that.
-      const r = await getLottoDraws(2000);
+      const r = await getLottoDraws(gameId, 2000);
       setDraws(r.draws);
       setCollapsedIds(
         new Set(r.draws.filter((d) => d.attempts.length > 0).map((d) => d.draw.id)),
@@ -906,11 +909,17 @@ export default function LottoClient() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [gameId]);
 
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    getLottoGames()
+      .then((r) => setGameName(r.games.find((g) => g.id === gameId)?.name ?? null))
+      .catch(() => setGameName(null));
+  }, [gameId]);
 
   const upsertLocalDraw = (detail: LottoDrawDetail) => {
     setDraws((ds) => {
@@ -977,8 +986,8 @@ export default function LottoClient() {
     try {
       const detail =
         drawModal.isEdit && drawModal.drawId != null
-          ? await updateLottoDraw(drawModal.drawId, drawDate, numbers, jackpotPrize, winners)
-          : await setLottoDraw(drawDate, numbers, jackpotPrize, winners);
+          ? await updateLottoDraw(gameId, drawModal.drawId, drawDate, numbers, jackpotPrize, winners)
+          : await setLottoDraw(gameId, drawDate, numbers, jackpotPrize, winners);
       upsertLocalDraw(detail);
       closeDrawModal();
     } catch (err) {
@@ -1225,7 +1234,7 @@ export default function LottoClient() {
       if (existing) {
         drawId = existing.draw.id;
       } else {
-        const created = await setLottoDraw(drawDate, null);
+        const created = await setLottoDraw(gameId, drawDate, null);
         drawId = created.draw.id;
         upsertLocalDraw(created);
       }
@@ -1289,7 +1298,7 @@ export default function LottoClient() {
     setSaving(true);
     setError(null);
     try {
-      const result = await importLottoDrawResultsText(importModal.text);
+      const result = await importLottoDrawResultsText(gameId, importModal.text);
       setImportSummary({
         inserted: result.inserted,
         updated: result.updated,
@@ -1893,10 +1902,13 @@ export default function LottoClient() {
     <div className={PAGE_CONTAINER_CLASSES}>
       <header>
         <PageHeader
-          title="Lotto"
+          title={gameName ?? "Lotto"}
           description={
             <>
-              Log each draw (6 numbers, 1–58), then log the attempts you played underneath
+              <Link href="/lotto" className="text-brand-text hover:underline">
+                ← All games
+              </Link>{" "}
+              — log each draw (6 numbers, 1–58), then log the attempts you played underneath
               it — matching numbers turn green.
             </>
           }

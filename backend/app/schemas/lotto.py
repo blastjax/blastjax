@@ -26,6 +26,7 @@ class LottoNumbers(BaseModel):
 
 
 class LottoDrawCreate(BaseModel):
+    game_id: int = Field(..., gt=0)
     draw_date: dt.date
     # Optional: a draw can be logged by date alone before its winning numbers
     # are announced, so attempts can be recorded ahead of the actual draw.
@@ -71,6 +72,7 @@ class LottoAttemptCreate(LottoNumbers):
 
 
 class LottoImportText(BaseModel):
+    game_id: int = Field(..., gt=0)
     # Pasted historic-results text — see `parse_lotto_draw_text` for the
     # accepted row shapes.
     text: str

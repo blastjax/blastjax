@@ -219,6 +219,69 @@ def check_child_write_sql() -> None:
     assert params == (3, *([None] * len(item)), 3), params
 
 
+def check_lotto_bulk_upsert_sql() -> None:
+    """Pin the historic-results import's bulk upsert to one multi-row INSERT
+    (not one INSERT per row -- see ``upsert_lotto_draws_bulk``'s docstring for
+    why that matters), and pin that a date repeated within the same pasted
+    batch collapses to a single VALUES row, last occurrence winning.
+
+    Skipping that collapse would build a VALUES list with the same
+    (draw_date, game_id) twice, and Postgres rejects an ON CONFLICT DO UPDATE
+    that would affect one row a second time in the same statement -- so this
+    is the difference between the import working and every re-pasted
+    overlap crashing it.
+    """
+    calls: list[tuple[str, tuple]] = []
+
+    class _Cursor:
+        def execute(self, sql, params=None):
+            calls.append((" ".join(sql.split()), tuple(params) if params else params))
+
+        def fetchall(self):
+            return [("2026-01-01",)]  # pretend this date is already stored
+
+    @contextmanager
+    def _conn():
+        yield None
+
+    @contextmanager
+    def _cursor(_):
+        yield _Cursor()
+
+    rows = [
+        {"draw_date": "2026-01-01", "numbers": [1, 2, 3, 4, 5, 6], "jackpot_prize": 1.0, "winners": 0},
+        {"draw_date": "2026-01-08", "numbers": [7, 8, 9, 10, 11, 12], "jackpot_prize": 2.0, "winners": 1},
+        # Same date pasted twice in one batch -- must collapse to one row.
+        {"draw_date": "2026-01-08", "numbers": [13, 14, 15, 16, 17, 18], "jackpot_prize": 3.0, "winners": 2},
+    ]
+    saved = db.get_connection, db.db_cursor
+    db.get_connection, db.db_cursor = _conn, _cursor
+    try:
+        result = db.upsert_lotto_draws_bulk(3, rows)
+    finally:
+        db.get_connection, db.db_cursor = saved
+
+    # 2026-01-01 was already seen -> updated; 2026-01-08 is new -> inserted
+    # once, then updated again by its own within-batch repeat.
+    assert result == {"inserted": 1, "updated": 2, "total": 3}, result
+    assert len(calls) == 2, calls
+
+    select_sql, select_params = calls[0]
+    assert select_sql.startswith(
+        "SELECT draw_date FROM lotto_draw WHERE game_id = %s AND draw_date IN"
+    ), select_sql
+    assert select_params == (3, "2026-01-01", "2026-01-08", "2026-01-08"), select_params
+
+    insert_sql, insert_params = calls[1]
+    assert insert_sql.count("(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)") == 2, insert_sql
+    assert "ON CONFLICT (draw_date, game_id) DO UPDATE SET" in insert_sql
+    assert len(insert_params) == 20, insert_params  # 2 rows (repeat collapsed) x 10 columns
+    # The second 2026-01-08 pasted (13..18) wins, not the first (7..12).
+    assert insert_params[10] == "2026-01-08", insert_params
+    assert insert_params[12:18] == (13, 14, 15, 16, 17, 18), insert_params
+    assert insert_params[18:20] == (3.0, 2), insert_params
+
+
 def check_serialize_detail_shape() -> None:
     """The response carries stored columns through untouched and adds only the
     accommodation's derived stay length."""

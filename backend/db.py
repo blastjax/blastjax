@@ -1,22 +1,13 @@
 """
 Payslip and installment storage: cloud PostgreSQL (Neon), via ``DATABASE_URL``.
 
-The query layer below is written in SQLite's dialect -- ``?`` placeholders and
-all -- because that is what it was when the app ran on a local file. Rather
-than rewrite ~2,500 lines of working SQL, ``db_cursor`` hands out a thin
-wrapper that translates each statement on its way to psycopg2:
+The query layer below is plain psycopg2: ``%s`` placeholders, with parameters
+always bound rather than interpolated into the statement. ``db_cursor`` hands
+out a thin wrapper that rewrites no SQL at all -- it only decides when a block
+needs a transaction (see ``_WriteAwareCursor``).
 
-  - ``?`` placeholders become ``%s`` (quote- and comment-aware, so a ``?``
-    inside a string literal or a ``--`` comment is left alone)
-  - a literal ``%`` is doubled when parameters are present, since psycopg2
-    uses ``%`` for its own interpolation
-
-The rest of the dialect already lines up: ``RETURNING``, ``ON CONFLICT ... DO
-UPDATE SET ... excluded.x`` and ``NULLS LAST`` are Postgres syntax that SQLite
-adopted, and the schema uses no SQLite-only functions.
-
-Values coming back are normalised in ``_row_to_dict`` so callers see exactly
-what they saw under SQLite -- JSON-safe primitives:
+Values coming back are normalised in ``_row_to_dict`` into JSON-safe
+primitives:
 
   - TIMESTAMPTZ(0) / DATE / TIME -> ISO-8601 ``str``
   - NUMERIC                      -> ``float`` (not ``Decimal``)
@@ -317,67 +308,7 @@ def check_connection() -> bool:
         return False
 
 
-# ------------------------------------------------------------ SQL translation
-
-
-@lru_cache(maxsize=1024)
-def _translate_sql(sql: str, has_params: bool) -> str:
-    """Rewrite SQLite-dialect ``?`` placeholders into psycopg2's ``%s``.
-
-    Scans rather than regex-replaces so that a ``?`` or ``%`` inside a string
-    literal, a quoted identifier, a ``--`` comment or a ``/* */`` block is left
-    exactly as written.
-    """
-    out: list[str] = []
-    i = 0
-    n = len(sql)
-    while i < n:
-        ch = sql[i]
-        # String literal or quoted identifier: copy through, honouring the
-        # doubled-quote escape ('' and "").
-        if ch in ("'", '"'):
-            quote = ch
-            out.append(ch)
-            i += 1
-            while i < n:
-                out.append(sql[i])
-                if sql[i] == quote:
-                    if i + 1 < n and sql[i + 1] == quote:
-                        out.append(sql[i + 1])
-                        i += 2
-                        continue
-                    i += 1
-                    break
-                i += 1
-            continue
-        # Line comment.
-        if ch == "-" and i + 1 < n and sql[i + 1] == "-":
-            while i < n and sql[i] != "\n":
-                out.append(sql[i])
-                i += 1
-            continue
-        # Block comment.
-        if ch == "/" and i + 1 < n and sql[i + 1] == "*":
-            out.append(sql[i])
-            out.append(sql[i + 1])
-            i += 2
-            while i < n and not (sql[i] == "*" and i + 1 < n and sql[i + 1] == "/"):
-                out.append(sql[i])
-                i += 1
-            continue
-        if ch == "?":
-            out.append("%s")
-            i += 1
-            continue
-        if ch == "%" and has_params:
-            # psycopg2 only %-interpolates when parameters are supplied, so
-            # doubling is correct exactly then.
-            out.append("%%")
-            i += 1
-            continue
-        out.append(ch)
-        i += 1
-    return "".join(out)
+# -------------------------------------------------------------- transactions
 
 
 @lru_cache(maxsize=1024)
@@ -407,14 +338,13 @@ def _is_write(sql: str) -> bool:
     return "FOR UPDATE" in upper or "FOR SHARE" in upper
 
 
-class _TranslatingCursor:
-    """psycopg2 cursor that accepts the SQLite-dialect SQL used below.
+class _WriteAwareCursor:
+    """psycopg2 cursor that decides when a block needs a transaction.
 
-    Also the gate that decides when a block needs a transaction: connections
-    are checked out in autocommit (one round trip per read), and the first
-    write statement seen here turns autocommit off so psycopg2 opens a real
-    transaction that ``get_connection`` then commits or rolls back. Every
-    later statement in the same block joins that transaction, so a
+    Connections are checked out in autocommit (one round trip per read), and
+    the first write statement seen here turns autocommit off so psycopg2 opens
+    a real transaction that ``get_connection`` then commits or rolls back.
+    Every later statement in the same block joins that transaction, so a
     multi-statement write is still all-or-nothing.
     """
 
@@ -431,13 +361,12 @@ class _TranslatingCursor:
     def execute(self, sql: str, params: Any = None) -> Any:
         self._begin_if_write(sql)
         if params is None:
-            return self._cur.execute(_translate_sql(sql, False))
-        return self._cur.execute(_translate_sql(sql, True), tuple(params))
+            return self._cur.execute(sql)
+        return self._cur.execute(sql, tuple(params))
 
     def executemany(self, sql: str, seq: Any) -> Any:
         self._begin_if_write(sql)
-        rows = [tuple(p) for p in seq]
-        return self._cur.executemany(_translate_sql(sql, True), rows)
+        return self._cur.executemany(sql, [tuple(p) for p in seq])
 
     def __getattr__(self, name: str) -> Any:
         # description, fetchone/fetchall/fetchmany, rowcount, close, ...
@@ -451,7 +380,7 @@ class _TranslatingCursor:
 def db_cursor(conn: Any):
     cur = conn.cursor()
     try:
-        yield _TranslatingCursor(cur)
+        yield _WriteAwareCursor(cur)
     finally:
         cur.close()
 
@@ -564,7 +493,7 @@ def insert_payslip(
                     withholding_tax, sss_contribution, philhealth, pag_ibig,
                     trust_fund,
                     company
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING {_PAYSLIP_RETURN_COLS}
                 """,
                 (
@@ -624,7 +553,7 @@ def insert_payslips_bulk(records: list[dict[str, Any]]) -> list[int]:
     """
     if not records:
         return []
-    placeholders = "(" + ", ".join(["?"] * len(_PAYSLIP_INSERT_COLS)) + ")"
+    placeholders = "(" + ", ".join(["%s"] * len(_PAYSLIP_INSERT_COLS)) + ")"
     values_sql = ", ".join([placeholders] * len(records))
     params: list[Any] = []
     for rec in records:
@@ -645,7 +574,7 @@ def list_payslips(limit: int = 200, company: str | None = None) -> list[dict[str
     company's Payslip page passes its own name so pages don't bleed into
     each other's data)."""
     limit = max(1, min(limit, 2000))
-    where_sql = "WHERE company = ?" if company is not None else ""
+    where_sql = "WHERE company = %s" if company is not None else ""
     params: tuple[Any, ...] = (company, limit) if company is not None else (limit,)
     with get_connection() as conn:
         with db_cursor(conn) as cur:
@@ -659,7 +588,7 @@ def list_payslips(limit: int = 200, company: str | None = None) -> list[dict[str
                          period_half DESC NULLS LAST,
                          created_at DESC,
                          id DESC
-                LIMIT ?
+                LIMIT %s
                 """,
                 params,
             )
@@ -671,7 +600,7 @@ def get_payslip(payslip_id: int) -> dict[str, Any] | None:
     with get_connection() as conn:
         with db_cursor(conn) as cur:
             cur.execute(
-                f"SELECT {_PAYSLIP_RETURN_COLS} FROM payslip WHERE id = ?",
+                f"SELECT {_PAYSLIP_RETURN_COLS} FROM payslip WHERE id = %s",
                 (payslip_id,),
             )
             row = cur.fetchone()
@@ -707,26 +636,26 @@ def update_payslip(
             cur.execute(
                 f"""
                 UPDATE payslip SET
-                    total = ?,
-                    commission = ?,
-                    reimbursement = ?,
-                    medical_reimbursement = ?,
-                    others = ?,
-                    mp2 = ?,
-                    allowances = ?,
-                    thirteenth_month = ?,
-                    basic_salary = ?,
-                    period_year = ?,
-                    period_month = ?,
-                    period_half = ?,
-                    notes = ?,
-                    withholding_tax = ?,
-                    sss_contribution = ?,
-                    philhealth = ?,
-                    pag_ibig = ?,
-                    trust_fund = ?,
-                    company = ?
-                WHERE id = ?
+                    total = %s,
+                    commission = %s,
+                    reimbursement = %s,
+                    medical_reimbursement = %s,
+                    others = %s,
+                    mp2 = %s,
+                    allowances = %s,
+                    thirteenth_month = %s,
+                    basic_salary = %s,
+                    period_year = %s,
+                    period_month = %s,
+                    period_half = %s,
+                    notes = %s,
+                    withholding_tax = %s,
+                    sss_contribution = %s,
+                    philhealth = %s,
+                    pag_ibig = %s,
+                    trust_fund = %s,
+                    company = %s
+                WHERE id = %s
                 RETURNING {_PAYSLIP_RETURN_COLS}
                 """,
                 (
@@ -759,7 +688,7 @@ def update_payslip(
 def delete_payslip(payslip_id: int) -> bool:
     with get_connection() as conn:
         with db_cursor(conn) as cur:
-            cur.execute("DELETE FROM payslip WHERE id = ?", (payslip_id,))
+            cur.execute("DELETE FROM payslip WHERE id = %s", (payslip_id,))
             return cur.rowcount > 0
 
 
@@ -768,7 +697,7 @@ def set_payslip_pdf(payslip_id: int, data: bytes) -> bool:
     with get_connection() as conn:
         with db_cursor(conn) as cur:
             cur.execute(
-                "UPDATE payslip SET pdf_data = ? WHERE id = ?",
+                "UPDATE payslip SET pdf_data = %s WHERE id = %s",
                 (data, payslip_id),
             )
             return cur.rowcount > 0
@@ -779,7 +708,7 @@ def get_payslip_pdf(payslip_id: int) -> bytes | None:
     with get_connection() as conn:
         with db_cursor(conn) as cur:
             cur.execute(
-                "SELECT pdf_data FROM payslip WHERE id = ?",
+                "SELECT pdf_data FROM payslip WHERE id = %s",
                 (payslip_id,),
             )
             row = cur.fetchone()
@@ -793,7 +722,7 @@ def delete_payslip_pdf(payslip_id: int) -> bool:
     with get_connection() as conn:
         with db_cursor(conn) as cur:
             cur.execute(
-                "UPDATE payslip SET pdf_data = NULL WHERE id = ?",
+                "UPDATE payslip SET pdf_data = NULL WHERE id = %s",
                 (payslip_id,),
             )
             return cur.rowcount > 0
@@ -817,14 +746,14 @@ def _installment_rows(
     holds a connection (see ``fetch_credit_card_bundle``) doesn't check out a
     second one just to run this. Clamps ``limit`` for every caller."""
     limit = max(1, min(limit, 2000))
-    where = "" if credit_card_id is None else "WHERE i.credit_card_id = ?"
+    where = "" if credit_card_id is None else "WHERE i.credit_card_id = %s"
     params = (limit,) if credit_card_id is None else (credit_card_id, limit)
     cur.execute(
         f"""
         {_INSTALLMENT_SELECT}
         {where}
         ORDER BY i.finish_date ASC, i.name ASC
-        LIMIT ?
+        LIMIT %s
         """,
         params,
     )
@@ -852,7 +781,7 @@ def list_installments_with_lines(limit: int = 500) -> list[dict[str, Any]]:
             if not headers:
                 return []
             ids = [h["id"] for h in headers]
-            placeholders = ",".join("?" * len(ids))
+            placeholders = ",".join(["%s"] * len(ids))
             cur.execute(
                 f"""
                 SELECT installment_id, id, seq, principal, interest, payment_total
@@ -876,7 +805,7 @@ def list_installments_with_lines(limit: int = 500) -> list[dict[str, Any]]:
 
 def _installment_row_dict(cur: Any, installment_id: int) -> dict[str, Any] | None:
     """Read one installment header row including the joined ``due_payment`` field."""
-    cur.execute(f"{_INSTALLMENT_SELECT} WHERE i.id = ?", (installment_id,))
+    cur.execute(f"{_INSTALLMENT_SELECT} WHERE i.id = %s", (installment_id,))
     row = cur.fetchone()
     if not row:
         return None
@@ -888,7 +817,7 @@ def _installment_lines_rows(cur: Any, installment_id: int) -> list[dict[str, Any
         """
         SELECT id, seq, principal, interest, payment_total
         FROM installment_line
-        WHERE installment_id = ?
+        WHERE installment_id = %s
         ORDER BY seq ASC
         """,
         (installment_id,),
@@ -942,7 +871,7 @@ def insert_installment(
                     name, installment_current, installment_total,
                     principal, interest, payment_total,
                     start_date, finish_date, remaining, original_total, credit_card_id
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
                 """,
                 (
@@ -986,7 +915,7 @@ def _seed_installment_lines(
     cur.executemany(
         """
         INSERT INTO installment_line (installment_id, seq, principal, interest, payment_total)
-        VALUES (?, ?, ?, ?, ?)
+        VALUES (%s, %s, %s, %s, %s)
         """,
         [(installment_id, seq, principal, interest, ptot) for seq in range(1, n + 1)],
     )
@@ -1014,7 +943,7 @@ def _recompute_installment_aggregates(cur: Any, installment_id: int) -> None:
         FROM installment i
         LEFT JOIN installment_line cl
             ON cl.installment_id = i.id AND cl.seq = i.installment_current
-        WHERE i.id = ?
+        WHERE i.id = %s
         """,
         (installment_id,),
     )
@@ -1026,12 +955,12 @@ def _recompute_installment_aggregates(cur: Any, installment_id: int) -> None:
         cur.execute(
             """
             UPDATE installment SET
-                original_total = ?,
-                remaining = ?,
-                principal = ?,
-                interest = ?,
-                payment_total = ?
-            WHERE id = ?
+                original_total = %s,
+                remaining = %s,
+                principal = %s,
+                interest = %s,
+                payment_total = %s
+            WHERE id = %s
             """,
             (
                 float(sum_p),
@@ -1045,8 +974,8 @@ def _recompute_installment_aggregates(cur: Any, installment_id: int) -> None:
     else:
         cur.execute(
             """
-            UPDATE installment SET original_total = ?, remaining = ?
-            WHERE id = ?
+            UPDATE installment SET original_total = %s, remaining = %s
+            WHERE id = %s
             """,
             (float(sum_p), float(sum_pt_rem), installment_id),
         )
@@ -1065,10 +994,10 @@ def update_installment_line_and_fetch_detail(
             cur.execute(
                 """
                 UPDATE installment_line SET
-                    principal = ?,
-                    interest = ?,
-                    payment_total = ?
-                WHERE installment_id = ? AND seq = ?
+                    principal = %s,
+                    interest = %s,
+                    payment_total = %s
+                WHERE installment_id = %s AND seq = %s
                 """,
                 (principal, interest, ptot, installment_id, seq),
             )
@@ -1093,8 +1022,8 @@ def update_installment_lines_bulk(
                 cur.execute(
                     """
                     UPDATE installment_line
-                    SET principal = ?, interest = ?, payment_total = ?
-                    WHERE installment_id = ? AND seq = ?
+                    SET principal = %s, interest = %s, payment_total = %s
+                    WHERE installment_id = %s AND seq = %s
                     """,
                     (principal, interest, ptot, installment_id, int(seq)),
                 )
@@ -1121,7 +1050,7 @@ def reorder_installment_lines(
             cur.execute(
                 """
                 SELECT id FROM installment_line
-                WHERE installment_id = ?
+                WHERE installment_id = %s
                 ORDER BY seq ASC
                 """,
                 (installment_id,),
@@ -1135,12 +1064,12 @@ def reorder_installment_lines(
             # per-row UPDATEs can renumber freely without violating the
             # ``UNIQUE (installment_id, seq)`` constraint mid-statement.
             cur.execute(
-                "UPDATE installment_line SET seq = id + 1000000 WHERE installment_id = ?",
+                "UPDATE installment_line SET seq = id + 1000000 WHERE installment_id = %s",
                 (installment_id,),
             )
             for i, lid in enumerate(ordered_line_ids):
                 cur.execute(
-                    "UPDATE installment_line SET seq = ? WHERE installment_id = ? AND id = ?",
+                    "UPDATE installment_line SET seq = %s WHERE installment_id = %s AND id = %s",
                     (i + 1, installment_id, int(lid)),
                 )
             _recompute_installment_aggregates(cur, installment_id)
@@ -1162,7 +1091,7 @@ def _resync_installment_lines_on_total_change(
     n = int(new_total)
     ptot = _line_payment_total(principal, interest)
     cur.execute(
-        "DELETE FROM installment_line WHERE installment_id = ? AND seq > ?",
+        "DELETE FROM installment_line WHERE installment_id = %s AND seq > %s",
         (installment_id, n),
     )
     if n <= 0:
@@ -1170,7 +1099,7 @@ def _resync_installment_lines_on_total_change(
     cur.executemany(
         """
         INSERT INTO installment_line (installment_id, seq, principal, interest, payment_total)
-        VALUES (?, ?, ?, ?, ?)
+        VALUES (%s, %s, %s, %s, %s)
         ON CONFLICT (installment_id, seq) DO UPDATE SET
             principal = excluded.principal,
             interest = excluded.interest,
@@ -1202,7 +1131,7 @@ def update_installment(
                 SELECT installment_total,
                        (SELECT COUNT(*) FROM installment_line
                           WHERE installment_id = installment.id)
-                FROM installment WHERE id = ?
+                FROM installment WHERE id = %s
                 """,
                 (installment_id,),
             )
@@ -1213,18 +1142,18 @@ def update_installment(
             cur.execute(
                 """
                 UPDATE installment SET
-                    name = ?,
-                    installment_current = ?,
-                    installment_total = ?,
-                    principal = ?,
-                    interest = ?,
-                    payment_total = ?,
-                    start_date = ?,
-                    finish_date = ?,
-                    remaining = ?,
-                    original_total = ?,
-                    credit_card_id = ?
-                WHERE id = ?
+                    name = %s,
+                    installment_current = %s,
+                    installment_total = %s,
+                    principal = %s,
+                    interest = %s,
+                    payment_total = %s,
+                    start_date = %s,
+                    finish_date = %s,
+                    remaining = %s,
+                    original_total = %s,
+                    credit_card_id = %s
+                WHERE id = %s
                 """,
                 (
                     name,
@@ -1254,7 +1183,7 @@ def update_installment(
 def delete_installment(installment_id: int) -> bool:
     with get_connection() as conn:
         with db_cursor(conn) as cur:
-            cur.execute("DELETE FROM installment WHERE id = ?", (installment_id,))
+            cur.execute("DELETE FROM installment WHERE id = %s", (installment_id,))
             return cur.rowcount > 0
 
 
@@ -1272,7 +1201,7 @@ def installment_apply_payment(installment_id: int) -> dict[str, Any] | None:
                 SELECT installment_current, installment_total, payment_total, remaining,
                        (SELECT COUNT(*) FROM installment_line il
                           WHERE il.installment_id = installment.id)
-                FROM installment WHERE id = ?
+                FROM installment WHERE id = %s
                 """,
                 (installment_id,),
             )
@@ -1286,7 +1215,7 @@ def installment_apply_payment(installment_id: int) -> dict[str, Any] | None:
             if not (current <= total and rem > 0):
                 return None
             cur.execute(
-                "UPDATE installment SET installment_current = installment_current + 1 WHERE id = ?",
+                "UPDATE installment SET installment_current = installment_current + 1 WHERE id = %s",
                 (installment_id,),
             )
             if line_count > 0:
@@ -1294,7 +1223,7 @@ def installment_apply_payment(installment_id: int) -> dict[str, Any] | None:
             else:
                 new_rem = max(0.0, rem - pay)
                 cur.execute(
-                    "UPDATE installment SET remaining = ? WHERE id = ?",
+                    "UPDATE installment SET remaining = %s WHERE id = %s",
                     (new_rem, installment_id),
                 )
             return _installment_row_dict(cur, installment_id)
@@ -1322,7 +1251,7 @@ def _house_payment_row_dict(
 ) -> dict[str, Any] | None:
     """Read one plan including its joined ``entry_count``/``total_paid``/``last_paid_on``."""
     cur.execute(
-        f"{_HOUSE_PAYMENT_SELECT} WHERE h.id = ?",
+        f"{_HOUSE_PAYMENT_SELECT} WHERE h.id = %s",
         (house_payment_id,),
     )
     row = cur.fetchone()
@@ -1336,7 +1265,7 @@ def _house_payment_entries_rows(
         """
         SELECT id, paid_on, amount, created_at
         FROM house_payment_entry
-        WHERE house_payment_id = ?
+        WHERE house_payment_id = %s
         ORDER BY paid_on DESC, id DESC
         """,
         (house_payment_id,),
@@ -1366,7 +1295,7 @@ def list_house_payments(limit: int = 500) -> list[dict[str, Any]]:
                 f"""
                 {_HOUSE_PAYMENT_SELECT}
                 ORDER BY h.name ASC, h.id ASC
-                LIMIT ?
+                LIMIT %s
                 """,
                 (limit,),
             )
@@ -1389,7 +1318,7 @@ def insert_house_payment(name: str, notes: str | None) -> dict[str, Any]:
             cur.execute(
                 """
                 INSERT INTO house_payment (name, notes)
-                VALUES (?, ?)
+                VALUES (%s, %s)
                 RETURNING id, name, notes, created_at
                 """,
                 (name, notes),
@@ -1409,8 +1338,8 @@ def update_house_payment(
         with db_cursor(conn) as cur:
             cur.execute(
                 """
-                UPDATE house_payment SET name = ?, notes = ?
-                WHERE id = ?
+                UPDATE house_payment SET name = %s, notes = %s
+                WHERE id = %s
                 RETURNING id
                 """,
                 (name, notes, house_payment_id),
@@ -1424,7 +1353,7 @@ def delete_house_payment(house_payment_id: int) -> bool:
     with get_connection() as conn:
         with db_cursor(conn) as cur:
             cur.execute(
-                "DELETE FROM house_payment WHERE id = ?", (house_payment_id,)
+                "DELETE FROM house_payment WHERE id = %s", (house_payment_id,)
             )
             return cur.rowcount > 0
 
@@ -1438,7 +1367,7 @@ def insert_house_payment_entry(
             cur.execute(
                 """
                 INSERT INTO house_payment_entry (house_payment_id, paid_on, amount)
-                SELECT ?, ?, ? WHERE EXISTS (SELECT 1 FROM house_payment WHERE id = ?)
+                SELECT %s, %s, %s WHERE EXISTS (SELECT 1 FROM house_payment WHERE id = %s)
                 RETURNING id
                 """,
                 (house_payment_id, paid_on, amount, house_payment_id),
@@ -1456,8 +1385,8 @@ def update_house_payment_entry(
         with db_cursor(conn) as cur:
             cur.execute(
                 """
-                UPDATE house_payment_entry SET paid_on = ?, amount = ?
-                WHERE id = ? AND house_payment_id = ?
+                UPDATE house_payment_entry SET paid_on = %s, amount = %s
+                WHERE id = %s AND house_payment_id = %s
                 RETURNING id
                 """,
                 (paid_on, amount, entry_id, house_payment_id),
@@ -1476,7 +1405,7 @@ def delete_house_payment_entry(
             cur.execute(
                 """
                 DELETE FROM house_payment_entry
-                WHERE id = ? AND house_payment_id = ?
+                WHERE id = %s AND house_payment_id = %s
                 RETURNING id
                 """,
                 (entry_id, house_payment_id),
@@ -1497,7 +1426,7 @@ def list_blood_pressures(limit: int = 500) -> list[dict[str, Any]]:
                 f"""
                 SELECT {_BLOOD_PRESSURE_COLS} FROM blood_pressure
                 ORDER BY created_at DESC, id DESC
-                LIMIT ?
+                LIMIT %s
                 """,
                 (limit,),
             )
@@ -1519,7 +1448,7 @@ def insert_blood_pressure(
             cur.execute(
                 f"""
                 INSERT INTO blood_pressure (systolic, diastolic, pulse, spo2, temperature, weight, notes)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
                 RETURNING {_BLOOD_PRESSURE_COLS}
                 """,
                 (systolic, diastolic, pulse, spo2, temperature, weight, notes),
@@ -1542,9 +1471,9 @@ def update_blood_pressure(
             cur.execute(
                 f"""
                 UPDATE blood_pressure
-                SET systolic = ?, diastolic = ?, pulse = ?, spo2 = ?,
-                    temperature = ?, weight = ?, notes = ?
-                WHERE id = ?
+                SET systolic = %s, diastolic = %s, pulse = %s, spo2 = %s,
+                    temperature = %s, weight = %s, notes = %s
+                WHERE id = %s
                 RETURNING {_BLOOD_PRESSURE_COLS}
                 """,
                 (systolic, diastolic, pulse, spo2, temperature, weight, notes, reading_id),
@@ -1556,7 +1485,7 @@ def update_blood_pressure(
 def delete_blood_pressure(reading_id: int) -> bool:
     with get_connection() as conn:
         with db_cursor(conn) as cur:
-            cur.execute("DELETE FROM blood_pressure WHERE id = ?", (reading_id,))
+            cur.execute("DELETE FROM blood_pressure WHERE id = %s", (reading_id,))
             return cur.rowcount > 0
 
 
@@ -1575,13 +1504,13 @@ def list_fixed_expenses(
             clauses = []
             params: list[Any] = []
             if period_half is not None:
-                clauses.append("period_half = ?")
+                clauses.append("period_half = %s")
                 params.append(period_half)
             if period_year is not None:
-                clauses.append("period_year = ?")
+                clauses.append("period_year = %s")
                 params.append(period_year)
             if period_month is not None:
-                clauses.append("period_month = ?")
+                clauses.append("period_month = %s")
                 params.append(period_month)
             where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
             params.append(limit)
@@ -1590,7 +1519,7 @@ def list_fixed_expenses(
                 SELECT {_FIXED_EXPENSE_COLS} FROM fixed_expense
                 {where}
                 ORDER BY created_at DESC, id DESC
-                LIMIT ?
+                LIMIT %s
                 """,
                 params,
             )
@@ -1609,7 +1538,7 @@ def insert_fixed_expense(
             cur.execute(
                 f"""
                 INSERT INTO fixed_expense (period_half, period_year, period_month, amount, description)
-                VALUES (?, ?, ?, ?, ?)
+                VALUES (%s, %s, %s, %s, %s)
                 RETURNING {_FIXED_EXPENSE_COLS}
                 """,
                 (period_half, period_year, period_month, amount, description),
@@ -1620,7 +1549,7 @@ def insert_fixed_expense(
 def delete_fixed_expense(expense_id: int) -> bool:
     with get_connection() as conn:
         with db_cursor(conn) as cur:
-            cur.execute("DELETE FROM fixed_expense WHERE id = ?", (expense_id,))
+            cur.execute("DELETE FROM fixed_expense WHERE id = %s", (expense_id,))
             return cur.rowcount > 0
 
 
@@ -1648,16 +1577,16 @@ def list_monthly_expenses(
             clauses = []
             params: list[Any] = []
             if period_half is not None:
-                clauses.append("period_half = ?")
+                clauses.append("period_half = %s")
                 params.append(period_half)
             if period_year is not None and period_month is not None:
-                clauses.append("(is_recurring = TRUE OR (period_year = ? AND period_month = ?))")
+                clauses.append("(is_recurring = TRUE OR (period_year = %s AND period_month = %s))")
                 params.extend([period_year, period_month])
             elif period_year is not None:
-                clauses.append("(is_recurring = TRUE OR period_year = ?)")
+                clauses.append("(is_recurring = TRUE OR period_year = %s)")
                 params.append(period_year)
             elif period_month is not None:
-                clauses.append("(is_recurring = TRUE OR period_month = ?)")
+                clauses.append("(is_recurring = TRUE OR period_month = %s)")
                 params.append(period_month)
             where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
             params.append(limit)
@@ -1666,7 +1595,7 @@ def list_monthly_expenses(
                 SELECT {_MONTHLY_EXPENSE_COLS} FROM monthly_expense
                 {where}
                 ORDER BY created_at DESC, id DESC
-                LIMIT ?
+                LIMIT %s
                 """,
                 tuple(params),
             )
@@ -1689,7 +1618,7 @@ def insert_monthly_expense(
                 INSERT INTO monthly_expense
                     (name, description, amount, period_half, period_year, period_month,
                      is_recurring)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
                 RETURNING {_MONTHLY_EXPENSE_COLS}
                 """,
                 (name, description, amount, period_half, period_year, period_month, is_recurring),
@@ -1712,9 +1641,9 @@ def update_monthly_expense(
             cur.execute(
                 f"""
                 UPDATE monthly_expense
-                SET name = ?, description = ?, amount = ?, period_half = ?,
-                    period_year = ?, period_month = ?, is_recurring = ?
-                WHERE id = ?
+                SET name = %s, description = %s, amount = %s, period_half = %s,
+                    period_year = %s, period_month = %s, is_recurring = %s
+                WHERE id = %s
                 RETURNING {_MONTHLY_EXPENSE_COLS}
                 """,
                 (
@@ -1735,7 +1664,7 @@ def update_monthly_expense(
 def delete_monthly_expense(expense_id: int) -> bool:
     with get_connection() as conn:
         with db_cursor(conn) as cur:
-            cur.execute("DELETE FROM monthly_expense WHERE id = ?", (expense_id,))
+            cur.execute("DELETE FROM monthly_expense WHERE id = %s", (expense_id,))
             return cur.rowcount > 0
 
 
@@ -1798,7 +1727,7 @@ def insert_credit_card(
                 INSERT INTO credit_card (
                     name, credit_limit, last_statement_balance, current_balance,
                     minimum_due, interest_rate, statement_date, due_date
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING {_CREDIT_CARD_COLS}
                 """,
                 (
@@ -1831,15 +1760,15 @@ def update_credit_card(
             cur.execute(
                 f"""
                 UPDATE credit_card SET
-                    name = ?,
-                    credit_limit = ?,
-                    last_statement_balance = ?,
-                    current_balance = ?,
-                    minimum_due = ?,
-                    interest_rate = ?,
-                    statement_date = ?,
-                    due_date = ?
-                WHERE id = ?
+                    name = %s,
+                    credit_limit = %s,
+                    last_statement_balance = %s,
+                    current_balance = %s,
+                    minimum_due = %s,
+                    interest_rate = %s,
+                    statement_date = %s,
+                    due_date = %s
+                WHERE id = %s
                 RETURNING {_CREDIT_CARD_COLS}
                 """,
                 (
@@ -1871,8 +1800,8 @@ def adjust_credit_card_balance(
         with db_cursor(conn) as cur:
             cur.execute(
                 f"""
-                UPDATE credit_card SET current_balance = ?
-                WHERE id = ?
+                UPDATE credit_card SET current_balance = %s
+                WHERE id = %s
                 RETURNING {_CREDIT_CARD_COLS}
                 """,
                 (current_balance, card_id),
@@ -1884,7 +1813,7 @@ def adjust_credit_card_balance(
 def delete_credit_card(card_id: int) -> bool:
     with get_connection() as conn:
         with db_cursor(conn) as cur:
-            cur.execute("DELETE FROM credit_card WHERE id = ?", (card_id,))
+            cur.execute("DELETE FROM credit_card WHERE id = %s", (card_id,))
             return cur.rowcount > 0
 
 
@@ -1895,7 +1824,7 @@ def _credit_card_payment_rows(cur: Any, credit_card_id: int) -> list[dict[str, A
     cur.execute(
         f"""
         SELECT {_CREDIT_CARD_PAYMENT_COLS} FROM credit_card_payment
-        WHERE credit_card_id = ?
+        WHERE credit_card_id = %s
         ORDER BY payment_date DESC, id DESC
         """,
         (credit_card_id,),
@@ -1915,20 +1844,20 @@ def insert_credit_card_payment(
     """Insert the payment and decrement the card's ``current_balance`` in one transaction."""
     with get_connection() as conn:
         with db_cursor(conn) as cur:
-            cur.execute("SELECT 1 FROM credit_card WHERE id = ?", (credit_card_id,))
+            cur.execute("SELECT 1 FROM credit_card WHERE id = %s", (credit_card_id,))
             if not cur.fetchone():
                 return None
             cur.execute(
                 f"""
                 INSERT INTO credit_card_payment (credit_card_id, amount, payment_date, note)
-                VALUES (?, ?, ?, ?)
+                VALUES (%s, %s, %s, %s)
                 RETURNING {_CREDIT_CARD_PAYMENT_COLS}
                 """,
                 (credit_card_id, amount, payment_date, note),
             )
             payment = _row_to_dict(cur, cur.fetchone())
             cur.execute(
-                "UPDATE credit_card SET current_balance = current_balance - ? WHERE id = ?",
+                "UPDATE credit_card SET current_balance = current_balance - %s WHERE id = %s",
                 (amount, credit_card_id),
             )
             return payment
@@ -1939,7 +1868,7 @@ def delete_credit_card_payment(payment_id: int) -> bool:
     with get_connection() as conn:
         with db_cursor(conn) as cur:
             cur.execute(
-                "DELETE FROM credit_card_payment WHERE id = ? RETURNING credit_card_id, amount",
+                "DELETE FROM credit_card_payment WHERE id = %s RETURNING credit_card_id, amount",
                 (payment_id,),
             )
             row = cur.fetchone()
@@ -1947,7 +1876,7 @@ def delete_credit_card_payment(payment_id: int) -> bool:
                 return False
             credit_card_id, amount = row
             cur.execute(
-                "UPDATE credit_card SET current_balance = current_balance + ? WHERE id = ?",
+                "UPDATE credit_card SET current_balance = current_balance + %s WHERE id = %s",
                 (amount, credit_card_id),
             )
             return True
@@ -1975,7 +1904,7 @@ def upsert_calendar_day_overrides(
                 cur.execute(
                     """
                     INSERT INTO calendar_day_override (day, amount)
-                    VALUES (?, ?)
+                    VALUES (%s, %s)
                     ON CONFLICT (day) DO UPDATE SET amount = excluded.amount
                     """,
                     (day, amount),
@@ -2009,7 +1938,7 @@ def get_pay_period_start_override(
             cur.execute(
                 f"""
                 SELECT {_PP_START_OVERRIDE_COLS} FROM pay_period_start_override
-                WHERE period_year = ? AND period_month = ? AND period_half = ?
+                WHERE period_year = %s AND period_month = %s AND period_half = %s
                 """,
                 (period_year, period_month, period_half),
             )
@@ -2026,7 +1955,7 @@ def upsert_pay_period_start_override(
                 f"""
                 INSERT INTO pay_period_start_override
                     (period_year, period_month, period_half, start_date)
-                VALUES (?, ?, ?, ?)
+                VALUES (%s, %s, %s, %s)
                 ON CONFLICT (period_year, period_month, period_half)
                     DO UPDATE SET start_date = excluded.start_date
                 RETURNING {_PP_START_OVERRIDE_COLS}
@@ -2044,7 +1973,7 @@ def delete_pay_period_start_override(
             cur.execute(
                 """
                 DELETE FROM pay_period_start_override
-                WHERE period_year = ? AND period_month = ? AND period_half = ?
+                WHERE period_year = %s AND period_month = %s AND period_half = %s
                 RETURNING id
                 """,
                 (period_year, period_month, period_half),
@@ -2092,14 +2021,14 @@ def get_payslip_defaults(company: str) -> dict[str, Any]:
         with db_cursor(conn) as cur:
             cur.execute(
                 f"SELECT half, {', '.join(_PAYSLIP_DEFAULT_FORM_COLS)} "
-                "FROM payslip_default WHERE company = ?",
+                "FROM payslip_default WHERE company = %s",
                 (company,),
             )
             rows_by_half = {
                 r["half"]: r for r in (_row_to_dict(cur, row) for row in cur.fetchall())
             }
             cur.execute(
-                "SELECT settings_half FROM payslip_default_settings WHERE company = ?",
+                "SELECT settings_half FROM payslip_default_settings WHERE company = %s",
                 (company,),
             )
             settings_row = cur.fetchone()
@@ -2117,7 +2046,7 @@ def save_payslip_defaults(
     """Upsert both half templates and the active-half toggle for one company,
     in one transaction."""
     cols_sql = ", ".join(_PAYSLIP_DEFAULT_FORM_COLS)
-    placeholders_sql = ", ".join("?" for _ in _PAYSLIP_DEFAULT_FORM_COLS)
+    placeholders_sql = ", ".join("%s" for _ in _PAYSLIP_DEFAULT_FORM_COLS)
     updates_sql = ", ".join(f"{c} = excluded.{c}" for c in _PAYSLIP_DEFAULT_FORM_COLS)
     with get_connection() as conn:
         with db_cursor(conn) as cur:
@@ -2126,7 +2055,7 @@ def save_payslip_defaults(
                 cur.execute(
                     f"""
                     INSERT INTO payslip_default (company, half, {cols_sql})
-                    VALUES (?, ?, {placeholders_sql})
+                    VALUES (%s, %s, {placeholders_sql})
                     ON CONFLICT (company, half) DO UPDATE SET {updates_sql}
                     """,
                     (company, half, *values),
@@ -2134,7 +2063,7 @@ def save_payslip_defaults(
             cur.execute(
                 """
                 INSERT INTO payslip_default_settings (company, settings_half)
-                VALUES (?, ?)
+                VALUES (%s, %s)
                 ON CONFLICT (company) DO UPDATE SET settings_half = excluded.settings_half
                 """,
                 (company, settings_half),
@@ -2142,16 +2071,29 @@ def save_payslip_defaults(
 
 
 _LOTTO_DRAW_COLS = (
-    "id, draw_date, n1, n2, n3, n4, n5, n6, jackpot_prize, winners, created_at"
+    "id, draw_date, game_id, n1, n2, n3, n4, n5, n6, jackpot_prize, winners, created_at"
 )
 _LOTTO_ATTEMPT_COLS = "id, draw_id, ticket, n1, n2, n3, n4, n5, n6, created_at"
+
+
+def list_lotto_games() -> list[dict[str, Any]]:
+    """The fixed set of lotto games (see schema.SEED_LOTTO_GAMES), ordered by
+    field size (6/45, 6/49, 6/55, 6/58) rather than by id -- id order is
+    creation order, not display order (see ``lotto_draw.game_id``'s DEFAULT,
+    which pins id=3 to Ultra Lotto 6/58 for existing rows)."""
+    with get_connection() as conn:
+        with db_cursor(conn) as cur:
+            cur.execute(
+                r"SELECT id, name FROM lotto_game ORDER BY substring(name from '/(\d+)$')::int"
+            )
+            return [_row_to_dict(cur, r) for r in cur.fetchall()]
 
 
 def _lotto_attempts_rows(cur: Any, draw_id: int) -> list[dict[str, Any]]:
     cur.execute(
         f"""
         SELECT {_LOTTO_ATTEMPT_COLS} FROM lotto_attempt
-        WHERE draw_id = ?
+        WHERE draw_id = %s
         ORDER BY created_at ASC, id ASC
         """,
         (draw_id,),
@@ -2161,7 +2103,7 @@ def _lotto_attempts_rows(cur: Any, draw_id: int) -> list[dict[str, Any]]:
 
 def _lotto_draw_detail(cur: Any, draw_id: int) -> dict[str, Any] | None:
     cur.execute(
-        f"SELECT {_LOTTO_DRAW_COLS} FROM lotto_draw WHERE id = ?",
+        f"SELECT {_LOTTO_DRAW_COLS} FROM lotto_draw WHERE id = %s",
         (draw_id,),
     )
     row = cur.fetchone()
@@ -2171,18 +2113,19 @@ def _lotto_draw_detail(cur: Any, draw_id: int) -> dict[str, Any] | None:
     return {"draw": draw, "attempts": _lotto_attempts_rows(cur, draw_id)}
 
 
-def list_lotto_draws(limit: int = 200) -> list[dict[str, Any]]:
-    """Every draw (newest first), each with its attempts nested."""
+def list_lotto_draws(game_id: int, limit: int = 200) -> list[dict[str, Any]]:
+    """Every draw for one game (newest first), each with its attempts nested."""
     limit = max(1, min(limit, 2000))
     with get_connection() as conn:
         with db_cursor(conn) as cur:
             cur.execute(
                 f"""
                 SELECT {_LOTTO_DRAW_COLS} FROM lotto_draw
+                WHERE game_id = %s
                 ORDER BY draw_date DESC, id DESC
-                LIMIT ?
+                LIMIT %s
                 """,
-                (limit,),
+                (game_id, limit),
             )
             draws = [_row_to_dict(cur, r) for r in cur.fetchall()]
             if not draws:
@@ -2191,7 +2134,7 @@ def list_lotto_draws(limit: int = 200) -> list[dict[str, Any]]:
             cur.execute(
                 f"""
                 SELECT {_LOTTO_ATTEMPT_COLS} FROM lotto_attempt
-                WHERE draw_id IN ({",".join("?" * len(ids))})
+                WHERE draw_id IN ({",".join(["%s"] * len(ids))})
                 ORDER BY created_at ASC, id ASC
                 """,
                 ids,
@@ -2229,67 +2172,80 @@ def list_lotto_draw_results() -> list[dict[str, Any]]:
 
 
 def upsert_lotto_draw(
+    game_id: int,
     draw_date: Any,
     numbers: list[int] | None,
     jackpot_prize: float | None = None,
     winners: int = 0,
 ) -> dict[str, Any]:
-    """Create the result for a date, or overwrite it if one already exists.
-    ``numbers`` may be None to log just the date before the result is known.
-    Overwrites ``jackpot_prize``/``winners`` too, same as the numbers — posting
-    the same date again replaces that date's result wholesale."""
+    """Create the result for a game's date, or overwrite it if one already
+    exists. ``numbers`` may be None to log just the date before the result is
+    known. Overwrites ``jackpot_prize``/``winners`` too, same as the numbers —
+    posting the same game+date again replaces that result wholesale."""
     n1, n2, n3, n4, n5, n6 = numbers if numbers is not None else (None,) * 6
     with get_connection() as conn:
         with db_cursor(conn) as cur:
             cur.execute(
                 """
-                INSERT INTO lotto_draw (draw_date, n1, n2, n3, n4, n5, n6, jackpot_prize, winners)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT (draw_date) DO UPDATE SET
+                INSERT INTO lotto_draw (draw_date, game_id, n1, n2, n3, n4, n5, n6, jackpot_prize, winners)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (draw_date, game_id) DO UPDATE SET
                     n1 = excluded.n1, n2 = excluded.n2, n3 = excluded.n3,
                     n4 = excluded.n4, n5 = excluded.n5, n6 = excluded.n6,
                     jackpot_prize = excluded.jackpot_prize, winners = excluded.winners
                 RETURNING id
                 """,
-                (draw_date, n1, n2, n3, n4, n5, n6, jackpot_prize, winners),
+                (draw_date, game_id, n1, n2, n3, n4, n5, n6, jackpot_prize, winners),
             )
             draw_id = cur.fetchone()[0]
             return _lotto_draw_detail(cur, draw_id)
 
 
-def upsert_lotto_draws_bulk(rows: list[dict[str, Any]]) -> dict[str, Any]:
-    """Bulk-upsert draws by date in one transaction (the whole batch commits or
-    none of it does) — used by the historic-results text import. Each row:
-    ``{"draw_date": iso date str, "numbers": [n1..n6], "jackpot_prize": float | None,
-    "winners": int}``. Re-uploading the same date overwrites it, so importing
-    the same file twice (or a file that repeats a date) is safe.
+def upsert_lotto_draws_bulk(game_id: int, rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Bulk-upsert one game's draws by date in one round trip (plus the dedup
+    lookup) — used by the historic-results text import. Each row:
+    ``{"draw_date": iso date str, "numbers": [n1..n6], "jackpot_prize": float
+    | None, "winners": int}``. Re-uploading the same date overwrites it, so
+    importing the same file twice (or a file that repeats a date) is safe.
+
+    One multi-row INSERT replaces what used to be one INSERT per row — for
+    the ~1,500 draws a historic-results paste typically carries, that was
+    1,500 network round trips to Neon (35-80ms each, per this module's own
+    docstring) instead of one.
     """
     if not rows:
         return {"inserted": 0, "updated": 0, "total": 0}
     with get_connection() as conn:
         with db_cursor(conn) as cur:
             dates = [r["draw_date"] for r in rows]
-            placeholders = ",".join("?" * len(dates))
+            placeholders = ",".join(["%s"] * len(dates))
             cur.execute(
-                f"SELECT draw_date FROM lotto_draw WHERE draw_date IN ({placeholders})",
-                dates,
+                f"SELECT draw_date FROM lotto_draw WHERE game_id = %s AND draw_date IN ({placeholders})",
+                [game_id, *dates],
             )
             seen = {r[0] for r in cur.fetchall()}
             inserted = updated = 0
             for row in rows:
-                draw_date = row["draw_date"]
+                if row["draw_date"] in seen:
+                    updated += 1
+                else:
+                    inserted += 1
+                    seen.add(row["draw_date"])
+
+            # A row can't be upserted twice by the same ON CONFLICT statement
+            # (Postgres rejects it: "cannot affect row a second time"), so a
+            # date repeated within the pasted text is collapsed here, last
+            # occurrence winning — the same result sequential per-row upserts
+            # would have left.
+            by_date = {row["draw_date"]: row for row in rows}
+            values_sql = ",".join(["(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"] * len(by_date))
+            params: list[Any] = []
+            for row in by_date.values():
                 n1, n2, n3, n4, n5, n6 = row["numbers"]
-                cur.execute(
-                    """
-                    INSERT INTO lotto_draw (draw_date, n1, n2, n3, n4, n5, n6, jackpot_prize, winners)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT (draw_date) DO UPDATE SET
-                        n1 = excluded.n1, n2 = excluded.n2, n3 = excluded.n3,
-                        n4 = excluded.n4, n5 = excluded.n5, n6 = excluded.n6,
-                        jackpot_prize = excluded.jackpot_prize, winners = excluded.winners
-                    """,
+                params.extend(
                     (
-                        draw_date,
+                        row["draw_date"],
+                        game_id,
                         n1,
                         n2,
                         n3,
@@ -2298,20 +2254,29 @@ def upsert_lotto_draws_bulk(rows: list[dict[str, Any]]) -> dict[str, Any]:
                         n6,
                         row.get("jackpot_prize"),
                         row.get("winners", 0),
-                    ),
+                    )
                 )
-                if draw_date in seen:
-                    updated += 1
-                else:
-                    inserted += 1
-                    seen.add(draw_date)
+            cur.execute(
+                f"""
+                INSERT INTO lotto_draw (draw_date, game_id, n1, n2, n3, n4, n5, n6, jackpot_prize, winners)
+                VALUES {values_sql}
+                ON CONFLICT (draw_date, game_id) DO UPDATE SET
+                    n1 = excluded.n1, n2 = excluded.n2, n3 = excluded.n3,
+                    n4 = excluded.n4, n5 = excluded.n5, n6 = excluded.n6,
+                    jackpot_prize = excluded.jackpot_prize, winners = excluded.winners
+                """,
+                params,
+            )
             return {"inserted": inserted, "updated": updated, "total": len(rows)}
 
 
-def get_lotto_draw_id_by_date(draw_date: Any) -> int | None:
+def get_lotto_draw_id_by_date(game_id: int, draw_date: Any) -> int | None:
     with get_connection() as conn:
         with db_cursor(conn) as cur:
-            cur.execute("SELECT id FROM lotto_draw WHERE draw_date = ?", (draw_date,))
+            cur.execute(
+                "SELECT id FROM lotto_draw WHERE game_id = %s AND draw_date = %s",
+                (game_id, draw_date),
+            )
             row = cur.fetchone()
             return row[0] if row else None
 
@@ -2331,9 +2296,9 @@ def update_lotto_draw(
         with db_cursor(conn) as cur:
             cur.execute(
                 """
-                UPDATE lotto_draw SET draw_date = ?, n1 = ?, n2 = ?, n3 = ?, n4 = ?, n5 = ?, n6 = ?,
-                    jackpot_prize = ?, winners = ?
-                WHERE id = ?
+                UPDATE lotto_draw SET draw_date = %s, n1 = %s, n2 = %s, n3 = %s, n4 = %s, n5 = %s, n6 = %s,
+                    jackpot_prize = %s, winners = %s
+                WHERE id = %s
                 RETURNING id
                 """,
                 (draw_date, n1, n2, n3, n4, n5, n6, jackpot_prize, winners, draw_id),
@@ -2347,7 +2312,7 @@ def update_lotto_draw(
 def delete_lotto_draw(draw_id: int) -> bool:
     with get_connection() as conn:
         with db_cursor(conn) as cur:
-            cur.execute("DELETE FROM lotto_draw WHERE id = ?", (draw_id,))
+            cur.execute("DELETE FROM lotto_draw WHERE id = %s", (draw_id,))
             return cur.rowcount > 0
 
 
@@ -2363,7 +2328,7 @@ def insert_lotto_attempt(
             cur.execute(
                 """
                 INSERT INTO lotto_attempt (draw_id, ticket, n1, n2, n3, n4, n5, n6)
-                SELECT ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM lotto_draw WHERE id = ?)
+                SELECT %s, %s, %s, %s, %s, %s, %s, %s WHERE EXISTS (SELECT 1 FROM lotto_draw WHERE id = %s)
                 RETURNING id
                 """,
                 (draw_id, ticket, n1, n2, n3, n4, n5, n6, draw_id),
@@ -2381,8 +2346,8 @@ def update_lotto_attempt(
         with db_cursor(conn) as cur:
             cur.execute(
                 """
-                UPDATE lotto_attempt SET ticket = ?, n1 = ?, n2 = ?, n3 = ?, n4 = ?, n5 = ?, n6 = ?
-                WHERE id = ? AND draw_id = ?
+                UPDATE lotto_attempt SET ticket = %s, n1 = %s, n2 = %s, n3 = %s, n4 = %s, n5 = %s, n6 = %s
+                WHERE id = %s AND draw_id = %s
                 RETURNING id
                 """,
                 (ticket, n1, n2, n3, n4, n5, n6, attempt_id, draw_id),
@@ -2396,7 +2361,7 @@ def delete_lotto_attempt(draw_id: int, attempt_id: int) -> dict[str, Any] | None
     with get_connection() as conn:
         with db_cursor(conn) as cur:
             cur.execute(
-                "DELETE FROM lotto_attempt WHERE id = ? AND draw_id = ? RETURNING id",
+                "DELETE FROM lotto_attempt WHERE id = %s AND draw_id = %s RETURNING id",
                 (attempt_id, draw_id),
             )
             if not cur.fetchone():
@@ -2434,7 +2399,7 @@ def list_app_users() -> list[dict[str, Any]]:
         with db_cursor(conn) as cur:
             cur.execute(
                 # LOWER(): Postgres has no NOCASE collation, so the
-                # case-insensitive ordering SQLite got from the column's
+                # case-insensitive ordering the column used to get from its
                 # COLLATE NOCASE has to be spelled out.
                 f"SELECT {_APP_USER_PUBLIC_COLS} FROM app_user ORDER BY LOWER(username) ASC"
             )
@@ -2452,7 +2417,7 @@ def insert_app_user(username: str, password_hash: str) -> dict[str, Any]:
             cur.execute(
                 f"""
                 INSERT INTO app_user (username, password_hash)
-                VALUES (?, ?)
+                VALUES (%s, %s)
                 RETURNING {_APP_USER_PUBLIC_COLS}
                 """,
                 (username, password_hash),
@@ -2466,11 +2431,11 @@ def get_app_user_by_username(username: str) -> dict[str, Any] | None:
     with get_connection() as conn:
         with db_cursor(conn) as cur:
             cur.execute(
-                # LOWER() on both sides: SQLite matched case-insensitively via
+                # LOWER() on both sides: the name matches case-insensitively,
                 # the column's COLLATE NOCASE, and login must keep doing so.
                 # The unique index on LOWER(username) serves this lookup.
                 "SELECT id, username, password_hash, is_superuser, allowed_pages, created_at "
-                "FROM app_user WHERE LOWER(username) = LOWER(?)",
+                "FROM app_user WHERE LOWER(username) = LOWER(%s)",
                 (username,),
             )
             row = cur.fetchone()
@@ -2483,7 +2448,7 @@ def get_app_user_by_id(user_id: int) -> dict[str, Any] | None:
     with get_connection() as conn:
         with db_cursor(conn) as cur:
             cur.execute(
-                f"SELECT {_APP_USER_PUBLIC_COLS} FROM app_user WHERE id = ?",
+                f"SELECT {_APP_USER_PUBLIC_COLS} FROM app_user WHERE id = %s",
                 (user_id,),
             )
             row = cur.fetchone()
@@ -2504,16 +2469,16 @@ def update_app_user(
         with db_cursor(conn) as cur:
             if username is not None:
                 cur.execute(
-                    "UPDATE app_user SET username = ? WHERE id = ?",
+                    "UPDATE app_user SET username = %s WHERE id = %s",
                     (username, user_id),
                 )
             if password_hash is not None:
                 cur.execute(
-                    "UPDATE app_user SET password_hash = ? WHERE id = ?",
+                    "UPDATE app_user SET password_hash = %s WHERE id = %s",
                     (password_hash, user_id),
                 )
             cur.execute(
-                f"SELECT {_APP_USER_PUBLIC_COLS} FROM app_user WHERE id = ?",
+                f"SELECT {_APP_USER_PUBLIC_COLS} FROM app_user WHERE id = %s",
                 (user_id,),
             )
             row = cur.fetchone()
@@ -2535,11 +2500,11 @@ def update_app_user_access(
     with get_connection() as conn:
         with db_cursor(conn) as cur:
             cur.execute(
-                "UPDATE app_user SET is_superuser = ?, allowed_pages = ? WHERE id = ?",
+                "UPDATE app_user SET is_superuser = %s, allowed_pages = %s WHERE id = %s",
                 (is_superuser, json.dumps(allowed_pages) if allowed_pages is not None else None, user_id),
             )
             cur.execute(
-                f"SELECT {_APP_USER_PUBLIC_COLS} FROM app_user WHERE id = ?",
+                f"SELECT {_APP_USER_PUBLIC_COLS} FROM app_user WHERE id = %s",
                 (user_id,),
             )
             row = cur.fetchone()
@@ -2549,7 +2514,7 @@ def update_app_user_access(
 def delete_app_user(user_id: int) -> bool:
     with get_connection() as conn:
         with db_cursor(conn) as cur:
-            cur.execute("DELETE FROM app_user WHERE id = ?", (user_id,))
+            cur.execute("DELETE FROM app_user WHERE id = %s", (user_id,))
             return cur.rowcount > 0
 
 
@@ -2606,14 +2571,14 @@ def insert_company(name: str, flags: dict[str, bool] | None = None) -> dict[str,
     merged = {**_COMPANY_FLAG_DEFAULTS, **(flags or {})}
     values = [merged[c] for c in _COMPANY_FLAG_COLUMNS]
     cols_sql = ", ".join(_COMPANY_FLAG_COLUMNS)
-    placeholders_sql = ", ".join("?" for _ in _COMPANY_FLAG_COLUMNS)
+    placeholders_sql = ", ".join("%s" for _ in _COMPANY_FLAG_COLUMNS)
     with get_connection() as conn:
         with db_cursor(conn) as cur:
             cur.execute(
                 f"""
                 INSERT INTO company (name, sort_order, {cols_sql})
                 VALUES (
-                    ?, COALESCE((SELECT MAX(sort_order) FROM company), -1) + 1,
+                    %s, COALESCE((SELECT MAX(sort_order) FROM company), -1) + 1,
                     {placeholders_sql}
                 )
                 RETURNING {_COMPANY_PUBLIC_COLS}
@@ -2644,7 +2609,7 @@ def reorder_companies(ordered_ids: list[int]) -> list[dict[str, Any]] | None:
             cur.execute("UPDATE company SET sort_order = id + 1000000")
             for i, cid in enumerate(ordered_ids):
                 cur.execute(
-                    "UPDATE company SET sort_order = ? WHERE id = ?", (i, int(cid))
+                    "UPDATE company SET sort_order = %s WHERE id = %s", (i, int(cid))
                 )
             cur.execute(
                 f"SELECT {_COMPANY_PUBLIC_COLS} FROM company ORDER BY sort_order ASC"
@@ -2660,13 +2625,13 @@ def update_company(
     ``psycopg2.IntegrityError`` on a name collision."""
     merged = {**_COMPANY_FLAG_DEFAULTS, **(flags or {})}
     values = [merged[c] for c in _COMPANY_FLAG_COLUMNS]
-    set_sql = ", ".join(f"{c} = ?" for c in _COMPANY_FLAG_COLUMNS)
+    set_sql = ", ".join(f"{c} = %s" for c in _COMPANY_FLAG_COLUMNS)
     with get_connection() as conn:
         with db_cursor(conn) as cur:
             cur.execute(
                 f"""
-                UPDATE company SET name = ?, {set_sql}
-                WHERE id = ?
+                UPDATE company SET name = %s, {set_sql}
+                WHERE id = %s
                 RETURNING {_COMPANY_PUBLIC_COLS}
                 """,
                 (name, *values, company_id),
@@ -2684,18 +2649,18 @@ def delete_company(company_id: int) -> bool:
     """
     with get_connection() as conn:
         with db_cursor(conn) as cur:
-            cur.execute("SELECT name FROM company WHERE id = ?", (company_id,))
+            cur.execute("SELECT name FROM company WHERE id = %s", (company_id,))
             row = cur.fetchone()
             if row is None:
                 return False
             name = row[0]
-            cur.execute("SELECT COUNT(*) FROM payslip WHERE company = ?", (name,))
+            cur.execute("SELECT COUNT(*) FROM payslip WHERE company = %s", (name,))
             in_use = cur.fetchone()[0]
             if in_use:
                 raise ValueError(
                     f'Cannot delete "{name}": {in_use} payslip(s) still use it.'
                 )
-            cur.execute("DELETE FROM company WHERE id = ?", (company_id,))
+            cur.execute("DELETE FROM company WHERE id = %s", (company_id,))
             return cur.rowcount > 0
 
 
@@ -2734,7 +2699,7 @@ class _TravelChild(NamedTuple):
     cols: str
     order: str
     # A column the INSERT computes in SQL rather than taking from the request
-    # body, as (column, expression). Any ``?`` in the expression is filled
+    # body, as (column, expression). Any ``%s`` in the expression is filled
     # with the trip id.
     insert_expr: tuple[str, str] | None = None
 
@@ -2747,7 +2712,7 @@ _TRAVEL_CHILDREN: dict[str, _TravelChild] = {
         "sort_order ASC, id ASC",
         (
             "sort_order",
-            "COALESCE((SELECT MAX(sort_order) + 1 FROM travel_city WHERE trip_id = ?), 0)",
+            "COALESCE((SELECT MAX(sort_order) + 1 FROM travel_city WHERE trip_id = %s), 0)",
         ),
     ),
     "flights": _TravelChild(
@@ -2815,14 +2780,14 @@ def _travel_write_values(kind: str, values: dict[str, Any]) -> tuple[str, ...]:
 def _travel_child_rows(cur: Any, kind: str, trip_id: int) -> list[dict[str, Any]]:
     spec = _TRAVEL_CHILDREN[kind]
     cur.execute(
-        f"SELECT {spec.cols} FROM {spec.table} WHERE trip_id = ? ORDER BY {spec.order}",
+        f"SELECT {spec.cols} FROM {spec.table} WHERE trip_id = %s ORDER BY {spec.order}",
         (trip_id,),
     )
     return [_row_to_dict(cur, r) for r in cur.fetchall()]
 
 
 def _travel_trip_detail(cur: Any, trip_id: int) -> dict[str, Any] | None:
-    cur.execute(f"SELECT {_TRAVEL_TRIP_COLS} FROM travel_trip WHERE id = ?", (trip_id,))
+    cur.execute(f"SELECT {_TRAVEL_TRIP_COLS} FROM travel_trip WHERE id = %s", (trip_id,))
     row = cur.fetchone()
     if row is None:
         return None
@@ -2842,7 +2807,7 @@ def list_travel_trips(limit: int = 500) -> list[dict[str, Any]]:
                 f"""
                 SELECT {_TRAVEL_TRIP_COLS} FROM travel_trip
                 ORDER BY start_date DESC, id DESC
-                LIMIT ?
+                LIMIT %s
                 """,
                 (limit,),
             )
@@ -2850,7 +2815,7 @@ def list_travel_trips(limit: int = 500) -> list[dict[str, Any]]:
             if not trips:
                 return []
             ids = [t["id"] for t in trips]
-            placeholders = ",".join("?" * len(ids))
+            placeholders = ",".join(["%s"] * len(ids))
 
             by_kind: dict[str, dict[int, list[dict[str, Any]]]] = {}
             for kind, spec in _TRAVEL_CHILDREN.items():
@@ -2888,7 +2853,7 @@ def insert_travel_trip(
             cur.execute(
                 """
                 INSERT INTO travel_trip (title, start_date, end_date, notes)
-                VALUES (?, ?, ?, ?)
+                VALUES (%s, %s, %s, %s)
                 RETURNING id
                 """,
                 (title, start_date, end_date, notes),
@@ -2911,8 +2876,8 @@ def update_travel_trip(
             cur.execute(
                 """
                 UPDATE travel_trip SET
-                    title = ?, start_date = ?, end_date = ?, notes = ?
-                WHERE id = ?
+                    title = %s, start_date = %s, end_date = %s, notes = %s
+                WHERE id = %s
                 RETURNING id
                 """,
                 (title, start_date, end_date, notes, trip_id),
@@ -2925,7 +2890,7 @@ def update_travel_trip(
 def delete_travel_trip(trip_id: int) -> bool:
     with get_connection() as conn:
         with db_cursor(conn) as cur:
-            cur.execute("DELETE FROM travel_trip WHERE id = ?", (trip_id,))
+            cur.execute("DELETE FROM travel_trip WHERE id = %s", (trip_id,))
             return cur.rowcount > 0
 
 
@@ -2941,13 +2906,13 @@ def insert_travel_child(
     spec = _TRAVEL_CHILDREN[kind]
     cols = _travel_write_values(kind, values)
     names = ["trip_id", *cols]
-    slots = ["?"] * len(names)
+    slots = ["%s"] * len(names)
     params: list[Any] = [trip_id, *(values[c] for c in cols)]
     if spec.insert_expr:
         extra_col, extra_sql = spec.insert_expr
         names.append(extra_col)
         slots.append(extra_sql)
-        params.extend([trip_id] * extra_sql.count("?"))
+        params.extend([trip_id] * extra_sql.count("%s"))
     params.append(trip_id)  # the EXISTS guard
     with get_connection() as conn:
         with db_cursor(conn) as cur:
@@ -2955,7 +2920,7 @@ def insert_travel_child(
                 f"""
                 INSERT INTO {spec.table} ({", ".join(names)})
                 SELECT {", ".join(slots)}
-                WHERE EXISTS (SELECT 1 FROM travel_trip WHERE id = ?)
+                WHERE EXISTS (SELECT 1 FROM travel_trip WHERE id = %s)
                 RETURNING id
                 """,
                 tuple(params),
@@ -2972,14 +2937,14 @@ def update_travel_child(
     ``None`` when no such record belongs to that trip."""
     spec = _TRAVEL_CHILDREN[kind]
     cols = _travel_write_values(kind, values)
-    assignments = ", ".join(f"{c} = ?" for c in cols)
+    assignments = ", ".join(f"{c} = %s" for c in cols)
     params = [*(values[c] for c in cols), child_id, trip_id]
     with get_connection() as conn:
         with db_cursor(conn) as cur:
             cur.execute(
                 f"""
                 UPDATE {spec.table} SET {assignments}
-                WHERE id = ? AND trip_id = ?
+                WHERE id = %s AND trip_id = %s
                 RETURNING id
                 """,
                 tuple(params),
@@ -2996,7 +2961,7 @@ def delete_travel_child(kind: str, trip_id: int, child_id: int) -> dict[str, Any
     with get_connection() as conn:
         with db_cursor(conn) as cur:
             cur.execute(
-                f"DELETE FROM {spec.table} WHERE id = ? AND trip_id = ? RETURNING id",
+                f"DELETE FROM {spec.table} WHERE id = %s AND trip_id = %s RETURNING id",
                 (child_id, trip_id),
             )
             if not cur.fetchone():

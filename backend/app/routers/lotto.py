@@ -33,6 +33,7 @@ from db import (
     insert_lotto_attempt,
     list_lotto_draw_results,
     list_lotto_draws,
+    list_lotto_games,
     update_lotto_attempt,
     update_lotto_draw,
     upsert_lotto_draw,
@@ -77,13 +78,26 @@ def _serialize_detail(detail: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-@router.get("/api/lotto")
-def lotto_list(limit: int = Query(default=200, ge=1, le=2000)) -> dict[str, Any]:
-    key = f"lotto:list:{limit}"
+@router.get("/api/lotto/games")
+def lotto_games() -> dict[str, Any]:
+    key = "lotto:games"
     hit = cache.get(key)
     if hit is not None:
         return hit
-    rows = list_lotto_draws(limit=limit)
+    result = {"games": list_lotto_games()}
+    cache.set(key, result)
+    return result
+
+
+@router.get("/api/lotto")
+def lotto_list(
+    game_id: int = Query(..., gt=0), limit: int = Query(default=200, ge=1, le=2000)
+) -> dict[str, Any]:
+    key = f"lotto:list:{game_id}:{limit}"
+    hit = cache.get(key)
+    if hit is not None:
+        return hit
+    rows = list_lotto_draws(game_id, limit=limit)
     result = {"draws": [_serialize_detail(r) for r in rows]}
     cache.set(key, result)
     return result
@@ -248,7 +262,7 @@ def lotto_analysis(top: int = Query(default=10, ge=1, le=58)) -> dict[str, Any]:
 @router.post("/api/lotto")
 def lotto_set_draw(body: LottoDrawCreate) -> dict[str, Any]:
     detail = upsert_lotto_draw(
-        body.draw_date.isoformat(), body.numbers, body.jackpot_prize, body.winners
+        body.game_id, body.draw_date.isoformat(), body.numbers, body.jackpot_prize, body.winners
     )
     return _serialize_detail(detail)
 
@@ -259,9 +273,10 @@ def lotto_import_text(body: LottoImportText) -> dict[str, Any]:
     ``| n1-n2-n3-n4-n5-n6 | m/d/yyyy | jackpot | winners |`` (a leading
     tab-separated game-name column, e.g. from a spreadsheet paste, is
     tolerated and discarded — see ``parse_lotto_draw_text``). Each row is
-    upserted by date (same rule as ``POST /api/lotto``), so re-pasting the
-    same rows — or a newer batch that also fills in jackpot/winner columns
-    for draws already in the database — overwrites rather than duplicating."""
+    upserted by date within ``game_id`` (same rule as ``POST /api/lotto``),
+    so re-pasting the same rows — or a newer batch that also fills in
+    jackpot/winner columns for draws already in the database — overwrites
+    rather than duplicating."""
     if not body.text.strip():
         raise HTTPException(status_code=400, detail="Paste in some rows first.")
     parsed, errors = parse_lotto_draw_text(body.text)
@@ -270,14 +285,14 @@ def lotto_import_text(body: LottoImportText) -> dict[str, Any]:
         if errors:
             detail += f" First error — {errors[0]}"
         raise HTTPException(status_code=400, detail=detail)
-    summary = upsert_lotto_draws_bulk(import_rows_to_bulk_params(parsed))
+    summary = upsert_lotto_draws_bulk(body.game_id, import_rows_to_bulk_params(parsed))
     return {**summary, "errors": errors}
 
 
 @router.put("/api/lotto/{draw_id}")
 def lotto_update_draw(draw_id: int, body: LottoDrawCreate) -> dict[str, Any]:
     draw_date = body.draw_date.isoformat()
-    existing_id = get_lotto_draw_id_by_date(draw_date)
+    existing_id = get_lotto_draw_id_by_date(body.game_id, draw_date)
     if existing_id is not None and existing_id != draw_id:
         raise HTTPException(
             status_code=409, detail="Another result already exists for that date."

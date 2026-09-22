@@ -998,6 +998,15 @@ export async function deleteCreditCardPayment(paymentId: number) {
   );
 }
 
+export type LottoGame = {
+  id: number;
+  name: string;
+};
+
+export async function getLottoGames() {
+  return getJson<{ games: LottoGame[] }>("/api/lotto/games");
+}
+
 export type LottoDrawRow = {
   id: number;
   draw_date: string;
@@ -1022,8 +1031,8 @@ export type LottoDrawDetail = {
   attempts: LottoAttemptRow[];
 };
 
-export async function getLottoDraws(limit?: number) {
-  return getJson<{ draws: LottoDrawDetail[] }>("/api/lotto", { limit });
+export async function getLottoDraws(gameId: number, limit?: number) {
+  return getJson<{ draws: LottoDrawDetail[] }>("/api/lotto", { game_id: gameId, limit });
 }
 
 /** `numbers: null` logs just the date — the result can be filled in later
@@ -1031,12 +1040,14 @@ export async function getLottoDraws(limit?: number) {
  * `jackpotPrize`/`winners` default to "not set yet" (null / 0), same as the
  * backend does when they're omitted. */
 export async function setLottoDraw(
+  gameId: number,
   drawDate: string,
   numbers: number[] | null,
   jackpotPrize?: number | null,
   winners?: number,
 ) {
   return sendJson<LottoDrawDetail>("POST", "/api/lotto", {
+    game_id: gameId,
     draw_date: drawDate,
     numbers,
     jackpot_prize: jackpotPrize ?? null,
@@ -1045,6 +1056,7 @@ export async function setLottoDraw(
 }
 
 export async function updateLottoDraw(
+  gameId: number,
   drawId: number,
   drawDate: string,
   numbers: number[] | null,
@@ -1052,6 +1064,7 @@ export async function updateLottoDraw(
   winners?: number,
 ) {
   return sendJson<LottoDrawDetail>("PUT", `/api/lotto/${drawId}`, {
+    game_id: gameId,
     draw_date: drawDate,
     numbers,
     jackpot_prize: jackpotPrize ?? null,
@@ -1100,13 +1113,13 @@ export async function deleteLottoAttempt(drawId: number, attemptId: number) {
  * is fine too — it's discarded). Each row is upserted by date, so re-pasting
  * (e.g. to backfill jackpot/winners on draws already here) overwrites
  * rather than duplicating. */
-export async function importLottoDrawResultsText(text: string) {
+export async function importLottoDrawResultsText(gameId: number, text: string) {
   return sendJson<{
     inserted: number;
     updated: number;
     total: number;
     errors: string[];
-  }>("POST", "/api/lotto/import-text", { text });
+  }>("POST", "/api/lotto/import-text", { game_id: gameId, text });
 }
 
 /** An app-managed user account. Passwords are Argon2id-hashed server-side —

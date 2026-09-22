@@ -10,9 +10,4 @@ __pycache__
 .git
 .gitignore
 
-# Local-build only: none of this is in git, but without it `docker compose build
-# api` uploads the 175MB backend/venv tree as build context on every run, and
-# could bake a developer's local SQLite file into the image.
-venv/
 .venv/
-data/
