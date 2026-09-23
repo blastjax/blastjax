@@ -32,7 +32,6 @@ export type PayslipFieldKey = Extract<
   | "others"
   | "allowances"
   | "thirteenth_month"
-  | "trust_fund"
   | "withholding_tax"
   | "sss_contribution"
   | "philhealth"

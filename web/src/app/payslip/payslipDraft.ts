@@ -102,7 +102,6 @@ export function formFromRow(r: PayslipRow): FormState {
     sss_contribution: fmtOptAmount(r.sss_contribution),
     philhealth: fmtOptAmount(r.philhealth),
     pag_ibig: fmtOptAmount(r.pag_ibig),
-    trust_fund: fmtOptAmount(r.trust_fund),
   };
 }
 
@@ -138,6 +137,5 @@ export function formToCreateBody(f: FormState): PayslipCreateBody {
     sss_contribution: parseOptFloat(f.sss_contribution),
     philhealth: parseOptFloat(f.philhealth),
     pag_ibig: parseOptFloat(f.pag_ibig),
-    trust_fund: parseOptFloat(f.trust_fund),
   };
 }

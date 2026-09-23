@@ -38,9 +38,8 @@ export function PayslipFormFields({
    * template is applied. */
   showPeriodYearMonth = true,
   /** Which fields Settings → Companies has turned on for this payslip's
-   * company (some companies just don't have Commission, Pag-ibig, etc., and
-   * Trust Fund is off everywhere until a company turns it on). Defaults to
-   * "everything but Trust Fund" — same as before this toggle existed. */
+   * company (some companies just don't have Commission, Pag-ibig, etc.).
+   * Defaults to everything shown — same as before this toggle existed. */
   flags = DEFAULT_COMPANY_COLUMN_FLAGS,
 }: {
   form: FormState;
@@ -113,17 +112,6 @@ export function PayslipFormFields({
           <AmountInput
             value={form.mp2}
             onChange={onAmountChange("mp2")}
-            disabled={disabled}
-            className={PAYSLIP_INPUT_OVERRIDE}
-          />
-        </label>
-      )}
-      {flags.show_trust_fund && (
-        <label className="flex flex-col gap-1 text-sm">
-          <span className={PAYSLIP_TEXT_DIM}>Trust Fund</span>
-          <AmountInput
-            value={form.trust_fund}
-            onChange={onAmountChange("trust_fund")}
             disabled={disabled}
             className={PAYSLIP_INPUT_OVERRIDE}
           />

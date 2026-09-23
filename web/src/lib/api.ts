@@ -116,7 +116,6 @@ export type PayslipRow = {
   sss_contribution: number | null;
   philhealth: number | null;
   pag_ibig: number | null;
-  trust_fund: number | null;
   has_pdf?: boolean;
   created_at: string;
 };
@@ -140,7 +139,6 @@ export type PayslipCreateBody = {
   sss_contribution?: number | null;
   philhealth?: number | null;
   pag_ibig?: number | null;
-  trust_fund?: number | null;
 };
 
 export async function getPayslips(limit?: number, company?: string) {
@@ -874,7 +872,6 @@ export type PayslipDefaultFormDto = {
   sss_contribution: string;
   philhealth: string;
   pag_ibig: string;
-  trust_fund: string;
 };
 
 export type PayslipDefaultsBundleDto = {
@@ -1010,6 +1007,18 @@ export async function getLottoGames() {
   return getJson<{ games: LottoGame[] }>("/api/lotto/games");
 }
 
+/** URL-friendly identifier for a game, derived from its name -- "Megalotto
+ * 6/45" -> "megalotto", "Lotto 6/42" -> "lotto" -- so `/lotto/[slug]` reads
+ * as the game instead of an opaque numeric id. Resolving a slug back to a
+ * game is just finding the one whose name slugifies to it (see the
+ * `[gameSlug]` route), so there's nothing to keep in sync server-side. */
+export function lottoGameSlug(name: string): string {
+  return name
+    .replace(/\s*\d+\/\d+\s*$/, "")
+    .toLowerCase()
+    .replace(/\s+/g, "");
+}
+
 export type LottoDrawRow = {
   id: number;
   draw_date: string;
@@ -1087,6 +1096,18 @@ export async function createLottoAttempt(
   return sendJson<LottoDrawDetail>("POST", `/api/lotto/${drawId}/attempts`, {
     numbers,
     ticket: ticket ?? null,
+  });
+}
+
+/** Saves every attempt in one request instead of one `createLottoAttempt`
+ * call per line — what "Paste attempts" uses, since a multi-ticket paste
+ * otherwise costs a network round trip per board play. */
+export async function createLottoAttemptsBulk(
+  drawId: number,
+  attempts: { numbers: number[]; ticket?: number | null }[],
+) {
+  return sendJson<LottoDrawDetail>("POST", `/api/lotto/${drawId}/attempts/bulk`, {
+    attempts: attempts.map((a) => ({ numbers: a.numbers, ticket: a.ticket ?? null })),
   });
 }
 
@@ -1201,7 +1222,6 @@ export type CompanyColumnFlags = {
   show_philhealth: boolean;
   show_pag_ibig: boolean;
   show_mp2: boolean;
-  show_trust_fund: boolean;
 };
 
 /** A company payslips are tagged under; managed via Settings → Companies. */
@@ -1212,10 +1232,10 @@ export type CompanyRow = CompanyColumnFlags & {
   sort_order: number;
 };
 
-/** What every column defaulted to before this toggle existed (all shown),
- * except Trust Fund, which is new and defaults to hidden. Used whenever a
- * payslip's `company` string doesn't match any managed company (e.g. an
- * old/deleted one) so fields still show up rather than vanishing. */
+/** What every column defaulted to before this toggle existed (all shown).
+ * Used whenever a payslip's `company` string doesn't match any managed
+ * company (e.g. an old/deleted one) so fields still show up rather than
+ * vanishing. */
 export const DEFAULT_COMPANY_COLUMN_FLAGS: CompanyColumnFlags = {
   show_total: true,
   show_basic_salary: true,
@@ -1230,7 +1250,6 @@ export const DEFAULT_COMPANY_COLUMN_FLAGS: CompanyColumnFlags = {
   show_philhealth: true,
   show_pag_ibig: true,
   show_mp2: true,
-  show_trust_fund: false,
 };
 
 /** Looks up `companyName` in `companies` and returns its column-visibility
@@ -1255,7 +1274,6 @@ export function companyColumnFlags(
     show_philhealth: c.show_philhealth,
     show_pag_ibig: c.show_pag_ibig,
     show_mp2: c.show_mp2,
-    show_trust_fund: c.show_trust_fund,
   };
 }
 

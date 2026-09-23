@@ -20,7 +20,6 @@ export type DraggableStatId =
   | "allowances"
   | "commission"
   | "thirteenth_month"
-  | "trust_fund"
   | "months_remaining";
 
 export const DEFAULT_STAT_CARD_ORDER: DraggableStatId[] = [
@@ -31,7 +30,6 @@ export const DEFAULT_STAT_CARD_ORDER: DraggableStatId[] = [
   "allowances",
   "commission",
   "thirteenth_month",
-  "trust_fund",
   "months_remaining",
 ];
 
@@ -43,7 +41,6 @@ export const DRAGGABLE_FIELD: Record<
   | "others"
   | "allowances"
   | "thirteenth_month"
-  | "trust_fund"
 > = {
   total: "total",
   reimbursement: "reimbursement",
@@ -51,7 +48,6 @@ export const DRAGGABLE_FIELD: Record<
   allowances: "allowances",
   commission: "commission",
   thirteenth_month: "thirteenth_month",
-  trust_fund: "trust_fund",
 };
 
 export const STAT_LABEL: Record<DraggableStatId, string> = {
@@ -62,7 +58,6 @@ export const STAT_LABEL: Record<DraggableStatId, string> = {
   allowances: "Allowances",
   commission: "Commission",
   thirteenth_month: "13th Month",
-  trust_fund: "Trust Fund",
   months_remaining: "Months Remaining",
 };
 
@@ -109,7 +104,6 @@ export const STAT_THEMES: Record<DraggableStatId, StatTheme> = {
   allowances: FLAT_THEME,
   commission: FLAT_THEME,
   thirteenth_month: FLAT_THEME,
-  trust_fund: FLAT_THEME,
   months_remaining: FLAT_THEME,
 };
 

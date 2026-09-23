@@ -25,8 +25,8 @@ import {
 
 /** Every per-company column toggle, grouped and ordered to match the two
  * halves of the Add/Edit Payslip form (the main grid vs. the "Deductions"
- * aside — see PayslipFormFields). Trust Fund is the only one that defaults
- * to hidden — see `DEFAULT_COMPANY_COLUMN_FLAGS`. */
+ * aside — see PayslipFormFields). All default to shown — see
+ * `DEFAULT_COMPANY_COLUMN_FLAGS`. */
 const INCOME_COLUMN_TOGGLES: { key: keyof CompanyColumnFlags; label: string }[] = [
   { key: "show_total", label: "Total" },
   { key: "show_basic_salary", label: "Basic salary" },
@@ -44,25 +44,15 @@ const DEDUCTION_COLUMN_TOGGLES: { key: keyof CompanyColumnFlags; label: string }
   { key: "show_philhealth", label: "Philhealth" },
   { key: "show_pag_ibig", label: "Pag-ibig" },
   { key: "show_mp2", label: "MP2" },
-  { key: "show_trust_fund", label: "Trust Fund" },
 ];
 
 const ALL_COLUMN_TOGGLES = [...INCOME_COLUMN_TOGGLES, ...DEDUCTION_COLUMN_TOGGLES];
 
-/** "All columns shown" for a company that never diverged from the defaults,
- * otherwise which columns are hidden and/or (for Trust Fund) turned on. */
+/** "All columns shown" for a company that never diverged from the defaults
+ * (every flag defaults to shown), otherwise which columns it hides. */
 function describeFlags(flags: CompanyColumnFlags): string {
-  const hidden = ALL_COLUMN_TOGGLES.filter(
-    (t) => DEFAULT_COMPANY_COLUMN_FLAGS[t.key] && !flags[t.key],
-  ).map((t) => t.label);
-  const shown = ALL_COLUMN_TOGGLES.filter(
-    (t) => !DEFAULT_COMPANY_COLUMN_FLAGS[t.key] && flags[t.key],
-  ).map((t) => t.label);
-  if (hidden.length === 0 && shown.length === 0) return "All columns shown";
-  const parts: string[] = [];
-  if (hidden.length) parts.push(`Hides ${hidden.join(", ")}`);
-  if (shown.length) parts.push(`Shows ${shown.join(", ")}`);
-  return parts.join(" · ");
+  const hidden = ALL_COLUMN_TOGGLES.filter((t) => !flags[t.key]).map((t) => t.label);
+  return hidden.length ? `Hides ${hidden.join(", ")}` : "All columns shown";
 }
 
 /** One group of checkboxes (Income or Deductions). */

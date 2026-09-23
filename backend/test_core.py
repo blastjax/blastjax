@@ -222,6 +222,66 @@ def check_child_write_sql() -> None:
     assert params == (3, *([None] * len(item)), 3), params
 
 
+def check_lotto_bulk_attempts_sql() -> None:
+    """Pin "Paste attempts"' bulk insert to one multi-row INSERT (not one
+    ``POST .../attempts`` per line -- see ``insert_lotto_attempts_bulk``'s
+    docstring for why), and pin its existence guard: an empty ``RETURNING``
+    means the draw doesn't exist, and the function returns None without
+    building a draw detail.
+    """
+    calls: list[tuple[str, tuple]] = []
+
+    class _Cursor:
+        def __init__(self, returning: list[tuple]) -> None:
+            self._returning = returning
+
+        def execute(self, sql, params=None):
+            calls.append((" ".join(sql.split()), tuple(params) if params else params))
+
+        def fetchall(self):
+            return self._returning
+
+    @contextmanager
+    def _conn():
+        yield None
+
+    def _cursor_factory(returning: list[tuple]):
+        @contextmanager
+        def _cursor(_):
+            yield _Cursor(returning)
+
+        return _cursor
+
+    attempts = [([1, 2, 3, 4, 5, 6], 1), ([7, 8, 9, 10, 11, 12], 1)]
+
+    saved = db.get_connection, db.db_cursor, db._lotto_draw_detail
+    db.get_connection = _conn
+    db.db_cursor = _cursor_factory([(101,), (102,)])
+    db._lotto_draw_detail = lambda cur, draw_id: {"sentinel_draw_id": draw_id}
+    try:
+        result = db.insert_lotto_attempts_bulk(9, attempts)
+    finally:
+        db.get_connection, db.db_cursor, db._lotto_draw_detail = saved
+
+    assert result == {"sentinel_draw_id": 9}, result
+    assert len(calls) == 1, calls
+    sql, params = calls[0]
+    assert sql.count("(%s, %s, %s, %s, %s, %s, %s, %s)") == 2, sql
+    assert "WHERE EXISTS (SELECT 1 FROM lotto_draw WHERE id = %s)" in sql, sql
+    # Each attempt: draw_id, ticket, n1..n6 -- then the trailing draw_id for
+    # the existence guard.
+    assert params == (9, 1, 1, 2, 3, 4, 5, 6, 9, 1, 7, 8, 9, 10, 11, 12, 9), params
+
+    saved = db.get_connection, db.db_cursor, db._lotto_draw_detail
+    db.get_connection = _conn
+    db.db_cursor = _cursor_factory([])  # nothing came back -> draw 404 doesn't exist
+    db._lotto_draw_detail = lambda cur, draw_id: {"sentinel_draw_id": draw_id}
+    try:
+        assert db.insert_lotto_attempts_bulk(404, attempts) is None
+    finally:
+        db.get_connection, db.db_cursor, db._lotto_draw_detail = saved
+
+
 def check_lotto_bulk_upsert_sql() -> None:
     """Pin the historic-results import's bulk upsert to one multi-row INSERT
     (not one INSERT per row -- see ``upsert_lotto_draws_bulk``'s docstring for
@@ -336,10 +396,9 @@ def check_schema_covers_what_the_app_queries() -> None:
 
     schema.py is called the single owner of the schema, but that only holds if
     something checks it. It had already drifted while the DDL lived inside the
-    migration script: the whole ``company`` table, ``payslip.trust_fund`` and
-    ``payslip_default.trust_fund`` were live and queried while absent from it,
-    so rebuilding would have produced a database the app errors against on
-    first use.
+    migration script: the whole ``company`` table was live and queried while
+    absent from it, so rebuilding would have produced a database the app
+    errors against on first use.
 
     Startup needs no separate check here -- ``init_schema`` derives the tables
     it requires from this same DDL.
@@ -360,9 +419,10 @@ def check_schema_covers_what_the_app_queries() -> None:
         missing = _plain_columns(cols_sql) - columns[table]
         assert not missing, f"{table}: selected but not in the DDL: {sorted(missing)}"
 
-    # Written by save_payslip_defaults; it has no single column constant to
-    # derive from, and it is exactly what drifted before.
-    assert "trust_fund" in columns["payslip_default"]
+    # Written by save_payslip_defaults, which builds its INSERT from this
+    # tuple rather than from a SELECT list -- exactly what drifted before.
+    missing_defaults = set(db._PAYSLIP_DEFAULT_FORM_COLS) - columns["payslip_default"]
+    assert not missing_defaults, f"payslip_default: written but not in the DDL: {sorted(missing_defaults)}"
 
     # Every company visibility flag must exist as a column.
     missing_flags = set(db._COMPANY_FLAG_COLUMNS) - columns["company"]

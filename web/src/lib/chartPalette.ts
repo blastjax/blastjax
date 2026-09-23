@@ -14,7 +14,6 @@ export const CHART_SERIES_COLOR_KEYS = [
   "sss_contribution",
   "philhealth",
   "pag_ibig",
-  "trust_fund",
 ] as const;
 
 export type ChartSeriesColorKey = (typeof CHART_SERIES_COLOR_KEYS)[number];
@@ -32,7 +31,6 @@ export const CHART_SERIES_LABEL: Record<ChartSeriesColorKey, string> = {
   sss_contribution: "SSS contribution",
   philhealth: "Philhealth",
   pag_ibig: "Pag-ibig",
-  trust_fund: "Trust Fund",
 };
 
 const LS_CHART_PALETTE = "blastjax:chartPalette:v1";
@@ -56,7 +54,6 @@ const BUILTIN_LIGHT: Record<ChartSeriesColorKey, string> = {
   sss_contribution: "#b91c1c",
   philhealth: "#f97316",
   pag_ibig: "#fb7185",
-  trust_fund: "#6366f1",
 };
 
 /** Slightly brighter defaults on dark backgrounds for readability. */
@@ -73,7 +70,6 @@ const BUILTIN_DARK: Record<ChartSeriesColorKey, string> = {
   sss_contribution: "#ef4444",
   philhealth: "#fdba74",
   pag_ibig: "#fda4af",
-  trust_fund: "#818cf8",
 };
 
 export function defaultChartPalette(): ChartPaletteByTheme {

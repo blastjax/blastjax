@@ -47,8 +47,7 @@ export function PayslipYearStatsSection({
 }: {
   index: PayslipIndex;
   /** Settings → Companies decides which of these show up per company (some
-   * companies just don't have commission, and Trust Fund is off everywhere
-   * until a company turns it on), so the stat cards follow suit. */
+   * companies just don't have commission), so the stat cards follow suit. */
   flags?: CompanyColumnFlags;
 }) {
   const [statsYear, setStatsYear] = useState(() => new Date().getFullYear());
@@ -72,8 +71,6 @@ export function PayslipYearStatsSection({
         return flags.show_allowances;
       case "thirteenth_month":
         return flags.show_thirteenth_month;
-      case "trust_fund":
-        return flags.show_trust_fund;
       default:
         return true;
     }
@@ -100,8 +97,7 @@ export function PayslipYearStatsSection({
     sums.sss_contribution +
     sums.philhealth +
     sums.pag_ibig +
-    sums.mp2 +
-    sums.trust_fund;
+    sums.mp2;
   const totalPlusDeductions = sums.total + deductionsSumYtd;
   /** Breakdown cards: compare line items to gross (net + deductions), falling back to net if gross is unset. */
   const pctDenominator =

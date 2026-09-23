@@ -8,6 +8,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Modal } from "@/components/Modal";
 import {
   createLottoAttempt,
+  createLottoAttemptsBulk,
   deleteLottoAttempt,
   deleteLottoDraw,
   getLottoDraws,
@@ -1055,12 +1056,14 @@ export default function LottoClient({ gameId }: { gameId: number }) {
     setAttemptsFormError(null);
   };
 
-  /** Creates every attempt in `blocks` against `drawId`. A block with no
-   * explicit "Ticket N" header is numbered after whatever's already on the
-   * draw, so a second add (or paste) doesn't collide with tickets from the
-   * first. Returns the last detail the API handed back, or null if the
-   * blocks were empty. Shared by "Add attempt" and "Paste attempts" so both
-   * number tickets identically. */
+  /** Creates every attempt in `blocks` against `drawId` in one request. A
+   * block with no explicit "Ticket N" header is numbered after whatever's
+   * already on the draw, so a second add (or paste) doesn't collide with
+   * tickets from the first. Returns null if the blocks were empty. Shared by
+   * "Add attempt" and "Paste attempts" so both number tickets identically —
+   * and, since a paste can carry a few dozen board plays, both save in one
+   * round trip instead of one ``POST .../attempts`` per line (same fix as
+   * "Import historic results"' bulk upsert). */
   const createTicketBlocks = async (
     drawId: number,
     blocks: TicketBlock[],
@@ -1071,15 +1074,16 @@ export default function LottoClient({ gameId }: { gameId: number }) {
       0,
     );
     let nextAutoTicket = priorMaxTicket + 1;
-    let detail: LottoDrawDetail | null = null;
+    const attempts: { numbers: number[]; ticket: number }[] = [];
     for (const block of blocks) {
       const ticket = block.ticket ?? nextAutoTicket;
       nextAutoTicket = Math.max(nextAutoTicket, ticket + 1);
       for (const numbers of block.attempts) {
-        detail = await createLottoAttempt(drawId, numbers, ticket);
+        attempts.push({ numbers, ticket });
       }
     }
-    return detail;
+    if (attempts.length === 0) return null;
+    return createLottoAttemptsBulk(drawId, attempts);
   };
 
   /** Adds new attempts, or replaces an edited set — see `AttemptsModalState`.

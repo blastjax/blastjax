@@ -71,6 +71,13 @@ class LottoAttemptCreate(LottoNumbers):
     ticket: int | None = None
 
 
+class LottoAttemptsBulkCreate(BaseModel):
+    # "Paste attempts" can carry a few dozen board plays across several
+    # tickets in one go; saving them one at a time meant a network round
+    # trip per line (see insert_lotto_attempts_bulk).
+    attempts: list[LottoAttemptCreate] = Field(min_length=1)
+
+
 class LottoImportText(BaseModel):
     game_id: int = Field(..., gt=0)
     # Pasted historic-results text — see `parse_lotto_draw_text` for the

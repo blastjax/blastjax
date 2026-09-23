@@ -20,6 +20,7 @@ import cache
 from app.deps import require_db
 from app.schemas.lotto import (
     LottoAttemptCreate,
+    LottoAttemptsBulkCreate,
     LottoDrawCreate,
     LottoImportText,
 )
@@ -31,6 +32,7 @@ from db import (
     delete_lotto_draw,
     get_lotto_draw_id_by_date,
     insert_lotto_attempt,
+    insert_lotto_attempts_bulk,
     list_lotto_draw_results,
     list_lotto_draws,
     list_lotto_games,
@@ -315,6 +317,18 @@ def lotto_remove_draw(draw_id: int) -> dict[str, Any]:
 @router.post("/api/lotto/{draw_id}/attempts")
 def lotto_add_attempt(draw_id: int, body: LottoAttemptCreate) -> dict[str, Any]:
     detail = insert_lotto_attempt(draw_id, body.numbers, body.ticket)
+    if detail is None:
+        raise HTTPException(status_code=404, detail="Draw not found.")
+    return _serialize_detail(detail)
+
+
+@router.post("/api/lotto/{draw_id}/attempts/bulk")
+def lotto_add_attempts_bulk(draw_id: int, body: LottoAttemptsBulkCreate) -> dict[str, Any]:
+    """Add every attempt in ``body.attempts`` in one round trip — what
+    "Paste attempts" uses, instead of one ``POST .../attempts`` per line."""
+    detail = insert_lotto_attempts_bulk(
+        draw_id, [(a.numbers, a.ticket) for a in body.attempts]
+    )
     if detail is None:
         raise HTTPException(status_code=404, detail="Draw not found.")
     return _serialize_detail(detail)

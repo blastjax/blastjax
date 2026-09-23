@@ -29,9 +29,9 @@ The schema itself is owned by ``backend/schema.py``, not by this module --
 ``init_schema()`` only verifies that the tables it defines are present (plus
 tops up the fixed ``lotto_game`` rows), and reads the list from that same DDL,
 so there is no second copy to drift out of sync. ``backend/test_core.py``
-checks the DDL against every column the queries below select. That is not a theoretical risk: the ``company`` table and both
-``trust_fund`` columns were live and queried while missing from the DDL
-entirely.
+checks the DDL against every column the queries below select. That is not a
+theoretical risk: the ``company`` table was live and queried while missing
+from the DDL entirely.
 
 Round trips
 -----------
@@ -523,7 +523,7 @@ _PAYSLIP_RETURN_COLS = """
     medical_reimbursement, others, mp2, allowances,
     thirteenth_month, basic_salary,
     period_year, period_month, period_half, notes,
-    withholding_tax, sss_contribution, philhealth, pag_ibig, trust_fund,
+    withholding_tax, sss_contribution, philhealth, pag_ibig,
     company,
     (pdf_data IS NOT NULL) AS has_pdf,
     created_at
@@ -548,7 +548,6 @@ def insert_payslip(
     sss_contribution: float | None = None,
     philhealth: float | None = None,
     pag_ibig: float | None = None,
-    trust_fund: float | None = None,
     *,
     company: str,
 ) -> dict[str, Any]:
@@ -570,9 +569,8 @@ def insert_payslip(
                     thirteenth_month, basic_salary,
                     period_year, period_month, period_half, notes,
                     withholding_tax, sss_contribution, philhealth, pag_ibig,
-                    trust_fund,
                     company
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING {_PAYSLIP_RETURN_COLS}
                 """,
                 (
@@ -593,7 +591,6 @@ def insert_payslip(
                     sss_contribution,
                     philhealth,
                     pag_ibig,
-                    trust_fund,
                     company,
                 ),
             )
@@ -618,7 +615,6 @@ _PAYSLIP_INSERT_COLS: tuple[str, ...] = (
     "sss_contribution",
     "philhealth",
     "pag_ibig",
-    "trust_fund",
 )
 
 
@@ -705,7 +701,6 @@ def update_payslip(
     sss_contribution: float | None = None,
     philhealth: float | None = None,
     pag_ibig: float | None = None,
-    trust_fund: float | None = None,
     *,
     company: str,
 ) -> dict[str, Any] | None:
@@ -732,7 +727,6 @@ def update_payslip(
                     sss_contribution = %s,
                     philhealth = %s,
                     pag_ibig = %s,
-                    trust_fund = %s,
                     company = %s
                 WHERE id = %s
                 RETURNING {_PAYSLIP_RETURN_COLS}
@@ -755,7 +749,6 @@ def update_payslip(
                     sss_contribution,
                     philhealth,
                     pag_ibig,
-                    trust_fund,
                     company,
                     payslip_id,
                 ),
@@ -2077,7 +2070,6 @@ _PAYSLIP_DEFAULT_FORM_COLS = (
     "sss_contribution",
     "philhealth",
     "pag_ibig",
-    "trust_fund",
 )
 
 
@@ -2435,6 +2427,37 @@ def insert_lotto_attempt(
             return _lotto_draw_detail(cur, draw_id)
 
 
+def insert_lotto_attempts_bulk(
+    draw_id: int, attempts: list[tuple[list[int], int | None]]
+) -> dict[str, Any] | None:
+    """Add every attempt in ``attempts`` (each a ``(numbers, ticket)`` pair)
+    under a draw in one round trip, and return the refreshed draw detail --
+    or None if the draw doesn't exist. Same existence guard as
+    ``insert_lotto_attempt``, but as one multi-row INSERT instead of one per
+    attempt: a "Paste attempts" ticket with a few dozen board plays used to
+    cost a network round trip per line (see ``upsert_lotto_draws_bulk``,
+    which fixed the same thing for historic-results import)."""
+    values_sql = ",".join(["(%s, %s, %s, %s, %s, %s, %s, %s)"] * len(attempts))
+    params: list[Any] = []
+    for numbers, ticket in attempts:
+        n1, n2, n3, n4, n5, n6 = numbers
+        params.extend((draw_id, ticket, n1, n2, n3, n4, n5, n6))
+    with get_connection() as conn:
+        with db_cursor(conn) as cur:
+            cur.execute(
+                f"""
+                INSERT INTO lotto_attempt (draw_id, ticket, n1, n2, n3, n4, n5, n6)
+                SELECT * FROM (VALUES {values_sql}) AS v(draw_id, ticket, n1, n2, n3, n4, n5, n6)
+                WHERE EXISTS (SELECT 1 FROM lotto_draw WHERE id = %s)
+                RETURNING id
+                """,
+                [*params, draw_id],
+            )
+            if not cur.fetchall():
+                return None
+            return _lotto_draw_detail(cur, draw_id)
+
+
 def update_lotto_attempt(
     draw_id: int, attempt_id: int, numbers: list[int], ticket: int | None = None
 ) -> dict[str, Any] | None:
@@ -2632,14 +2655,11 @@ _COMPANY_FLAG_COLUMNS: tuple[str, ...] = (
     "show_philhealth",
     "show_pag_ibig",
     "show_mp2",
-    "show_trust_fund",
 )
 
 # Every flag defaults to shown -- that was every column's behavior before
-# per-company visibility existed -- except Trust Fund, which is new and off
-# everywhere until a company turns it on.
+# per-company visibility existed.
 _COMPANY_FLAG_DEFAULTS: dict[str, bool] = {c: True for c in _COMPANY_FLAG_COLUMNS}
-_COMPANY_FLAG_DEFAULTS["show_trust_fund"] = False
 
 _COMPANY_PUBLIC_COLS = (
     "id, name, created_at, sort_order, " + ", ".join(_COMPANY_FLAG_COLUMNS)

@@ -303,14 +303,6 @@ export function PayslipClientModal({
                           </dd>
                         </div>
                       )}
-                      {detailFlags.show_trust_fund && (
-                        <div>
-                          <dt className={`text-xs ${PAYSLIP_TEXT_DIM}`}>Trust Fund</dt>
-                          <dd className={PAYSLIP_DANGER_TEXT}>
-                            {fmtNum(row.trust_fund)}
-                          </dd>
-                        </div>
-                      )}
                       <div className={`mt-1 border-t ${PAYSLIP_BORDER} pt-3`}>
                         <dt className={`text-xs font-semibold ${PAYSLIP_TEXT_2}`}>
                           Deductions total

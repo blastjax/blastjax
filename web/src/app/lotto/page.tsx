@@ -5,8 +5,37 @@ import { useEffect, useState } from "react";
 import { ChevronRightIcon, TicketIcon } from "@/components/Icons";
 import { Modal } from "@/components/Modal";
 import { PageHeader } from "@/components/PageHeader";
-import { getLottoGames, importLottoDrawResultsText, type LottoGame } from "@/lib/api";
+import { getLottoGames, importLottoDrawResultsText, lottoGameSlug, type LottoGame } from "@/lib/api";
+import { formatDate, toIsoDateLocal } from "@/lib/dateFormat";
 import { fmtCount, fmtJackpotCompact } from "@/lib/formatNumber";
+
+/** PCSO's fixed weekly draw schedule per game (`Date.getDay()`: 0=Sunday..
+ * 6=Saturday) — real-world scheduling, not something anyone edits from this
+ * app, so it lives as a UI constant rather than a database column. */
+const DRAW_SCHEDULE: Record<string, number[]> = {
+  "Ultra Lotto 6/58": [0, 2, 5],
+  "Grand Lotto 6/55": [1, 3, 6],
+  "Superlotto 6/49": [0, 2, 4],
+  "Megalotto 6/45": [1, 3, 5],
+  "Lotto 6/42": [2, 4, 6],
+};
+
+/** "Today"/"Tomorrow", or the next scheduled draw date's `formatDate`
+ * display — null for a game with no known schedule (so the card just omits
+ * the line). */
+function nextDrawLabel(gameName: string): string | null {
+  const schedule = DRAW_SCHEDULE[gameName];
+  if (!schedule || schedule.length === 0) return null;
+  const today = new Date();
+  const todayDow = today.getDay();
+  let offset = 0;
+  while (!schedule.includes((todayDow + offset) % 7)) offset += 1;
+  if (offset === 0) return "Today";
+  if (offset === 1) return "Tomorrow";
+  const next = new Date(today);
+  next.setDate(next.getDate() + offset);
+  return formatDate(toIsoDateLocal(next));
+}
 import {
   ACTION_BUTTON_CLASSES,
   alertClasses,
@@ -183,29 +212,41 @@ export default function LottoGamesPage() {
 
       {games && (
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          {games.map((game) => (
-            <Link key={game.id} href={`/lotto/${game.id}`} className={`${CARD_CLASSES} group flex items-start gap-4`}>
-              <span
-                className="inline-flex size-11 shrink-0 items-center justify-center rounded-full bg-success-soft text-success-text"
-                aria-hidden
+          {games.map((game) => {
+            const nextDraw = nextDrawLabel(game.name);
+            return (
+              <Link
+                key={game.id}
+                href={`/lotto/${lottoGameSlug(game.name)}`}
+                className={`${CARD_CLASSES} group flex items-start gap-4`}
               >
-                <TicketIcon className="size-5" />
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="flex items-center gap-1.5">
-                  <span className="text-base font-semibold tracking-[-0.2px] text-ink">
-                    {game.name}
+                <span
+                  className="inline-flex size-11 shrink-0 items-center justify-center rounded-full bg-success-soft text-success-text"
+                  aria-hidden
+                >
+                  <TicketIcon className="size-5" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-center gap-1.5">
+                    <span className="text-base font-semibold tracking-[-0.2px] text-ink">
+                      {game.name}
+                    </span>
+                    <ChevronRightIcon className="size-4 text-ink-4 transition-transform duration-150 group-hover:translate-x-0.5 group-hover:text-brand-text" />
                   </span>
-                  <ChevronRightIcon className="size-4 text-ink-4 transition-transform duration-150 group-hover:translate-x-0.5 group-hover:text-brand-text" />
+                  <span className="mt-1 block text-sm text-ink-3">
+                    {game.jackpot_prize != null
+                      ? `Jackpot ${fmtJackpotCompact(game.jackpot_prize)}`
+                      : "No jackpot logged yet"}
+                  </span>
+                  {nextDraw && (
+                    <span className="mt-0.5 block text-sm text-ink-3">
+                      Next draw: {nextDraw}
+                    </span>
+                  )}
                 </span>
-                <span className="mt-1 block text-sm text-ink-3">
-                  {game.jackpot_prize != null
-                    ? `Jackpot ${fmtJackpotCompact(game.jackpot_prize)}`
-                    : "No jackpot logged yet"}
-                </span>
-              </span>
-            </Link>
-          ))}
+              </Link>
+            );
+          })}
         </div>
       )}
 
