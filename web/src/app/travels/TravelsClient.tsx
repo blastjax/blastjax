@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { Source_Serif_4 } from "next/font/google";
 import { Fragment, useEffect, useState, type ReactNode } from "react";
+import { DatePickerField } from "@/components/DatePickerField";
 import { Modal } from "@/components/Modal";
 import {
   createTravelAccommodation,
@@ -452,6 +453,7 @@ const GHOST = "cursor-pointer rounded-lg border border-tv-line-3 px-4 py-[9px] t
 const INPUT = "rounded-lg border border-tv-line-3 bg-tv-well px-[11px] text-[13.5px] text-tv-1 outline-none focus:border-tv-focus";
 const CAP = "text-[11px] font-semibold tracking-[.06em] text-tv-6";
 const BACKDROP = "fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-5";
+const POPOVER = "border-tv-line-3 bg-tv-menu shadow-[0_12px_30px_rgba(0,0,0,.12)] dark:shadow-[0_12px_30px_rgba(0,0,0,.5)]";
 
 function FormField({ label, wide, children }: { label: ReactNode; wide?: boolean; children: ReactNode }) {
   return (
@@ -502,6 +504,7 @@ export default function TravelsClient() {
   const entries = trip ? toEntries(trip) : [];
   const places = trip ? placesOf(trip) : [];
   const detail = entries.find((e) => e.key === drawerKey) ?? null;
+  const inTrip = (iso: string) => !!trip && iso >= trip.trip.start_date && iso <= trip.trip.end_date;
 
   const run = async (fn: () => Promise<void>) => {
     setSaving(true);
@@ -1192,9 +1195,31 @@ export default function TravelsClient() {
           </FormField>
           {!route && <FormField label="Location">{txt("location", "Address or place name")}</FormField>}
           <div className="grid grid-cols-[1.3fr_1fr] gap-2.5">
-            <FormField label={`${startCap} date`}>{dateTime("startDate", "date")}</FormField>
+            <FormField label={`${startCap} date`}>
+              <DatePickerField
+                value={f.startDate}
+                className={`${INPUT} py-2`}
+                popoverClassName={POPOVER}
+                highlightDay={inTrip}
+                highlightLabel="Trip dates"
+                // An end date that no longer comes after the start is dropped.
+                onChange={(iso) => setF((x) => ({ ...x, startDate: iso, endDate: x.endDate > iso ? x.endDate : "" }))}
+              />
+            </FormField>
             <FormField label="Time">{dateTime("startTime", "time")}</FormField>
-            <FormField label={`${endCap} date`}>{dateTime("endDate", "date")}</FormField>
+            <FormField label={`${endCap} date`}>
+              <DatePickerField
+                value={f.endDate}
+                className={`${INPUT} py-2`}
+                popoverClassName={POPOVER}
+                rangeFrom={f.startDate}
+                placeholder="Same day"
+                clearLabel="Same day"
+                highlightDay={(iso) => inTrip(iso) && iso > f.startDate}
+                highlightLabel={`Trip dates after ${startCap.toLowerCase()}`}
+                onChange={(iso) => setF((x) => ({ ...x, endDate: iso }))}
+              />
+            </FormField>
             <FormField label="Time">{dateTime("endTime", "time")}</FormField>
           </div>
           <p className="-mt-1.5 text-[11.5px] text-tv-7">
