@@ -102,6 +102,15 @@ class TravelFlightCreate(BaseModel):
     to_city: str | None = None
     to_country: str | None = None
     notes: str | None = None
+    # Booking details. `title` is an optional display name; the UI falls
+    # back to "From → To" when it's unset.
+    title: str | None = None
+    airline: str | None = None
+    seat: str | None = None
+    terminal: str | None = None
+    gate: str | None = None
+    baggage: str | None = None
+    confirmation: str | None = None
 
     @field_validator("flight_number")
     @classmethod
@@ -123,6 +132,13 @@ class TravelFlightCreate(BaseModel):
         "to_city",
         "to_country",
         "notes",
+        "title",
+        "airline",
+        "seat",
+        "terminal",
+        "gate",
+        "baggage",
+        "confirmation",
     )
     @classmethod
     def _optional(cls, v: str | None) -> str | None:
@@ -157,6 +173,12 @@ class TravelTransportCreate(BaseModel):
     to_city: str | None = None
     to_country: str | None = None
     notes: str | None = None
+    title: str | None = None
+    operator: str | None = None
+    seat: str | None = None
+    travel_class: str | None = None
+    platform: str | None = None
+    confirmation: str | None = None
 
     @field_validator("departure_time", "arrival_time", mode="before")
     @classmethod
@@ -174,6 +196,12 @@ class TravelTransportCreate(BaseModel):
         "to_city",
         "to_country",
         "notes",
+        "title",
+        "operator",
+        "seat",
+        "travel_class",
+        "platform",
+        "confirmation",
     )
     @classmethod
     def _optional(cls, v: str | None) -> str | None:
@@ -197,6 +225,9 @@ class TravelItineraryCreate(BaseModel):
     location_name: str | None = None
     location_map_url: str | None = None
     notes: str | None = None
+    booked_via: str | None = None
+    price: str | None = None
+    confirmation: str | None = None
 
     @field_validator("activity")
     @classmethod
@@ -208,7 +239,7 @@ class TravelItineraryCreate(BaseModel):
     def _blank_time(cls, v: object) -> object:
         return _blank_time_to_none(v)
 
-    @field_validator("location_name", "location_map_url", "notes")
+    @field_validator("location_name", "location_map_url", "notes", "booked_via", "price", "confirmation")
     @classmethod
     def _optional(cls, v: str | None) -> str | None:
         return _clean_optional(v)
@@ -231,6 +262,11 @@ class TravelAccommodationCreate(BaseModel):
     location_name: str | None = None
     location_map_url: str | None = None
     notes: str | None = None
+    room: str | None = None
+    guests: str | None = None
+    phone: str | None = None
+    booked_via: str | None = None
+    price: str | None = None
 
     @field_validator("name")
     @classmethod
@@ -248,6 +284,11 @@ class TravelAccommodationCreate(BaseModel):
         "location_name",
         "location_map_url",
         "notes",
+        "room",
+        "guests",
+        "phone",
+        "booked_via",
+        "price",
     )
     @classmethod
     def _optional(cls, v: str | None) -> str | None:

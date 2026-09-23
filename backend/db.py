@@ -2836,20 +2836,23 @@ _TRAVEL_CITY_COLS = "id, trip_id, name, start_date, end_date, sort_order, create
 _TRAVEL_FLIGHT_COLS = (
     "id, trip_id, flight_number, flight_date, arrival_date, departure_time, arrival_time, "
     "from_location, from_map_url, from_city, from_country, "
-    "to_location, to_map_url, to_city, to_country, notes, created_at"
+    "to_location, to_map_url, to_city, to_country, notes, "
+    "title, airline, seat, terminal, gate, baggage, confirmation, created_at"
 )
 _TRAVEL_TRANSPORT_COLS = (
     "id, trip_id, mode, number, travel_date, arrival_date, departure_time, arrival_time, "
     "from_location, from_map_url, from_city, from_country, "
-    "to_location, to_map_url, to_city, to_country, notes, created_at"
+    "to_location, to_map_url, to_city, to_country, notes, "
+    "title, operator, seat, travel_class, platform, confirmation, created_at"
 )
 _TRAVEL_ITINERARY_COLS = (
     "id, trip_id, item_date, item_end_date, start_time, end_time, activity, "
-    "location_name, location_map_url, notes, created_at"
+    "location_name, location_map_url, notes, booked_via, price, confirmation, created_at"
 )
 _TRAVEL_ACCOMMODATION_COLS = (
     "id, trip_id, name, checkin_date, checkout_date, checkin_time, checkout_time, "
-    "booking_confirmation, instructions, location_name, location_map_url, notes, created_at"
+    "booking_confirmation, instructions, location_name, location_map_url, notes, "
+    "room, guests, phone, booked_via, price, created_at"
 )
 
 

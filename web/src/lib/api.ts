@@ -1360,6 +1360,13 @@ export type TravelFlightRow = {
   to_city: string | null;
   to_country: string | null;
   notes: string | null;
+  title: string | null;
+  airline: string | null;
+  seat: string | null;
+  terminal: string | null;
+  gate: string | null;
+  baggage: string | null;
+  confirmation: string | null;
   created_at: string;
 };
 
@@ -1388,6 +1395,12 @@ export type TravelTransportRow = {
   to_city: string | null;
   to_country: string | null;
   notes: string | null;
+  title: string | null;
+  operator: string | null;
+  seat: string | null;
+  travel_class: string | null;
+  platform: string | null;
+  confirmation: string | null;
   created_at: string;
 };
 
@@ -1405,6 +1418,9 @@ export type TravelItineraryRow = {
   /** Custom Google Maps link; when unset the UI builds a search link from `location_name`. */
   location_map_url: string | null;
   notes: string | null;
+  booked_via: string | null;
+  price: string | null;
+  confirmation: string | null;
   created_at: string;
 };
 
@@ -1425,6 +1441,11 @@ export type TravelAccommodationRow = {
   /** Custom Google Maps link; when unset the UI builds a search link from `location_name`. */
   location_map_url: string | null;
   notes: string | null;
+  room: string | null;
+  guests: string | null;
+  phone: string | null;
+  booked_via: string | null;
+  price: string | null;
   created_at: string;
 };
 
@@ -1465,6 +1486,13 @@ export type TravelFlightBody = {
   to_city?: string | null;
   to_country?: string | null;
   notes?: string | null;
+  title?: string | null;
+  airline?: string | null;
+  seat?: string | null;
+  terminal?: string | null;
+  gate?: string | null;
+  baggage?: string | null;
+  confirmation?: string | null;
 };
 
 export type TravelTransportBody = {
@@ -1483,6 +1511,12 @@ export type TravelTransportBody = {
   to_city?: string | null;
   to_country?: string | null;
   notes?: string | null;
+  title?: string | null;
+  operator?: string | null;
+  seat?: string | null;
+  travel_class?: string | null;
+  platform?: string | null;
+  confirmation?: string | null;
 };
 
 export type TravelItineraryBody = {
@@ -1494,6 +1528,9 @@ export type TravelItineraryBody = {
   location_name?: string | null;
   location_map_url?: string | null;
   notes?: string | null;
+  booked_via?: string | null;
+  price?: string | null;
+  confirmation?: string | null;
 };
 
 export type TravelAccommodationBody = {
@@ -1507,6 +1544,11 @@ export type TravelAccommodationBody = {
   location_name?: string | null;
   location_map_url?: string | null;
   notes?: string | null;
+  room?: string | null;
+  guests?: string | null;
+  phone?: string | null;
+  booked_via?: string | null;
+  price?: string | null;
 };
 
 export async function getTravelTrips(limit?: number) {

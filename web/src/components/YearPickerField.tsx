@@ -27,7 +27,7 @@ function pageStartFor(year: number): number {
  * at a time) to pick a year without typing digit-by-digit — in place of a
  * bare `<input type="text" inputMode="numeric">`. Typing still works; the
  * grid is just a faster way in, the same relationship a date field has to
- * its calendar (see `DatePickerField`). */
+ * its calendar. */
 export function YearPickerField({
   value,
   onChange,

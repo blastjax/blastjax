@@ -287,6 +287,125 @@
   --color-st-ded: var(--st-ded);
 }
 
+/* --------------------------------------------------------------------------
+ * Travels page (Claude Design "Travel Itinerary v2").
+ *
+ * Dark values are the design's exact colors; light values mirror them on a
+ * white floor. The `--tv-type*` / `--tv-place*` tokens are oklch "L C" pairs:
+ * the page supplies each type's or place's hue, e.g.
+ * `oklch(var(--tv-type-bg) 250)`, so one hue reads right in both themes.
+ * ----------------------------------------------------------------------- */
+.travels-page {
+  font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+  font-size: 14px;
+  line-height: normal;
+
+  --tv-card: #ffffff;
+  --tv-card-hover: #fafbfc;
+  --tv-well: #f6f7f8;
+  --tv-menu: #ffffff;
+  --tv-chip: #eef0f2;
+  --tv-grid: #eef0f2;
+  --tv-line: #e5e7ea;
+  --tv-line-2: #dfe2e6;
+  --tv-line-3: #d3d7dc;
+  --tv-line-4: #bcc2c9;
+  --tv-0: #0f1113;
+  --tv-1: #16181b;
+  --tv-2: #3a3f46;
+  --tv-3: #4a5058;
+  --tv-4: #5b626b;
+  --tv-5: #6b727c;
+  --tv-6: #858c96;
+  --tv-7: #9aa1ab;
+  --tv-8: #b4bac2;
+  --tv-accent: oklch(0.56 0.1 180);
+  --tv-accent-on: #ffffff;
+  --tv-link: oklch(0.5 0.1 180);
+  --tv-link-hover: oklch(0.42 0.09 180);
+  --tv-focus: oklch(0.6 0.11 180);
+  --tv-danger: oklch(0.55 0.18 25);
+  --tv-danger-line: oklch(0.8 0.08 25);
+
+  --tv-type: 0.6 0.15;
+  --tv-type-bg: 0.9 0.06;
+  --tv-type-fg: 0.3 0.08;
+  --tv-item-bg: 0.975 0.015;
+  --tv-item-bd: 0.87 0.045;
+  --tv-place-fg: 0.38 0.09;
+  --tv-place-bg: 0.94 0.04;
+  --tv-place-dot: 0.62 0.13;
+}
+
+.dark .travels-page {
+  --tv-card: #111317;
+  --tv-card-hover: #13161a;
+  --tv-well: #0c0e11;
+  --tv-menu: #15181c;
+  --tv-chip: #1a1d21;
+  --tv-grid: #17191d;
+  --tv-line: #1f2328;
+  --tv-line-2: #23272d;
+  --tv-line-3: #2a2f36;
+  --tv-line-4: #353b43;
+  --tv-0: #f1f3f5;
+  --tv-1: #e7e9ec;
+  --tv-2: #c4c8ce;
+  --tv-3: #b4bac2;
+  --tv-4: #9aa1ab;
+  --tv-5: #8a919b;
+  --tv-6: #6b717a;
+  --tv-7: #5b616a;
+  --tv-8: #4b5159;
+  --tv-accent: oklch(0.74 0.11 180);
+  --tv-accent-on: #05201d;
+  --tv-link: oklch(0.8 0.11 180);
+  --tv-link-hover: oklch(0.88 0.1 180);
+  --tv-focus: oklch(0.7 0.11 180);
+  --tv-danger: oklch(0.75 0.14 25);
+  --tv-danger-line: oklch(0.4 0.1 25);
+
+  --tv-type: 0.75 0.13;
+  --tv-type-bg: 0.27 0.06;
+  --tv-type-fg: 0.93 0.04;
+  --tv-item-bg: 0.19 0.025;
+  --tv-item-bd: 0.3 0.05;
+  --tv-place-fg: 0.86 0.08;
+  --tv-place-bg: 0.24 0.04;
+  --tv-place-dot: 0.72 0.12;
+}
+
+@theme inline {
+  --font-tv-serif: var(--tv-serif), Georgia, serif;
+
+  --color-tv-card: var(--tv-card);
+  --color-tv-card-hover: var(--tv-card-hover);
+  --color-tv-well: var(--tv-well);
+  --color-tv-menu: var(--tv-menu);
+  --color-tv-chip: var(--tv-chip);
+  --color-tv-grid: var(--tv-grid);
+  --color-tv-line: var(--tv-line);
+  --color-tv-line-2: var(--tv-line-2);
+  --color-tv-line-3: var(--tv-line-3);
+  --color-tv-line-4: var(--tv-line-4);
+  --color-tv-0: var(--tv-0);
+  --color-tv-1: var(--tv-1);
+  --color-tv-2: var(--tv-2);
+  --color-tv-3: var(--tv-3);
+  --color-tv-4: var(--tv-4);
+  --color-tv-5: var(--tv-5);
+  --color-tv-6: var(--tv-6);
+  --color-tv-7: var(--tv-7);
+  --color-tv-8: var(--tv-8);
+  --color-tv-accent: var(--tv-accent);
+  --color-tv-accent-on: var(--tv-accent-on);
+  --color-tv-link: var(--tv-link);
+  --color-tv-link-hover: var(--tv-link-hover);
+  --color-tv-focus: var(--tv-focus);
+  --color-tv-danger: var(--tv-danger);
+  --color-tv-danger-line: var(--tv-danger-line);
+}
+
 @layer theme {
   .dark {
     --color-zinc-950: var(--page);
