@@ -87,16 +87,6 @@ export function formatMonthYearShort(year: number, month: number): string {
   return `${MONTH_NAMES_SHORT[month - 1]} ${year}`;
 }
 
-export function formatMonthYearFromKey(key: string): string {
-  const p = parseMonthKey(key);
-  return p ? formatMonthYear(p.y, p.m) : key;
-}
-
-export function formatMonthYearShortFromKey(key: string): string {
-  const p = parseMonthKey(key);
-  return p ? formatMonthYearShort(p.y, p.m) : key;
-}
-
 /** Local (non-UTC) "YYYY-MM-DD" for a `Date` — the inverse of `parseDateOnlyLocal`,
  * used by the calendar pickers to turn a clicked day back into a plain date string. */
 export function toIsoDateLocal(d: Date): string {

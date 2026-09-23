@@ -246,6 +246,38 @@ export function ChevronRightIcon(p: IconProps) {
   );
 }
 
+export function ChevronLeftIcon(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="m15 6-6 6 6 6" />
+    </Svg>
+  );
+}
+
+export function ChevronUpIcon(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="m6 15 6-6 6 6" />
+    </Svg>
+  );
+}
+
+export function ArrowUpRightIcon(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M7 17 17 7M7 7h10v10" />
+    </Svg>
+  );
+}
+
+export function ArrowDownRightIcon(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="m7 7 10 10M17 7v10H7" />
+    </Svg>
+  );
+}
+
 export function LogoutIcon(p: IconProps) {
   return (
     <Svg {...p}>

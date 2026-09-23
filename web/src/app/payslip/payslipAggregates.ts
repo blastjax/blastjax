@@ -37,8 +37,9 @@ export function medicalBucketStartYear(r: PayslipRow): number | null {
   return null;
 }
 
-/** Calendar year containing this pay period (scheduled: period year; else created_at). */
-export function calendarYearForRow(r: PayslipRow): number | null {
+/** `year * 12 + (month - 1)` of the calendar month containing this pay period
+ * (scheduled: period year/month; else created_at). */
+export function calendarMonthIndex(r: PayslipRow): number | null {
   const py = r.period_year;
   const pm = r.period_month;
   if (
@@ -51,13 +52,19 @@ export function calendarYearForRow(r: PayslipRow): number | null {
     r.period_half >= 1 &&
     r.period_half <= 2
   ) {
-    return Math.trunc(py);
+    return Math.trunc(py) * 12 + pm - 1;
   }
   if (r.created_at) {
     const d = new Date(r.created_at);
-    if (!Number.isNaN(d.getTime())) return d.getFullYear();
+    if (!Number.isNaN(d.getTime())) return d.getFullYear() * 12 + d.getMonth();
   }
   return null;
+}
+
+/** Calendar year containing this pay period (scheduled: period year; else created_at). */
+export function calendarYearForRow(r: PayslipRow): number | null {
+  const t = calendarMonthIndex(r);
+  return t == null ? null : Math.floor(t / 12);
 }
 
 /** Sum of withholding, SSS, Philhealth, Pag-ibig, and MP2 for one payslip row. */

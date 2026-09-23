@@ -188,6 +188,105 @@
   --color-indigo-950: oklch(0.24 0.04 192);
 }
 
+/* --------------------------------------------------------------------------
+ * Salary Stats + Commission pages (Claude Design "Sophos Payslip").
+ *
+ * Dark values are the design's exact colors; light values mirror them on a
+ * white floor. Scoped to `.stats-page` (see components/StatsPage.tsx) so the
+ * rest of the app keeps its own tokens.
+ * ----------------------------------------------------------------------- */
+.stats-page {
+  font-family: var(--st-sans), system-ui, sans-serif;
+  line-height: normal;
+
+  --st-bg: #ffffff;
+  --st-card: #ffffff;
+  --st-well: #f4f4f5;
+  --st-cell: #fafafa;
+  --st-track: #e4e4e7;
+  --st-seg: #ffffff;
+  --st-empty: rgb(0 0 0 / 0.03);
+  --st-line: rgb(0 0 0 / 0.08);
+  --st-line-strong: rgb(0 0 0 / 0.12);
+  --st-hover: rgb(0 0 0 / 0.04);
+  --st-axis: rgb(0 0 0 / 0.3);
+  --st-1: #09090b;
+  --st-2: #3f3f46;
+  --st-3: #52525b;
+  --st-4: #71717a;
+  --st-5: #d4d4d8;
+  --st-6: #a1a1aa;
+  --st-teal: #0d9488;
+  --st-teal-strong: #14b8a6;
+  --st-teal-soft: #115e59;
+  --st-pos: #16a34a;
+  --st-pos-soft: #166534;
+  --st-neg: #dc2626;
+  --st-down: #dc2626;
+  --st-inc: #059669;
+  --st-ded: #e11d48;
+}
+
+.dark .stats-page {
+  --st-bg: #09090b;
+  --st-card: #111113;
+  --st-well: #18181b;
+  --st-cell: #141417;
+  --st-track: #1c1c20;
+  --st-seg: #27272a;
+  --st-empty: rgb(255 255 255 / 0.02);
+  --st-line: rgb(255 255 255 / 0.06);
+  --st-line-strong: rgb(255 255 255 / 0.08);
+  --st-hover: rgb(255 255 255 / 0.04);
+  --st-axis: rgb(255 255 255 / 0.3);
+  --st-1: #fafafa;
+  --st-2: #d4d4d8;
+  --st-3: #a1a1aa;
+  --st-4: #71717a;
+  --st-5: #3f3f46;
+  --st-6: #52525b;
+  --st-teal: #5eead4;
+  --st-teal-strong: #2dd4bf;
+  --st-teal-soft: #99f6e4;
+  --st-pos: #4ade80;
+  --st-pos-soft: #bbf7d0;
+  --st-neg: #fca5a5;
+  --st-down: #f87171;
+  --st-inc: #34d399;
+  --st-ded: #fb7185;
+}
+
+@theme inline {
+  --font-st-mono: var(--st-mono), ui-monospace, monospace;
+
+  --color-st-bg: var(--st-bg);
+  --color-st-card: var(--st-card);
+  --color-st-well: var(--st-well);
+  --color-st-cell: var(--st-cell);
+  --color-st-track: var(--st-track);
+  --color-st-seg: var(--st-seg);
+  --color-st-empty: var(--st-empty);
+  --color-st-line: var(--st-line);
+  --color-st-line-strong: var(--st-line-strong);
+  --color-st-hover: var(--st-hover);
+  --color-st-axis: var(--st-axis);
+  --color-st-1: var(--st-1);
+  --color-st-2: var(--st-2);
+  --color-st-3: var(--st-3);
+  --color-st-4: var(--st-4);
+  --color-st-5: var(--st-5);
+  --color-st-6: var(--st-6);
+  --color-st-teal: var(--st-teal);
+  --color-st-teal-strong: var(--st-teal-strong);
+  --color-st-teal-soft: var(--st-teal-soft);
+  --color-st-pos: var(--st-pos);
+  --color-st-pos-soft: var(--st-pos-soft);
+  --color-st-neg: var(--st-neg);
+  --color-st-down: var(--st-down);
+  --color-st-inc: var(--st-inc);
+  --color-st-ded: var(--st-ded);
+}
+
 @layer theme {
   .dark {
     --color-zinc-950: var(--page);

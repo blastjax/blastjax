@@ -1,173 +1,64 @@
 "use client";
 
-import { PageHeader } from "@/components/PageHeader";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  Area,
-  Bar,
-  CartesianGrid,
-  ComposedChart,
-  Legend,
-  Line,
-  LineChart,
-  ReferenceLine,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
-import { ChartZoomControls } from "@/components/ChartZoomControls";
-import { ToggleLegendList } from "@/components/ToggleLegendList";
-import { useTheme } from "@/components/ThemeProvider";
 import { getPayslips, type PayslipRow } from "@/lib/api";
-import { chartScrollMinWidth, xAxisTickInterval } from "@/lib/chartAxis";
-import { getChartTooltipStyle } from "@/lib/chartTooltipStyle";
-import { fmtAmount, fmtAxisMoneyTick } from "@/lib/formatNumber";
+import { fmtAmount as fmt } from "@/lib/formatNumber";
+import { MONTH_NAMES_FULL as MF, MONTH_NAMES_SHORT as MN } from "@/lib/dateFormat";
+import { ERROR_ALERT_CLASSES, LOADING_TEXT_CLASSES } from "@/lib/ui";
+import { ChevronDownIcon, ChevronUpIcon } from "@/components/Icons";
 import {
-  MONTH_NAMES_FULL,
-  MONTH_NAMES_SHORT,
-  formatMonthYearShortFromKey,
-} from "@/lib/dateFormat";
-import {
-  AMOUNT_NEGATIVE_CLASSES,
-  AMOUNT_POSITIVE_CLASSES,
-  CARD_CLASSES,
-  DASHED_EMPTY_CLASSES,
-  ERROR_ALERT_CLASSES,
-  LOADING_TEXT_CLASSES,
-  PAGE_CONTAINER_CLASSES,
-  SEGMENTED_BUTTON_ACTIVE_CLASSES,
-  SEGMENTED_BUTTON_CLASSES,
-  SEGMENTED_BUTTON_INACTIVE_CLASSES,
-  SEGMENTED_WRAPPER_CLASSES,
-  TABLE_CELL_CLASSES,
-  TABLE_HEAD_CELL_CLASSES,
-  TABLE_HEAD_ROW_CLASSES,
-  TABLE_ROW_CLASSES,
-  TABLE_WRAPPER_CLASSES,
-} from "@/lib/ui";
-import { useChartZoom } from "@/lib/useChartZoom";
-import { buildCommissionForecast, type CalculationSegment } from "./commissionForecast";
+  Chip,
+  Segmented,
+  STATS_CARD_CLASSES,
+  STATS_H2_CLASSES,
+  STATS_PAGE_CLASSES,
+  STATS_SUB_CLASSES,
+  STATS_TICK_CLASSES,
+  STATS_TIP_CLASSES,
+  STATS_XLABEL_CLASSES,
+  StatsHeader,
+  YearStepper,
+  fk,
+  niceStep,
+  pctOf,
+  useWidth,
+  xLabels,
+} from "@/components/StatsPage";
+import { buildForecast, monthlyCommission, type MonthValue } from "./commissionForecast";
 
-const ACTUAL_COLOR = { light: "#059669", dark: "#34d399" } as const;
-const FORECAST_COLOR = { light: "#9ca3af", dark: "#9ca3af" } as const;
+/** One line color per year, oldest first; cycles past six years. */
+const YEAR_COLORS = ["#60a5fa", "#fb923c", "#2dd4bf", "#fbbf24", "#f472b6", "#4ade80"];
 
-/** Fixed-order categorical palette for the "one line per year" chart — bold, highly
- * saturated hues (still validated for CVD-safe adjacent contrast); assign by
- * ascending year so an existing year keeps its color as later years are appended,
- * rather than cycling hues on every reassignment. Same hex in both modes (already
- * bold enough to hold up on both surfaces). */
-const YEAR_LINE_COLORS = [
-  { light: "#2563eb", dark: "#2563eb" },
-  { light: "#ea580c", dark: "#ea580c" },
-  { light: "#0d9488", dark: "#0d9488" },
-  { light: "#d97706", dark: "#d97706" },
-  { light: "#db2777", dark: "#db2777" },
-  { light: "#15803d", dark: "#15803d" },
-  { light: "#7c3aed", dark: "#7c3aed" },
-  { light: "#dc2626", dark: "#dc2626" },
+const HORIZONS = [
+  { value: 3, label: "3 mo" },
+  { value: 6, label: "6 mo" },
+  { value: 12, label: "12 mo" },
 ] as const;
+type Horizon = (typeof HORIZONS)[number]["value"];
 
-const CALCULATION_SEGMENT_COLOR_CLASSES: Record<
-  NonNullable<CalculationSegment["color"]>,
-  string
-> = {
-  date: "text-orange-600 dark:text-orange-400",
-  years: "text-purple-600 dark:text-purple-400",
-  positive: AMOUNT_POSITIVE_CLASSES,
-  negative: AMOUNT_NEGATIVE_CLASSES,
-};
+const RANGES = [
+  { value: "Year", label: "Year" },
+  { value: "12M", label: "12 mo" },
+  { value: "24M", label: "24 mo" },
+  { value: "All", label: "All" },
+] as const;
+type Range = (typeof RANGES)[number]["value"];
 
-/** Compact per-row trend: same-month actuals across previous years (green, solid)
- * bridging into the forecasted month (gray, dashed) — a visual complement to the
- * "How it's calculated" text next to it. */
-function ForecastTrendSparkline({
-  samples,
-  forecastValue,
-  actualColor,
-  forecastColor,
-}: {
-  samples: { yearsAgo: number; value: number }[];
-  forecastValue: number;
-  actualColor: string;
-  forecastColor: string;
-}) {
-  const chronological = [...samples].reverse();
-  const data: { key: string; actual: number | null; forecast: number | null }[] =
-    chronological.map((s) => ({ key: `-${s.yearsAgo}y`, actual: s.value, forecast: null }));
-  const bridge = data[data.length - 1];
-  if (bridge) bridge.forecast = bridge.actual;
-  data.push({ key: "forecast", actual: null, forecast: forecastValue });
+const VIEWS = [
+  { value: "heat", label: "Heatmap" },
+  { value: "lines", label: "Lines" },
+] as const;
+type View = (typeof VIEWS)[number]["value"];
 
-  return (
-    <div className="h-8 w-24">
-      <ResponsiveContainer width="100%" height="100%">
-        <LineChart data={data} margin={{ top: 2, right: 2, bottom: 2, left: 2 }}>
-          <Line
-            type="monotone"
-            dataKey="actual"
-            stroke={actualColor}
-            strokeWidth={2}
-            dot={false}
-            isAnimationActive={false}
-            connectNulls={false}
-          />
-          <Line
-            type="monotone"
-            dataKey="forecast"
-            stroke={forecastColor}
-            strokeWidth={2}
-            strokeDasharray="4 3"
-            dot={{ r: 2 }}
-            isAnimationActive={false}
-            connectNulls={false}
-          />
-        </LineChart>
-      </ResponsiveContainer>
-    </div>
-  );
-}
+const DESCRIPTION = "Track commission earned per month and forecast what's still to come.";
 
-const fmtMoney = fmtAmount;
-
-const MONTHLY_BY_YEAR_TICK_STEP = 25000;
-
-const MONTHLY_CHART_TYPE_OPTIONS = ["line", "bar", "area"] as const;
-type MonthlyChartType = (typeof MONTHLY_CHART_TYPE_OPTIONS)[number];
-const MONTHLY_CHART_TYPE_LABEL: Record<MonthlyChartType, string> = {
-  line: "Line",
-  bar: "Bar",
-  area: "Area",
-};
-
-const HORIZON_OPTIONS = [3, 6, 12] as const;
-type Horizon = (typeof HORIZON_OPTIONS)[number];
+const signedPct = (cur: number, base: number) =>
+  `${cur >= base ? "+" : "−"}${Math.abs(((cur - base) / base) * 100).toFixed(1)}%`;
 
 export default function CommissionClient({ company = "Sophos" }: { company?: string }) {
   const [rows, setRows] = useState<PayslipRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [horizon, setHorizon] = useState<Horizon>(6);
-  const [monthlyChartType, setMonthlyChartType] = useState<MonthlyChartType>("line");
-  const [hiddenYears, setHiddenYears] = useState<Set<number>>(() => new Set());
-
-  const toggleYear = useCallback((year: number) => {
-    setHiddenYears((prev) => {
-      const next = new Set(prev);
-      if (next.has(year)) next.delete(year);
-      else next.add(year);
-      return next;
-    });
-  }, []);
-
-  const { theme } = useTheme();
-  const actualColor = ACTUAL_COLOR[theme];
-  const forecastColor = FORECAST_COLOR[theme];
-  const axisTickFill = theme === "dark" ? "#a1a1aa" : "#71717a";
-
-  const chartTooltipStyle = useMemo(() => getChartTooltipStyle(theme), [theme]);
-  const trendZoom = useChartZoom();
-  const monthlyByYearZoom = useChartZoom();
 
   const load = useCallback(async () => {
     setError(null);
@@ -187,531 +78,562 @@ export default function CommissionClient({ company = "Sophos" }: { company?: str
     void load();
   }, [load]);
 
-  const forecast = useMemo(() => buildCommissionForecast(rows, horizon), [rows, horizon]);
+  const hist = useMemo(() => monthlyCommission(rows), [rows]);
 
-  const chartData = useMemo(() => {
-    const points: Record<string, string | number | null>[] = forecast.historical.map((p) => ({
-      monthKey: p.monthKey,
-      label: p.label,
-      commission: p.commission,
-      commissionForecast: null,
-    }));
-    const bridge = points[points.length - 1];
-    if (bridge) {
-      bridge.commissionForecast = forecast.historical[forecast.historical.length - 1]!.commission;
-    }
-    for (const fp of forecast.forecastPoints) {
-      points.push({
-        monthKey: fp.monthKey,
-        label: fp.label,
-        commission: null,
-        commissionForecast: fp.commissionForecast,
-      });
-    }
-    return points;
-  }, [forecast]);
-
-  const lastActualMonthKey = forecast.historical[forecast.historical.length - 1]?.monthKey;
-
-  function formatMonthKeyTick(monthKey: string): string {
-    return formatMonthYearShortFromKey(monthKey);
+  if (loading || error || hist.length === 0) {
+    return (
+      <div className={STATS_PAGE_CLASSES}>
+        <StatsHeader company={company} title="Commission" description={DESCRIPTION} />
+        {error ? (
+          <div className={ERROR_ALERT_CLASSES} role="alert">{error}</div>
+        ) : (
+          <p className={LOADING_TEXT_CLASSES}>
+            {loading
+              ? "Loading payslips…"
+              : "No commission history yet — add payslip entries with a commission amount to see a forecast here."}
+          </p>
+        )}
+      </div>
+    );
   }
+  return <CommissionView company={company} hist={hist} />;
+}
 
-  const calendarByYear = useMemo(() => {
-    const map = new Map<number, Map<number, number>>();
-    for (const p of forecast.historical) {
-      const m = /^(\d{4})-(\d{2})$/.exec(p.monthKey);
-      if (!m) continue;
-      const year = Number(m[1]);
-      const month = Number(m[2]);
-      if (!map.has(year)) map.set(year, new Map());
-      map.get(year)!.set(month, p.commission);
-    }
-    return map;
-  }, [forecast]);
+function CommissionView({ company, hist }: { company: string; hist: MonthValue[] }) {
+  const last = hist[hist.length - 1]!;
+  const [h, setH] = useState<Horizon>(6);
+  const [cRange, setCRange] = useState<Range>("Year");
+  const [cYear, setCYear] = useState(last.y);
+  const [cHover, setCHover] = useState<number | null>(null);
+  const [view, setView] = useState<View>("heat");
+  const [hiddenYears, setHiddenYears] = useState<ReadonlySet<number>>(() => new Set());
+  const [expanded, setExpanded] = useState<ReadonlySet<number>>(() => new Set([0]));
+  const [chartRef, W] = useWidth();
+  const [linesRef, LW] = useWidth();
 
-  const calendarYears = useMemo(
-    () => [...calendarByYear.keys()].sort((a, b) => b - a),
-    [calendarByYear],
-  );
+  const byIndex = useMemo(() => new Map(hist.map((d) => [d.y * 12 + d.m, d.v])), [hist]);
+  const cv = (y: number, m: number) => byIndex.get(y * 12 + m) ?? null;
+  const fc = useMemo(() => buildForecast(hist, h), [hist, h]);
+  const years = [...new Set(hist.map((d) => d.y))];
 
-  /** Ascending so an existing year keeps its color slot as later years are appended. */
-  const calendarYearsAsc = useMemo(() => [...calendarYears].sort((a, b) => a - b), [calendarYears]);
+  /* ---- KPIs ---- */
+  const f0 = fc[0]!;
+  const fLast = fc[fc.length - 1]!;
+  const ly0 = cv(f0.y - 1, f0.m);
+  const ytd = hist.filter((d) => d.y === last.y);
+  const ytdSum = ytd.reduce((a, d) => a + d.v, 0);
+  const lySum = ytd.reduce((a, d) => a + (cv(d.y - 1, d.m) ?? 0), 0);
+  const avg = hist.reduce((a, d) => a + d.v, 0) / hist.length;
+  const kpis = [
+    {
+      label: `Next month · ${MF[f0.m]} ${f0.y}`,
+      value: fmt(f0.v),
+      sub: ly0 != null ? `Predicted · ${MN[f0.m]} ${f0.y - 1} was ${fmt(ly0)}` : "Predicted",
+      accent: true,
+    },
+    {
+      label: `Next ${h} months`,
+      value: fmt(fc.reduce((a, f) => a + f.v, 0)),
+      sub: `Predicted total · ${MN[f0.m]} ${f0.y} – ${MN[fLast.m]} ${fLast.y}`,
+    },
+    {
+      label: `${last.y} so far`,
+      value: fmt(ytdSum),
+      sub: lySum
+        ? `${signedPct(ytdSum, lySum)} vs ${MN[ytd[0]!.m]}–${MN[last.m]} ${last.y - 1}`
+        : `No ${last.y - 1} data to compare`,
+    },
+    { label: "Monthly average", value: fmt(avg), sub: `All-time, across ${hist.length} months` },
+  ];
 
-  const yearColorForIndex = useCallback(
-    (index: number) => YEAR_LINE_COLORS[index % YEAR_LINE_COLORS.length]![theme],
-    [theme],
-  );
+  /* ---- Trend & forecast chart ---- */
+  const cYears = [...new Set([...years, ...fc.map((f) => f.y)])];
+  const cy = Math.min(cYear, cYears[cYears.length - 1]!);
+  const yMode = cRange === "Year";
+  const hs = yMode
+    ? hist.filter((d) => d.y === cy)
+    : hist.slice(-({ "12M": 12, "24M": 24, All: hist.length } as const)[cRange]);
+  const fcs = yMode ? fc.filter((f) => f.y === cy) : fc;
+  const pts = [...hs.map((d) => ({ ...d, f: false })), ...fcs.map((f) => ({ y: f.y, m: f.m, v: f.v, f: true }))];
+  const H = 300, pl = 52, pr = 8, pt = 10, pb = 30;
+  const iw = W - pl - pr, ih = H - pt - pb;
+  const mx = Math.max(1, ...pts.map((p) => p.v));
+  const step = niceStep(mx / 4);
+  const top = Math.ceil(mx / step) * step;
+  const Y = (v: number) => pt + ((top - v) / top) * ih;
+  const sx = iw / Math.max(1, pts.length - 1);
+  const X = (i: number) => pl + i * sx;
+  const ticks: { y: number; label: string }[] = [];
+  for (let v = 0; v <= top + 0.1; v += step) ticks.push({ y: Y(v), label: fk(v) });
+  const hn = hs.length;
+  const line = hs.map((d, i) => `${i ? "L" : "M"}${X(i).toFixed(1)} ${Y(d.v).toFixed(1)}`).join(" ");
+  const area = hn ? `${line} L${X(hn - 1).toFixed(1)} ${Y(0)} L${X(0)} ${Y(0)} Z` : "";
+  const f0i = Math.max(0, hn - 1);
+  const fline = fcs.length
+    ? pts.slice(f0i).map((d, i) => `${i ? "L" : "M"}${X(f0i + i).toFixed(1)} ${Y(d.v).toFixed(1)}`).join(" ")
+    : "";
+  const fx = fcs.length ? X(f0i) : W - pr;
+  const hp = cHover != null && cHover < pts.length ? pts[cHover]! : null;
+  const hx = cHover == null ? 0 : X(cHover);
+  const hpPrev = hp ? cv(hp.y - 1, hp.m) : null;
+  const stepYear = (y: number) => {
+    setCYear(y);
+    setCHover(null);
+  };
 
-  const monthlyByYearChartData = useMemo(
-    () =>
-      MONTH_NAMES_SHORT.map((name, idx) => {
-        const month = idx + 1;
-        const point: Record<string, string | number | null> = { month: name };
-        for (const year of calendarYearsAsc) {
-          point[String(year)] = calendarByYear.get(year)?.get(month) ?? null;
-        }
-        return point;
-      }),
-    [calendarByYear, calendarYearsAsc],
-  );
-
-  /** Fixed 25k-increment Y ticks, independent of chart height, so a taller chart
-   * doesn't invite Recharts to pick a different (denser) auto tick count. */
-  const monthlyByYearTicks = useMemo(() => {
-    let max = 0;
-    for (const point of monthlyByYearChartData) {
-      for (const year of calendarYearsAsc) {
-        const v = point[String(year)];
-        if (typeof v === "number" && v > max) max = v;
-      }
-    }
-    const top =
-      Math.ceil(Math.max(max, MONTHLY_BY_YEAR_TICK_STEP) / MONTHLY_BY_YEAR_TICK_STEP) *
-      MONTHLY_BY_YEAR_TICK_STEP;
-    const ticks: number[] = [];
-    for (let t = 0; t <= top; t += MONTHLY_BY_YEAR_TICK_STEP) ticks.push(t);
-    return ticks;
-  }, [monthlyByYearChartData, calendarYearsAsc]);
+  /* ---- Heatmap + seasonal lines ---- */
+  const hmx = Math.max(1, ...hist.map((d) => d.v));
+  const LH = 300, lpl = 52, lpr = 12, lpt = 10, lpb = 30;
+  const liw = LW - lpl - lpr, lih = LH - lpt - lpb;
+  const lstep = niceStep(hmx / 4);
+  const ltop = Math.ceil(hmx / lstep) * lstep;
+  const LY = (v: number) => lpt + ((ltop - v) / ltop) * lih;
+  const LX = (m: number) => lpl + m * (liw / 11);
+  const lticks: { y: number; label: string }[] = [];
+  for (let v = 0; v <= ltop + 0.1; v += lstep) lticks.push({ y: LY(v), label: fk(v) });
+  const yearColor = (y: number) => YEAR_COLORS[years.indexOf(y) % YEAR_COLORS.length]!;
 
   return (
-    <div className={PAGE_CONTAINER_CLASSES}>
-      <PageHeader
-        title={`${company} Commission`}
-        description={
-          <>
-            Track commission earned per month and forecast what&apos;s still to come.
-          </>
-        }
-      />
-
-      {error && (
-        <div className={ERROR_ALERT_CLASSES} role="alert">
-          {error}
+    <div className={STATS_PAGE_CLASSES}>
+      <StatsHeader company={company} title="Commission" description={DESCRIPTION}>
+        <div className="flex items-center gap-2.5">
+          <span className="text-[13px] text-st-3">Forecast</span>
+          <Segmented
+            options={HORIZONS}
+            value={h}
+            onChange={(v) => {
+              setH(v);
+              setCHover(null);
+            }}
+          />
         </div>
-      )}
+      </StatsHeader>
 
-      {loading ? (
-        <p className={LOADING_TEXT_CLASSES}>Loading payslips…</p>
-      ) : forecast.historical.length === 0 ? (
-        <p className={DASHED_EMPTY_CLASSES}>
-          No commission history yet — add payslip entries with a commission amount to see a
-          forecast here.
-        </p>
-      ) : (
-        <>
-          <section className={CARD_CLASSES}>
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <h2 className="text-lg font-medium text-ink">
-                  Commission trend &amp; forecast
-                </h2>
-                <p className="mt-1 text-sm text-ink-2">
-                  Monthly commission totals from payslip history (solid), with a projected
-                  continuation (dashed). Each forecasted month is trended from that same
-                  calendar month in previous years — e.g. next July is projected from prior
-                  Julys — rather than nearby months, since commission tends to vary by month.
-                </p>
-              </div>
-              <ChartZoomControls
-                zoom={trendZoom.zoom}
-                onZoomIn={trendZoom.zoomIn}
-                onZoomOut={trendZoom.zoomOut}
-                onReset={trendZoom.resetZoom}
-                canZoomIn={trendZoom.canZoomIn}
-                canZoomOut={trendZoom.canZoomOut}
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(210px,1fr))] gap-3">
+        {kpis.map((k) => (
+          <div
+            key={k.label}
+            className={`flex flex-col gap-2.5 rounded-[14px] border px-5 py-[18px] ${
+              k.accent ? "border-[rgba(45,212,191,.2)] bg-[rgba(45,212,191,.07)]" : "border-st-line bg-st-card"
+            }`}
+          >
+            <div className={`text-[13px] ${k.accent ? "text-st-teal-soft" : "text-st-3"}`}>{k.label}</div>
+            <div
+              className={`font-st-mono text-[26px] font-semibold leading-none tracking-[-0.03em] ${
+                k.accent ? "text-st-teal" : "text-st-1"
+              }`}
+            >
+              {k.value}
+            </div>
+            <div className="text-xs text-st-4">{k.sub}</div>
+          </div>
+        ))}
+      </div>
+
+      <section className={`${STATS_CARD_CLASSES} flex flex-col gap-[18px]`}>
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h2 className={STATS_H2_CLASSES}>Trend &amp; forecast</h2>
+            <p className={`${STATS_SUB_CLASSES} max-w-[600px] text-pretty`}>
+              Actual commission per month (solid) and the projection (dashed). Each forecast month
+              is trended from the same calendar month in prior years, since commission is seasonal.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {yMode && (
+              <YearStepper
+                year={cy}
+                canPrev={cy > cYears[0]!}
+                canNext={cy < cYears[cYears.length - 1]!}
+                onPrev={() => stepYear(cy - 1)}
+                onNext={() => stepYear(cy + 1)}
               />
+            )}
+            <Segmented
+              options={RANGES}
+              value={cRange}
+              onChange={(r) => {
+                setCRange(r);
+                setCHover(null);
+              }}
+            />
+          </div>
+        </div>
+        <div ref={chartRef} onMouseLeave={() => setCHover(null)} className="relative h-[300px] w-full">
+          {W > 0 && (
+            <svg width={W} height={H} className="block overflow-visible">
+              <defs>
+                <linearGradient id="commission-area" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0" style={{ stopColor: "var(--st-teal-strong)", stopOpacity: 0.28 }} />
+                  <stop offset="1" style={{ stopColor: "var(--st-teal-strong)", stopOpacity: 0 }} />
+                </linearGradient>
+              </defs>
+              <rect x={fx} y={pt} width={Math.max(0, W - pr - fx)} height={ih} fill="rgba(45,212,191,.05)" />
+              {fcs.length > 0 && (
+                <text x={fx + 8} y={pt + 14} className="fill-st-teal text-[11px] font-medium">Forecast</text>
+              )}
+              {ticks.map((k) => (
+                <g key={k.y}>
+                  <line x1={pl} x2={W - pr} y1={k.y} y2={k.y} className="stroke-st-line" />
+                  <text x={pl - 10} y={k.y + 4} textAnchor="end" className={STATS_TICK_CLASSES}>
+                    {k.label}
+                  </text>
+                </g>
+              ))}
+              <path d={area} fill="url(#commission-area)" />
+              <path d={line} fill="none" strokeWidth={2} strokeLinejoin="round" className="stroke-st-teal-strong" />
+              <path d={fline} fill="none" strokeWidth={2} strokeDasharray="5 5" className="stroke-st-teal" />
+              {fcs.map((f, i) => (
+                <circle key={i} cx={X(hn + i)} cy={Y(f.v)} r={3.5} strokeWidth={1.5} className="fill-st-card stroke-st-teal" />
+              ))}
+              {xLabels(pts, X, H - 8).map((x) => (
+                <text key={x.x} x={x.x} y={x.y} textAnchor="middle" className={STATS_XLABEL_CLASSES}>
+                  {x.label}
+                </text>
+              ))}
+              {hp && (
+                <>
+                  <line x1={hx} x2={hx} y1={pt} y2={H - pb} className="stroke-st-5" />
+                  <circle cx={hx} cy={Y(hp.v)} r={5} strokeWidth={2} className="fill-st-teal-strong stroke-st-bg" />
+                </>
+              )}
+              {pts.map((_, i) => (
+                <rect
+                  key={i}
+                  x={X(i) - sx / 2}
+                  y={0}
+                  width={sx}
+                  height={H - pb}
+                  fill="transparent"
+                  onMouseEnter={() => setCHover(i)}
+                />
+              ))}
+            </svg>
+          )}
+          {hp && (
+            <div className={`${STATS_TIP_CLASSES} w-[200px] gap-1.5`} style={{ left: Math.max(0, hx + 220 > W ? hx - 214 : hx + 14) }}>
+              <div className="flex items-center justify-between">
+                <span className="font-semibold text-st-1">{MF[hp.m]} {hp.y}</span>
+                <span className="rounded bg-[rgba(45,212,191,.12)] px-1.5 py-0.5 text-[10.5px] text-st-teal">
+                  {hp.f ? "Forecast" : "Actual"}
+                </span>
+              </div>
+              <div className="font-st-mono text-lg font-semibold text-st-1">{fmt(hp.v)}</div>
+              <div className="text-st-3">
+                {hpPrev ? `${signedPct(hp.v, hpPrev)} vs ${MN[hp.m]} ${hp.y - 1}` : "No data for last year"}
+              </div>
             </div>
+          )}
+        </div>
+      </section>
 
-            <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
-              <span className="text-sm text-ink-2">Forecast</span>
-              <div className={SEGMENTED_WRAPPER_CLASSES}>
-                {HORIZON_OPTIONS.map((h) => (
+      <section className={`${STATS_CARD_CLASSES} flex flex-col gap-4`}>
+        <div>
+          <h2 className={STATS_H2_CLASSES}>Forecast breakdown</h2>
+          <p className={STATS_SUB_CLASSES}>
+            Each month is projected from up to 5 previous years of the same month. Open a row to see
+            the inputs.
+          </p>
+        </div>
+        <div className="overflow-x-auto">
+          <div className="flex min-w-[720px] flex-col">
+            <div className="grid grid-cols-[minmax(140px,1.2fr)_130px_150px_150px_110px_32px] gap-4 border-b border-st-line px-3 pb-2.5 text-[11px] tracking-[.06em] text-st-4">
+              <span>MONTH</span>
+              <span className="text-right">PREDICTED</span>
+              <span className="text-right">VS LAST YEAR</span>
+              <span>HISTORY</span>
+              <span className="text-right">TREND / YR</span>
+              <span />
+            </div>
+            {fc.map((f, i) => {
+              const lyv = cv(f.y - 1, f.m);
+              const d = lyv ? ((f.v - lyv) / lyv) * 100 : null;
+              const n = f.pts.length;
+              const vals = [...f.pts.map((p) => p[1]), f.v];
+              const lo = Math.min(...vals);
+              const hi = Math.max(...vals);
+              const mxp = (j: number) => 4 + j * (142 / Math.max(1, n));
+              const myp = (v: number) => 30 - (hi === lo ? 13 : ((v - lo) / (hi - lo)) * 26);
+              const dots = f.pts.map((p, j) => ({ x: mxp(j), y: myp(p[1]) }));
+              const lp = dots[dots.length - 1];
+              const open = expanded.has(i);
+              const pm = hi || 1;
+              return (
+                <div key={`${f.y}-${f.m}`} className="border-b border-st-line">
                   <button
-                    key={h}
                     type="button"
-                    className={`${SEGMENTED_BUTTON_CLASSES} ${
-                      horizon === h
-                        ? SEGMENTED_BUTTON_ACTIVE_CLASSES
-                        : SEGMENTED_BUTTON_INACTIVE_CLASSES
-                    }`}
-                    onClick={() => setHorizon(h)}
+                    aria-expanded={open}
+                    onClick={() =>
+                      setExpanded((s) => {
+                        const next = new Set(s);
+                        if (!next.delete(i)) next.add(i);
+                        return next;
+                      })
+                    }
+                    className="grid w-full grid-cols-[minmax(140px,1.2fr)_130px_150px_150px_110px_32px] items-center gap-4 rounded-lg p-3 text-left hover:bg-st-hover"
                   >
-                    {h} mo
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="mt-6 h-[min(24rem,55vh)] w-full min-h-[240px] overflow-x-auto">
-              <div className="h-full" style={{ minWidth: chartScrollMinWidth(chartData.length, 56 * trendZoom.zoom) }}>
-              <ResponsiveContainer width="100%" height="100%">
-                <ComposedChart data={chartData} margin={{ top: 8, right: 20, bottom: 8, left: 8 }}>
-                  <CartesianGrid
-                    strokeDasharray="3 3"
-                    className="stroke-zinc-200 dark:stroke-zinc-700"
-                  />
-                  <XAxis
-                    dataKey="monthKey"
-                    tick={{ fontSize: 11, fill: axisTickFill }}
-                    tickFormatter={formatMonthKeyTick}
-                    interval={xAxisTickInterval(chartData.length, 48)}
-                  />
-                  <YAxis
-                    tick={{ fontSize: 11, fill: axisTickFill }}
-                    tickFormatter={fmtAxisMoneyTick}
-                  />
-                  <Tooltip
-                    formatter={(value) => fmtMoney(Number(value ?? 0))}
-                    labelFormatter={(_, payload) => payload?.[0]?.payload?.label ?? ""}
-                    contentStyle={chartTooltipStyle}
-                  />
-                  <Legend />
-                  {lastActualMonthKey && (
-                    <ReferenceLine
-                      x={lastActualMonthKey}
-                      stroke={axisTickFill}
-                      strokeDasharray="4 4"
-                      label={{ value: "Today", position: "insideTopRight", fill: axisTickFill, fontSize: 11 }}
-                    />
-                  )}
-                  <Area
-                    type="monotone"
-                    dataKey="commission"
-                    name="Commission (actual)"
-                    stroke={actualColor}
-                    strokeWidth={2}
-                    fill={actualColor}
-                    fillOpacity={0.22}
-                    dot={{ r: 3 }}
-                    activeDot={{ r: 5 }}
-                    connectNulls={false}
-                  />
-                  <Area
-                    type="monotone"
-                    dataKey="commissionForecast"
-                    name="Commission (forecast)"
-                    stroke={forecastColor}
-                    strokeWidth={2}
-                    strokeDasharray="6 4"
-                    fill={forecastColor}
-                    fillOpacity={0.18}
-                    dot={{ r: 3 }}
-                    activeDot={{ r: 5 }}
-                    connectNulls={false}
-                  />
-                </ComposedChart>
-              </ResponsiveContainer>
-              </div>
-            </div>
-          </section>
-
-          <section className={CARD_CLASSES}>
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <h2 className="text-lg font-medium text-ink">
-                  Commission by month
-                </h2>
-                <p className="mt-1 text-sm text-ink-2">
-                  The same twelve calendar months, one line per year, so seasonal patterns
-                  within a year are easy to compare across years. Click a year below the
-                  chart to hide or show it.
-                </p>
-              </div>
-              <ChartZoomControls
-                zoom={monthlyByYearZoom.zoom}
-                onZoomIn={monthlyByYearZoom.zoomIn}
-                onZoomOut={monthlyByYearZoom.zoomOut}
-                onReset={monthlyByYearZoom.resetZoom}
-                canZoomIn={monthlyByYearZoom.canZoomIn}
-                canZoomOut={monthlyByYearZoom.canZoomOut}
-              />
-            </div>
-
-            <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
-              <span className="text-sm text-ink-2">Chart type</span>
-              <div className={SEGMENTED_WRAPPER_CLASSES}>
-                {MONTHLY_CHART_TYPE_OPTIONS.map((t) => (
-                  <button
-                    key={t}
-                    type="button"
-                    className={`${SEGMENTED_BUTTON_CLASSES} ${
-                      monthlyChartType === t
-                        ? SEGMENTED_BUTTON_ACTIVE_CLASSES
-                        : SEGMENTED_BUTTON_INACTIVE_CLASSES
-                    }`}
-                    onClick={() => setMonthlyChartType(t)}
-                  >
-                    {MONTHLY_CHART_TYPE_LABEL[t]}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="mt-6 h-[min(36rem,75vh)] w-full min-h-[360px] overflow-x-auto">
-              <div className="h-full" style={{ minWidth: chartScrollMinWidth(monthlyByYearChartData.length, 40 * monthlyByYearZoom.zoom) }}>
-              <ResponsiveContainer width="100%" height="100%">
-                <ComposedChart
-                  data={monthlyByYearChartData}
-                  margin={{ top: 8, right: 20, bottom: 8, left: 8 }}
-                >
-                  <CartesianGrid
-                    strokeDasharray="3 3"
-                    className="stroke-zinc-200 dark:stroke-zinc-700"
-                  />
-                  <XAxis dataKey="month" tick={{ fontSize: 11, fill: axisTickFill }} />
-                  <YAxis
-                    tick={{ fontSize: 11, fill: axisTickFill }}
-                    domain={[0, monthlyByYearTicks[monthlyByYearTicks.length - 1]]}
-                    ticks={monthlyByYearTicks}
-                    tickFormatter={fmtAxisMoneyTick}
-                  />
-                  <Tooltip
-                    formatter={(value) => fmtMoney(Number(value ?? 0))}
-                    itemSorter={(item) => -Number(item.dataKey)}
-                    contentStyle={chartTooltipStyle}
-                  />
-                  <Legend
-                    content={(props) => (
-                      <ToggleLegendList
-                        items={(props.payload ?? []).map((entry) => {
-                          const year = Number(entry.value);
-                          return {
-                            key: String(entry.value),
-                            label: String(entry.value),
-                            color: entry.color ?? "",
-                            hidden: hiddenYears.has(year),
-                          };
-                        })}
-                        onToggle={(key) => toggleYear(Number(key))}
+                    <span className="font-medium text-st-1">{MF[f.m]} {f.y}</span>
+                    <span className="text-right font-st-mono text-sm font-semibold text-st-teal">{fmt(f.v)}</span>
+                    <span className="flex flex-col items-end gap-0.5">
+                      <span className={`font-st-mono text-[12.5px] ${d == null ? "text-st-4" : d >= 0 ? "text-st-pos" : "text-st-down"}`}>
+                        {d == null ? "—" : `${d >= 0 ? "+" : "−"}${Math.abs(d).toFixed(1)}%`}
+                      </span>
+                      <span className="whitespace-nowrap text-[11.5px] text-st-4">
+                        {lyv != null ? `${MN[f.m]} ${f.y - 1}: ${fmt(lyv)}` : ""}
+                      </span>
+                    </span>
+                    <svg width={150} height={34} className="block overflow-visible">
+                      <path
+                        d={dots.map((p, j) => `${j ? "L" : "M"}${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(" ")}
+                        fill="none"
+                        strokeWidth={1.5}
+                        className="stroke-st-4"
                       />
+                      {lp && (
+                        <path
+                          d={`M${lp.x.toFixed(1)} ${lp.y.toFixed(1)} L${mxp(n).toFixed(1)} ${myp(f.v).toFixed(1)}`}
+                          fill="none"
+                          strokeWidth={1.5}
+                          strokeDasharray="3 3"
+                          className="stroke-st-teal"
+                        />
+                      )}
+                      {dots.map((p, j) => (
+                        <circle key={j} cx={p.x} cy={p.y} r={2.5} className="fill-st-3" />
+                      ))}
+                      <circle cx={mxp(n)} cy={myp(f.v)} r={3.5} strokeWidth={1.5} className="fill-st-card stroke-st-teal" />
+                    </svg>
+                    <span className={`text-right font-st-mono text-[12.5px] ${f.slope >= 0 ? "text-st-pos" : "text-st-down"}`}>
+                      {f.slope >= 0 ? "+" : "−"}
+                      {fmt(Math.abs(f.slope))}
+                    </span>
+                    {open ? (
+                      <ChevronUpIcon className="size-4 justify-self-end text-st-4" />
+                    ) : (
+                      <ChevronDownIcon className="size-4 justify-self-end text-st-4" />
                     )}
+                  </button>
+                  {open && (
+                    <div className="grid grid-cols-[repeat(auto-fit,minmax(260px,1fr))] gap-6 px-3 pb-[18px] pt-1">
+                      <div className="flex flex-col gap-1.5">
+                        {[
+                          ...f.pts.map(([py, pv]) => ({ label: `${MN[f.m]} ${py}`, v: pv, forecast: false })),
+                          { label: `${MN[f.m]} ${f.y}`, v: f.v, forecast: true },
+                        ].map((p) => (
+                          <div key={p.label} className="grid grid-cols-[72px_minmax(0,1fr)_96px] items-center gap-2.5 text-[12.5px]">
+                            <span className="text-st-3">{p.label}</span>
+                            <div className="h-1.5 overflow-hidden rounded-full bg-st-track">
+                              <div
+                                className={`h-full rounded-full ${p.forecast ? "bg-st-teal-strong" : "bg-st-6"}`}
+                                style={{ width: `${pctOf(p.v, pm)}%` }}
+                              />
+                            </div>
+                            <span className={`text-right font-st-mono ${p.forecast ? "text-st-teal" : "text-st-2"}`}>
+                              {fmt(p.v)}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                      <p className="self-center text-pretty text-[13px] leading-[1.6] text-st-3">
+                        {n >= 2
+                          ? `A straight-line trend was fitted to ${MF[f.m]} across ${n} years (${f.pts[0]![0]}–${f.pts[n - 1]![0]}). It moves ${f.slope >= 0 ? "up" : "down"} ${fmt(Math.abs(f.slope))} per year, which projects ${fmt(f.v)} for ${f.y}.`
+                          : n === 1
+                            ? `Only ${f.pts[0]![0]} has ${MF[f.m]} data, so its value is carried forward: ${fmt(f.v)} for ${f.y}.`
+                            : `No earlier ${MF[f.m]} to trend from, so this uses the all-time monthly average: ${fmt(f.v)}.`}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </section>
+
+      <section className={`${STATS_CARD_CLASSES} flex flex-col gap-[18px]`}>
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h2 className={STATS_H2_CLASSES}>History by month</h2>
+            <p className={`${STATS_SUB_CLASSES} max-w-[600px] text-pretty`}>
+              One row per year, one column per calendar month. Brighter cells mean higher commission,
+              so seasonal peaks line up vertically.
+            </p>
+          </div>
+          <Segmented options={VIEWS} value={view} onChange={setView} />
+        </div>
+
+        {view === "heat" ? (
+          <div className="overflow-x-auto">
+            <div className="grid min-w-[820px] grid-cols-[52px_repeat(12,minmax(0,1fr))_104px] items-center gap-1">
+              <span />
+              {MN.map((m) => (
+                <span key={m} className="pb-1 text-center text-[11.5px] text-st-4">{m}</span>
+              ))}
+              <span className="pb-1 text-right text-[11.5px] text-st-4">Total</span>
+              {[...years].reverse().map((y) => {
+                const inYear = hist.filter((d) => d.y === y);
+                const note =
+                  inYear.length === 12
+                    ? ""
+                    : y === last.y
+                      ? "Year to date"
+                      : `${MN[inYear[0]!.m]} – ${MN[inYear[inYear.length - 1]!.m]}`;
+                return (
+                  <HeatRow
+                    key={y}
+                    year={y}
+                    note={note}
+                    total={inYear.reduce((a, d) => a + d.v, 0)}
+                    cells={MN.map((_, m) => {
+                      const v = cv(y, m);
+                      const f = v == null ? fc.find((x) => x.y === y && x.m === m) : undefined;
+                      return { m, v, f: f?.v ?? null };
+                    })}
+                    max={hmx}
                   />
-                  {calendarYearsAsc.map((year, idx) => {
-                    const color = yearColorForIndex(idx);
-                    const hidden = hiddenYears.has(year);
-                    const dataKey = String(year);
-                    if (monthlyChartType === "bar") {
-                      return (
-                        <Bar
-                          key={year}
-                          dataKey={dataKey}
-                          name={dataKey}
-                          fill={color}
-                          radius={[4, 4, 0, 0]}
-                          hide={hidden}
-                        />
-                      );
-                    }
-                    if (monthlyChartType === "area") {
-                      return (
-                        <Area
-                          key={year}
-                          type="monotone"
-                          dataKey={dataKey}
-                          name={dataKey}
-                          stroke={color}
-                          strokeWidth={2}
-                          fill={color}
-                          fillOpacity={0.1}
-                          dot={{ r: 3 }}
-                          activeDot={{ r: 5 }}
-                          connectNulls={false}
-                          hide={hidden}
-                        />
-                      );
-                    }
+                );
+              })}
+              <span className="pt-1.5 text-[11.5px] text-st-4">Avg</span>
+              {MN.map((mn, m) => {
+                const vs = years.map((y) => cv(y, m)).filter((v): v is number => v != null);
+                return (
+                  <span key={mn} className="pt-1.5 text-center font-st-mono text-[11.5px] text-st-3">
+                    {vs.length ? fk(vs.reduce((a, b) => a + b, 0) / vs.length) : "—"}
+                  </span>
+                );
+              })}
+              <span />
+            </div>
+            <div className="mt-3.5 flex flex-wrap items-center gap-3.5 text-xs text-st-4">
+              <span className="flex items-center gap-1.5">
+                Low
+                <span className="h-2 w-[120px] rounded-full bg-[linear-gradient(90deg,rgba(45,212,191,.1),rgba(45,212,191,.85))]" />
+                High
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="h-3 w-4 rounded-[3px] border border-dashed border-[#2dd4bf]" />
+                Forecast
+              </span>
+            </div>
+          </div>
+        ) : (
+          <>
+            <div ref={linesRef} className="h-80 w-full">
+              {LW > 0 && (
+                <svg width={LW} height={LH} className="block overflow-visible">
+                  {lticks.map((k) => (
+                    <g key={k.y}>
+                      <line x1={lpl} x2={LW - lpr} y1={k.y} y2={k.y} className="stroke-st-line" />
+                      <text x={lpl - 10} y={k.y + 4} textAnchor="end" className={STATS_TICK_CLASSES}>
+                        {k.label}
+                      </text>
+                    </g>
+                  ))}
+                  {years.map((y) => {
+                    if (hiddenYears.has(y)) return null;
+                    const latest = y === last.y;
+                    const inYear = hist.filter((d) => d.y === y);
                     return (
-                      <Line
-                        key={year}
-                        type="monotone"
-                        dataKey={dataKey}
-                        name={dataKey}
-                        stroke={color}
-                        strokeWidth={2}
-                        dot={{ r: 3 }}
-                        activeDot={{ r: 5 }}
-                        connectNulls={false}
-                        hide={hidden}
-                      />
+                      <g key={y}>
+                        <path
+                          d={inYear.map((d, i) => `${i ? "L" : "M"}${LX(d.m).toFixed(1)} ${LY(d.v).toFixed(1)}`).join(" ")}
+                          fill="none"
+                          stroke={yearColor(y)}
+                          strokeWidth={latest ? 2.75 : 1.75}
+                          opacity={latest ? 1 : 0.75}
+                          strokeLinejoin="round"
+                        />
+                        {inYear.map((d) => (
+                          <circle key={d.m} cx={LX(d.m)} cy={LY(d.v)} r={3} fill={yearColor(y)} opacity={latest ? 1 : 0.8} />
+                        ))}
+                      </g>
                     );
                   })}
-                </ComposedChart>
-              </ResponsiveContainer>
-              </div>
+                  {MN.map((mn, m) => (
+                    <text key={mn} x={LX(m)} y={LH - 8} textAnchor="middle" className={STATS_XLABEL_CLASSES}>
+                      {mn}
+                    </text>
+                  ))}
+                </svg>
+              )}
             </div>
-          </section>
-
-          <section className={CARD_CLASSES}>
-            <h2 className="text-lg font-medium text-ink">
-              Forecast summary
-            </h2>
-            <p className="mt-1 text-sm text-ink-2">
-              Each month below is projected from its own same-month history across{" "}
-              {forecast.forecastPoints[0]?.yearsOfHistory ?? 0} previous year
-              {forecast.forecastPoints[0]?.yearsOfHistory === 1 ? "" : "s"} of data.
-            </p>
-
-            <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              <div className="rounded-lg border border-emerald-200 bg-emerald-50/60 p-4 dark:border-emerald-800 dark:bg-emerald-950/30">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-400">
-                  Next month predicted
-                </p>
-                <p className="mt-2 text-2xl font-bold tabular-nums text-emerald-800 dark:text-emerald-200">
-                  {forecast.nextMonthPredicted != null ? fmtMoney(forecast.nextMonthPredicted) : "–"}
-                </p>
-              </div>
-              <div className="rounded-lg border border-line bg-zinc-50/90 p-4 dark:bg-zinc-900/50">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-ink-3">
-                  Predicted total ({horizon} mo)
-                </p>
-                <p className="mt-2 text-2xl font-bold tabular-nums text-ink">
-                  {fmtMoney(forecast.horizonTotal)}
-                </p>
-              </div>
-              <div className="rounded-lg border border-line bg-zinc-50/90 p-4 dark:bg-zinc-900/50">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-ink-3">
-                  Same month last year
-                </p>
-                <p className="mt-2 text-2xl font-bold tabular-nums text-ink">
-                  {forecast.forecastPoints[0]?.sameMonthLastYear != null
-                    ? fmtMoney(forecast.forecastPoints[0].sameMonthLastYear)
-                    : "–"}
-                </p>
-              </div>
-              <div className="rounded-lg border border-line bg-zinc-50/90 p-4 dark:bg-zinc-900/50">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-ink-3">
-                  All-time monthly average
-                </p>
-                <p className="mt-2 text-2xl font-bold tabular-nums text-ink">
-                  {forecast.allTimeAverage != null ? fmtMoney(forecast.allTimeAverage) : "–"}
-                </p>
-              </div>
+            <div className="flex flex-wrap justify-center gap-1.5">
+              {years.map((y) => (
+                <Chip
+                  key={y}
+                  round
+                  label={String(y)}
+                  color={yearColor(y)}
+                  on={!hiddenYears.has(y)}
+                  onClick={() =>
+                    setHiddenYears((s) => {
+                      const next = new Set(s);
+                      if (!next.delete(y)) next.add(y);
+                      return next;
+                    })
+                  }
+                />
+              ))}
             </div>
-
-            {forecast.forecastPoints.length > 0 && (
-              <div className={`${TABLE_WRAPPER_CLASSES} mt-6 overflow-x-auto`}>
-                <table className="w-full min-w-[42rem] text-left text-sm">
-                  <thead>
-                    <tr className={TABLE_HEAD_ROW_CLASSES}>
-                      <th className={TABLE_HEAD_CELL_CLASSES}>Month</th>
-                      <th className={TABLE_HEAD_CELL_CLASSES}>Predicted commission</th>
-                      <th className={TABLE_HEAD_CELL_CLASSES}>Trend</th>
-                      <th className={TABLE_HEAD_CELL_CLASSES}>How it&apos;s calculated</th>
-                      <th className={TABLE_HEAD_CELL_CLASSES}>Years used</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {forecast.forecastPoints.map((fp) => (
-                      <tr key={fp.monthKey} className={TABLE_ROW_CLASSES}>
-                        <td className={TABLE_CELL_CLASSES}>{fp.label}</td>
-                        <td className={`${TABLE_CELL_CLASSES} ${AMOUNT_POSITIVE_CLASSES}`}>
-                          {fmtMoney(fp.commissionForecast)}
-                        </td>
-                        <td className={TABLE_CELL_CLASSES}>
-                          <ForecastTrendSparkline
-                            samples={fp.sameMonthSamples}
-                            forecastValue={fp.commissionForecast}
-                            actualColor={actualColor}
-                            forecastColor={forecastColor}
-                          />
-                        </td>
-                        <td className={`${TABLE_CELL_CLASSES} text-xs`}>
-                          {fp.calculationDetail.map((seg, i) => {
-                            if (seg.break) return <br key={i} />;
-                            const colorClass = seg.color
-                              ? CALCULATION_SEGMENT_COLOR_CLASSES[seg.color]
-                              : undefined;
-                            return seg.bold ? (
-                              <strong
-                                key={i}
-                                className={`font-semibold ${
-                                  colorClass ?? "text-ink-2"
-                                }`}
-                              >
-                                {seg.text}
-                              </strong>
-                            ) : (
-                              <span key={i} className={colorClass}>
-                                {seg.text}
-                              </span>
-                            );
-                          })}
-                        </td>
-                        <td className={TABLE_CELL_CLASSES}>
-                          {fp.yearsOfHistory}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </section>
-
-          <section className={CARD_CLASSES}>
-            <h2 className="text-lg font-medium text-ink">
-              Historic commission entries
-            </h2>
-            <p className="mt-1 text-sm text-ink-2">
-              One commission total per month, most recent year first.
-            </p>
-            {calendarYears.length === 0 ? (
-              <p className={`mt-4 ${DASHED_EMPTY_CLASSES}`}>No commission entries recorded yet.</p>
-            ) : (
-              <div className="mt-4 grid grid-cols-1 gap-x-6 gap-y-8 sm:grid-cols-2 lg:grid-cols-3">
-                {calendarYears.map((year) => {
-                  const monthMap = calendarByYear.get(year)!;
-                  const yearTotal = [...monthMap.values()].reduce((s, v) => s + v, 0);
-                  return (
-                    <div
-                      key={year}
-                      className="flex w-full min-w-0 flex-col rounded-lg border border-line bg-zinc-50/40 p-4 sm:p-5 dark:bg-zinc-900/30"
-                    >
-                      <h3 className="mb-4 flex items-center justify-between gap-2 border-b border-line pb-3 text-base font-semibold text-ink">
-                        <span>{year}</span>
-                        <span className="text-base font-normal tabular-nums text-emerald-700 dark:text-emerald-300">
-                          {fmtMoney(yearTotal)}
-                        </span>
-                      </h3>
-                      <div className="grid w-full min-w-0 grid-cols-3 gap-2 sm:gap-3">
-                        {MONTH_NAMES_FULL.map((monthName, idx) => {
-                          const month = idx + 1;
-                          const value = monthMap.get(month);
-                          const hasValue = value != null && value > 0;
-                          return (
-                            <div
-                              key={month}
-                              className={`flex min-h-[3.75rem] min-w-0 flex-col items-center justify-center gap-1 rounded-lg border px-1.5 py-2 text-center ${
-                                hasValue
-                                  ? "border-emerald-200 bg-emerald-50/80 dark:border-emerald-900 dark:bg-emerald-950/40"
-                                  : "border-dashed border-line bg-zinc-50/50 dark:bg-zinc-900/40"
-                              }`}
-                            >
-                              <span className="min-w-0 truncate text-[11px] font-medium leading-tight text-ink-2">
-                                {monthName} {year}
-                              </span>
-                              <span
-                                className={`min-w-0 truncate text-xs tabular-nums leading-tight ${
-                                  hasValue
-                                    ? "font-semibold text-emerald-800 dark:text-emerald-200"
-                                    : "text-ink-4"
-                                }`}
-                              >
-                                {hasValue ? fmtMoney(value) : "–"}
-                              </span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </section>
-        </>
-      )}
+          </>
+        )}
+      </section>
     </div>
+  );
+}
+
+function HeatRow({
+  year,
+  note,
+  total,
+  cells,
+  max,
+}: {
+  year: number;
+  note: string;
+  total: number;
+  cells: { m: number; v: number | null; f: number | null }[];
+  max: number;
+}) {
+  const cell = "grid h-[42px] place-items-center rounded-[7px] border font-st-mono text-xs font-medium";
+  return (
+    <>
+      <span className="text-[13px] font-semibold text-st-2">{year}</span>
+      {cells.map(({ m, v, f }) => {
+        if (v != null) {
+          const a = 0.08 + 0.77 * (v / max);
+          return (
+            <div
+              key={m}
+              title={`${MF[m]} ${year}: ${fmt(v)}`}
+              className={`${cell} border-transparent ${a > 0.62 ? "text-[#042f2e]" : "text-st-1"}`}
+              style={{ background: `rgba(45,212,191,${a.toFixed(3)})` }}
+            >
+              {fk(v)}
+            </div>
+          );
+        }
+        if (f != null) {
+          return (
+            <div
+              key={m}
+              title={`${MF[m]} ${year} forecast: ${fmt(f)}`}
+              className={`${cell} border-dashed border-[rgba(45,212,191,.6)] italic text-st-teal`}
+            >
+              {fk(f)}
+            </div>
+          );
+        }
+        return (
+          <div key={m} className={`${cell} border-transparent bg-st-empty text-st-5`}>
+            —
+          </div>
+        );
+      })}
+      <div className="flex flex-col items-end leading-[1.2]">
+        <span className="font-st-mono text-[13px] font-semibold text-st-1">{fmt(total)}</span>
+        <span className="text-[11px] text-st-4">{note}</span>
+      </div>
+    </>
   );
 }

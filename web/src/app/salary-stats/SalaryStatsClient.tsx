@@ -1,423 +1,102 @@
 "use client";
 
-import { PageHeader } from "@/components/PageHeader";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { usePathname } from "next/navigation";
-import {
-  Area,
-  CartesianGrid,
-  Cell,
-  ComposedChart,
-  Legend,
-  Pie,
-  PieChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
-import { ChartZoomControls } from "@/components/ChartZoomControls";
-import { ToggleLegendList } from "@/components/ToggleLegendList";
-import { useTheme } from "@/components/ThemeProvider";
-import {
-  CHART_SERIES_LABEL,
-  loadChartPalette,
-  type ChartSeriesColorKey,
-} from "@/lib/chartPalette";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { getPayslips, type PayslipRow } from "@/lib/api";
-import { chartScrollMinWidth, xAxisTickInterval } from "@/lib/chartAxis";
-import { useLgUp } from "@/lib/useLgUp";
-import { fmtAmount, fmtAxisMoneyTick } from "@/lib/formatNumber";
-import { getChartTooltipStyle } from "@/lib/chartTooltipStyle";
+import { fmtAmount as fmt } from "@/lib/formatNumber";
+import { MONTH_NAMES_FULL as MF, MONTH_NAMES_SHORT as MN } from "@/lib/dateFormat";
+import { ERROR_ALERT_CLASSES, LOADING_TEXT_CLASSES } from "@/lib/ui";
+import { ArrowDownRightIcon, ArrowUpRightIcon } from "@/components/Icons";
 import {
-  MONTH_NAMES_SHORT,
-  formatMonthYear,
-  formatMonthYearShortFromKey,
-  monthKey as sharedMonthKey,
-  parseMonthKey as sharedParseMonthKey,
-} from "@/lib/dateFormat";
-import {
-  ACTION_BUTTON_CLASSES,
-  AMOUNT_NEGATIVE_CLASSES,
-  AMOUNT_POSITIVE_CLASSES,
-  CARD_CLASSES,
-  CHART_ZOOM_BUTTON_CLASSES,
-  ERROR_ALERT_CLASSES,
-  INPUT_CLASSES,
-  LOADING_TEXT_CLASSES,
-  PAGE_CONTAINER_CLASSES,
-  SEGMENTED_BUTTON_ACTIVE_CLASSES,
-  SEGMENTED_BUTTON_CLASSES,
-  SEGMENTED_BUTTON_INACTIVE_CLASSES,
-  SEGMENTED_WRAPPER_CLASSES,
-} from "@/lib/ui";
-import { useChartZoom } from "@/lib/useChartZoom";
+  Chip,
+  Segmented,
+  STATS_CARD_CLASSES,
+  STATS_H2_CLASSES,
+  STATS_PAGE_CLASSES,
+  STATS_SUB_CLASSES,
+  STATS_TICK_CLASSES,
+  STATS_TIP_CLASSES,
+  STATS_XLABEL_CLASSES,
+  StatsHeader,
+  YearStepper,
+  fk,
+  niceStep,
+  pctOf,
+  useWidth,
+  xLabels,
+} from "@/components/StatsPage";
+import { calendarMonthIndex } from "@/app/payslip/payslipAggregates";
 
-/** Pie + non-deduction line categories (MP2 is grouped with statutory deductions). */
-const PIE_SERIES_KEYS = [
-  "basic_salary",
-  "reimbursement",
-  "others",
-  "allowances",
-  "commission",
-  "thirteenth_month",
-  "medical_reimbursement",
-] as const satisfies readonly ChartSeriesColorKey[];
+const INC = [
+  { k: "basic_salary", n: "Basic salary", c: "#10b981" },
+  { k: "commission", n: "Commission", c: "#0ea5e9" },
+  { k: "thirteenth_month", n: "13th month", c: "#a3e635" },
+  { k: "others", n: "Others", c: "#818cf8" },
+  { k: "allowances", n: "Allowances", c: "#22d3ee" },
+  { k: "reimbursement", n: "Reimbursement", c: "#c084fc" },
+  { k: "medical_reimbursement", n: "Medical reimbursement", c: "#5eead4" },
+] as const;
 
-type PieSeriesKey = (typeof PIE_SERIES_KEYS)[number];
+const DED = [
+  { k: "withholding_tax", n: "Withholding tax", c: "#f43f5e" },
+  { k: "mp2", n: "MP2", c: "#fb923c" },
+  { k: "philhealth", n: "PhilHealth", c: "#facc15" },
+  { k: "sss_contribution", n: "SSS contribution", c: "#f472b6" },
+  { k: "pag_ibig", n: "Pag-IBIG", c: "#fca5a5" },
+] as const;
 
-const DEDUCTION_KEYS = [
-  "withholding_tax",
-  "sss_contribution",
-  "philhealth",
-  "pag_ibig",
-  "mp2",
-] as const satisfies readonly ChartSeriesColorKey[];
+type Series = (typeof INC)[number] | (typeof DED)[number];
+type Key = Series["k"];
+/** One calendar month's totals; `m` is 0-based. */
+type Month = { y: number; m: number } & Record<Key, number>;
 
-const LINE_SERIES_KEYS = [...PIE_SERIES_KEYS, ...DEDUCTION_KEYS] as const;
+const ALL: readonly Series[] = [...INC, ...DED];
 
-type LineSeriesKey = (typeof LINE_SERIES_KEYS)[number];
-
-function emptyTotals<K extends keyof PayslipRow>(
-  keys: readonly K[],
-): Record<K, number> {
-  const o = {} as Record<K, number>;
-  for (const k of keys) o[k] = 0;
-  return o;
+function blankMonth(t: number): Month {
+  const d = { y: Math.floor(t / 12), m: t % 12 } as Month;
+  for (const s of ALL) d[s.k] = 0;
+  return d;
 }
 
-/** Calendar month { y, m } for aggregation (1–12). */
-function calendarMonthForRow(r: PayslipRow): { y: number; m: number } | null {
-  const py = r.period_year;
-  const pm = r.period_month;
-  if (
-    py != null &&
-    Number.isFinite(py) &&
-    pm != null &&
-    pm >= 1 &&
-    pm <= 12 &&
-    r.period_half != null &&
-    r.period_half >= 1 &&
-    r.period_half <= 2
-  ) {
-    return { y: Math.trunc(py), m: pm };
-  }
-  if (r.created_at) {
-    const d = new Date(r.created_at);
-    if (!Number.isNaN(d.getTime())) {
-      return { y: d.getFullYear(), m: d.getMonth() + 1 };
+/** Totals per calendar month from the first payslip to the last, gaps zero-filled. */
+function buildMonths(rows: PayslipRow[]): Month[] {
+  const byT = new Map<number, Month>();
+  for (const r of rows) {
+    const t = calendarMonthIndex(r);
+    if (t == null) continue;
+    let d = byT.get(t);
+    if (!d) byT.set(t, (d = blankMonth(t)));
+    for (const s of ALL) {
+      const v = r[s.k];
+      if (v != null && Number.isFinite(v)) d[s.k] += v;
     }
   }
-  return null;
-}
-
-const monthKey = sharedMonthKey;
-const parseMonthKey = sharedParseMonthKey;
-
-/** "YYYY-MM" -> "Jul 2026" for chart axis labels. */
-const monthAxisLabel = formatMonthYearShortFromKey;
-
-function compareMonthKeys(a: string, b: string): number {
-  const pa = parseMonthKey(a);
-  const pb = parseMonthKey(b);
-  if (!pa || !pb) return 0;
-  if (pa.y !== pb.y) return pa.y - pb.y;
-  return pa.m - pb.m;
-}
-
-/** Inclusive range of YYYY-MM strings from start to end. */
-function monthsBetweenInclusive(startKey: string, endKey: string): string[] {
-  if (compareMonthKeys(startKey, endKey) > 0) return [];
-  const out: string[] = [];
-  const cur = parseMonthKey(startKey);
-  const end = parseMonthKey(endKey);
-  if (!cur || !end) return out;
-  while (true) {
-    const k = monthKey(cur.y, cur.m);
-    out.push(k);
-    if (cur.y === end.y && cur.m === end.m) break;
-    cur.m += 1;
-    if (cur.m > 12) {
-      cur.m = 1;
-      cur.y += 1;
-    }
-    if (cur.y > end.y + 200) break;
-  }
+  if (byT.size === 0) return [];
+  const ts = [...byT.keys()];
+  const hi = Math.max(...ts);
+  const out: Month[] = [];
+  for (let t = Math.min(...ts); t <= hi; t++) out.push(byT.get(t) ?? blankMonth(t));
   return out;
 }
 
-type LineTotals = Record<LineSeriesKey, number>;
+const sum = (list: readonly Month[], k: Key) => list.reduce((a, d) => a + d[k], 0);
+const gross = (list: readonly Month[]) => INC.reduce((a, s) => a + sum(list, s.k), 0);
+const deds = (list: readonly Month[]) => DED.reduce((a, s) => a + sum(list, s.k), 0);
 
-interface StatsIndex {
-  /** YYYY-MM key → per-category sums across all line series. */
-  byMonth: Map<string, LineTotals>;
-  /** Calendar year → per-category sums across all line series. */
-  byYear: Map<number, LineTotals>;
-}
+const RANGES = [
+  { value: "Year", label: "Year" },
+  { value: "12M", label: "12 mo" },
+  { value: "24M", label: "24 mo" },
+  { value: "36M", label: "36 mo" },
+  { value: "All", label: "All" },
+] as const;
+type Range = (typeof RANGES)[number]["value"];
 
-/**
- * Single O(rows) pass that buckets every row into its calendar month and year,
- * summing all line-series categories at once.
- *
- * Replaces the previous design where the pie (year + deductions) and the line
- * chart each re-scanned the full `rows` array per period — the line chart did
- * one full scan *per month* in the selected range and cloned a fresh
- * accumulator object for every matching row, making a multi-year range over
- * 2000 rows O(months × rows). Lookups below are now O(1) per period.
- */
-function buildStatsIndex(rows: PayslipRow[]): StatsIndex {
-  const byMonth = new Map<string, LineTotals>();
-  const byYear = new Map<number, LineTotals>();
-  for (const r of rows) {
-    const cm = calendarMonthForRow(r);
-    if (!cm) continue;
-    const mk = monthKey(cm.y, cm.m);
-    let mTot = byMonth.get(mk);
-    if (!mTot) {
-      mTot = emptyTotals(LINE_SERIES_KEYS);
-      byMonth.set(mk, mTot);
-    }
-    let yTot = byYear.get(cm.y);
-    if (!yTot) {
-      yTot = emptyTotals(LINE_SERIES_KEYS);
-      byYear.set(cm.y, yTot);
-    }
-    for (const k of LINE_SERIES_KEYS) {
-      const v = r[k];
-      if (typeof v === "number" && Number.isFinite(v)) {
-        mTot[k] += v;
-        yTot[k] += v;
-      }
-    }
-  }
-  return { byMonth, byYear };
-}
-
-function sumDeductionKeys(
-  sums: Record<(typeof DEDUCTION_KEYS)[number], number>,
-): number {
-  let s = 0;
-  for (const k of DEDUCTION_KEYS) s += sums[k];
-  return s;
-}
-
-function earliestMonthKey(rows: PayslipRow[]): string | null {
-  let best: string | null = null;
-  for (const r of rows) {
-    const cm = calendarMonthForRow(r);
-    if (!cm) continue;
-    const k = monthKey(cm.y, cm.m);
-    if (!best || compareMonthKeys(k, best) < 0) best = k;
-  }
-  return best;
-}
-
-function currentMonthKey(): string {
-  const d = new Date();
-  return monthKey(d.getFullYear(), d.getMonth() + 1);
-}
-
-const fmtMoney = fmtAmount;
-
-const PICKER_YEAR_MIN = 1900;
-const PICKER_YEAR_MAX = 2200;
-
-function formatMonthKeyButtonLabel(key: string): string {
-  const p = parseMonthKey(key);
-  if (!p) return "Select month";
-  return formatMonthYear(p.y, p.m);
-}
-
-const pickerBtnClass = `w-full min-w-[10rem] text-left ${ACTION_BUTTON_CLASSES}`;
-const pickerYearNavBtnClass = `${CHART_ZOOM_BUTTON_CLASSES} focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-indigo-500`;
-
-type LineRangePickerAlign = "left" | "right";
-
-function LineRangeMonthPicker({
-  fieldLabel,
-  value,
-  onChange,
-  open,
-  onOpen,
-  onClose,
-  align = "left",
-}: {
-  fieldLabel: string;
-  value: string;
-  onChange: (key: string) => void;
-  open: boolean;
-  onOpen: () => void;
-  onClose: () => void;
-  align?: LineRangePickerAlign;
-}) {
-  const p = value ? parseMonthKey(value) : null;
-  const [browseYear, setBrowseYear] = useState(() => p?.y ?? new Date().getFullYear());
-
-  useEffect(() => {
-    if (open) {
-      const pr = value ? parseMonthKey(value) : null;
-      setBrowseYear(pr?.y ?? new Date().getFullYear());
-    }
-  }, [open, value]);
-
-  const rootRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
-        onClose();
-      }
-    };
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
-  }, [open, onClose]);
-
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
-
-  const onYearWheel = (e: React.WheelEvent) => {
-    e.preventDefault();
-    const d = e.deltaY > 0 ? 1 : -1;
-    setBrowseYear((y) => Math.min(PICKER_YEAR_MAX, Math.max(PICKER_YEAR_MIN, y + d)));
-  };
-
-  return (
-    <div className="relative" ref={rootRef}>
-      <div className="flex flex-col gap-1 text-sm">
-        <span className="text-ink-2">{fieldLabel}</span>
-        <button
-          type="button"
-          className={pickerBtnClass}
-          onClick={() => (open ? onClose() : onOpen())}
-          aria-expanded={open}
-          aria-haspopup="dialog"
-        >
-          {formatMonthKeyButtonLabel(value || "")}
-        </button>
-      </div>
-      {open && (
-        <div
-          className={`absolute z-30 mt-1 min-w-[16.5rem] max-w-[calc(100vw-2rem)] rounded-lg border border-line bg-surface p-3 shadow-lg dark:shadow-none dark:ring-1 dark:ring-white/10 ${
-            align === "right" ? "right-0" : "left-0"
-          }`}
-          role="dialog"
-          aria-label={`Choose month for ${fieldLabel}`}
-        >
-          <div
-            className="flex select-none items-center justify-center gap-0.5 text-sm text-ink-2"
-            onWheel={onYearWheel}
-            title="Scroll to change year"
-          >
-            <button
-              type="button"
-              className={pickerYearNavBtnClass}
-              onClick={() =>
-                setBrowseYear((y) => (y > PICKER_YEAR_MIN ? y - 1 : y))
-              }
-              aria-label="Previous year"
-            >
-              &lt;
-            </button>
-            <span className="min-w-[3.5rem] px-2 text-center text-base font-medium tabular-nums text-ink">
-              {browseYear}
-            </span>
-            <button
-              type="button"
-              className={pickerYearNavBtnClass}
-              onClick={() =>
-                setBrowseYear((y) => (y < PICKER_YEAR_MAX ? y + 1 : y))
-              }
-              aria-label="Next year"
-            >
-              &gt;
-            </button>
-          </div>
-          <div
-            className="mt-3 grid grid-cols-4 gap-1.5 sm:gap-2"
-            onWheelCapture={(e) => e.stopPropagation()}
-          >
-            {MONTH_NAMES_SHORT.map((abbr, i) => {
-              const m = i + 1;
-              const mk = monthKey(browseYear, m);
-              const selected = value === mk;
-              return (
-                <button
-                  key={mk}
-                  type="button"
-                  className={`rounded-lg border px-1.5 py-2 text-center text-xs font-medium transition-colors duration-150 sm:px-2 sm:text-sm ${
-                    selected
-                      ? "border-brand bg-brand text-brand-on"
-                      : "border-line-strong bg-surface text-ink-2 hover:bg-surface-2 hover:text-ink"
-                  }`}
-                  onClick={() => {
-                    onChange(mk);
-                    onClose();
-                  }}
-                >
-                  {abbr}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-type PieMode = "month" | "year";
+const DESCRIPTION = "Compare income and deductions across months and years.";
 
 export default function SalaryStatsClient({ company = "Sophos" }: { company?: string }) {
   const [rows, setRows] = useState<PayslipRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
-  const [pieMode, setPieMode] = useState<PieMode>("year");
-  const [pieYear, setPieYear] = useState(() => new Date().getFullYear());
-  const [pieMonthStr, setPieMonthStr] = useState(() => currentMonthKey());
-  const [hiddenPieKeys, setHiddenPieKeys] = useState<Set<PieSeriesKey>>(() => new Set());
-
-  const togglePieKey = useCallback((key: PieSeriesKey) => {
-    setHiddenPieKeys((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  }, []);
-
-  const [lineStart, setLineStart] = useState("");
-  const [lineEnd, setLineEnd] = useState(currentMonthKey());
-  const [lineInitialized, setLineInitialized] = useState(false);
-  const [lineRangeOpen, setLineRangeOpen] = useState<"from" | "to" | null>(null);
-
-  const [visibleSeries, setVisibleSeries] = useState<Record<LineSeriesKey, boolean>>(
-    () =>
-      Object.fromEntries(LINE_SERIES_KEYS.map((k) => [k, true])) as Record<
-        LineSeriesKey,
-        boolean
-      >,
-  );
-
-  const pathname = usePathname();
-  const lgUp = useLgUp();
-  const { theme } = useTheme();
-  const chartPalette = useMemo(() => {
-    void pathname;
-    return loadChartPalette();
-  }, [pathname]);
-  const chartSeriesColors = chartPalette[theme];
-  const axisTickFill = theme === "dark" ? "#a1a1aa" : "#71717a";
-
-  const chartTooltipStyle = useMemo(() => getChartTooltipStyle(theme), [theme]);
-  const trendZoom = useChartZoom();
 
   const load = useCallback(async () => {
     setError(null);
@@ -437,527 +116,474 @@ export default function SalaryStatsClient({ company = "Sophos" }: { company?: st
     void load();
   }, [load]);
 
-  useEffect(() => {
-    if (lineInitialized || rows.length === 0) return;
-    const earliest = earliestMonthKey(rows);
-    const start = earliest ?? currentMonthKey();
-    setLineStart(start);
-    setLineEnd(currentMonthKey());
-    setLineInitialized(true);
-  }, [rows, lineInitialized]);
+  const data = useMemo(() => buildMonths(rows), [rows]);
 
-  const statsIndex = useMemo(() => buildStatsIndex(rows), [rows]);
-
-  /** Per-category totals for the pie's selected period (year or month); undefined when empty. */
-  const periodTotals = useMemo<LineTotals | undefined>(() => {
-    if (pieMode === "year") return statsIndex.byYear.get(pieYear);
-    const p = parseMonthKey(pieMonthStr);
-    return p ? statsIndex.byMonth.get(monthKey(p.y, p.m)) : undefined;
-  }, [statsIndex, pieMode, pieYear, pieMonthStr]);
-
-  const pieSlices = useMemo(() => {
-    const list: { name: string; key: PieSeriesKey; value: number }[] = [];
-    for (const k of PIE_SERIES_KEYS) {
-      list.push({
-        key: k,
-        name: CHART_SERIES_LABEL[k],
-        value: periodTotals?.[k] ?? 0,
-      });
-    }
-    return list.filter((x) => x.value > 0);
-  }, [periodTotals]);
-
-  /** `pieSlices` minus any category the user hid via the legend below the chart —
-   * recharts computes each slice's `percent` as value / sum(this array), so
-   * hiding a slice here reflows the rest to fill 100% among what's left visible. */
-  const visiblePieSlices = useMemo(
-    () => pieSlices.filter((s) => !hiddenPieKeys.has(s.key)),
-    [pieSlices, hiddenPieKeys],
-  );
-
-  const piePeriodDeductions = useMemo(() => {
-    const sums = emptyTotals(DEDUCTION_KEYS);
-    if (periodTotals) {
-      for (const k of DEDUCTION_KEYS) sums[k] = periodTotals[k];
-    }
-    return { sums, total: sumDeductionKeys(sums) };
-  }, [periodTotals]);
-
-  const linePoints = useMemo(() => {
-    const keys = monthsBetweenInclusive(lineStart, lineEnd);
-    return keys.map((mk) => {
-      const sums = statsIndex.byMonth.get(mk);
-      const point: Record<string, string | number> = {
-        monthKey: mk,
-        label: monthAxisLabel(mk),
-      };
-      for (const k of LINE_SERIES_KEYS) {
-        point[k] = sums?.[k] ?? 0;
-      }
-      return point;
-    });
-  }, [statsIndex, lineStart, lineEnd]);
-
-  const lineRangeDeductionsTotal = useMemo(() => {
-    if (!lineStart || !lineEnd || compareMonthKeys(lineStart, lineEnd) > 0) {
-      return 0;
-    }
-    let t = 0;
-    for (const p of linePoints) {
-      for (const k of DEDUCTION_KEYS) {
-        t += Number(p[k] ?? 0);
-      }
-    }
-    return t;
-  }, [linePoints, lineStart, lineEnd]);
-
-  const allTimeTotals = useMemo(() => {
-    const incomeByKey = emptyTotals(PIE_SERIES_KEYS);
-    const deductionsByKey = emptyTotals(DEDUCTION_KEYS);
-    for (const sums of statsIndex.byYear.values()) {
-      for (const k of PIE_SERIES_KEYS) incomeByKey[k] += sums[k];
-      for (const k of DEDUCTION_KEYS) deductionsByKey[k] += sums[k];
-    }
-    let income = 0;
-    for (const k of PIE_SERIES_KEYS) income += incomeByKey[k];
-    let deductions = 0;
-    for (const k of DEDUCTION_KEYS) deductions += deductionsByKey[k];
-    const sortedIncomeKeys = [...PIE_SERIES_KEYS].sort(
-      (a, b) => incomeByKey[b] - incomeByKey[a],
+  if (loading || error || data.length === 0) {
+    return (
+      <div className={STATS_PAGE_CLASSES}>
+        <StatsHeader company={company} title="Salary Stats" description={DESCRIPTION} />
+        {error ? (
+          <div className={ERROR_ALERT_CLASSES} role="alert">{error}</div>
+        ) : (
+          <p className={LOADING_TEXT_CLASSES}>
+            {loading ? "Loading payslips…" : "No payslips yet — add some to see stats here."}
+          </p>
+        )}
+      </div>
     );
-    const sortedDeductionKeys = [...DEDUCTION_KEYS].sort(
-      (a, b) => deductionsByKey[b] - deductionsByKey[a],
-    );
-    return { income, incomeByKey, deductions, deductionsByKey, sortedIncomeKeys, sortedDeductionKeys };
-  }, [statsIndex]);
+  }
+  return <SalaryStatsView company={company} data={data} />;
+}
 
-  const allTimeRange = useMemo(() => {
-    let earliest: string | null = null;
-    let latest: string | null = null;
-    for (const r of rows) {
-      const cm = calendarMonthForRow(r);
-      if (!cm) continue;
-      const k = monthKey(cm.y, cm.m);
-      if (!earliest || compareMonthKeys(k, earliest) < 0) earliest = k;
-      if (!latest || compareMonthKeys(k, latest) > 0) latest = k;
-    }
-    if (!earliest || !latest) return null;
-    return {
-      from: formatMonthKeyButtonLabel(earliest),
-      to: formatMonthKeyButtonLabel(latest),
-    };
-  }, [rows]);
+function SalaryStatsView({ company, data }: { company: string; data: Month[] }) {
+  const yrs = useMemo(() => [...new Set(data.map((d) => d.y))], [data]);
+  const firstYear = yrs[0]!;
+  const lastYear = yrs[yrs.length - 1]!;
 
-  const anySeriesVisible = LINE_SERIES_KEYS.some((k) => visibleSeries[k]);
+  const [year, setYear] = useState(lastYear);
+  const [tYear, setTYear] = useState(lastYear);
+  const [range, setRange] = useState<Range>("Year");
+  const [hidden, setHidden] = useState<ReadonlySet<Key>>(() => new Set());
+  const [hover, setHover] = useState<number | null>(null);
+  const [trendRef, W] = useWidth();
 
-  const toggleSeriesGroup = (group: readonly LineSeriesKey[]) => {
-    setVisibleSeries((prev) => {
-      const anyOn = group.some((k) => prev[k]);
-      const next = !anyOn;
-      const o = { ...prev } as Record<LineSeriesKey, boolean>;
-      for (const k of group) o[k] = next;
-      return o;
-    });
+  const pickYear = (y: number) => {
+    setYear(y);
+    setTYear(y);
+    setRange("Year");
+    setHover(null);
   };
 
-  const toggleAllSeries = () => toggleSeriesGroup([...LINE_SERIES_KEYS]);
-  const toggleAdditionsSeries = () => toggleSeriesGroup(PIE_SERIES_KEYS);
-  const toggleDeductionsSeries = () => toggleSeriesGroup(DEDUCTION_KEYS);
+  /* ---- Selected year vs the same months of the year before ---- */
+  const yearRows = data.filter((d) => d.y === year);
+  const ms = yearRows.map((d) => d.m);
+  const prev = data.filter((d) => d.y === year - 1 && ms.includes(d.m));
+  const hasPrev = prev.length === yearRows.length && prev.length > 0;
+  const partial = yearRows.length < 12;
+  const g = gross(yearRows);
+  const dd = deds(yearRows);
+  const net = g - dd;
+  const pg = gross(prev);
+  const pd = deds(prev);
+  const cmp = !hasPrev
+    ? "no prior-year data"
+    : partial
+      ? `vs ${MN[ms[0]!]}–${MN[ms[ms.length - 1]!]} ${year - 1}`
+      : `vs ${year - 1}`;
+  const kpi = (label: string, cur: number, pv: number, upGood: boolean) => {
+    const d = hasPrev && pv ? ((cur - pv) / pv) * 100 : null;
+    return { label, value: fmt(cur), d, good: d == null ? null : d >= 0 === upGood };
+  };
+  const kpis = [
+    kpi("Gross income", g, pg, true),
+    kpi("Take-home pay", net, pg - pd, true),
+    kpi("Deductions", dd, pd, false),
+    kpi("Commission", sum(yearRows, "commission"), sum(prev, "commission"), true),
+  ];
+  const breakdown = (defs: readonly Series[], tot: number) =>
+    defs
+      .map((s) => ({ ...s, v: sum(yearRows, s.k) }))
+      .filter((r) => r.v > 0)
+      .sort((a, b) => b.v - a.v)
+      .map((r) => ({ ...r, pct: pctOf(r.v, tot) }));
+  const incRows = breakdown(INC, g);
+  const dedRows = breakdown(DED, dd);
+
+  /* ---- Month-by-month diverging chart ---- */
+  const isYearMode = range === "Year";
+  const rr = isYearMode
+    ? data.filter((d) => d.y === tYear)
+    : data.slice(-({ "12M": 12, "24M": 24, "36M": 36, All: data.length } as const)[range]);
+  const vi = INC.filter((s) => !hidden.has(s.k));
+  const vd = DED.filter((s) => !hidden.has(s.k));
+  const H = 320, pl = 52, pr = 8, pt = 10, pb = 30;
+  const iw = W - pl - pr, ih = H - pt - pb;
+  const ups = rr.map((d) => vi.reduce((a, s) => a + d[s.k], 0));
+  const dns = rr.map((d) => vd.reduce((a, s) => a + d[s.k], 0));
+  const mu = Math.max(1, ...ups);
+  const md = Math.max(0, ...dns);
+  const step = niceStep((mu + md) / 5);
+  const top = Math.ceil(mu / step) * step;
+  const bot = Math.ceil(md / step) * step;
+  const Y = (v: number) => pt + ((top - v) / (top + bot)) * ih;
+  const ticks: { y: number; label: string }[] = [];
+  for (let v = -bot; v <= top + 0.1; v += step) ticks.push({ y: Y(v), label: fk(v) });
+  const band = iw / Math.max(1, rr.length);
+  const bw = Math.max(2, band * 0.62);
+  const cx = (i: number) => pl + i * band + band / 2;
+  const bars: { x: number; y: number; h: number; fill: string; op: number }[] = [];
+  rr.forEach((d, i) => {
+    const x = pl + i * band + (band - bw) / 2;
+    const op = hover == null || hover === i ? 1 : 0.35;
+    let a = 0;
+    for (const s of vi) {
+      const v = d[s.k];
+      if (v <= 0) continue;
+      bars.push({ x, y: Y(a + v), h: Math.max(0, Y(a) - Y(a + v) - (a > 0 ? 1 : 0)), fill: s.c, op });
+      a += v;
+    }
+    a = 0;
+    for (const s of vd) {
+      const v = d[s.k];
+      if (v <= 0) continue;
+      bars.push({ x, y: Y(-a) + (a > 0 ? 1 : 0), h: Math.max(0, Y(-a - v) - Y(-a) - (a > 0 ? 1 : 0)), fill: s.c, op });
+      a += v;
+    }
+  });
+  const netPath = rr
+    .map((_, i) => `${i ? "L" : "M"}${cx(i).toFixed(1)} ${Y(ups[i]! - dns[i]!).toFixed(1)}`)
+    .join(" ");
+  const hv = hover != null && hover < rr.length ? hover : null;
+  const hd = hv == null ? null : rr[hv]!;
+  const hx = hv == null ? 0 : cx(hv);
+  const toggle = (k: Key) =>
+    setHidden((s) => {
+      const n = new Set(s);
+      if (!n.delete(k)) n.add(k);
+      return n;
+    });
+  const rFirst = rr[0]!;
+  const rLast = rr[rr.length - 1]!;
+  const rangeLabel = `${MN[rFirst.m]} ${rFirst.y} – ${MN[rLast.m]} ${rLast.y}`;
+  const rg = gross(rr);
+  const rd = deds(rr);
+
+  /* ---- All-time ---- */
+  const ag = gross(data);
+  const ad = deds(data);
+  const allTime = (defs: readonly Series[]) => {
+    const l = defs.map((s) => ({ ...s, v: sum(data, s.k) })).sort((a, b) => b.v - a.v);
+    const mx = l[0]!.v || 1;
+    return l.map((r) => ({ ...r, w: pctOf(r.v, mx) }));
+  };
+  const aFirst = data[0]!;
+  const aLast = data[data.length - 1]!;
 
   return (
-    <div className={PAGE_CONTAINER_CLASSES}>
-      <PageHeader
-        title={`${company} Salary Stats`}
-        description={
-          <>
-            Compare income and deductions across months and years.
-          </>
-        }
-      />
+    <div className={STATS_PAGE_CLASSES}>
+      <StatsHeader company={company} title="Salary Stats" description={DESCRIPTION}>
+        <YearStepper
+          lg
+          year={year}
+          sub={partial ? `${MN[ms[0]!]} – ${MN[ms[ms.length - 1]!]}` : "Full year"}
+          canPrev={year > firstYear}
+          canNext={year < lastYear}
+          onPrev={() => pickYear(year - 1)}
+          onNext={() => pickYear(year + 1)}
+        />
+      </StatsHeader>
 
-      {error && (
-        <div className={ERROR_ALERT_CLASSES} role="alert">
-          {error}
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(210px,1fr))] gap-3">
+        {kpis.map((k) => (
+          <div
+            key={k.label}
+            className="flex flex-col gap-2.5 rounded-[14px] border border-st-line bg-st-card px-5 py-[18px]"
+          >
+            <div className="text-[13px] text-st-3">{k.label}</div>
+            <div className="font-st-mono text-[26px] font-semibold leading-none tracking-[-0.03em] text-st-1">
+              {k.value}
+            </div>
+            <div className="flex flex-wrap items-center gap-2 text-xs text-st-4">
+              <span
+                className={`inline-flex items-center gap-[3px] rounded-full px-[7px] py-0.5 font-medium ${
+                  k.good == null
+                    ? "bg-st-hover text-st-3"
+                    : k.good
+                      ? "bg-[rgba(74,222,128,.1)] text-st-pos"
+                      : "bg-[rgba(248,113,113,.1)] text-st-down"
+                }`}
+              >
+                {k.d == null ? null : k.d >= 0 ? (
+                  <ArrowUpRightIcon className="size-3" />
+                ) : (
+                  <ArrowDownRightIcon className="size-3" />
+                )}
+                {k.d == null ? "—" : `${Math.abs(k.d).toFixed(1)}%`}
+              </span>
+              <span>{cmp}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <section className={STATS_CARD_CLASSES}>
+        <div className="mb-[22px]">
+          <h2 className={STATS_H2_CLASSES}>Where the money came from, and where it went</h2>
+          <p className={STATS_SUB_CLASSES}>Income and deductions for {year}, largest first.</p>
         </div>
-      )}
-
-      {loading ? (
-          <p className={LOADING_TEXT_CLASSES}>Loading payslips…</p>
-        ) : (
-          <>
-          <section className={CARD_CLASSES}>
-            <h2 className="text-lg font-medium text-ink">
-              Composition
-            </h2>
-
-            <div className="mt-4 flex flex-wrap items-center justify-center gap-3">
-              <div className={SEGMENTED_WRAPPER_CLASSES}>
-                <button
-                  type="button"
-                  className={`${SEGMENTED_BUTTON_CLASSES} ${
-                    pieMode === "year"
-                      ? SEGMENTED_BUTTON_ACTIVE_CLASSES
-                      : SEGMENTED_BUTTON_INACTIVE_CLASSES
-                  }`}
-                  onClick={() => setPieMode("year")}
-                >
-                  Per year
-                </button>
-                <button
-                  type="button"
-                  className={`${SEGMENTED_BUTTON_CLASSES} ${
-                    pieMode === "month"
-                      ? SEGMENTED_BUTTON_ACTIVE_CLASSES
-                      : SEGMENTED_BUTTON_INACTIVE_CLASSES
-                  }`}
-                  onClick={() => setPieMode("month")}
-                >
-                  Per month
-                </button>
-              </div>
-              {pieMode === "year" ? (
-                <div
-                  className="inline-flex items-center gap-0.5 text-sm"
-                  role="group"
-                  aria-label="Year"
-                >
-                  <button
-                    type="button"
-                    className={pickerYearNavBtnClass}
-                    onClick={() =>
-                      setPieYear((y) => (y > 1900 ? y - 1 : y))
-                    }
-                    aria-label="Previous year"
-                  >
-                    &lt;
-                  </button>
-                  <span className="min-w-[4.5rem] px-2 text-center font-medium tabular-nums text-ink">
-                    {pieYear}
-                  </span>
-                  <button
-                    type="button"
-                    className={pickerYearNavBtnClass}
-                    onClick={() =>
-                      setPieYear((y) => (y < 2200 ? y + 1 : y))
-                    }
-                    aria-label="Next year"
-                  >
-                    &gt;
-                  </button>
-                </div>
-              ) : (
-                <label className="flex items-center gap-2 text-sm">
-                  <span className="text-ink-2">Month</span>
-                  <input
-                    type="month"
-                    className={INPUT_CLASSES}
-                    value={pieMonthStr}
-                    onChange={(e) => setPieMonthStr(e.target.value)}
-                  />
-                </label>
-              )}
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(min(340px,100%),1fr))] gap-8">
+          <div className="flex flex-col gap-3.5">
+            <div className="flex items-baseline justify-between">
+              <span className="text-xs tracking-[.06em] text-st-4">INCOME</span>
+              <span className="font-st-mono text-lg font-semibold text-st-1">{fmt(g)}</span>
             </div>
-
-            <div className="mt-6 h-[min(40rem,80vw)] w-full min-h-[360px]">
-              {pieSlices.length === 0 ? (
-                <p className="py-12 text-center text-sm text-ink-3">
-                  No data in this period for these categories.
-                </p>
-              ) : visiblePieSlices.length === 0 ? (
-                <p className="py-12 text-center text-sm text-ink-3">
-                  All categories hidden — click a legend entry below to show one.
-                </p>
-              ) : (
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={visiblePieSlices}
-                      dataKey="value"
-                      nameKey="name"
-                      cx="50%"
-                      cy="50%"
-                      outerRadius="52%"
-                      paddingAngle={3}
-                      labelLine={lgUp ? { stroke: axisTickFill, strokeWidth: 1 } : false}
-                      label={
-                        lgUp
-                          ? ({ name, percent }) =>
-                              `${name} ${fmtMoney((percent ?? 0) * 100)}%`
-                          : false
-                      }
-                    >
-                      {visiblePieSlices.map((s) => (
-                        <Cell key={s.key} fill={chartSeriesColors[s.key]} />
-                      ))}
-                    </Pie>
-                    <Tooltip
-                      formatter={(value) =>
-                        fmtMoney(Number(value ?? 0))
-                      }
-                      contentStyle={chartTooltipStyle}
-                    />
-                  </PieChart>
-                </ResponsiveContainer>
-              )}
+            <SegmentBar items={incRows} />
+            <BreakdownRows items={incRows} amountClass="text-st-1" />
+          </div>
+          <div className="flex flex-col gap-3.5">
+            <div className="flex items-baseline justify-between">
+              <span className="text-xs tracking-[.06em] text-st-4">
+                DEDUCTIONS <span className="text-st-3">· {pctOf(dd, g).toFixed(1)}% of gross</span>
+              </span>
+              <span className="font-st-mono text-lg font-semibold text-st-neg">{fmt(dd)}</span>
             </div>
+            <SegmentBar items={dedRows} />
+            <BreakdownRows items={dedRows} amountClass="text-st-neg" />
+            <div className="mt-auto flex items-center justify-between rounded-[10px] border border-[rgba(74,222,128,.15)] bg-[rgba(74,222,128,.07)] px-4 py-3.5">
+              <span className="text-st-pos-soft">Take-home after deductions</span>
+              <span className="font-st-mono text-base font-semibold text-st-pos">{fmt(net)}</span>
+            </div>
+          </div>
+        </div>
+      </section>
 
-            {pieSlices.length > 0 && (
-              <ToggleLegendList
-                items={pieSlices.map((s) => ({
-                  key: s.key,
-                  label: s.name,
-                  color: chartSeriesColors[s.key],
-                  hidden: hiddenPieKeys.has(s.key),
-                }))}
-                onToggle={(key) => togglePieKey(key as PieSeriesKey)}
+      <section className={`${STATS_CARD_CLASSES} flex flex-col gap-[18px]`}>
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h2 className={STATS_H2_CLASSES}>Month by month</h2>
+            <p className={`${STATS_SUB_CLASSES} max-w-[560px] text-pretty`}>
+              Income stacks above the line, deductions below. The white line is take-home pay.
+              Hover a month for its breakdown.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {isYearMode && (
+              <YearStepper
+                year={tYear}
+                canPrev={tYear > firstYear}
+                canNext={tYear < lastYear}
+                onPrev={() => {
+                  setTYear(tYear - 1);
+                  setHover(null);
+                }}
+                onNext={() => {
+                  setTYear(tYear + 1);
+                  setHover(null);
+                }}
               />
             )}
+            <Segmented
+              options={RANGES}
+              value={range}
+              onChange={(r) => {
+                setRange(r);
+                setHover(null);
+              }}
+            />
+          </div>
+        </div>
 
-            <div className="mt-6 rounded-lg border border-line bg-zinc-50/90 p-4 dark:bg-zinc-900/50">
-              <h3 className="text-[11px] font-semibold uppercase tracking-wide text-ink-3">
-                Deductions ({pieMode === "year" ? `year ${pieYear}` : "selected month"})
-              </h3>
-              <div className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
-                {DEDUCTION_KEYS.map((k) => (
-                  <div
-                    key={k}
-                    className="flex items-center justify-between gap-4 rounded-md border border-transparent px-0.5 py-1 sm:border-zinc-200/80 sm:px-2 sm:py-1.5 dark:sm:border-zinc-700/80"
-                  >
-                    <span className="text-ink-2">
-                      {CHART_SERIES_LABEL[k]}
-                    </span>
-                    <span className={`text-sm ${AMOUNT_NEGATIVE_CLASSES}`}>
-                      {fmtMoney(piePeriodDeductions.sums[k])}
-                    </span>
-                  </div>
-                ))}
-                <div className="col-span-full mt-2 flex flex-col gap-1 border-t border-line pt-3 dark:border-zinc-600 sm:flex-row sm:items-center sm:justify-between">
-                  <span className="text-xs font-semibold text-ink-2">
-                    Deductions total
-                  </span>
-                  <span className={`text-sm font-semibold ${AMOUNT_NEGATIVE_CLASSES}`}>
-                    {fmtMoney(piePeriodDeductions.total)}
-                  </span>
-                </div>
-              </div>
-            </div>
-          </section>
+        <div className="flex flex-wrap items-center gap-x-[18px] gap-y-1.5">
+          <div className="flex flex-wrap items-center gap-1.5 rounded-xl border border-[rgba(16,185,129,.22)] bg-[rgba(16,185,129,.07)] px-2.5 py-2">
+            <span className="mr-1 text-[11px] font-semibold tracking-[.06em] text-st-inc">▲ INCOME</span>
+            {INC.map((s) => (
+              <Chip key={s.k} label={s.n} color={s.c} on={!hidden.has(s.k)} onClick={() => toggle(s.k)} />
+            ))}
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5 rounded-xl border border-[rgba(244,63,94,.25)] bg-[rgba(244,63,94,.08)] px-2.5 py-2">
+            <span className="mr-1 text-[11px] font-semibold tracking-[.06em] text-st-ded">▼ DEDUCTIONS</span>
+            {DED.map((s) => (
+              <Chip key={s.k} label={s.n} color={s.c} on={!hidden.has(s.k)} onClick={() => toggle(s.k)} />
+            ))}
+          </div>
+        </div>
 
-          <section className={CARD_CLASSES}>
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <h2 className="text-lg font-medium text-ink">
-                  Trend by month
-                </h2>
-                <p className="mt-1 text-sm text-ink-2">
-                  Monthly totals per category (including 13th month, withholding, SSS,
-                  Philhealth, Pag-ibig, and MP2). Adjust the range (defaults from first data
-                  month through today). A deductions total for the whole range is shown under
-                  the chart.
-                </p>
-              </div>
-              <ChartZoomControls
-                zoom={trendZoom.zoom}
-                onZoomIn={trendZoom.zoomIn}
-                onZoomOut={trendZoom.zoomOut}
-                onReset={trendZoom.resetZoom}
-                canZoomIn={trendZoom.canZoomIn}
-                canZoomOut={trendZoom.canZoomOut}
-              />
-            </div>
-
-            <div className="mt-4 flex flex-wrap items-end justify-center gap-4">
-              <LineRangeMonthPicker
-                fieldLabel="From"
-                value={lineStart}
-                onChange={setLineStart}
-                open={lineRangeOpen === "from"}
-                onOpen={() => setLineRangeOpen("from")}
-                onClose={() => setLineRangeOpen((o) => (o === "from" ? null : o))}
-                align="left"
-              />
-              <LineRangeMonthPicker
-                fieldLabel="To"
-                value={lineEnd}
-                onChange={setLineEnd}
-                open={lineRangeOpen === "to"}
-                onOpen={() => setLineRangeOpen("to")}
-                onClose={() => setLineRangeOpen((o) => (o === "to" ? null : o))}
-                align="right"
-              />
-              <div className="flex flex-wrap items-center justify-center gap-2">
-                <button
-                  type="button"
-                  className={ACTION_BUTTON_CLASSES}
-                  onClick={toggleAllSeries}
-                >
-                  Toggle all series
-                </button>
-                <button
-                  type="button"
-                  className={ACTION_BUTTON_CLASSES}
-                  onClick={toggleAdditionsSeries}
-                >
-                  Toggle additions
-                </button>
-                <button
-                  type="button"
-                  className={ACTION_BUTTON_CLASSES}
-                  onClick={toggleDeductionsSeries}
-                >
-                  Toggle deductions
-                </button>
-              </div>
-            </div>
-
-            <div className="mt-6 h-[min(24rem,55vh)] w-full min-h-[240px]">
-              {!lineStart || !lineEnd || compareMonthKeys(lineStart, lineEnd) > 0 ? (
-                <p className="py-10 text-center text-sm text-ink-3">
-                  Choose a valid period (from ≤ to).
-                </p>
-              ) : !anySeriesVisible ? (
-                <p className="py-10 text-center text-sm text-ink-3">
-                  Turn on at least one series or use the range toggles above.
-                </p>
-              ) : (
-                <div className="h-full w-full overflow-x-auto">
-                <div className="h-full" style={{ minWidth: chartScrollMinWidth(linePoints.length, 56 * trendZoom.zoom) }}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <ComposedChart
-                    data={linePoints}
-                    margin={{ top: 8, right: 20, bottom: 8, left: 8 }}
-                  >
-                    <CartesianGrid strokeDasharray="3 3" className="stroke-zinc-200 dark:stroke-zinc-700" />
-                    <XAxis
-                      dataKey="label"
-                      tick={{ fontSize: 11, fill: axisTickFill }}
-                      interval={xAxisTickInterval(linePoints.length, 48)}
-                    />
-                    <YAxis
-                      tick={{ fontSize: 11, fill: axisTickFill }}
-                      tickFormatter={fmtAxisMoneyTick}
-                    />
-                    <Tooltip
-                      formatter={(value) => fmtMoney(Number(value ?? 0))}
-                      labelFormatter={(_label, payload) => {
-                        const mk = payload?.[0]?.payload?.monthKey;
-                        return typeof mk === "string"
-                          ? formatMonthKeyButtonLabel(mk)
-                          : _label;
-                      }}
-                      contentStyle={chartTooltipStyle}
-                    />
-                    <Legend
-                      content={(props) => (
-                        <ToggleLegendList
-                          items={(props.payload ?? []).map((entry) => {
-                            const k = entry.dataKey as LineSeriesKey;
-                            return {
-                              key: k,
-                              label: CHART_SERIES_LABEL[k],
-                              color: entry.color ?? "",
-                              hidden: !visibleSeries[k],
-                            };
-                          })}
-                          onToggle={(key) =>
-                            setVisibleSeries((prev) => ({
-                              ...prev,
-                              [key]: !prev[key as LineSeriesKey],
-                            }))
-                          }
-                        />
-                      )}
-                    />
-                    {LINE_SERIES_KEYS.map((k) => (
-                      <Area
-                        key={k}
-                        type="monotone"
-                        dataKey={k}
-                        name={CHART_SERIES_LABEL[k]}
-                        stroke={chartSeriesColors[k]}
-                        strokeWidth={2}
-                        fill={chartSeriesColors[k]}
-                        fillOpacity={0.22}
-                        dot={{ r: 3 }}
-                        activeDot={{ r: 5 }}
-                        hide={!visibleSeries[k]}
-                      />
-                    ))}
-                  </ComposedChart>
-                </ResponsiveContainer>
-                </div>
-                </div>
+        <div ref={trendRef} onMouseLeave={() => setHover(null)} className="relative h-80 w-full">
+          {W > 0 && (
+            <svg width={W} height={H} className="block overflow-visible">
+              <rect x={pl} y={pt} width={iw} height={Math.max(0, Y(0) - pt)} fill="rgba(16,185,129,.05)" />
+              <rect x={pl} y={Y(0)} width={iw} height={Math.max(0, pt + ih - Y(0))} fill="rgba(244,63,94,.08)" />
+              {ticks.map((k) => (
+                <g key={k.y}>
+                  <line x1={pl} x2={W - pr} y1={k.y} y2={k.y} className="stroke-st-line" />
+                  <text x={pl - 10} y={k.y + 4} textAnchor="end" className={STATS_TICK_CLASSES}>
+                    {k.label}
+                  </text>
+                </g>
+              ))}
+              <text x={pl + 8} y={pt + 14} className="fill-st-inc text-[10.5px] font-semibold tracking-[.08em]">
+                ▲ INCOME
+              </text>
+              <text x={pl + 8} y={pt + ih - 8} className="fill-st-ded text-[10.5px] font-semibold tracking-[.08em]">
+                ▼ DEDUCTIONS
+              </text>
+              {bars.map((b, i) => (
+                <rect key={i} x={b.x} y={b.y} width={bw} height={b.h} fill={b.fill} opacity={b.op} />
+              ))}
+              <line x1={pl} x2={W - pr} y1={Y(0)} y2={Y(0)} className="stroke-st-axis" />
+              <path d={netPath} fill="none" strokeWidth={1.75} strokeLinejoin="round" className="stroke-st-1" />
+              {xLabels(rr, cx, H - 8).map((x) => (
+                <text key={x.x} x={x.x} y={x.y} textAnchor="middle" className={STATS_XLABEL_CLASSES}>
+                  {x.label}
+                </text>
+              ))}
+              {hv != null && (
+                <circle cx={hx} cy={Y(ups[hv]! - dns[hv]!)} r={4} strokeWidth={2} className="fill-st-bg stroke-st-1" />
               )}
-            </div>
-
-            {!lineStart || !lineEnd || compareMonthKeys(lineStart, lineEnd) > 0 ? null : (
-              <div className="mt-4 flex flex-col gap-1 rounded-lg border border-line bg-zinc-50/90 px-4 py-3 dark:bg-zinc-900/50 sm:flex-row sm:items-center sm:justify-between">
-                <span className="text-xs font-semibold uppercase tracking-wide text-ink-3">
-                  Deductions total (sum over chart range)
-                </span>
-                <span className={`text-sm font-semibold ${AMOUNT_NEGATIVE_CLASSES}`}>
-                  {fmtMoney(lineRangeDeductionsTotal)}
-                </span>
-              </div>
-            )}
-          </section>
-
-          <section className={CARD_CLASSES}>
-            <h2 className="text-lg font-medium text-ink">
-              All-time Summary
-            </h2>
-            {allTimeRange && (
-              <p className="mt-1 text-sm text-ink-2">
-                Totals from {allTimeRange.from} through {allTimeRange.to}.
-              </p>
-            )}
-            <div className="mt-5 grid gap-4 sm:grid-cols-2">
-              <div className="rounded-lg border border-emerald-200 bg-emerald-50/60 p-4 dark:border-emerald-800 dark:bg-emerald-950/30">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-400">
-                  Total Income
-                  <span className="ml-2 normal-case font-normal tracking-normal text-ink-4">net / gross</span>
-                </p>
-                <div className="mt-2 flex items-baseline justify-between gap-4">
-                  <span className="text-2xl font-bold tabular-nums text-emerald-800 dark:text-emerald-200">
-                    {fmtMoney(allTimeTotals.income)}
-                  </span>
-                  <span className="text-2xl font-light tabular-nums text-emerald-700/70 dark:text-emerald-300/60">
-                    {fmtMoney(allTimeTotals.income + allTimeTotals.deductions)}
-                  </span>
-                </div>
-                <div className="mt-3 space-y-1.5 border-t border-emerald-200 pt-3 dark:border-emerald-800">
-                  {allTimeTotals.sortedIncomeKeys.map((k) => (
-                    <div key={k} className="flex items-center justify-between gap-4 text-sm">
-                      <span className="text-ink-2">{CHART_SERIES_LABEL[k]}</span>
-                      <span className={AMOUNT_POSITIVE_CLASSES}>
-                        {fmtMoney(allTimeTotals.incomeByKey[k])}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-              <div className="rounded-lg border border-red-200 bg-red-50/60 p-4 dark:border-red-800 dark:bg-red-950/30">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-red-700 dark:text-red-400">
-                  Total Deductions
-                </p>
-                <p className="mt-2 text-2xl font-bold tabular-nums text-red-800 dark:text-red-200">
-                  {fmtMoney(allTimeTotals.deductions)}
-                </p>
-                <div className="mt-3 space-y-1.5 border-t border-red-200 pt-3 dark:border-red-800">
-                  {allTimeTotals.sortedDeductionKeys.map((k) => (
-                    <div key={k} className="flex items-center justify-between gap-4 text-sm">
-                      <span className="text-ink-2">{CHART_SERIES_LABEL[k]}</span>
-                      <span className={AMOUNT_NEGATIVE_CLASSES}>
-                        {fmtMoney(allTimeTotals.deductionsByKey[k])}
-                      </span>
-                    </div>
-                  ))}
-                </div>
+              {rr.map((_, i) => (
+                <rect
+                  key={i}
+                  x={pl + i * band}
+                  y={0}
+                  width={band}
+                  height={H - pb}
+                  fill="transparent"
+                  onMouseEnter={() => setHover(i)}
+                />
+              ))}
+            </svg>
+          )}
+          {hd && hv != null && (
+            <div className={`${STATS_TIP_CLASSES} w-[230px] gap-[5px]`} style={{ left: Math.max(0, hx + 250 > W ? hx - 244 : hx + 14) }}>
+              <div className="mb-1 font-semibold text-st-1">{MF[hd.m]} {hd.y}</div>
+              <div className="text-[10.5px] font-semibold tracking-[.08em] text-st-inc">▲ INCOME</div>
+              {vi.filter((s) => hd[s.k] > 0).map((s) => (
+                <TipRow key={s.k} color={s.c} name={s.n} value={fmt(hd[s.k])} valueClass="text-st-1" />
+              ))}
+              <div className="mt-1.5 text-[10.5px] font-semibold tracking-[.08em] text-st-ded">▼ DEDUCTIONS</div>
+              {vd.filter((s) => hd[s.k] > 0).map((s) => (
+                <TipRow key={s.k} color={s.c} name={s.n} value={`−${fmt(hd[s.k])}`} valueClass="text-st-neg" />
+              ))}
+              <div className="mt-[3px] flex justify-between border-t border-st-line-strong pt-[7px]">
+                <span className="text-st-2">Take-home</span>
+                <span className="font-st-mono text-[12.5px] font-semibold text-st-pos">{fmt(ups[hv]! - dns[hv]!)}</span>
               </div>
             </div>
-          </section>
-          </>
-        )}
+          )}
+        </div>
+
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-px overflow-hidden rounded-[10px] border border-st-line bg-st-line">
+          {[
+            { label: "Gross", v: rg, cls: "text-st-1" },
+            { label: "Deductions", v: rd, cls: "text-st-neg" },
+            { label: "Take-home", v: rg - rd, cls: "text-st-pos" },
+          ].map((c) => (
+            <div key={c.label} className="flex flex-col gap-1 bg-st-cell px-4 py-3">
+              <span className="text-xs text-st-4">{c.label} · {rangeLabel}</span>
+              <span className={`font-st-mono text-base font-semibold ${c.cls}`}>{fmt(c.v)}</span>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className={`${STATS_CARD_CLASSES} flex flex-col gap-[22px]`}>
+        <div>
+          <h2 className={STATS_H2_CLASSES}>All-time summary</h2>
+          <p className={STATS_SUB_CLASSES}>
+            Totals from {MF[aFirst.m]} {aFirst.y} through {MF[aLast.m]} {aLast.y}.
+          </p>
+        </div>
+        <div className="flex flex-col gap-2.5">
+          <div className="flex flex-wrap items-end justify-between gap-4">
+            <div className="flex flex-col gap-1">
+              <span className="text-xs text-st-4">Gross earned</span>
+              <span className="font-st-mono text-[22px] font-semibold text-st-1">{fmt(ag)}</span>
+            </div>
+            <div className="flex flex-col items-end gap-1">
+              <span className="text-xs text-st-4">Take-home</span>
+              <span className="font-st-mono text-[30px] font-semibold tracking-[-0.02em] text-st-pos">{fmt(ag - ad)}</span>
+            </div>
+          </div>
+          <div className="flex h-3.5 gap-0.5 overflow-hidden rounded-full">
+            <div className="bg-st-pos" style={{ width: `${pctOf(ag - ad, ag)}%` }} />
+            <div className="flex-1 bg-st-down" />
+          </div>
+          <div className="flex flex-wrap justify-between gap-2 text-[12.5px] text-st-3">
+            <span>
+              <span className="text-st-pos">■</span> Kept {pctOf(ag - ad, ag).toFixed(1)}%
+            </span>
+            <span>
+              <span className="text-st-down">■</span> Deducted {fmt(ad)} · {pctOf(ad, ag).toFixed(1)}%
+            </span>
+          </div>
+        </div>
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(min(340px,100%),1fr))] gap-8">
+          <AllTimeRows title="INCOME" items={allTime(INC)} amountClass="text-st-1" />
+          <AllTimeRows title="DEDUCTIONS" items={allTime(DED)} amountClass="text-st-neg" />
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function SegmentBar({ items }: { items: readonly { k: string; c: string; pct: number }[] }) {
+  return (
+    <div className="flex h-2.5 gap-0.5 overflow-hidden rounded-full bg-st-track">
+      {items.map((r) => (
+        <div key={r.k} style={{ width: `${r.pct}%`, background: r.c }} />
+      ))}
+    </div>
+  );
+}
+
+function BreakdownRows({
+  items,
+  amountClass,
+}: {
+  items: readonly { k: string; n: string; c: string; v: number; pct: number }[];
+  amountClass: string;
+}) {
+  return (
+    <div className="flex flex-col">
+      {items.map((r) => (
+        <div
+          key={r.k}
+          className="grid grid-cols-[10px_minmax(0,1fr)_56px_120px] items-center gap-3 border-b border-st-line py-[9px]"
+        >
+          <span className="size-2.5 rounded-[3px]" style={{ background: r.c }} />
+          <span className="text-st-2">{r.n}</span>
+          <span className="text-right font-st-mono text-[12.5px] text-st-4">{r.pct.toFixed(1)}%</span>
+          <span className={`text-right font-st-mono text-[13.5px] font-medium ${amountClass}`}>{fmt(r.v)}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function AllTimeRows({
+  title,
+  items,
+  amountClass,
+}: {
+  title: string;
+  items: readonly { k: string; n: string; c: string; v: number; w: number }[];
+  amountClass: string;
+}) {
+  return (
+    <div>
+      <div className="mb-1.5 text-xs tracking-[.06em] text-st-4">{title}</div>
+      {items.map((r) => (
+        <div
+          key={r.k}
+          className="grid grid-cols-[minmax(0,1fr)_56px_112px] items-center gap-3.5 border-b border-st-line py-[9px] sm:grid-cols-[minmax(0,1fr)_90px_130px]"
+        >
+          <span className="text-st-2">{r.n}</span>
+          <div className="h-1.5 overflow-hidden rounded-full bg-st-track">
+            <div className="h-full rounded-full" style={{ width: `${r.w}%`, background: r.c }} />
+          </div>
+          <span className={`text-right font-st-mono text-[13.5px] font-medium ${amountClass}`}>{fmt(r.v)}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function TipRow({
+  color,
+  name,
+  value,
+  valueClass,
+}: {
+  color: string;
+  name: string;
+  value: string;
+  valueClass: string;
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="size-2 rounded-[2px]" style={{ background: color }} />
+      <span className="flex-1 text-st-3">{name}</span>
+      <span className={`font-st-mono ${valueClass}`}>{value}</span>
     </div>
   );
 }

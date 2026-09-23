@@ -62,16 +62,6 @@ export function fmtAmountEnUs(n: number): string {
   return EN_US_AMOUNT_FORMAT.format(n);
 }
 
-/**
- * Chart axis ticks: `12,500.00` below 1000, `12.50k` at or above it. Shared by
- * every money y-axis so the three chart pages can't drift apart, and so the
- * formatter isn't rebuilt for each of the ~6 ticks per render.
- */
-export function fmtAxisMoneyTick(value: unknown): string {
-  const n = Number(value);
-  return n >= 1000 ? `${AMOUNT_FORMAT.format(n / 1000)}k` : AMOUNT_FORMAT.format(n);
-}
-
 /** `292772750.79` -> "292.77M" — for the jackpot figures, the one amount in
  * this app too big to sit next to anything else at full precision (a
  * nine-figure peso jackpot). Below a million, the plain amount. */
