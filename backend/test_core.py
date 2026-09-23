@@ -28,6 +28,7 @@ import db
 import schema
 from app import security
 from app.routers import travel
+from app.services import pcso_results
 
 
 def check_translate_sql() -> None:
@@ -343,6 +344,78 @@ def check_lotto_bulk_upsert_sql() -> None:
     assert insert_params[10] == "2026-01-08", insert_params
     assert insert_params[12:18] == (13, 14, 15, 16, 17, 18), insert_params
     assert insert_params[18:20] == (3.0, 2), insert_params
+
+
+def check_pcso_results() -> None:
+    """Pin what the PCSO sync reads off the results grid -- only tracked games,
+    numbers sorted the way lotto_draw's CHECK needs them, a bad row skipped
+    rather than sinking the rest -- and where it resumes searching from."""
+    html = """<table class="Grid search-lotto-result-table">
+      <tr><th>LOTTO GAME</th><th>COMBINATIONS</th><th>DRAW DATE</th><th>JACKPOT (PHP)</th><th>WINNERS</th></tr>
+      <tr><td>Ultra Lotto 6/58</td><td>18-03-22-20-19-43</td><td>9/22/2026</td><td>322,258,134.01</td><td>1</td></tr>
+      <tr><td>3D Lotto 2PM</td><td>0-3-4</td><td>9/22/2026</td><td>4,500.00</td><td>164</td></tr>
+      <tr><td>Lotto 6/42</td><td>01-01-02-03-04-05</td><td>9/22/2026</td><td>5,000,000.00</td><td>0</td></tr>
+    </table>"""
+    games = {"Ultra Lotto 6/58", "Lotto 6/42"}
+    got = pcso_results.parse_results(html, games)
+    assert got == [
+        pcso_results.PcsoResult(
+            game="Ultra Lotto 6/58",
+            draw_date=dt.date(2026, 9, 22),
+            numbers=[3, 18, 19, 20, 22, 43],
+            jackpot_prize=322258134.01,
+            winners=1,
+        )
+    ], got  # 3D is untracked; the 6/42 row repeats a number, so it's skipped
+    assert pcso_results.parse_results("<p>no draws</p>", games) == []
+
+    today = dt.date(2026, 9, 23)
+    # Resume after the game furthest behind...
+    assert pcso_results.sync_start(["2026-09-22", "2026-09-20"], today) == dt.date(2026, 9, 21)
+    # ...capped at SYNC_DAYS back, which is also where a game with no results starts.
+    floor = today - dt.timedelta(days=pcso_results.SYNC_DAYS - 1)
+    assert pcso_results.sync_start(["2026-09-22", None], today) == floor
+    assert pcso_results.sync_start(["2020-01-01"], today) == floor
+    # Everything current -> a start after today, i.e. nothing to fetch.
+    assert pcso_results.sync_start(["2026-09-23"], today) > today
+
+
+def check_lotto_results_insert_sql() -> None:
+    """Pin the PCSO sync's insert to skip, not overwrite, a game+date that
+    already has a result -- the ``WHERE lotto_draw.n1 IS NULL`` on the upsert
+    is the whole difference from ``upsert_lotto_draws_bulk`` -- and to collapse
+    a game+date PCSO lists twice, which Postgres would otherwise reject."""
+    calls: list[tuple[str, tuple]] = []
+
+    class _Cursor:
+        rowcount = 2
+
+        def execute(self, sql, params=None):
+            calls.append((" ".join(sql.split()), tuple(params)))
+
+    @contextmanager
+    def _conn():
+        yield None
+
+    @contextmanager
+    def _cursor(_):
+        yield _Cursor()
+
+    row = {"game_id": 3, "draw_date": "2026-09-22", "numbers": [1, 2, 3, 4, 5, 6], "jackpot_prize": 1.0, "winners": 0}
+    rows = [row, {**row, "game_id": 5}, row]  # the same 6/58 draw listed twice
+    saved = db.get_connection, db.db_cursor
+    db.get_connection, db.db_cursor = _conn, _cursor
+    try:
+        assert db.insert_lotto_results(rows) == 2
+        assert db.insert_lotto_results([]) == 0
+    finally:
+        db.get_connection, db.db_cursor = saved
+
+    assert len(calls) == 1, calls  # and none at all for an empty batch
+    sql, params = calls[0]
+    assert sql.endswith("WHERE lotto_draw.n1 IS NULL"), sql
+    assert sql.count("(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)") == 2, sql
+    assert params[:2] == ("2026-09-22", 3) and params[10:12] == ("2026-09-22", 5), params
 
 
 def check_serialize_detail_shape() -> None:

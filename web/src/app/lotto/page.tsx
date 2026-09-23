@@ -5,7 +5,13 @@ import { useEffect, useState } from "react";
 import { ChevronRightIcon, TicketIcon } from "@/components/Icons";
 import { Modal } from "@/components/Modal";
 import { PageHeader } from "@/components/PageHeader";
-import { getLottoGames, importLottoDrawResultsText, lottoGameSlug, type LottoGame } from "@/lib/api";
+import {
+  getLottoGames,
+  importLottoDrawResultsText,
+  lottoGameSlug,
+  syncLottoResultsFromPcso,
+  type LottoGame,
+} from "@/lib/api";
 import { formatDate, toIsoDateLocal } from "@/lib/dateFormat";
 import { fmtCount, fmtJackpotCompact } from "@/lib/formatNumber";
 
@@ -105,6 +111,7 @@ export default function LottoGamesPage() {
   const [importError, setImportError] = useState<string | null>(null);
   const [importSummary, setImportSummary] = useState<ImportSummary | null>(null);
   const [saving, setSaving] = useState(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
 
   const load = async () => {
     try {
@@ -117,6 +124,15 @@ export default function LottoGamesPage() {
 
   useEffect(() => {
     void load();
+    // New results from pcso.gov.ph land in the background, alongside the
+    // cards; they only reload when something was added (a new jackpot).
+    syncLottoResultsFromPcso()
+      .then((r) => {
+        if (r.inserted > 0) void load();
+      })
+      .catch((e: unknown) =>
+        setSyncError(e instanceof Error ? e.message : "Couldn't check PCSO for new results."),
+      );
   }, []);
 
   const openImport = () => {
@@ -208,6 +224,9 @@ export default function LottoGamesPage() {
       </header>
 
       {error && <p className={ERROR_ALERT_CLASSES}>{error}</p>}
+      {syncError && (
+        <p className="text-sm text-ink-3">Couldn&apos;t fetch new results from PCSO: {syncError}</p>
+      )}
       {!error && games === null && <p className={LOADING_TEXT_CLASSES}>Loading…</p>}
 
       {games && (

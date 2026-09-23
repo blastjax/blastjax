@@ -2359,6 +2359,56 @@ def upsert_lotto_draws_bulk(game_id: int, rows: list[dict[str, Any]]) -> dict[st
             return {"inserted": inserted, "updated": updated, "total": len(rows)}
 
 
+def list_lotto_latest_results() -> list[dict[str, Any]]:
+    """Each game's id, name, and newest draw date that has winning numbers
+    (``latest``, null if none) -- where the PCSO sync resumes from. A date
+    logged ahead of its result doesn't count, so the sync still fills it in."""
+    with get_connection() as conn:
+        with db_cursor(conn) as cur:
+            cur.execute(
+                """
+                SELECT g.id, g.name, max(d.draw_date) AS latest
+                FROM lotto_game g
+                LEFT JOIN lotto_draw d ON d.game_id = g.id AND d.n1 IS NOT NULL
+                GROUP BY g.id, g.name
+                """
+            )
+            return [_row_to_dict(cur, r) for r in cur.fetchall()]
+
+
+def insert_lotto_results(rows: list[dict[str, Any]]) -> int:
+    """Insert results pulled from PCSO (see ``app.services.pcso_results``) in
+    one statement, skipping every game+date that already has winning numbers
+    -- a stored result is never overwritten, unlike ``upsert_lotto_draws_bulk``.
+    A date logged ahead of its result (numbers NULL, see ``upsert_lotto_draw``)
+    gets them filled in. Each row: ``{"game_id", "draw_date", "numbers",
+    "jackpot_prize", "winners"}``. Returns how many draws were written."""
+    # Collapsed per game+date: ON CONFLICT DO UPDATE can't touch one row twice
+    # in a statement (see upsert_lotto_draws_bulk).
+    by_key = {(r["game_id"], r["draw_date"]): r for r in rows}
+    if not by_key:
+        return 0
+    params: list[Any] = []
+    for r in by_key.values():
+        params.extend((r["draw_date"], r["game_id"], *r["numbers"], r["jackpot_prize"], r["winners"]))
+    values_sql = ",".join(["(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"] * len(by_key))
+    with get_connection() as conn:
+        with db_cursor(conn) as cur:
+            cur.execute(
+                f"""
+                INSERT INTO lotto_draw (draw_date, game_id, n1, n2, n3, n4, n5, n6, jackpot_prize, winners)
+                VALUES {values_sql}
+                ON CONFLICT (draw_date, game_id) DO UPDATE SET
+                    n1 = excluded.n1, n2 = excluded.n2, n3 = excluded.n3,
+                    n4 = excluded.n4, n5 = excluded.n5, n6 = excluded.n6,
+                    jackpot_prize = excluded.jackpot_prize, winners = excluded.winners
+                WHERE lotto_draw.n1 IS NULL
+                """,
+                params,
+            )
+            return cur.rowcount
+
+
 def get_lotto_draw_id_by_date(game_id: int, draw_date: Any) -> int | None:
     with get_connection() as conn:
         with db_cursor(conn) as cur:

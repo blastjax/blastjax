@@ -10,3 +10,7 @@ argon2-cffi~=25.1
 # Postgres driver (Neon). psycopg2-binary ships prebuilt wheels, so the image
 # needs no libpq/compiler at build time.
 psycopg2-binary~=2.9
+# PCSO results sync (app/services/pcso_results.py): pcso.gov.ph's Akamai
+# front 403s python-requests, so curl_cffi impersonates Chrome's TLS.
+curl_cffi~=0.16.3
+beautifulsoup4~=4.15

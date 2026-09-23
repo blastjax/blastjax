@@ -1146,6 +1146,14 @@ export async function importLottoDrawResultsText(gameId: number, text: string) {
   }>("POST", "/api/lotto/import-text", { game_id: gameId, text });
 }
 
+/** Pulls every game's results newer than what's stored from pcso.gov.ph —
+ * the Lotto page fires this on load; the server only actually scrapes from
+ * 10 PM PH time, at most every 15 minutes. A date that already has a result
+ * is skipped, never overwritten. */
+export async function syncLottoResultsFromPcso() {
+  return sendJson<{ inserted: number }>("POST", "/api/lotto/sync-pcso");
+}
+
 /** An app-managed user account. Passwords are Argon2id-hashed server-side —
  * this type never carries one. These are the credentials checked at login
  * (see AuthGate) once at least one user exists; managed via Settings → Users. */

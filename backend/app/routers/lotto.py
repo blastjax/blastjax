@@ -5,6 +5,8 @@ prize at stake, and how many tickets won it. A draw is upserted by date
 (posting the same date again overwrites that date's result) — including via
 ``POST /api/lotto/import-text``, which bulk-loads pasted historic results
 text (the same shape "Paste attempts" reads, one draw per line) in one shot.
+``POST /api/lotto/sync-pcso`` pulls new results straight from pcso.gov.ph
+instead, and never overwrites a date that already has one.
 Attempts are the user's own picks, added, edited, and removed underneath a
 draw — linked to it (and so to its date) via ``draw_id``.
 """
@@ -12,6 +14,7 @@ draw — linked to it (and so to its date) via ``draw_id``.
 from __future__ import annotations
 
 import datetime as dt
+import time
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -27,15 +30,18 @@ from app.schemas.lotto import (
 from app.services.lotto_analysis import LottoAnalysis, NumberStat, PairStat, analyze_draws
 from app.services.lotto_import import import_rows_to_bulk_params, parse_lotto_draw_text
 from app.services.lotto_prize_analysis import DrawRecord, PrizeAnalysis, analyze_prizes
+from app.services.pcso_results import PH_TIME, PcsoError, fetch_results, sync_start
 from db import (
     delete_lotto_attempt,
     delete_lotto_draw,
     get_lotto_draw_id_by_date,
     insert_lotto_attempt,
     insert_lotto_attempts_bulk,
+    insert_lotto_results,
     list_lotto_draw_results,
     list_lotto_draws,
     list_lotto_games,
+    list_lotto_latest_results,
     update_lotto_attempt,
     update_lotto_draw,
     upsert_lotto_draw,
@@ -289,6 +295,55 @@ def lotto_import_text(body: LottoImportText) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail=detail)
     summary = upsert_lotto_draws_bulk(body.game_id, import_rows_to_bulk_params(parsed))
     return {**summary, "errors": errors}
+
+
+# pcso.gov.ph is only asked from 10 PM PH time, when the night's draws are
+# posted, and then at most once per _PCSO_SYNC_EVERY however often the Lotto
+# page loads -- few enough requests to stay under Akamai's bot protection. The
+# API runs a single uvicorn worker, so a module global is all the state.
+_PCSO_SYNC_FROM = dt.time(22)
+_PCSO_SYNC_EVERY = 15 * 60
+_pcso_synced_at: float | None = None
+
+
+@router.post("/api/lotto/sync-pcso")
+def lotto_sync_pcso() -> dict[str, Any]:
+    """Pull every tracked game's results newer than what's stored from
+    pcso.gov.ph -- the Lotto page fires this on load, but it's a no-op before
+    10 PM PH time. Only the gap is searched (from the day after the game
+    furthest behind, see ``sync_start``), so a night the page wasn't opened is
+    caught up the next one, and a game+date that already has a result is
+    skipped, never overwritten (see ``insert_lotto_results``). ``inserted`` is
+    how many draws were added."""
+    global _pcso_synced_at
+    ph_now = dt.datetime.now(PH_TIME)
+    if ph_now.time() < _PCSO_SYNC_FROM:
+        return {"inserted": 0}
+    now = time.monotonic()
+    if _pcso_synced_at is not None and now - _pcso_synced_at < _PCSO_SYNC_EVERY:
+        return {"inserted": 0}
+    _pcso_synced_at = now  # stamped up front, so a failing PCSO isn't retried on every load either
+    games = list_lotto_latest_results()
+    today = ph_now.date()
+    start = sync_start((g["latest"] for g in games), today)
+    if start > today:
+        return {"inserted": 0}
+    game_ids = {g["name"]: g["id"] for g in games}
+    try:
+        results = fetch_results(start, today, game_ids.keys())
+    except PcsoError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    rows = [
+        {
+            "game_id": game_ids[r.game],
+            "draw_date": r.draw_date.isoformat(),
+            "numbers": r.numbers,
+            "jackpot_prize": r.jackpot_prize,
+            "winners": r.winners,
+        }
+        for r in results
+    ]
+    return {"inserted": insert_lotto_results(rows)}
 
 
 @router.put("/api/lotto/{draw_id}")
