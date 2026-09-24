@@ -1001,6 +1001,9 @@ export type LottoGame = {
   /** The game's current jackpot — its newest draw that has one. Null until a
    * draw with a prize is logged. */
   jackpot_prize: number | null;
+  /** Date of the newest draw with attempts logged against it — the last draw
+   * played. Null until the game has an attempt. */
+  last_attempt_draw_date: string | null;
 };
 
 export async function getLottoGames() {

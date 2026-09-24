@@ -257,6 +257,11 @@ export default function LottoGamesPage() {
                       ? `Jackpot ${fmtJackpotCompact(game.jackpot_prize)}`
                       : "No jackpot logged yet"}
                   </span>
+                  {game.last_attempt_draw_date && (
+                    <span className="mt-0.5 block text-sm text-ink-3">
+                      Last draw played: {formatDate(game.last_attempt_draw_date)}
+                    </span>
+                  )}
                   {nextDraw && (
                     <span className="mt-0.5 block text-sm text-ink-3">
                       Next draw: {nextDraw}

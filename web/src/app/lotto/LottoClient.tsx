@@ -2,9 +2,9 @@
 
 import Link from "next/link";
 import { AmountInput } from "@/components/AmountInput";
-import { PencilIcon, TrashIcon } from "@/components/Icons";
+import { ChevronRightIcon, PencilIcon, TrashIcon } from "@/components/Icons";
 import { PageHeader } from "@/components/PageHeader";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { Modal } from "@/components/Modal";
 import {
   createLottoAttempt,
@@ -19,8 +19,13 @@ import {
   type LottoAttemptRow,
   type LottoDrawDetail,
 } from "@/lib/api";
-import { formatDate, formatMonthDayShort } from "@/lib/dateFormat";
-import { fmtAmountOrDash, fmtCount, fmtJackpotCompact } from "@/lib/formatNumber";
+import {
+  MONTH_NAMES_FULL,
+  formatDate,
+  formatMonthDayShort,
+  parseDateOnlyLocal,
+} from "@/lib/dateFormat";
+import { fmtCount, fmtJackpotCompact } from "@/lib/formatNumber";
 import {
   ACTION_BUTTON_CLASSES,
   ADD_BUTTON_CLASSES,
@@ -412,8 +417,8 @@ function NumberBall({
 }: {
   n: number;
   variant?: "neutral" | "result" | "match" | "miss";
-  /** "lg" is 3x the "md" ball — used for the hero draw's own numbers, where
-   * they're the single most important thing on the page. */
+  /** "lg" is ~2x the "md" ball — used for a draw card's own result, where
+   * it's the single most important thing on the page. */
   size?: "md" | "lg";
 }) {
   const styles: Record<string, string> = {
@@ -427,13 +432,67 @@ function NumberBall({
   };
   const sizeClasses =
     size === "lg"
-      ? "h-[84px] w-[84px] text-[28px] sm:h-[108px] sm:w-[108px] sm:text-[36px]"
+      ? "h-12 w-12 text-lg sm:h-16 sm:w-16 sm:text-2xl"
       : "h-7 w-7 text-xs sm:h-9 sm:w-9 sm:text-sm";
   return (
     <span
       className={`flex ${sizeClasses} shrink-0 items-center justify-center rounded-full border font-semibold tabular-nums ${styles[variant]}`}
     >
       {String(n).padStart(2, "0")}
+    </span>
+  );
+}
+
+/** The attempt that matched the most of a draw's result: how many it hit
+ * (-1 when the draw has no result or no attempts) and which result numbers
+ * those were, so History can light them up on the draw's own balls. */
+function bestAttempt(detail: LottoDrawDetail): { count: number; hits: Set<number> } {
+  let best = { count: -1, hits: new Set<number>() };
+  if (detail.draw.numbers.length !== 6) return best;
+  const drawSet = new Set(detail.draw.numbers);
+  for (const a of detail.attempts) {
+    const hits = new Set(a.numbers.filter((n) => drawSet.has(n)));
+    if (hits.size > best.count) best = { count: hits.size, hits };
+  }
+  return best;
+}
+
+const WEEKDAY_FORMAT = new Intl.DateTimeFormat("en-US", { weekday: "short" });
+const LONG_DATE_FORMAT = new Intl.DateTimeFormat("en-US", {
+  weekday: "long",
+  month: "long",
+  day: "numeric",
+  year: "numeric",
+});
+
+/** One attempt line's own score, at the end of its row — tinted once it
+ * reaches a prize tier, the same threshold `MatchPill` uses. */
+function ScoreCell({ count }: { count: number }) {
+  return (
+    <span
+      className={`flex h-9 w-11 shrink-0 items-center justify-center rounded-lg text-xs font-semibold tabular-nums ${
+        count >= 3
+          ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300"
+          : "text-ink-4"
+      }`}
+    >
+      {count}/6
+    </span>
+  );
+}
+
+/** "Best 4/6" pill, tinted by prize tier — 3+ is where PCSO starts paying,
+ * 6 is the jackpot. */
+function MatchPill({ count }: { count: number }) {
+  const tone =
+    count === 6
+      ? "bg-amber-400 text-amber-950"
+      : count >= 3
+        ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300"
+        : "bg-surface-2 text-ink-2";
+  return (
+    <span className={`rounded-full px-2.5 py-1 text-xs font-semibold tabular-nums ${tone}`}>
+      {count === 6 ? "Jackpot!" : `Best ${count}/6`}
     </span>
   );
 }
@@ -489,16 +548,20 @@ function StatTile({
   label,
   value,
   tone,
+  hint,
 }: {
   label: string;
   value: string;
   tone: keyof typeof STAT_TILE_TONES;
+  /** One plain-language line saying what the number means. */
+  hint?: string;
 }) {
   const t = STAT_TILE_TONES[tone];
   return (
-    <div className={`rounded-lg border p-3 ${t.card}`}>
+    <div className={`rounded-lg border p-4 ${t.card}`}>
       <p className={`text-[11px] font-semibold uppercase tracking-wide ${t.label}`}>{label}</p>
       <p className={`mt-1 text-2xl font-bold tabular-nums ${t.value}`}>{value}</p>
+      {hint && <p className="mt-1 text-xs text-ink-3">{hint}</p>}
     </div>
   );
 }
@@ -536,9 +599,9 @@ type InsightsData = {
   latestDrawSet: Set<number>;
 };
 
-/** A cell's look: its frequency band, or `latest` when the number came up
- * in the most recent result — that overrides the band, since "this just got
- * drawn" is the thing you want to spot first. */
+/** A legend entry: a frequency band, or `latest` — a ring drawn *on top of*
+ * a cell's band when the number came up in the most recent result, so
+ * spotting "this just got drawn" doesn't hide how often you play it. */
 type BoardSwatch = BoardTier | "latest";
 
 /** One place for each swatch, so the board cells and the legend under them
@@ -557,14 +620,14 @@ const BOARD_SWATCH_CLASSES: Record<BoardSwatch, string> = {
   secondLeast: "bg-zinc-400 text-zinc-900 dark:bg-zinc-600 dark:text-zinc-100",
   sometimes: "bg-zinc-600 text-white dark:bg-zinc-400 dark:text-zinc-900",
   most: "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900",
-  latest: "bg-emerald-700 text-white dark:bg-emerald-400 dark:text-emerald-950",
+  latest: "ring-2 ring-emerald-500 ring-offset-2 ring-offset-surface",
 };
 
 const BOARD_SWATCH_LABELS: Record<BoardSwatch, string> = {
-  never: "Never played",
-  least: "Least",
-  secondLeast: "Second least",
-  sometimes: "Sometimes",
+  never: "Never",
+  least: "Rarely",
+  secondLeast: "Sometimes",
+  sometimes: "Often",
   most: "Most",
   latest: "In latest result",
 };
@@ -590,7 +653,9 @@ function quantile(ascending: number[], q: number): number {
   return lo === hi ? ascending[lo] : ascending[lo] + (ascending[hi] - ascending[lo]) * (pos - lo);
 }
 
-function buildInsights(draws: LottoDrawDetail[]): InsightsData {
+/** `maxNumber` is the game's field size (45 for 6/45), so the board only
+ * shows numbers the game can actually draw. */
+function buildInsights(draws: LottoDrawDetail[], maxNumber: number): InsightsData {
   const played = new Map<number, number>();
   const drawn = new Map<number, number>();
   const histCounts = [0, 0, 0, 0, 0, 0, 0];
@@ -634,7 +699,7 @@ function buildInsights(draws: LottoDrawDetail[]): InsightsData {
   // bands and leaves the bottom two permanently empty. Quartiles of the
   // numbers actually played put ~a quarter of the board in each band, which
   // is what "least played" vs "most played" is supposed to mean.
-  const counts = Array.from({ length: 58 }, (_, i) => played.get(i + 1) ?? 0);
+  const counts = Array.from({ length: maxNumber }, (_, i) => played.get(i + 1) ?? 0);
   const playedAscending = counts.filter((v) => v > 0).sort((a, b) => a - b);
   const q1 = quantile(playedAscending, 0.25);
   const q2 = quantile(playedAscending, 0.5);
@@ -725,19 +790,6 @@ const TAB_LABELS: Record<LottoTab, string> = {
   insights: "Insights",
 };
 
-// A minimum match count — 0 means "all", 6 means only a jackpot line.
-type AttemptFilter = 0 | 1 | 2 | 3 | 4 | 5 | 6;
-const ATTEMPT_FILTERS: AttemptFilter[] = [0, 1, 2, 3, 4, 5, 6];
-const FILTER_LABELS: Record<AttemptFilter, string> = {
-  0: "All",
-  1: "≥1",
-  2: "≥2",
-  3: "≥3",
-  4: "≥4",
-  5: "≥5",
-  6: "6/6",
-};
-
 type AttemptSort = "ticket" | "best";
 const SORT_LABELS: Record<AttemptSort, string> = {
   ticket: "By ticket",
@@ -767,9 +819,9 @@ export default function LottoClient({ gameId }: { gameId: number }) {
 
   const [activeTab, setActiveTab] = useState<LottoTab>("draw");
 
-  // Refine "This draw"'s attempt list without touching History — these two
-  // only apply to the hero draw (see `renderDrawCard`'s `hero` option).
-  const [attemptFilter, setAttemptFilter] = useState<AttemptFilter>(0);
+  // Refine a draw card's attempt list: `attemptFilter` is an exact match
+  // count picked from the card's tally strip (null = every attempt).
+  const [attemptFilter, setAttemptFilter] = useState<number | null>(null);
   const [attemptSort, setAttemptSort] = useState<AttemptSort>("ticket");
   // A draw/ticket/attempt card's Edit/Delete icons live behind a
   // double-click instead of sitting on the card face all the time — this
@@ -781,25 +833,18 @@ export default function LottoClient({ gameId }: { gameId: number }) {
     setRevealedActions((cur) => (cur && JSON.stringify(cur) === JSON.stringify(target) ? null : target));
   };
 
-  const [collapsedIds, setCollapsedIds] = useState<Set<number>>(new Set());
   // History tab shows one compact row per draw; clicking one opens it in a
-  // modal using the same hero treatment as "This draw" (result balls,
-  // filter/sort, ticket grid) rather than navigating away.
+  // modal using the same card as "This draw" (result balls, tally strip,
+  // ticket grid) rather than navigating away.
   const [historyModalDrawId, setHistoryModalDrawId] = useState<number | null>(null);
 
-  const toggleCollapsed = (drawId: number) => {
-    setCollapsedIds((s) => {
-      const next = new Set(s);
-      if (next.has(drawId)) next.delete(drawId);
-      else next.add(drawId);
-      return next;
-    });
-  };
-
   // Draws are grouped into one card per year so a history spanning many
-  // years doesn't render as one endless flat list; every year starts
-  // collapsed and expands on click.
+  // years doesn't render as one endless flat list; the newest year opens on
+  // load (see `load`), the rest expand on click.
   const [expandedYears, setExpandedYears] = useState<Set<string>>(new Set());
+  // Most of a game's ~1,500 draws were never played — "Played" cuts History
+  // down to the ones with attempts logged.
+  const [historyFilter, setHistoryFilter] = useState<"all" | "played">("all");
 
   const toggleYearExpanded = (year: string) => {
     setExpandedYears((s) => {
@@ -810,20 +855,9 @@ export default function LottoClient({ gameId }: { gameId: number }) {
     });
   };
 
-  // A draw with no attempts has nothing to collapse, so it's never
-  // collapsible — only draws with attempts participate in collapse state.
-  const collapsibleDraws = draws.filter((d) => d.attempts.length > 0);
-
-  const allCollapsed =
-    collapsibleDraws.length > 0 && collapsibleDraws.every((d) => collapsedIds.has(d.draw.id));
-
-  const toggleCollapseAll = () => {
-    setCollapsedIds((s) => {
-      const allAreCollapsed =
-        collapsibleDraws.length > 0 && collapsibleDraws.every((d) => s.has(d.draw.id));
-      return allAreCollapsed ? new Set() : new Set(collapsibleDraws.map((d) => d.draw.id));
-    });
-  };
+  // The field size is the name's "6/NN" suffix, so the board and copy say
+  // 1–45 on Megalotto rather than the 1–58 of the biggest game.
+  const maxNumber = Number(gameName?.match(/\/(\d+)$/)?.[1]) || 58;
 
   const whatIfMatches = useMemo(() => findWhatIfMatches(draws), [draws]);
 
@@ -858,18 +892,36 @@ export default function LottoClient({ gameId }: { gameId: number }) {
   const pinnedDraw =
     draws.find((d) => d.attempts.length > 0 && d.draw.numbers.length !== 6) ?? draws[0];
 
-  // `draws` is already sorted newest-first, so same-year draws are always
-  // contiguous — one pass buckets them into ordered year groups for the
-  // History tab.
-  const yearGroups: { year: string; items: LottoDrawDetail[] }[] = [];
-  for (const detail of draws) {
+  const playedDraws = draws.filter((d) => d.attempts.length > 0);
+  const historyDraws = historyFilter === "played" ? playedDraws : draws;
+
+  // `draws` is already sorted newest-first, so same-year and same-month draws
+  // are always contiguous — one pass buckets them into ordered year → month
+  // groups for the History tab, tallying each year's summary on the way.
+  const yearGroups: {
+    year: string;
+    months: { month: number; items: LottoDrawDetail[] }[];
+    count: number;
+    played: number;
+    best: number;
+  }[] = [];
+  for (const detail of historyDraws) {
     const year = detail.draw.draw_date.slice(0, 4);
-    const last = yearGroups[yearGroups.length - 1];
-    if (last && last.year === year) {
-      last.items.push(detail);
-    } else {
-      yearGroups.push({ year, items: [detail] });
+    const month = Number(detail.draw.draw_date.slice(5, 7));
+    let group = yearGroups[yearGroups.length - 1];
+    if (!group || group.year !== year) {
+      group = { year, months: [], count: 0, played: 0, best: -1 };
+      yearGroups.push(group);
     }
+    let monthGroup = group.months[group.months.length - 1];
+    if (!monthGroup || monthGroup.month !== month) {
+      monthGroup = { month, items: [] };
+      group.months.push(monthGroup);
+    }
+    monthGroup.items.push(detail);
+    group.count += 1;
+    if (detail.attempts.length > 0) group.played += 1;
+    group.best = Math.max(group.best, bestAttempt(detail).count);
   }
 
   const [drawModal, setDrawModal] = useState<DrawModalState>(emptyDrawModal);
@@ -893,8 +945,10 @@ export default function LottoClient({ gameId }: { gameId: number }) {
       // loaded, so nothing gets silently cut off further back than that.
       const r = await getLottoDraws(gameId, 2000);
       setDraws(r.draws);
-      setCollapsedIds(
-        new Set(r.draws.filter((d) => d.attempts.length > 0).map((d) => d.draw.id)),
+      // Open the newest year the first time there's anything to show; later
+      // reloads (after a save) leave whatever the user has open alone.
+      setExpandedYears((s) =>
+        s.size > 0 || r.draws.length === 0 ? s : new Set([r.draws[0].draw.draw_date.slice(0, 4)]),
       );
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load lotto results");
@@ -1316,25 +1370,18 @@ export default function LottoClient({ gameId }: { gameId: number }) {
    * that thing (see `revealedActions`) to reveal a pencil/trash icon pair
    * for it.
    *
-   * `hero: true` is the "This draw" tab's spotlight treatment: bigger
-   * balls, an eyebrow label, and the filter/sort controls
-   * (`attemptFilter`/`attemptSort`) applied to its attempts. Every other
-   * call site (History's expanded rows) passes no options and renders
-   * exactly as before — filter/sort are a hero-only refinement, never
-   * applied to a historic draw. */
-  const renderDrawCard = (detail: LottoDrawDetail, opts: { hero?: boolean } = {}) => {
-    const hero = opts.hero ?? false;
+   * Used for "This draw" and for a History row's modal alike, with the
+   * tally strip (`attemptFilter`) and sort (`attemptSort`) applied to its
+   * attempts. */
+  const renderDrawCard = (detail: LottoDrawDetail) => {
     const hasResult = detail.draw.numbers.length === 6;
     const drawSet = new Set(detail.draw.numbers);
+    const drawDate = parseDateOnlyLocal(detail.draw.draw_date);
     const totalAttempts = detail.attempts.length;
     const ticketCount = new Set(
       detail.attempts.flatMap((a) => (a.ticket != null ? [a.ticket] : [])),
     ).size;
     const hasAttempts = totalAttempts > 0;
-    // The hero is always expanded — collapse only makes sense for History's
-    // browsing use case.
-    const collapsed = hero ? false : hasAttempts && collapsedIds.has(detail.draw.id);
-    const collapsible = hasAttempts && !hero;
     const showDrawActions =
       revealedActions?.type === "draw" && revealedActions.drawId === detail.draw.id;
     // Without a result yet, there's nothing to match attempts against —
@@ -1348,23 +1395,22 @@ export default function LottoClient({ gameId }: { gameId: number }) {
           matchCount: attempt.numbers.filter((n) => drawSet.has(n)).length,
         }))
       : detail.attempts.map((attempt) => ({ attempt, matchCount: -1 }));
-    // The filter chips are a "This draw"-only refinement — a historic card
-    // always shows everything, exactly as before.
+    // The tally strip doubles as the filter: picking a tier shows only the
+    // lines that hit exactly that many. Without a result there's nothing to
+    // filter by, so a leftover pick from another draw is ignored.
+    const activeFilter = hasResult ? attemptFilter : null;
     const attemptsByMatch =
-      hero && attemptFilter > 0
-        ? scoredAttempts.filter(({ matchCount }) => matchCount >= attemptFilter)
+      activeFilter != null
+        ? scoredAttempts.filter(({ matchCount }) => matchCount === activeFilter)
         : scoredAttempts;
-    // Always all six tiers, zero counts included, so the row of badges
-    // lines up in the same place on every card instead of shifting
-    // around based on which tiers that draw happened to hit — a summary
-    // of the whole draw, not just what the hero's filter currently reveals.
+    // All seven tiers, zero counts included, so the strip keeps the same
+    // shape on every draw — a summary of the whole draw, not of whatever
+    // the filter currently shows.
     const matchBreakdown =
-      hasResult && totalAttempts > 0
-        ? [1, 2, 3, 4, 5, 6].map((tier) => ({
+      hasResult && hasAttempts
+        ? [0, 1, 2, 3, 4, 5, 6].map((tier) => ({
             tier,
-            count: detail.attempts.filter(
-              (a) => a.numbers.filter((n) => drawSet.has(n)).length === tier,
-            ).length,
+            count: scoredAttempts.filter((s) => s.matchCount === tier).length,
           }))
         : [];
 
@@ -1401,37 +1447,27 @@ export default function LottoClient({ gameId }: { gameId: number }) {
       })),
       (c) => c.bestMatch >= 3,
     );
-    // "Best first" is the hero's read-only leaderboard view — every
-    // attempt across every ticket, ranked by match count, no per-row
-    // actions (switch back to "By ticket" for those).
+    // "Best first" is a read-only leaderboard — every attempt across every
+    // ticket, ranked by match count, no per-row actions (switch back to
+    // "By ticket" for those). Meaningless before the result is in.
     const rankedAttempts =
-      hero && attemptSort === "best"
+      hasResult && attemptSort === "best"
         ? [...attemptsByMatch].sort((a, b) => b.matchCount - a.matchCount)
         : null;
 
-    const drawNumbersDisplay = hasResult ? (
-      <div className="mt-2 flex flex-wrap justify-center gap-1 sm:gap-1.5">
-        {detail.draw.numbers.map((n) => (
-          <NumberBall key={n} n={n} variant="result" size={hero ? "lg" : "md"} />
-        ))}
+    // Six dashed placeholders stand in for a result that isn't in yet, so
+    // the card keeps its shape either way.
+    const drawNumbersDisplay = (
+      <div className="mt-4 flex flex-wrap gap-2 sm:gap-3">
+        {hasResult
+          ? detail.draw.numbers.map((n) => <NumberBall key={n} n={n} variant="result" size="lg" />)
+          : Array.from({ length: 6 }, (_, i) => (
+              <span
+                key={i}
+                className="h-12 w-12 shrink-0 rounded-full border-2 border-dashed border-line-strong sm:h-16 sm:w-16"
+              />
+            ))}
       </div>
-    ) : (
-      <span className="mt-2 inline-block rounded-full border border-dashed border-amber-300 bg-amber-50 px-2 py-1 text-xs font-medium text-amber-700 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
-        Result not in yet
-      </span>
-    );
-    const jackpotDisplay = (detail.draw.jackpot_prize != null || detail.draw.winners > 0) && (
-      <p className="mt-1.5 text-xs text-ink-3">
-        {detail.draw.jackpot_prize != null && (
-          <>Jackpot {fmtAmountOrDash(detail.draw.jackpot_prize)}</>
-        )}
-        {detail.draw.jackpot_prize != null && detail.draw.winners > 0 && " · "}
-        {detail.draw.winners > 0 && (
-          <>
-            {fmtCount(detail.draw.winners)} winner{detail.draw.winners === 1 ? "" : "s"}
-          </>
-        )}
-      </p>
     );
     // A ticketed attempt is edited/deleted as part of its ticket
     // (double-click the ticket card) — only an ungrouped attempt gets its
@@ -1465,6 +1501,7 @@ export default function LottoClient({ gameId }: { gameId: number }) {
             />
           ))}
         </div>
+        {hasResult && <ScoreCell count={attempt.numbers.filter((n) => drawSet.has(n)).length} />}
         {showActions && (
           <div
             className="flex shrink-0 items-center gap-1"
@@ -1496,88 +1533,32 @@ export default function LottoClient({ gameId }: { gameId: number }) {
       </li>
       );
     };
-    const matchBreakdownDisplay = matchBreakdown.length > 0 && (
-      <div className="mt-2 flex flex-wrap items-center gap-1.5">
-        {matchBreakdown.map(({ tier, count }) => (
-          <span
-            key={tier}
-            className={`rounded-full border border-line bg-surface-2 px-2 py-1 text-xs font-medium text-ink-2 ${
-              count === 0 ? "opacity-40" : ""
-            }`}
-          >
-            {tier}/6 &times;{count}
-          </span>
-        ))}
-      </div>
-    );
     return (
       <section
         key={detail.draw.id}
         title="Double-click for edit/delete"
-        className={
-          hero
-            ? "rounded-xl bg-surface p-5 shadow-xs sm:p-6"
-            : CARD_CLASSES
-        }
+        className={CARD_CLASSES}
         onDoubleClick={(e) => {
           e.stopPropagation();
           toggleRevealed({ type: "draw", drawId: detail.draw.id });
         }}
       >
-        <div
-          className={`group -m-1 flex flex-wrap items-start justify-between gap-3 rounded-lg p-1 transition-colors duration-150 ${
-            collapsible ? "cursor-pointer hover:bg-surface-2 dark:hover:bg-zinc-800/60" : ""
-          }`}
-          role={collapsible ? "button" : undefined}
-          tabIndex={collapsible ? 0 : undefined}
-          aria-expanded={collapsible ? !collapsed : undefined}
-          onClick={() => {
-            if (collapsible) toggleCollapsed(detail.draw.id);
-          }}
-          onKeyDown={(e) => {
-            if (!collapsible) return;
-            if (e.key === "Enter" || e.key === " ") {
-              e.preventDefault();
-              toggleCollapsed(detail.draw.id);
-            }
-          }}
-        >
+        <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
-            {hero && (
-              <div className="mb-1 flex items-center gap-2">
-                <span className="text-[10px] font-semibold uppercase tracking-wider text-indigo-600 dark:text-indigo-400">
-                  This draw
-                </span>
-                {hasResult && (
-                  <span className="flex items-center gap-1 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
-                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" aria-hidden />
-                    result in
-                  </span>
-                )}
-              </div>
+            {hasResult ? (
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300">
+                <span className="size-1.5 rounded-full bg-emerald-500" aria-hidden />
+                Result in
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-800 dark:bg-amber-950/60 dark:text-amber-300">
+                <span className="size-1.5 animate-pulse rounded-full bg-amber-500" aria-hidden />
+                Awaiting result
+              </span>
             )}
-            <h2
-              className={`font-medium text-ink ${hero ? "text-2xl" : "text-lg"} ${
-                collapsible
-                  ? "transition-colors duration-150 group-hover:text-indigo-600 dark:group-hover:text-indigo-400"
-                  : ""
-              }`}
-            >
-              {formatDate(detail.draw.draw_date)}
-              {collapsed && (
-                <span className="ml-2 text-sm font-normal text-ink-3">
-                  ({totalAttempts} attempt
-                  {totalAttempts === 1 ? "" : "s"}
-                  {ticketCount > 0
-                    ? `, ${ticketCount} ticket${ticketCount === 1 ? "" : "s"}`
-                    : ""}
-                  )
-                </span>
-              )}
+            <h2 className="mt-2 text-xl font-semibold tracking-tight text-ink sm:text-2xl">
+              {drawDate ? LONG_DATE_FORMAT.format(drawDate) : formatDate(detail.draw.draw_date)}
             </h2>
-            {drawNumbersDisplay}
-            {jackpotDisplay}
-            {matchBreakdownDisplay}
           </div>
           <div
             className="flex flex-wrap items-center gap-1.5 sm:gap-2"
@@ -1620,57 +1601,120 @@ export default function LottoClient({ gameId }: { gameId: number }) {
           </div>
         </div>
 
-        {hero && hasAttempts && (
-          <div className="mt-4 flex flex-wrap items-center gap-2">
-            {/* Seven options wrap where the (`inline-flex`, nowrap) segmented
-             * wrapper token can't — same recipe, `flex flex-wrap` instead. */}
-            <div className="flex flex-wrap gap-1 rounded-lg border border-line bg-surface-2 p-1">
-              {ATTEMPT_FILTERS.map((f) => (
-                <button
-                  key={f}
-                  type="button"
-                  className={`${SEGMENTED_BUTTON_CLASSES} ${
-                    attemptFilter === f
-                      ? SEGMENTED_BUTTON_ACTIVE_CLASSES
-                      : SEGMENTED_BUTTON_INACTIVE_CLASSES
-                  }`}
-                  onClick={() => setAttemptFilter(f)}
-                >
-                  {FILTER_LABELS[f]}
-                </button>
-              ))}
-            </div>
-            <div className={SEGMENTED_WRAPPER_CLASSES}>
-              {(Object.keys(SORT_LABELS) as AttemptSort[]).map((s) => (
-                <button
-                  key={s}
-                  type="button"
-                  className={`${SEGMENTED_BUTTON_CLASSES} ${
-                    attemptSort === s
-                      ? SEGMENTED_BUTTON_ACTIVE_CLASSES
-                      : SEGMENTED_BUTTON_INACTIVE_CLASSES
-                  }`}
-                  onClick={() => setAttemptSort(s)}
-                >
-                  {SORT_LABELS[s]}
-                </button>
-              ))}
-            </div>
+        {drawNumbersDisplay}
+
+        <dl className="mt-5 grid grid-cols-2 gap-4 sm:flex sm:gap-10">
+          <div>
+            <dt className="text-xs text-ink-3">Jackpot</dt>
+            <dd className="mt-0.5 text-lg font-semibold tabular-nums text-ink">
+              {detail.draw.jackpot_prize != null ? fmtJackpotCompact(detail.draw.jackpot_prize) : "—"}
+            </dd>
           </div>
+          <div>
+            <dt className="text-xs text-ink-3">Winners</dt>
+            <dd
+              className={`mt-0.5 text-lg font-semibold tabular-nums ${
+                detail.draw.winners > 0 ? "text-amber-700 dark:text-amber-300" : "text-ink"
+              }`}
+            >
+              {!hasResult ? "—" : detail.draw.winners > 0 ? fmtCount(detail.draw.winners) : "None"}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-xs text-ink-3">Your attempts</dt>
+            <dd className="mt-0.5 text-lg font-semibold tabular-nums text-ink">
+              {fmtCount(totalAttempts)}
+              {ticketCount > 0 && (
+                <span className="ml-1.5 text-sm font-normal text-ink-3">
+                  on {fmtCount(ticketCount)} ticket{ticketCount === 1 ? "" : "s"}
+                </span>
+              )}
+            </dd>
+          </div>
+        </dl>
+
+        {!hasAttempts && (
+          <p className={`${DASHED_EMPTY_CLASSES} mt-5`}>
+            No attempts on this draw yet — add the numbers you played to check them against the result.
+          </p>
         )}
 
-        {!collapsed && hasAttempts && (
-        <div className="mt-4 border-t border-line pt-4">
-          <div className="flex flex-wrap items-center gap-3">
-            <h3 className="text-sm font-medium text-ink-2">
-              Attempts
-            </h3>
-            {ticketCount > 0 && (
-              <span className="text-xs text-ink-3">
-                {ticketCount} ticket{ticketCount === 1 ? "" : "s"}
-              </span>
+        {hasAttempts && (
+        <div className="mt-5 border-t border-line pt-5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-semibold text-ink">How your attempts did</h3>
+              <p className="mt-0.5 text-xs text-ink-3">
+                {hasResult
+                  ? "Tap a count to show only those attempts."
+                  : "Each attempt gets scored once the result is in."}{" "}
+                Double-click a ticket to edit or delete it.
+              </p>
+            </div>
+            {hasResult && (
+              <div className={SEGMENTED_WRAPPER_CLASSES}>
+                {(Object.keys(SORT_LABELS) as AttemptSort[]).map((s) => (
+                  <button
+                    key={s}
+                    type="button"
+                    aria-pressed={attemptSort === s}
+                    className={`${SEGMENTED_BUTTON_CLASSES} ${
+                      attemptSort === s
+                        ? SEGMENTED_BUTTON_ACTIVE_CLASSES
+                        : SEGMENTED_BUTTON_INACTIVE_CLASSES
+                    }`}
+                    onClick={() => setAttemptSort(s)}
+                  >
+                    {SORT_LABELS[s]}
+                  </button>
+                ))}
+              </div>
             )}
           </div>
+
+          {/* The tally doubles as the filter: one tap narrows the list to
+              that match count, a second tap (or "Show all") clears it. */}
+          {matchBreakdown.length > 0 && (
+            <div className="mb-2 mt-3 grid grid-cols-7 gap-1.5 sm:gap-2">
+              {matchBreakdown.map(({ tier, count }) => {
+                const active = activeFilter === tier;
+                return (
+                  <button
+                    key={tier}
+                    type="button"
+                    disabled={count === 0}
+                    aria-pressed={active}
+                    aria-label={`${count} attempt${count === 1 ? "" : "s"} matched ${tier} of 6`}
+                    className={`rounded-lg border px-1 py-2 text-center transition-colors duration-150 disabled:cursor-default disabled:opacity-40 ${
+                      active
+                        ? "border-brand bg-surface ring-1 ring-brand"
+                        : tier >= 3 && count > 0
+                          ? "border-emerald-300 bg-emerald-50 hover:border-emerald-500 dark:border-emerald-800 dark:bg-emerald-950/40"
+                          : "border-transparent bg-surface-2 enabled:hover:border-line-strong"
+                    }`}
+                    onClick={() => setAttemptFilter(active ? null : tier)}
+                  >
+                    <div className="text-lg font-semibold leading-tight tabular-nums text-ink sm:text-xl">
+                      {fmtCount(count)}
+                    </div>
+                    <div className="text-[11px] font-medium text-ink-3">{tier}/6</div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          {activeFilter != null && (
+            <p className="mt-2 text-xs text-ink-3">
+              Showing only attempts that matched {activeFilter}/6 ·{" "}
+              <button
+                type="button"
+                className="font-medium text-brand-text hover:underline"
+                onClick={() => setAttemptFilter(null)}
+              >
+                Show all
+              </button>
+            </p>
+          )}
 
           {attemptsByMatch.length === 0 ? (
             <p className={`${DASHED_EMPTY_CLASSES} mt-3`}>
@@ -1693,11 +1737,11 @@ export default function LottoClient({ gameId }: { gameId: number }) {
                     ))}
                   </div>
                   {attempt.ticket != null && (
-                    <span className="shrink-0 text-xs text-ink-3">ticket {attempt.ticket}</span>
+                    <span className="hidden shrink-0 text-xs text-ink-3 sm:inline">
+                      Ticket {attempt.ticket}
+                    </span>
                   )}
-                  <span className="flex h-9 w-12 shrink-0 items-center justify-center rounded-lg bg-surface-2 text-xs font-semibold tabular-nums text-ink-2">
-                    {hasResult ? `${matchCount}/6` : "—"}
-                  </span>
+                  <ScoreCell count={matchCount} />
                 </li>
               ))}
             </ol>
@@ -1724,25 +1768,13 @@ export default function LottoClient({ gameId }: { gameId: number }) {
                       toggleRevealed({ type: "ticket", drawId: detail.draw.id, ticket: cluster.ticket });
                     }}
                   >
-                    <div className="mb-2 flex flex-wrap items-center gap-2 text-xs font-medium text-ink-3">
-                      <span className="font-semibold text-ink-2">
-                        Ticket {cluster.ticket}
-                      </span>
-                      <span>
+                    <div className="mb-3 flex flex-wrap items-center gap-2">
+                      <span className="text-sm font-semibold text-ink">Ticket {cluster.ticket}</span>
+                      <span className="text-xs text-ink-3">
                         {cluster.items.length} attempt{cluster.items.length === 1 ? "" : "s"}
                       </span>
                       <div className="ml-auto flex items-center gap-1.5">
-                        {hasResult && (
-                          <span
-                            className={`rounded-lg px-2 py-1.5 text-[10px] font-semibold ${
-                              cluster.bestMatch >= 3
-                                ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300"
-                                : "bg-surface-2 text-ink-2"
-                            }`}
-                          >
-                            best {cluster.bestMatch}/6
-                          </span>
-                        )}
+                        {hasResult && <MatchPill count={cluster.bestMatch} />}
                         <div
                           className="flex items-center gap-1.5"
                           onClick={(e) => e.stopPropagation()}
@@ -1805,7 +1837,7 @@ export default function LottoClient({ gameId }: { gameId: number }) {
           <button
             type="button"
             disabled={saving}
-            className={`${ADD_BUTTON_CLASSES} mt-3 px-2 py-1 text-xs`}
+            className="mt-4 w-full rounded-lg border border-dashed border-line-strong py-2.5 text-sm font-medium text-ink-3 transition-colors duration-150 hover:border-brand hover:text-brand-text disabled:opacity-50"
             onClick={() => openAddAttempts(detail.draw.id)}
           >
             + Add attempt
@@ -1822,68 +1854,88 @@ export default function LottoClient({ gameId }: { gameId: number }) {
    * managing a historic draw is lost, it's just reached through a modal
    * instead of always open on the page. */
   const renderHistoryRow = (detail: LottoDrawDetail) => {
-    const hasResult = detail.draw.numbers.length === 6;
-    const totalAttempts = detail.attempts.length;
-    const ticketCount = new Set(
-      detail.attempts.flatMap((a) => (a.ticket != null ? [a.ticket] : [])),
-    ).size;
-    let bestMatch = -1;
-    if (hasResult) {
-      const drawSet = new Set(detail.draw.numbers);
-      for (const a of detail.attempts) {
-        const count = a.numbers.filter((n) => drawSet.has(n)).length;
-        if (count > bestMatch) bestMatch = count;
-      }
-    }
+    const { draw, attempts } = detail;
+    const hasResult = draw.numbers.length === 6;
+    const date = parseDateOnlyLocal(draw.draw_date);
+    const ticketCount = new Set(attempts.flatMap((a) => (a.ticket != null ? [a.ticket] : []))).size;
+    const best = bestAttempt(detail);
     return (
-      <button
-        key={detail.draw.id}
-        type="button"
-        className="flex w-full flex-wrap items-center gap-3 rounded-lg border border-line bg-surface p-3 text-left transition-colors duration-150 hover:bg-surface-2 dark:hover:bg-zinc-800/60 sm:gap-4"
-        onClick={() => setHistoryModalDrawId(detail.draw.id)}
-      >
-        <div className="w-28 shrink-0">
-          <div className="text-sm font-medium text-ink">{formatDate(detail.draw.draw_date)}</div>
-          {detail.draw.jackpot_prize != null && (
-            <div className="text-xs tabular-nums text-ink-4">
-              {fmtAmountOrDash(detail.draw.jackpot_prize)}
+      <li key={draw.id}>
+        <button
+          type="button"
+          aria-label={`${formatDate(draw.draw_date)} draw`}
+          className="group flex w-full flex-wrap items-center gap-x-3 gap-y-2 rounded-lg px-2 py-2 text-left transition-colors duration-150 hover:bg-surface-2 sm:flex-nowrap sm:gap-x-5 sm:px-3"
+          onClick={() => setHistoryModalDrawId(draw.id)}
+        >
+          {/* Calendar-style date: the month is already in the group header. */}
+          <div className="w-9 shrink-0 text-center">
+            <div className="text-[11px] font-medium uppercase tracking-wide text-ink-4">
+              {date ? WEEKDAY_FORMAT.format(date) : ""}
             </div>
-          )}
-        </div>
-        {hasResult ? (
-          <div className="flex flex-wrap gap-1">
-            {detail.draw.numbers.map((n) => (
-              <NumberBall key={n} n={n} variant="result" />
-            ))}
+            <div className="text-lg font-semibold leading-tight tabular-nums text-ink">
+              {date?.getDate()}
+            </div>
           </div>
-        ) : (
-          <span className="text-xs font-medium text-amber-700 dark:text-amber-300">
-            Result not in yet
-          </span>
-        )}
-        <div className="ml-auto flex items-center gap-2 text-xs text-ink-3">
-          <span>
-            {totalAttempts > 0
-              ? `${fmtCount(totalAttempts)} attempt${totalAttempts === 1 ? "" : "s"}${
-                  ticketCount > 0
-                    ? ` · ${fmtCount(ticketCount)} ticket${ticketCount === 1 ? "" : "s"}`
-                    : ""
-                }`
-              : "no attempts"}
-          </span>
-          {bestMatch >= 0 && (
-            <span
-              className={`rounded-full px-2 py-1 font-medium ${
-                bestMatch >= 3
-                  ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300"
-                  : "bg-surface-2 text-ink-2"
+
+          {/* The result, with the numbers your best line hit filled in green. */}
+          <div className="flex gap-1 sm:gap-1.5">
+            {hasResult
+              ? draw.numbers.map((n) => (
+                  <NumberBall key={n} n={n} variant={best.hits.has(n) ? "match" : "result"} />
+                ))
+              : Array.from({ length: 6 }, (_, i) => (
+                  <span
+                    key={i}
+                    className="h-7 w-7 shrink-0 rounded-full border border-dashed border-line-strong sm:h-9 sm:w-9"
+                  />
+                ))}
+          </div>
+
+          {/* Fixed width right after the balls, so it lines up on every row
+              whatever the play summary beside it says. */}
+          <div className="hidden w-28 shrink-0 md:block">
+            <div className="text-sm font-medium tabular-nums text-ink-2">
+              {draw.jackpot_prize != null ? fmtJackpotCompact(draw.jackpot_prize) : "—"}
+            </div>
+            <div
+              className={`text-xs ${
+                hasResult && draw.winners > 0
+                  ? "font-medium text-amber-700 dark:text-amber-300"
+                  : "text-ink-4"
               }`}
             >
-              best {bestMatch}/6
-            </span>
-          )}
-        </div>
-      </button>
+              {!hasResult
+                ? "Awaiting result"
+                : draw.winners > 0
+                  ? `Won by ${fmtCount(draw.winners)}`
+                  : "No winner"}
+            </div>
+          </div>
+
+          <div className="ml-auto flex shrink-0 items-center gap-3 sm:gap-5">
+            <div className="flex flex-col items-end gap-1">
+              {attempts.length > 0 &&
+                (best.count >= 0 ? (
+                  <MatchPill count={best.count} />
+                ) : (
+                  <span className="rounded-full bg-surface-2 px-2.5 py-1 text-xs font-semibold text-ink-2">
+                    Played
+                  </span>
+                ))}
+              {attempts.length > 0 && (
+                <span className="hidden text-xs tabular-nums text-ink-4 sm:block">
+                  {fmtCount(attempts.length)} attempt{attempts.length === 1 ? "" : "s"}
+                  {ticketCount > 0
+                    ? ` · ${fmtCount(ticketCount)} ticket${ticketCount === 1 ? "" : "s"}`
+                    : ""}
+                </span>
+              )}
+            </div>
+
+            <ChevronRightIcon className="hidden size-4 text-ink-4 transition-transform duration-150 group-hover:translate-x-0.5 group-hover:text-brand-text sm:block" />
+          </div>
+        </button>
+      </li>
     );
   };
 
@@ -1904,7 +1956,7 @@ export default function LottoClient({ gameId }: { gameId: number }) {
               <Link href="/lotto" className="text-brand-text hover:underline">
                 ← All games
               </Link>{" "}
-              — log each draw (6 numbers, 1–58), then log the attempts you played underneath
+              — log each draw (6 numbers, 1–{maxNumber}), then log the attempts you played underneath
               it — matching numbers turn green.
             </>
           }
@@ -2059,201 +2111,238 @@ export default function LottoClient({ gameId }: { gameId: number }) {
             ))}
           </div>
 
-          {activeTab === "draw" && pinnedDraw && renderDrawCard(pinnedDraw, { hero: true })}
+          {activeTab === "draw" && pinnedDraw && renderDrawCard(pinnedDraw)}
 
           {activeTab === "history" && (
-            <div className="flex flex-col gap-6">
-              {collapsibleDraws.length > 0 && (
-                <div className="flex justify-end gap-2">
+            <div className="flex flex-col gap-4">
+              <div className={`${SEGMENTED_WRAPPER_CLASSES} self-start`}>
+                {(
+                  [
+                    ["all", "All draws", draws.length],
+                    ["played", "Played", playedDraws.length],
+                  ] as const
+                ).map(([value, label, count]) => (
                   <button
+                    key={value}
                     type="button"
-                    className={`${ACTION_BUTTON_CLASSES} px-2 py-1.5 text-xs sm:px-3 sm:text-sm`}
-                    onClick={toggleCollapseAll}
+                    aria-pressed={historyFilter === value}
+                    className={`${SEGMENTED_BUTTON_CLASSES} ${
+                      historyFilter === value
+                        ? SEGMENTED_BUTTON_ACTIVE_CLASSES
+                        : SEGMENTED_BUTTON_INACTIVE_CLASSES
+                    }`}
+                    onClick={() => setHistoryFilter(value)}
                   >
-                    {allCollapsed ? "Expand all" : "Collapse all"}
+                    {label} <span className="tabular-nums opacity-70">{fmtCount(count)}</span>
                   </button>
-                </div>
+                ))}
+              </div>
+
+              {yearGroups.length === 0 && (
+                <p className={DASHED_EMPTY_CLASSES}>
+                  No played draws yet — log attempts on a draw and it shows up here.
+                </p>
               )}
 
-              <div className="flex flex-col gap-4">
-                {yearGroups.map((group) => {
-                  const expanded = expandedYears.has(group.year);
-                  let bestOfYear = -1;
-                  for (const d of group.items) {
-                    if (d.draw.numbers.length !== 6) continue;
-                    const s = new Set(d.draw.numbers);
-                    for (const a of d.attempts) {
-                      const c = a.numbers.filter((n) => s.has(n)).length;
-                      if (c > bestOfYear) bestOfYear = c;
-                    }
-                  }
-                  return (
-                    <section key={group.year} className={CARD_CLASSES}>
-                      <button
-                        type="button"
-                        className="-m-1 flex w-full flex-wrap items-center justify-between gap-3 rounded-lg p-1 text-left transition-colors duration-150 hover:bg-surface-2 dark:hover:bg-zinc-800/60"
-                        aria-expanded={expanded}
-                        onClick={() => toggleYearExpanded(group.year)}
-                      >
-                        <div className="flex items-baseline gap-3">
-                          <h2 className="text-lg font-medium text-ink">
-                            {group.year}
-                          </h2>
-                          <span className="text-xs text-ink-3">
-                            {fmtCount(group.items.length)} draw{group.items.length === 1 ? "" : "s"}
-                            {bestOfYear >= 0 ? ` · best ${bestOfYear}/6` : ""}
-                          </span>
-                        </div>
-                        <span
+              {yearGroups.map((group) => {
+                const expanded = expandedYears.has(group.year);
+                return (
+                  <section
+                    key={group.year}
+                    className="rounded-xl border border-line bg-surface p-2 shadow-xs sm:p-3"
+                  >
+                    <button
+                      type="button"
+                      className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors duration-150 hover:bg-surface-2 sm:px-3"
+                      aria-expanded={expanded}
+                      onClick={() => toggleYearExpanded(group.year)}
+                    >
+                      <h2 className="text-lg font-semibold tabular-nums text-ink">{group.year}</h2>
+                      <span className="flex flex-wrap items-center gap-x-2 text-xs text-ink-3">
+                        <span>
+                          {fmtCount(group.count)} draw{group.count === 1 ? "" : "s"}
+                        </span>
+                        {historyFilter === "all" && group.played > 0 && (
+                          <span>· {fmtCount(group.played)} played</span>
+                        )}
+                      </span>
+                      <span className="ml-auto flex items-center gap-3">
+                        {group.best >= 0 && <MatchPill count={group.best} />}
+                        <ChevronRightIcon
                           aria-hidden
-                          className={`text-ink-4 transition-transform ${
+                          className={`size-4 text-ink-4 transition-transform duration-150 ${
                             expanded ? "rotate-90" : ""
                           }`}
-                        >
-                          ›
-                        </span>
-                      </button>
-                      {expanded && (
-                        <div className="mt-4 flex flex-col gap-2 border-t border-line pt-4">
-                          {group.items.map((detail) => renderHistoryRow(detail))}
+                        />
+                      </span>
+                    </button>
+                    {expanded &&
+                      group.months.map(({ month, items }) => (
+                        <div key={month} className="mt-2 border-t border-line pt-2">
+                          <h3 className="flex items-baseline gap-2 px-2 pb-1 pt-1 sm:px-3">
+                            <span className="text-xs font-semibold uppercase tracking-wide text-ink-2">
+                              {MONTH_NAMES_FULL[month - 1]}
+                            </span>
+                            <span className="text-xs text-ink-4">
+                              {fmtCount(items.length)} draw{items.length === 1 ? "" : "s"}
+                            </span>
+                          </h3>
+                          <ul className="flex flex-col">{items.map(renderHistoryRow)}</ul>
                         </div>
-                      )}
-                    </section>
-                  );
-                })}
-              </div>
+                      ))}
+                  </section>
+                );
+              })}
             </div>
           )}
 
           {activeTab === "insights" &&
             (() => {
-              const ins = buildInsights(draws);
+              const ins = buildInsights(draws, maxNumber);
               const maxFavPlayed = Math.max(1, ...ins.favourites.map((f) => f.played));
               const maxFavDrawn = Math.max(1, ...ins.favourites.map((f) => f.drawn));
+              const maxHist = Math.max(1, ...ins.histCounts);
               return (
                 <div className="flex flex-col gap-6">
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                     <StatTile
                       label="Average match"
-                      value={ins.totalScored > 0 ? ins.avgMatch.toFixed(2) : "—"}
+                      value={ins.totalScored > 0 ? `${ins.avgMatch.toFixed(2)} / 6` : "—"}
                       tone="indigo"
+                      hint="Numbers each attempt hit, on average."
                     />
                     <StatTile
-                      label="Hit rate ≥3"
+                      label="Prize rate"
                       value={ins.totalScored > 0 ? `${ins.hitRate3.toFixed(1)}%` : "—"}
                       tone="emerald"
+                      hint="Attempts that matched 3 or more — where prizes start."
                     />
                     <StatTile
-                      label="Never drawn on me"
+                      label="Played, never drawn"
                       value={fmtCount(ins.neverDrawnCount)}
                       tone="amber"
+                      hint="Numbers you pick that have never come up in this game."
                     />
                   </div>
 
                   <section className={CARD_CLASSES}>
-                    <h2 className="text-sm font-semibold text-ink">Where my attempts land</h2>
+                    <div className="flex flex-wrap items-baseline justify-between gap-2">
+                      <h2 className="text-base font-semibold text-ink">How your attempts score</h2>
+                      {ins.totalScored > 0 && (
+                        <span className="text-xs text-ink-3">
+                          {fmtCount(ins.totalScored)} scored attempt{ins.totalScored === 1 ? "" : "s"}
+                        </span>
+                      )}
+                    </div>
                     <p className="mt-1 text-xs text-ink-3">
-                      Every scored attempt (against a draw with a result in), by match count.
+                      Every attempt on a draw with a result, by how many numbers it matched.
+                      Green rows are prize tiers.
                     </p>
                     {ins.totalScored === 0 ? (
                       <p className={`${DASHED_EMPTY_CLASSES} mt-3`}>
                         No scored attempts yet — this fills in once a draw&apos;s result is set.
                       </p>
                     ) : (
-                      <div className="mt-4 flex flex-col gap-2">
-                        {ins.histCounts.map((count, tier) => (
-                          <div key={tier} className="flex items-center gap-3">
-                            <span className="w-8 shrink-0 text-xs font-medium text-ink-3">
-                              {tier}/6
-                            </span>
-                            <div className="h-5 min-w-0 flex-1 overflow-hidden rounded-full bg-surface-2">
-                              <div
-                                className={`h-full rounded-full ${
-                                  tier >= 3 ? "bg-emerald-500" : "bg-ink-4"
+                      <div className="mt-4 flex flex-col gap-2.5">
+                        {ins.histCounts.map((count, tier) => {
+                          const pct = (count / ins.totalScored) * 100;
+                          return (
+                            <div
+                              key={tier}
+                              className="flex items-center gap-3"
+                              title={`${fmtCount(count)} attempt${count === 1 ? "" : "s"} (${pct.toFixed(1)}%) matched ${tier} of 6`}
+                            >
+                              <span
+                                className={`w-9 shrink-0 text-xs font-semibold tabular-nums ${
+                                  tier >= 3 ? "text-emerald-700 dark:text-emerald-300" : "text-ink-3"
                                 }`}
-                                style={{
-                                  width: `${Math.max(
-                                    (count / ins.totalScored) * 100,
-                                    count > 0 ? 2 : 0,
-                                  )}%`,
-                                }}
-                              />
+                              >
+                                {tier}/6
+                              </span>
+                              {/* Scaled to the tallest tier, not the total, so the
+                                  shape reads at a glance; the % carries the share. */}
+                              <div className="h-2.5 min-w-0 flex-1 rounded bg-surface-2">
+                                <div
+                                  className={`h-full rounded ${tier >= 3 ? "bg-emerald-500" : "bg-ink-4"}`}
+                                  style={{ width: `${count > 0 ? Math.max((count / maxHist) * 100, 1.5) : 0}%` }}
+                                />
+                              </div>
+                              <span className="w-24 shrink-0 text-right text-xs tabular-nums">
+                                <span className="font-semibold text-ink">{fmtCount(count)}</span>
+                                <span className="text-ink-4"> · {pct.toFixed(0)}%</span>
+                              </span>
                             </div>
-                            <span className="w-14 shrink-0 text-right text-xs font-medium tabular-nums text-ink-2">
-                              {fmtCount(count)}
-                            </span>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     )}
                   </section>
 
                   <section className={CARD_CLASSES}>
-                    <h2 className="text-sm font-semibold text-ink">My numbers vs the machine</h2>
+                    <h2 className="text-base font-semibold text-ink">Your favourite numbers</h2>
                     <p className="mt-1 text-xs text-ink-3">
-                      How often you play a number, against how often it&apos;s been drawn.
+                      The numbers you play most, beside how often each has actually been drawn.
+                      Green = in the latest result.
                     </p>
                     {ins.favourites.length === 0 ? (
                       <p className={`${DASHED_EMPTY_CLASSES} mt-3`}>
                         Log some attempts to see this.
                       </p>
                     ) : (
-                      <>
-                        <div className="mt-4 flex flex-col gap-3">
-                          {ins.favourites.map((f) => (
-                            <div key={f.n} className="flex items-center gap-3">
-                              <NumberBall n={f.n} variant={ins.latestDrawSet.has(f.n) ? "match" : "neutral"} />
-                              <div className="flex min-w-0 flex-1 flex-col gap-1">
-                                <div className="h-2 rounded-full bg-surface-2">
-                                  <div
-                                    className="h-full rounded-full bg-ink-4"
-                                    style={{ width: `${(f.played / maxFavPlayed) * 100}%` }}
-                                  />
+                      // Two side-by-side columns, each on its own scale with its
+                      // own heading — play counts (tens) and draw counts
+                      // (hundreds) never share a bar, so neither gets misread
+                      // against the other.
+                      <div className="mt-4 grid grid-cols-[auto_minmax(0,1fr)_minmax(0,1fr)] items-center gap-x-3 gap-y-2.5 sm:gap-x-6">
+                        <span />
+                        <span className="text-xs font-medium text-ink-3">You played it</span>
+                        <span className="text-xs font-medium text-ink-3">It was drawn</span>
+                        {ins.favourites.map((f) => (
+                          <Fragment key={f.n}>
+                            <NumberBall n={f.n} variant={ins.latestDrawSet.has(f.n) ? "match" : "neutral"} />
+                            {(
+                              [
+                                [f.played, maxFavPlayed, "bg-ink-4", "played"],
+                                [f.drawn, maxFavDrawn, "bg-brand", "drawn"],
+                              ] as const
+                            ).map(([value, max, tone, verb]) => (
+                              <div
+                                key={verb}
+                                className="flex items-center gap-2"
+                                title={`${verb === "played" ? "You played" : "Drawn"} ${fmtCount(value)} time${value === 1 ? "" : "s"}`}
+                              >
+                                <div className="h-2.5 min-w-0 flex-1 rounded bg-surface-2">
+                                  <div className={`h-full rounded ${tone}`} style={{ width: `${(value / max) * 100}%` }} />
                                 </div>
-                                <div className="h-2 rounded-full bg-surface-2">
-                                  <div
-                                    className="h-full rounded-full bg-brand"
-                                    style={{ width: `${(f.drawn / maxFavDrawn) * 100}%` }}
-                                  />
-                                </div>
+                                <span className="w-12 shrink-0 text-right text-xs font-semibold tabular-nums text-ink-2">
+                                  {fmtCount(value)}&times;
+                                </span>
                               </div>
-                              <span className="w-24 shrink-0 text-right text-xs tabular-nums text-ink-3">
-                                {fmtCount(f.played)}&times; / {fmtCount(f.drawn)}&times;
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                        <div className="mt-4 flex flex-wrap gap-4 text-xs text-ink-3">
-                          <span className="flex items-center gap-1.5">
-                            <span className="h-1.5 w-3.5 rounded-full bg-ink-4" aria-hidden />
-                            times you played it
-                          </span>
-                          <span className="flex items-center gap-1.5">
-                            <span className="h-1.5 w-3.5 rounded-full bg-brand" aria-hidden />
-                            times it was drawn
-                          </span>
-                        </div>
-                      </>
+                            ))}
+                          </Fragment>
+                        ))}
+                      </div>
                     )}
                   </section>
 
                   <section className={CARD_CLASSES}>
-                    <h2 className="text-sm font-semibold text-ink">Board coverage</h2>
+                    <h2 className="text-base font-semibold text-ink">Board coverage</h2>
                     <p className="mt-1 text-xs text-ink-3">
-                      Every number, 1–58, split into quarters by how often you&apos;ve played
-                      it. Green numbers were in the most recent result.
+                      Every number from 1 to {maxNumber}, shaded by how often you&apos;ve played it
+                      — the stronger the shade, the more you play it. Ringed numbers were in the
+                      latest result.
                     </p>
-                    <div className="mt-4 grid grid-cols-[repeat(auto-fill,minmax(2.25rem,1fr))] gap-1.5">
+                    <div className="mt-4 grid grid-cols-[repeat(auto-fill,minmax(2.5rem,1fr))] gap-2">
                       {ins.board.map((c) => {
-                        const swatch: BoardSwatch = ins.latestDrawSet.has(c.n)
-                          ? "latest"
-                          : c.tier;
+                        const inLatest = ins.latestDrawSet.has(c.n);
                         return (
                           <div
                             key={c.n}
-                            className={`flex aspect-square items-center justify-center rounded-md text-xs font-semibold tabular-nums transition-colors duration-150 ${BOARD_SWATCH_CLASSES[swatch]}`}
-                            title={`Played ${c.played} time${c.played === 1 ? "" : "s"}${
-                              swatch === "latest" ? " · in the latest result" : ""
+                            className={`flex aspect-square items-center justify-center rounded-md text-xs font-semibold tabular-nums transition-colors duration-150 ${BOARD_SWATCH_CLASSES[c.tier]} ${
+                              inLatest ? BOARD_SWATCH_CLASSES.latest : ""
+                            }`}
+                            title={`${String(c.n).padStart(2, "0")}: played ${c.played} time${c.played === 1 ? "" : "s"}${
+                              inLatest ? " · in the latest result" : ""
                             }`}
                           >
                             {String(c.n).padStart(2, "0")}
@@ -2265,7 +2354,9 @@ export default function LottoClient({ gameId }: { gameId: number }) {
                       {BOARD_LEGEND.map((swatch) => (
                         <span key={swatch} className="flex items-center gap-1.5">
                           <span
-                            className={`h-4 w-4 shrink-0 rounded ${BOARD_SWATCH_CLASSES[swatch]}`}
+                            className={`h-4 w-4 shrink-0 rounded ${BOARD_SWATCH_CLASSES[swatch]} ${
+                              swatch === "latest" ? "mx-1" : "" /* room for the ring's offset */
+                            }`}
                             aria-hidden
                           />
                           {BOARD_SWATCH_LABELS[swatch]}
@@ -2627,7 +2718,7 @@ export default function LottoClient({ gameId }: { gameId: number }) {
                   Close
                 </button>
               </div>
-              {renderDrawCard(detail, { hero: true })}
+              {renderDrawCard(detail)}
             </Modal>
           );
         })()}

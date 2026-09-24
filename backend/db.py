@@ -2156,15 +2156,19 @@ def list_lotto_games() -> list[dict[str, Any]]:
 
     ``jackpot_prize`` is the newest draw that carries one, matching what the
     per-game page calls the current jackpot, and is null for a game whose
-    draws have no prize recorded yet. The lateral rides on
-    ``idx_lotto_draw_game_date``, so labelling the game picker stays one
-    query rather than one per game.
+    draws have no prize recorded yet. ``last_attempt_draw_date`` is the date
+    of the newest draw the user logged attempts against (null if none) -- the
+    last draw they played. Both laterals ride on ``idx_lotto_draw_game_date``
+    (the second probing ``idx_lotto_attempt_parent`` per draw until one has
+    attempts), so labelling the game picker stays one query rather than one
+    per game.
     """
     with get_connection() as conn:
         with db_cursor(conn) as cur:
             cur.execute(
                 r"""
-                SELECT g.id, g.name, latest.jackpot_prize
+                SELECT g.id, g.name, latest.jackpot_prize,
+                       attempted.draw_date AS last_attempt_draw_date
                 FROM lotto_game g
                 LEFT JOIN LATERAL (
                     SELECT jackpot_prize FROM lotto_draw
@@ -2172,6 +2176,13 @@ def list_lotto_games() -> list[dict[str, Any]]:
                     ORDER BY draw_date DESC
                     LIMIT 1
                 ) latest ON TRUE
+                LEFT JOIN LATERAL (
+                    SELECT d.draw_date FROM lotto_draw d
+                    WHERE d.game_id = g.id
+                      AND EXISTS (SELECT 1 FROM lotto_attempt a WHERE a.draw_id = d.id)
+                    ORDER BY d.draw_date DESC
+                    LIMIT 1
+                ) attempted ON TRUE
                 ORDER BY substring(g.name from '/(\d+)$')::int
                 """
             )
