@@ -463,13 +463,13 @@ function CommissionView({ company, hist }: { company: string; hist: MonthValue[]
         </div>
 
         {view === "heat" ? (
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto font-st-mono text-xs font-medium text-st-1">
             <div className="grid min-w-[820px] grid-cols-[52px_repeat(12,minmax(0,1fr))_104px] items-center gap-1">
               <span />
               {MN.map((m) => (
-                <span key={m} className="pb-1 text-center text-[11.5px] text-st-4">{m}</span>
+                <span key={m} className="pb-1 text-center">{m}</span>
               ))}
-              <span className="pb-1 text-right text-[11.5px] text-st-4">Total</span>
+              <span className="pb-1 text-right">Total</span>
               {[...years].reverse().map((y) => {
                 const inYear = hist.filter((d) => d.y === y);
                 const note =
@@ -493,18 +493,18 @@ function CommissionView({ company, hist }: { company: string; hist: MonthValue[]
                   />
                 );
               })}
-              <span className="pt-1.5 text-[11.5px] text-st-4">Avg</span>
+              <span className="pt-1.5">Avg</span>
               {MN.map((mn, m) => {
                 const vs = years.map((y) => cv(y, m)).filter((v): v is number => v != null);
                 return (
-                  <span key={mn} className="pt-1.5 text-center font-st-mono text-[11.5px] text-st-3">
+                  <span key={mn} className="pt-1.5 text-center">
                     {vs.length ? fk(vs.reduce((a, b) => a + b, 0) / vs.length) : "—"}
                   </span>
                 );
               })}
               <span />
             </div>
-            <div className="mt-3.5 flex flex-wrap items-center gap-3.5 text-xs text-st-4">
+            <div className="mt-3.5 flex flex-wrap items-center gap-3.5">
               <span className="flex items-center gap-1.5">
                 Low
                 <span className="h-2 w-[120px] rounded-full bg-[linear-gradient(90deg,rgba(45,212,191,.1),rgba(45,212,191,.85))]" />
@@ -595,10 +595,10 @@ function HeatRow({
   cells: { m: number; v: number | null; f: number | null }[];
   max: number;
 }) {
-  const cell = "grid h-[42px] place-items-center rounded-[7px] border font-st-mono text-xs font-medium";
+  const cell = "grid h-[42px] place-items-center rounded-[7px] border";
   return (
     <>
-      <span className="text-[13px] font-semibold text-st-2">{year}</span>
+      <span>{year}</span>
       {cells.map(({ m, v, f }) => {
         if (v != null) {
           const a = 0.08 + 0.77 * (v / max);
@@ -606,7 +606,7 @@ function HeatRow({
             <div
               key={m}
               title={`${MF[m]} ${year}: ${fmt(v)}`}
-              className={`${cell} border-transparent ${a > 0.62 ? "text-[#042f2e]" : "text-st-1"}`}
+              className={`${cell} border-transparent`}
               style={{ background: `rgba(45,212,191,${a.toFixed(3)})` }}
             >
               {fk(v)}
@@ -625,14 +625,14 @@ function HeatRow({
           );
         }
         return (
-          <div key={m} className={`${cell} border-transparent bg-st-empty text-st-5`}>
+          <div key={m} className={`${cell} border-transparent bg-st-empty`}>
             —
           </div>
         );
       })}
       <div className="flex flex-col items-end leading-[1.2]">
-        <span className="font-st-mono text-[13px] font-semibold text-st-1">{fmt(total)}</span>
-        <span className="text-[11px] text-st-4">{note}</span>
+        <span>{fmt(total)}</span>
+        <span>{note}</span>
       </div>
     </>
   );
