@@ -1,10 +1,27 @@
 "use client";
 
 import { AmountInput } from "@/components/AmountInput";
+import { DatePickerField } from "@/components/DatePickerField";
 import { PageHeader } from "@/components/PageHeader";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { Modal } from "@/components/Modal";
+import {
+  DANGER_TEXT_BUTTON_CLASSES,
+  DIALOG_BODY_CLASSES,
+  DIALOG_CLASSES,
+  DIALOG_FOOTER_CLASSES,
+  Field,
+  IconAction,
+  LoadingBlocks,
+  Metric,
+  Meter,
+  ModalHeader,
+  Panel,
+  Pill,
+  TEXT_BUTTON_CLASSES,
+} from "@/components/FinanceUI";
+import { CreditCardIcon, PlusIcon } from "@/components/Icons";
 import {
   adjustCreditCardBalance,
   createCreditCard,
@@ -18,18 +35,11 @@ import {
   type InstallmentRow,
 } from "@/lib/api";
 import { formatAmountNumber, parseFormNumber } from "@/lib/parseFormNumber";
-import { formatDate } from "@/lib/dateFormat";
+import { formatDate, parseDateOnlyLocal, toIsoDateLocal } from "@/lib/dateFormat";
 import { fmtAmountOrDash } from "@/lib/formatNumber";
 import {
-  ADD_BUTTON_CLASSES,
-  CARD_CLASSES,
-  CLOSE_BUTTON_CLASSES,
-  DASHED_EMPTY_CLASSES,
-  DELETE_BUTTON_CLASSES,
-  EDIT_BUTTON_CLASSES,
   ERROR_ALERT_CLASSES,
   INPUT_CLASSES,
-  LOADING_TEXT_CLASSES,
   PAGE_CONTAINER_CLASSES,
   PRIMARY_BUTTON_CLASSES,
   SECONDARY_BUTTON_CLASSES,
@@ -49,8 +59,21 @@ const fmtMoney = fmtAmountOrDash;
  */
 const fmtDate = formatDate;
 
+/** Today in *local* time — `toISOString()` is UTC and gives yesterday before 8am in UTC+8. */
 function todayInputDate(): string {
-  return new Date().toISOString().slice(0, 10);
+  return toIsoDateLocal(new Date());
+}
+
+/** "In 3 days" / "Due today" / "5 days ago" for a date-only value. */
+function dueCountdown(iso: string | null): { text: string; tone: "neutral" | "warning" | "danger" } | null {
+  const d = iso ? parseDateOnlyLocal(iso) : null;
+  if (!d) return null;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const n = Math.round((d.getTime() - today.getTime()) / 86_400_000);
+  if (n < 0) return { text: `${-n} day${n === -1 ? "" : "s"} ago`, tone: "neutral" };
+  if (n === 0) return { text: "Due today", tone: "danger" };
+  return { text: `In ${n} day${n === 1 ? "" : "s"}`, tone: n <= 7 ? "warning" : "neutral" };
 }
 
 type PayoffByPayment = {
@@ -128,6 +151,16 @@ const emptyPaymentForm = (): PaymentForm => ({
   payment_date: todayInputDate(),
   note: "",
 });
+
+/** One label/value line in a definition list. */
+function Row({ label, children }: { label: ReactNode; children: ReactNode }) {
+  return (
+    <div className="flex items-center justify-between gap-3 py-2.5">
+      <dt className="text-sm text-ink-3">{label}</dt>
+      <dd className="flex items-center gap-2 text-sm font-medium tabular-nums text-ink">{children}</dd>
+    </div>
+  );
+}
 
 export default function CreditCardClient() {
   const [card, setCard] = useState<CreditCardRow | null>(null);
@@ -257,12 +290,13 @@ export default function CreditCardClient() {
   const onRemoveCard = useCallback(async () => {
     if (!card) return;
     if (!confirm("Remove this credit card? Linked installments will be unlinked.")) return;
-    setError(null);
+    setCardFormError(null);
     try {
       await deleteCreditCard(card.id);
+      setCardModalOpen(false);
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to remove credit card");
+      setCardFormError(err instanceof Error ? err.message : "Failed to remove credit card");
     }
   }, [card, load]);
 
@@ -310,6 +344,7 @@ export default function CreditCardClient() {
 
   const onDeletePayment = useCallback(
     async (id: number) => {
+      if (!confirm("Delete this payment? The card balance goes back up by its amount.")) return;
       setError(null);
       try {
         await deleteCreditCardPayment(id);
@@ -356,25 +391,25 @@ export default function CreditCardClient() {
     [card, balanceForm, load],
   );
 
-  const projections = useMemo(() => {
-    if (!card) return null;
+  /** Pay-in-full / half / minimum, as rows of one comparison table. */
+  const scenarios = useMemo(() => {
+    if (!card) return [];
     const rate = card.interest_rate / 100;
-    const halfRemaining = Math.max(card.current_balance / 2, 0);
-    const halfInterest = halfRemaining * rate;
-    const minRemaining = Math.max(card.current_balance - card.minimum_due, 0);
-    const minInterest = minRemaining * rate;
-    return {
-      half: {
-        remaining: halfRemaining,
-        interest: halfInterest,
-        nextStatement: halfRemaining + halfInterest,
-      },
-      minimum: {
-        remaining: minRemaining,
-        interest: minInterest,
-        nextStatement: minRemaining + minInterest,
-      },
+    const row = (label: string, remaining: number) => {
+      const interest = remaining * rate;
+      return {
+        label,
+        pay: card.current_balance - remaining,
+        remaining,
+        interest,
+        nextStatement: remaining + interest,
+      };
     };
+    return [
+      row("Pay in full", 0),
+      row("Pay half", Math.max(card.current_balance / 2, 0)),
+      row("Pay the minimum", Math.max(card.current_balance - card.minimum_due, 0)),
+    ];
   }, [card]);
 
   const payoffByPayment = useMemo(() => {
@@ -392,6 +427,39 @@ export default function CreditCardClient() {
   }, [card, calcMonthsInput]);
 
   const installmentDues = card ? Math.max(card.monthly_dues - card.minimum_due, 0) : 0;
+  const used = card && card.credit_limit > 0 ? card.current_balance / card.credit_limit : 0;
+  const due = card ? dueCountdown(card.due_date) : null;
+
+  /** The calculator's answer as [label, value] cells, or an error line. */
+  const calcInput = calcMode === "payment" ? calcPaymentInput : calcMonthsInput;
+  let calcResult: { error: string } | { cells: [string, string][] } | null = null;
+  if (calcInput.trim() !== "") {
+    if (calcMode === "payment") {
+      calcResult =
+        payoffByPayment == null
+          ? { error: "Enter an amount greater than zero." }
+          : !payoffByPayment.reachable
+            ? { error: "That doesn't cover the monthly interest, so the balance never clears. Try more." }
+            : {
+                cells: [
+                  ["Paid off in", `${payoffByPayment.months} month${payoffByPayment.months === 1 ? "" : "s"}`],
+                  ["Total interest", fmtMoney(payoffByPayment.totalInterest)],
+                  ["Total paid", fmtMoney(payoffByPayment.totalPaid)],
+                ],
+              };
+    } else {
+      calcResult =
+        payoffByMonths == null
+          ? { error: "Enter a number of months greater than zero." }
+          : {
+              cells: [
+                ["Pay each month", fmtMoney(payoffByMonths.payment)],
+                ["Total interest", fmtMoney(payoffByMonths.totalInterest)],
+                ["Total paid", fmtMoney(payoffByMonths.totalPaid)],
+              ],
+            };
+    }
+  }
 
   return (
     <div className={PAGE_CONTAINER_CLASSES}>
@@ -399,13 +467,25 @@ export default function CreditCardClient() {
         title="Credit Card"
         description={
           <>
-            Track your limit, statement balance, and payments. Installments carried on this card
-            are managed on the{" "}
-            <Link href="/installments" className="underline hover:no-underline">
-            Installments
+            Balance, statement and payments. Installments on the card live on the{" "}
+            <Link href="/installments" className="font-medium text-brand-text hover:underline">
+              Installments
             </Link>{" "}
             page.
           </>
+        }
+        actions={
+          card && (
+            <>
+              <button type="button" className={SECONDARY_BUTTON_CLASSES} onClick={openCardModal}>
+                Update statement
+              </button>
+              <button type="button" className={PRIMARY_BUTTON_CLASSES} onClick={openPaymentModal}>
+                <PlusIcon className="size-4" />
+                Record payment
+              </button>
+            </>
+          )
         }
       />
 
@@ -416,419 +496,273 @@ export default function CreditCardClient() {
       )}
 
       {loading ? (
-        <p className={LOADING_TEXT_CLASSES}>Loading credit card…</p>
+        <LoadingBlocks label="Loading credit card…" />
       ) : !card ? (
-        <div className={DASHED_EMPTY_CLASSES}>
-          <p>No credit card set up yet.</p>
-          <button
-            type="button"
-            className={`mt-4 ${PRIMARY_BUTTON_CLASSES}`}
-            onClick={openCardModal}
-          >
-            Add credit card
-          </button>
-        </div>
+        <Panel>
+          <div className="flex flex-col items-center py-10 text-center">
+            <span className="grid size-14 place-items-center rounded-full bg-brand-soft text-brand-text">
+              <CreditCardIcon className="size-7" />
+            </span>
+            <h2 className="mt-4 text-lg font-semibold text-ink">No credit card yet</h2>
+            <p className="mt-1 max-w-sm text-sm text-ink-3">
+              Add your card&apos;s limit and latest statement to track your balance, what&apos;s due,
+              and how long it takes to pay off.
+            </p>
+            <button type="button" className={`mt-5 ${PRIMARY_BUTTON_CLASSES}`} onClick={openCardModal}>
+              <PlusIcon className="size-4" />
+              Add credit card
+            </button>
+          </div>
+        </Panel>
       ) : (
         <>
-          <section className={CARD_CLASSES}>
-            <div className="flex flex-wrap items-start justify-between gap-2">
-              <h2 className="text-lg font-medium text-ink">
-                {card.name}
-              </h2>
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  className={EDIT_BUTTON_CLASSES}
-                  onClick={openCardModal}
-                >
-                  Edit
-                </button>
-                <button
-                  type="button"
-                  className={DELETE_BUTTON_CLASSES}
-                  onClick={() => void onRemoveCard()}
-                >
-                  Remove
-                </button>
+          <div className="grid gap-5 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
+            {/* The card itself: balance front and center, limit usage beneath. */}
+            <div className="relative flex min-h-[15rem] flex-col justify-between overflow-hidden rounded-2xl bg-linear-to-br from-indigo-600 via-indigo-700 to-indigo-950 p-6 text-white shadow-md sm:p-7">
+              <span aria-hidden className="pointer-events-none absolute -right-20 -top-24 size-72 rounded-full bg-white/10" />
+              <span aria-hidden className="pointer-events-none absolute -bottom-28 right-16 size-60 rounded-full bg-white/5" />
+              <div className="relative flex items-start justify-between gap-3">
+                <p className="truncate text-sm font-semibold tracking-wide text-white/85">{card.name}</p>
+                <CreditCardIcon className="size-7 shrink-0 text-white/70" />
+              </div>
+              <div className="relative mt-6">
+                <p className="text-xs font-medium uppercase tracking-wider text-white/60">Current balance</p>
+                <p className="mt-1 text-4xl font-semibold tabular-nums tracking-tight">
+                  {fmtMoney(card.current_balance)}
+                </p>
+              </div>
+              <div className="relative mt-6">
+                <div className="h-1.5 overflow-hidden rounded-full bg-white/20">
+                  <div
+                    className="h-full rounded-full bg-white transition-[width] duration-500"
+                    style={{ width: `${Math.max(0, Math.min(1, used)) * 100}%` }}
+                  />
+                </div>
+                <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 text-xs text-white/75">
+                  <span>
+                    <span className="font-semibold text-white">{Math.round(used * 100)}%</span> of{" "}
+                    {fmtMoney(card.credit_limit)} limit used
+                  </span>
+                  <button
+                    type="button"
+                    onClick={openBalanceModal}
+                    className="rounded-md px-1.5 py-0.5 font-medium text-white transition-colors hover:bg-white/15"
+                    title="Match what your bank shows"
+                  >
+                    {fmtMoney(card.available_limit)} available · Adjust
+                  </button>
+                </div>
               </div>
             </div>
-            <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
-              <div>
-                <dt className="text-xs text-ink-3">Credit limit</dt>
-                <dd className="tabular-nums font-semibold text-ink">
-                  {fmtMoney(card.credit_limit)}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-xs text-ink-3">Last statement balance</dt>
-                <dd className="tabular-nums font-semibold text-ink">
-                  {fmtMoney(card.last_statement_balance)}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-xs text-ink-3">Current balance</dt>
-                <dd className="tabular-nums font-semibold text-amber-800 dark:text-amber-200">
-                  {fmtMoney(card.current_balance)}
-                </dd>
-              </div>
-              <div>
-                <dt className="flex items-center gap-1.5 text-xs text-ink-3">
-                  Available limit
-                  <button
-                    type="button"
-                    className="text-indigo-600 underline hover:no-underline dark:text-indigo-400"
-                    onClick={openBalanceModal}
-                  >
-                    Edit
-                  </button>
-                </dt>
-                <dd className="tabular-nums font-semibold text-emerald-700 dark:text-emerald-300">
-                  {fmtMoney(card.available_limit)}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-xs text-ink-3">Minimum due</dt>
-                <dd className="tabular-nums font-semibold text-ink">
-                  {fmtMoney(card.minimum_due)}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-xs text-ink-3">Interest rate</dt>
-                <dd className="tabular-nums font-semibold text-ink">
-                  {card.interest_rate}%/month
-                </dd>
-              </div>
-              <div>
-                <dt className="text-xs text-ink-3">Statement date</dt>
-                <dd className="text-ink">{fmtDate(card.statement_date)}</dd>
-              </div>
-              <div>
-                <dt className="text-xs text-ink-3">Due date</dt>
-                <dd className="text-ink">{fmtDate(card.due_date)}</dd>
-              </div>
-            </dl>
-            <p className="mt-3 text-xs text-ink-3">
-              Editing this to record a new statement resets the current balance to the new
-              statement balance.
-            </p>
-          </section>
 
-          <section className={CARD_CLASSES}>
-            <h2 className="text-lg font-medium text-ink">Monthly dues</h2>
-            <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-3">
-              <div>
-                <dt className="text-xs text-ink-3">Minimum due</dt>
-                <dd className="tabular-nums font-semibold text-ink">
-                  {fmtMoney(card.minimum_due)}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-xs text-ink-3">Installments due this month</dt>
-                <dd className="tabular-nums font-semibold text-ink">
-                  {fmtMoney(installmentDues)}
-                </dd>
-              </div>
-              <div className="rounded-lg border border-emerald-200 bg-emerald-50/80 p-3 dark:border-emerald-900/50 dark:bg-emerald-950/30">
-                <dt className="text-xs font-medium text-emerald-800 dark:text-emerald-200">
-                  Total this month
-                </dt>
-                <dd className="tabular-nums font-semibold text-emerald-900 dark:text-emerald-100">
+            <Panel title="Statement" actions={due && <Pill tone={due.tone}>{due.text}</Pill>}>
+              <dl className="-my-2.5 divide-y divide-line-soft">
+                <Row label="Statement balance">{fmtMoney(card.last_statement_balance)}</Row>
+                <Row label="Minimum due">{fmtMoney(card.minimum_due)}</Row>
+                <Row label="Statement date">{fmtDate(card.statement_date)}</Row>
+                <Row label="Due date">{fmtDate(card.due_date)}</Row>
+                <Row label="Interest">{card.interest_rate}% / month</Row>
+              </dl>
+            </Panel>
+          </div>
+
+          <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)]">
+            <Panel title="Due this month" subtitle="What to set aside for this card.">
+              <dl className="-my-2.5 divide-y divide-line-soft">
+                <Row label="Minimum due">{fmtMoney(card.minimum_due)}</Row>
+                <Row label={`Installments (${installments.length})`}>{fmtMoney(installmentDues)}</Row>
+              </dl>
+              <div className="mt-4 flex items-end justify-between gap-3 rounded-xl bg-brand-soft px-4 py-3.5">
+                <span className="text-sm font-medium text-brand-text">Total this month</span>
+                <span className="text-2xl font-semibold tabular-nums text-brand-text">
                   {fmtMoney(card.monthly_dues)}
-                </dd>
+                </span>
               </div>
-            </dl>
-          </section>
+            </Panel>
 
-          <section className={CARD_CLASSES}>
-            <h2 className="text-lg font-medium text-ink">
-              If you don&apos;t pay in full
-            </h2>
-            <p className="mt-1 text-xs text-ink-2">
-              Estimate only — assumes no new purchases and a flat monthly rate. Your bank likely
-              uses an average daily balance, so the real finance charge may differ.
-            </p>
-            {projections && (
-              <div className="mt-4 grid gap-4 sm:grid-cols-2">
-                <div className="rounded-lg border border-line p-4">
-                  <h3 className="text-sm font-medium text-ink">
-                    Pay half the balance
-                  </h3>
-                  <dl className="mt-3 grid gap-2 text-sm">
-                    <div className="flex items-baseline justify-between">
-                      <dt className="text-xs text-ink-3">Remaining after payment</dt>
-                      <dd className="tabular-nums font-medium">
-                        {fmtMoney(projections.half.remaining)}
-                      </dd>
-                    </div>
-                    <div className="flex items-baseline justify-between">
-                      <dt className="text-xs text-ink-3">Est. interest</dt>
-                      <dd className="tabular-nums font-medium text-amber-800 dark:text-amber-200">
-                        {fmtMoney(projections.half.interest)}
-                      </dd>
-                    </div>
-                    <div className="flex items-baseline justify-between">
-                      <dt className="text-xs text-ink-3">Est. next statement</dt>
-                      <dd className="tabular-nums font-semibold text-ink">
-                        {fmtMoney(projections.half.nextStatement)}
-                      </dd>
-                    </div>
-                  </dl>
-                </div>
-                <div className="rounded-lg border border-line p-4">
-                  <h3 className="text-sm font-medium text-ink">
-                    Pay only the minimum
-                  </h3>
-                  <dl className="mt-3 grid gap-2 text-sm">
-                    <div className="flex items-baseline justify-between">
-                      <dt className="text-xs text-ink-3">Remaining after payment</dt>
-                      <dd className="tabular-nums font-medium">
-                        {fmtMoney(projections.minimum.remaining)}
-                      </dd>
-                    </div>
-                    <div className="flex items-baseline justify-between">
-                      <dt className="text-xs text-ink-3">Est. interest</dt>
-                      <dd className="tabular-nums font-medium text-amber-800 dark:text-amber-200">
-                        {fmtMoney(projections.minimum.interest)}
-                      </dd>
-                    </div>
-                    <div className="flex items-baseline justify-between">
-                      <dt className="text-xs text-ink-3">Est. next statement</dt>
-                      <dd className="tabular-nums font-semibold text-ink">
-                        {fmtMoney(projections.minimum.nextStatement)}
-                      </dd>
-                    </div>
-                  </dl>
-                </div>
+            <Panel
+              flush
+              title="If you don't pay in full"
+              subtitle="Estimate at a flat monthly rate, no new purchases. Your bank's average-daily-balance charge may differ."
+            >
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[34rem] text-sm">
+                  <thead>
+                    <tr className="border-y border-line-soft text-xs text-ink-3">
+                      <th className="px-5 py-2.5 text-left font-medium sm:px-6">If you…</th>
+                      <th className="px-3 py-2.5 text-right font-medium">Pay now</th>
+                      <th className="px-3 py-2.5 text-right font-medium">Carried over</th>
+                      <th className="px-3 py-2.5 text-right font-medium">Interest</th>
+                      <th className="px-5 py-2.5 text-right font-medium sm:px-6">Next statement</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-line-soft tabular-nums">
+                    {scenarios.map((s) => (
+                      <tr key={s.label}>
+                        <td className="px-5 py-3 font-medium text-ink sm:px-6">{s.label}</td>
+                        <td className="px-3 py-3 text-right text-ink-2">{fmtMoney(s.pay)}</td>
+                        <td className="px-3 py-3 text-right text-ink-2">{fmtMoney(s.remaining)}</td>
+                        <td className={`px-3 py-3 text-right font-medium ${s.interest > 0 ? "text-danger-text" : "text-success-text"}`}>
+                          {s.interest > 0 ? `+${fmtMoney(s.interest)}` : "None"}
+                        </td>
+                        <td className="px-5 py-3 text-right font-semibold text-ink sm:px-6">{fmtMoney(s.nextStatement)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
-            )}
-          </section>
+            </Panel>
+          </div>
 
-          <section className={CARD_CLASSES}>
-            <h2 className="text-lg font-medium text-ink">
-              Payoff calculator
-            </h2>
-            <p className="mt-1 text-xs text-ink-2">
-              Estimate only, based on your current balance ({fmtMoney(card.current_balance)}) and{" "}
-              {card.interest_rate}%/month interest, assuming no new purchases.
-            </p>
-
+          <Panel
+            title="Payoff calculator"
+            subtitle={`From your ${fmtMoney(card.current_balance)} balance at ${card.interest_rate}% a month, no new purchases.`}
+          >
             {card.current_balance <= 0 ? (
-              <p className="mt-4 text-sm text-emerald-700 dark:text-emerald-300">
-                Your balance is already paid off — nothing to calculate.
+              <p className="rounded-xl bg-success-soft px-4 py-3 text-sm font-medium text-success-text">
+                Nothing to pay off. Your balance is clear.
               </p>
             ) : (
-              <>
-                <div className={`mt-4 inline-flex ${SEGMENTED_WRAPPER_CLASSES}`}>
-                  <button
-                    type="button"
-                    className={`${SEGMENTED_BUTTON_CLASSES} ${
-                      calcMode === "payment"
-                        ? SEGMENTED_BUTTON_ACTIVE_CLASSES
-                        : SEGMENTED_BUTTON_INACTIVE_CLASSES
-                    }`}
-                    onClick={() => setCalcMode("payment")}
-                  >
-                    By monthly payment
-                  </button>
-                  <button
-                    type="button"
-                    className={`${SEGMENTED_BUTTON_CLASSES} ${
-                      calcMode === "months"
-                        ? SEGMENTED_BUTTON_ACTIVE_CLASSES
-                        : SEGMENTED_BUTTON_INACTIVE_CLASSES
-                    }`}
-                    onClick={() => setCalcMode("months")}
-                  >
-                    By target months
-                  </button>
-                </div>
-
-                {calcMode === "payment" ? (
-                  <div className="mt-4 grid gap-4 sm:grid-cols-2">
-                    <label className="flex flex-col gap-1 text-sm">
-                      <span className="text-ink-2">
-                        How much can you pay per month?
-                      </span>
-                      <AmountInput value={calcPaymentInput} onChange={setCalcPaymentInput} />
-                    </label>
-                    <div className="rounded-lg border border-line p-4 text-sm">
-                      {calcPaymentInput.trim() === "" ? (
-                        <p className="text-ink-3">
-                          Enter a monthly payment to see how long it&apos;ll take.
-                        </p>
-                      ) : payoffByPayment == null ? (
-                        <p className="text-red-700 dark:text-red-300">
-                          Enter a valid amount greater than zero.
-                        </p>
-                      ) : !payoffByPayment.reachable ? (
-                        <p className="text-red-700 dark:text-red-300">
-                          That payment doesn&apos;t cover the monthly interest, so the balance
-                          would never be paid off. Try a higher amount.
-                        </p>
-                      ) : (
-                        <dl className="grid gap-2">
-                          <div className="flex items-baseline justify-between">
-                            <dt className="text-xs text-ink-3">Time to pay off</dt>
-                            <dd className="tabular-nums font-semibold text-ink">
-                              {payoffByPayment.months}{" "}
-                              {payoffByPayment.months === 1 ? "month" : "months"}
-                            </dd>
-                          </div>
-                          <div className="flex items-baseline justify-between">
-                            <dt className="text-xs text-ink-3">Total interest</dt>
-                            <dd className="tabular-nums font-medium text-amber-800 dark:text-amber-200">
-                              {fmtMoney(payoffByPayment.totalInterest)}
-                            </dd>
-                          </div>
-                          <div className="flex items-baseline justify-between">
-                            <dt className="text-xs text-ink-3">Total paid</dt>
-                            <dd className="tabular-nums font-semibold text-ink">
-                              {fmtMoney(payoffByPayment.totalPaid)}
-                            </dd>
-                          </div>
-                        </dl>
-                      )}
-                    </div>
+              <div className="grid gap-5 md:grid-cols-[minmax(0,20rem)_minmax(0,1fr)] md:items-start">
+                <div className="flex flex-col gap-3">
+                  <div className={`${SEGMENTED_WRAPPER_CLASSES} w-full`}>
+                    {(
+                      [
+                        ["payment", "By payment"],
+                        ["months", "By months"],
+                      ] as const
+                    ).map(([mode, label]) => (
+                      <button
+                        key={mode}
+                        type="button"
+                        aria-pressed={calcMode === mode}
+                        className={`flex-1 ${SEGMENTED_BUTTON_CLASSES} ${
+                          calcMode === mode ? SEGMENTED_BUTTON_ACTIVE_CLASSES : SEGMENTED_BUTTON_INACTIVE_CLASSES
+                        }`}
+                        onClick={() => setCalcMode(mode)}
+                      >
+                        {label}
+                      </button>
+                    ))}
                   </div>
-                ) : (
-                  <div className="mt-4 grid gap-4 sm:grid-cols-2">
-                    <label className="flex flex-col gap-1 text-sm">
-                      <span className="text-ink-2">
-                        Pay it off in how many months?
-                      </span>
+                  {calcMode === "payment" ? (
+                    <Field label="I can pay each month">
+                      <AmountInput placeholder="0.00" value={calcPaymentInput} onChange={setCalcPaymentInput} />
+                    </Field>
+                  ) : (
+                    <Field label="Paid off in (months)">
                       <input
                         type="text"
-                        inputMode="decimal"
+                        inputMode="numeric"
+                        placeholder="12"
                         className={INPUT_CLASSES}
                         value={calcMonthsInput}
                         onChange={(e) => setCalcMonthsInput(e.target.value)}
                       />
-                    </label>
-                    <div className="rounded-lg border border-line p-4 text-sm">
-                      {calcMonthsInput.trim() === "" ? (
-                        <p className="text-ink-3">
-                          Enter a number of months to see the required payment.
-                        </p>
-                      ) : payoffByMonths == null ? (
-                        <p className="text-red-700 dark:text-red-300">
-                          Enter a valid number of months greater than zero.
-                        </p>
-                      ) : (
-                        <dl className="grid gap-2">
-                          <div className="flex items-baseline justify-between">
-                            <dt className="text-xs text-ink-3">Required monthly payment</dt>
-                            <dd className="tabular-nums font-semibold text-ink">
-                              {fmtMoney(payoffByMonths.payment)}
-                            </dd>
-                          </div>
-                          <div className="flex items-baseline justify-between">
-                            <dt className="text-xs text-ink-3">Total interest</dt>
-                            <dd className="tabular-nums font-medium text-amber-800 dark:text-amber-200">
-                              {fmtMoney(payoffByMonths.totalInterest)}
-                            </dd>
-                          </div>
-                          <div className="flex items-baseline justify-between">
-                            <dt className="text-xs text-ink-3">Total paid</dt>
-                            <dd className="tabular-nums font-semibold text-ink">
-                              {fmtMoney(payoffByMonths.totalPaid)}
-                            </dd>
-                          </div>
-                        </dl>
-                      )}
+                    </Field>
+                  )}
+                </div>
+                <div
+                  className="flex min-h-[6.5rem] items-center rounded-xl border border-line bg-surface-2/50 p-4"
+                  aria-live="polite"
+                >
+                  {calcResult == null ? (
+                    <p className="text-sm text-ink-3">
+                      {calcMode === "payment"
+                        ? "Enter a monthly amount to see how long payoff takes."
+                        : "Enter a number of months to see the payment needed."}
+                    </p>
+                  ) : "error" in calcResult ? (
+                    <p className="text-sm font-medium text-danger-text">{calcResult.error}</p>
+                  ) : (
+                    <div className="grid w-full gap-4 sm:grid-cols-3">
+                      {calcResult.cells.map(([label, value], i) => (
+                        <Metric
+                          key={label}
+                          label={label}
+                          value={value}
+                          tone={i === 0 ? "brand" : i === 1 ? "danger" : "neutral"}
+                        />
+                      ))}
                     </div>
-                  </div>
-                )}
-              </>
+                  )}
+                </div>
+              </div>
             )}
-          </section>
+          </Panel>
 
-          <section className={CARD_CLASSES}>
-            <div className="flex items-baseline justify-between gap-2">
-              <h2 className="text-lg font-medium text-ink">
-                Installments on this card
-              </h2>
-              <Link
-                href="/installments"
-                className="text-sm text-indigo-600 underline hover:no-underline dark:text-indigo-400"
-              >
-                Manage on Installments page →
-              </Link>
-            </div>
-            {installments.length === 0 ? (
-              <p className={`mt-4 ${DASHED_EMPTY_CLASSES}`}>
-                No installments are linked to this card yet.
-              </p>
-            ) : (
-              <ul className="mt-4 flex flex-col gap-2">
-                {installments.map((ins) => (
-                  <li
-                    key={ins.id}
-                    className="flex items-center justify-between gap-2 rounded-lg border border-line p-3"
-                  >
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-medium text-ink">
-                        {ins.name}
-                      </p>
-                      <p className="mt-0.5 text-xs text-ink-2">
-                        Installment {ins.installment_current}/{ins.installment_total}
-                      </p>
-                    </div>
-                    <span className="shrink-0 text-sm font-semibold tabular-nums text-amber-800 dark:text-amber-200">
-                      {fmtMoney(ins.remaining)}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
+          <div className="grid gap-5 lg:grid-cols-2">
+            <Panel
+              flush
+              title="Installments on this card"
+              actions={
+                <Link href="/installments" className={TEXT_BUTTON_CLASSES}>
+                  Manage →
+                </Link>
+              }
+            >
+              {installments.length === 0 ? (
+                <p className="px-5 pb-6 text-sm text-ink-3 sm:px-6">No installments are linked to this card.</p>
+              ) : (
+                <ul className="divide-y divide-line-soft border-t border-line-soft">
+                  {installments.map((ins) => {
+                    const done = Math.max(0, Math.min(ins.installment_current - 1, ins.installment_total));
+                    return (
+                      <li key={ins.id} className="px-5 py-3.5 sm:px-6">
+                        <div className="flex items-baseline justify-between gap-3">
+                          <p className="truncate text-sm font-medium text-ink">{ins.name}</p>
+                          <span className="shrink-0 text-sm font-semibold tabular-nums text-ink">
+                            {fmtMoney(ins.remaining)}
+                            <span className="ml-1 text-xs font-normal text-ink-4">left</span>
+                          </span>
+                        </div>
+                        <div className="mt-2 flex items-center gap-3">
+                          <Meter
+                            className="flex-1"
+                            value={ins.installment_total > 0 ? done / ins.installment_total : 0}
+                            label={`${ins.name} progress`}
+                          />
+                          <span className="shrink-0 text-xs tabular-nums text-ink-3">
+                            {done}/{ins.installment_total} paid
+                          </span>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </Panel>
 
-          <section className={CARD_CLASSES}>
-            <div className="flex items-baseline justify-between gap-2">
-              <h2 className="text-lg font-medium text-ink">Payments</h2>
-              <button
-                type="button"
-                className={ADD_BUTTON_CLASSES}
-                onClick={openPaymentModal}
-              >
-                + Record payment
-              </button>
-            </div>
-            {payments.length === 0 ? (
-              <p className={`mt-4 ${DASHED_EMPTY_CLASSES}`}>No payments recorded yet.</p>
-            ) : (
-              <ul className="mt-4 flex flex-col gap-2">
-                {payments.map((p) => (
-                  <li
-                    key={p.id}
-                    className="flex items-center justify-between gap-2 rounded-lg border border-line p-3"
-                  >
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium text-ink">
-                        {fmtDate(p.payment_date)}
-                      </p>
-                      {p.note && (
-                        <p className="mt-0.5 truncate text-xs text-ink-2">
-                          {p.note}
-                        </p>
-                      )}
-                    </div>
-                    <div className="flex shrink-0 items-center gap-2">
-                      <span className="text-sm font-semibold tabular-nums text-emerald-700 dark:text-emerald-300">
-                        {fmtMoney(p.amount)}
+            <Panel
+              flush
+              title="Payments"
+              actions={
+                <button type="button" className={TEXT_BUTTON_CLASSES} onClick={openPaymentModal}>
+                  <PlusIcon className="size-4" />
+                  Record
+                </button>
+              }
+            >
+              {payments.length === 0 ? (
+                <p className="px-5 pb-6 text-sm text-ink-3 sm:px-6">No payments recorded yet.</p>
+              ) : (
+                <ul className="divide-y divide-line-soft border-t border-line-soft">
+                  {payments.map((p) => (
+                    <li key={p.id} className="flex items-center gap-3 px-5 py-3 sm:px-6">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium text-ink">{fmtDate(p.payment_date)}</p>
+                        {p.note && <p className="mt-0.5 truncate text-xs text-ink-3">{p.note}</p>}
+                      </div>
+                      <span className="shrink-0 text-sm font-semibold tabular-nums text-success-text">
+                        −{fmtMoney(p.amount)}
                       </span>
-                      <button
-                        type="button"
-                        className={DELETE_BUTTON_CLASSES}
-                        onClick={() => void onDeletePayment(p.id)}
-                      >
-                        Delete
-                      </button>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
+                      <IconAction kind="delete" label="Delete payment" onClick={() => void onDeletePayment(p.id)} />
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Panel>
+          </div>
         </>
       )}
 
@@ -836,111 +770,100 @@ export default function CreditCardClient() {
         open={cardModalOpen}
         onClose={closeCardModal}
         ariaLabelledBy="credit-card-title"
+        dialogClassName={`${DIALOG_CLASSES} max-w-xl`}
       >
-        <div className="mb-4 flex items-start justify-between gap-2">
-          <h2
-            id="credit-card-title"
-            className="text-lg font-semibold text-ink"
-          >
-            {card ? "Edit credit card" : "Add credit card"}
-          </h2>
-          <button
-            type="button"
-            className={CLOSE_BUTTON_CLASSES}
-            onClick={closeCardModal}
-          >
-            Close
-          </button>
-        </div>
-        <form onSubmit={submitCardForm} className="grid gap-4 sm:grid-cols-2">
-          <label className="flex flex-col gap-1 text-sm sm:col-span-2">
-            <span className="text-ink-2">Name</span>
-            <input
-              required
-              type="text"
-              className={INPUT_CLASSES}
-              value={cardForm.name}
-              onChange={(e) => setCardForm((f) => ({ ...f, name: e.target.value }))}
-              disabled={cardSaving}
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-ink-2">Credit limit</span>
-            <AmountInput
-              required
-              value={cardForm.credit_limit}
-              onChange={(v) => setCardForm((f) => ({ ...f, credit_limit: v }))}
-              disabled={cardSaving}
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-ink-2">Last statement balance</span>
-            <AmountInput
-              required
-              value={cardForm.last_statement_balance}
-              onChange={(v) => setCardForm((f) => ({ ...f, last_statement_balance: v }))}
-              disabled={cardSaving}
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-ink-2">Minimum amount due</span>
-            <AmountInput
-              required
-              value={cardForm.minimum_due}
-              onChange={(v) => setCardForm((f) => ({ ...f, minimum_due: v }))}
-              disabled={cardSaving}
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-ink-2">Interest rate (%/month)</span>
-            <input
-              required
-              type="text"
-              inputMode="decimal"
-              className={INPUT_CLASSES}
-              value={cardForm.interest_rate}
-              onChange={(e) => setCardForm((f) => ({ ...f, interest_rate: e.target.value }))}
-              disabled={cardSaving}
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-ink-2">Statement date (optional)</span>
-            <input
-              type="date"
-              className={INPUT_CLASSES}
-              value={cardForm.statement_date}
-              onChange={(e) => setCardForm((f) => ({ ...f, statement_date: e.target.value }))}
-              disabled={cardSaving}
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-ink-2">Due date (optional)</span>
-            <input
-              type="date"
-              className={INPUT_CLASSES}
-              value={cardForm.due_date}
-              onChange={(e) => setCardForm((f) => ({ ...f, due_date: e.target.value }))}
-              disabled={cardSaving}
-            />
-          </label>
+        <ModalHeader
+          id="credit-card-title"
+          title={card ? "Update statement" : "Add credit card"}
+          subtitle={card ? "Saving resets the current balance to the new statement balance." : undefined}
+          onClose={closeCardModal}
+        />
+        <form onSubmit={submitCardForm} className="flex min-h-0 flex-1 flex-col">
+          <div className={`${DIALOG_BODY_CLASSES} grid gap-4 sm:grid-cols-2`}>
+            <Field label="Card name" className="sm:col-span-2">
+              <input
+                required
+                type="text"
+                className={INPUT_CLASSES}
+                value={cardForm.name}
+                onChange={(e) => setCardForm((f) => ({ ...f, name: e.target.value }))}
+                disabled={cardSaving}
+              />
+            </Field>
+            <Field label="Credit limit">
+              <AmountInput
+                required
+                value={cardForm.credit_limit}
+                onChange={(v) => setCardForm((f) => ({ ...f, credit_limit: v }))}
+                disabled={cardSaving}
+              />
+            </Field>
+            <Field label="Interest rate" hint="% per month">
+              <input
+                required
+                type="text"
+                inputMode="decimal"
+                className={INPUT_CLASSES}
+                value={cardForm.interest_rate}
+                onChange={(e) => setCardForm((f) => ({ ...f, interest_rate: e.target.value }))}
+                disabled={cardSaving}
+              />
+            </Field>
+            <Field label="Statement balance">
+              <AmountInput
+                required
+                value={cardForm.last_statement_balance}
+                onChange={(v) => setCardForm((f) => ({ ...f, last_statement_balance: v }))}
+                disabled={cardSaving}
+              />
+            </Field>
+            <Field label="Minimum due">
+              <AmountInput
+                required
+                value={cardForm.minimum_due}
+                onChange={(v) => setCardForm((f) => ({ ...f, minimum_due: v }))}
+                disabled={cardSaving}
+              />
+            </Field>
+            <Field label="Statement date" hint="Optional">
+              <DatePickerField
+                value={cardForm.statement_date}
+                onChange={(v) => setCardForm((f) => ({ ...f, statement_date: v }))}
+                disabled={cardSaving}
+                clearLabel="Clear"
+              />
+            </Field>
+            <Field label="Due date" hint="Optional">
+              <DatePickerField
+                value={cardForm.due_date}
+                onChange={(v) => setCardForm((f) => ({ ...f, due_date: v }))}
+                disabled={cardSaving}
+                clearLabel="Clear"
+              />
+            </Field>
 
-          {cardFormError && (
-            <div className={`sm:col-span-2 ${ERROR_ALERT_CLASSES}`} role="alert">
-              {cardFormError}
-            </div>
-          )}
-
-          <div className="flex flex-wrap gap-2 sm:col-span-2">
-            <button type="submit" disabled={cardSaving} className={PRIMARY_BUTTON_CLASSES}>
-              {cardSaving ? "Saving…" : card ? "Save statement" : "Add"}
-            </button>
-            <button
-              type="button"
-              disabled={cardSaving}
-              className={SECONDARY_BUTTON_CLASSES}
-              onClick={closeCardModal}
-            >
+            {cardFormError && (
+              <div className={`sm:col-span-2 ${ERROR_ALERT_CLASSES}`} role="alert">
+                {cardFormError}
+              </div>
+            )}
+          </div>
+          <div className={DIALOG_FOOTER_CLASSES}>
+            {card && (
+              <button
+                type="button"
+                disabled={cardSaving}
+                className={DANGER_TEXT_BUTTON_CLASSES}
+                onClick={() => void onRemoveCard()}
+              >
+                Remove card
+              </button>
+            )}
+            <button type="button" disabled={cardSaving} className={SECONDARY_BUTTON_CLASSES} onClick={closeCardModal}>
               Cancel
+            </button>
+            <button type="submit" disabled={cardSaving} className={PRIMARY_BUTTON_CLASSES}>
+              {cardSaving ? "Saving…" : card ? "Save statement" : "Add card"}
             </button>
           </div>
         </form>
@@ -950,71 +873,80 @@ export default function CreditCardClient() {
         open={paymentModalOpen}
         onClose={closePaymentModal}
         ariaLabelledBy="credit-card-payment-title"
+        dialogClassName={`${DIALOG_CLASSES} max-w-md`}
       >
-        <div className="mb-4 flex items-start justify-between gap-2">
-          <h2
-            id="credit-card-payment-title"
-            className="text-lg font-semibold text-ink"
-          >
-            Record payment
-          </h2>
-          <button
-            type="button"
-            className={CLOSE_BUTTON_CLASSES}
-            onClick={closePaymentModal}
-          >
-            Close
-          </button>
-        </div>
-        <form onSubmit={submitPaymentForm} className="grid gap-4">
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-ink-2">Amount</span>
-            <AmountInput
-              required
-              value={paymentForm.amount}
-              onChange={(v) => setPaymentForm((f) => ({ ...f, amount: v }))}
-              disabled={paymentSaving}
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-ink-2">Date</span>
-            <input
-              required
-              type="date"
-              className={INPUT_CLASSES}
-              value={paymentForm.payment_date}
-              onChange={(e) => setPaymentForm((f) => ({ ...f, payment_date: e.target.value }))}
-              disabled={paymentSaving}
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-ink-2">Note (optional)</span>
-            <input
-              type="text"
-              className={INPUT_CLASSES}
-              value={paymentForm.note}
-              onChange={(e) => setPaymentForm((f) => ({ ...f, note: e.target.value }))}
-              disabled={paymentSaving}
-            />
-          </label>
-
-          {paymentFormError && (
-            <div className={ERROR_ALERT_CLASSES} role="alert">
-              {paymentFormError}
+        <ModalHeader
+          id="credit-card-payment-title"
+          title="Record payment"
+          subtitle={card ? `Current balance ${fmtMoney(card.current_balance)}` : undefined}
+          onClose={closePaymentModal}
+        />
+        <form onSubmit={submitPaymentForm} className="flex min-h-0 flex-1 flex-col">
+          <div className={`${DIALOG_BODY_CLASSES} grid gap-4`}>
+            <div className="flex flex-col gap-2">
+              <Field label="Amount">
+                <AmountInput
+                  required
+                  autoFocus
+                  placeholder="0.00"
+                  value={paymentForm.amount}
+                  onChange={(v) => setPaymentForm((f) => ({ ...f, amount: v }))}
+                  disabled={paymentSaving}
+                />
+              </Field>
+              {card && (
+                <div className="flex flex-wrap gap-1.5">
+                  {(
+                    [
+                      ["Minimum", card.minimum_due],
+                      ["This month", card.monthly_dues],
+                      ["Full balance", card.current_balance],
+                    ] as const
+                  )
+                    .filter(([, v]) => v > 0)
+                    .map(([label, v]) => (
+                      <button
+                        key={label}
+                        type="button"
+                        disabled={paymentSaving}
+                        className="rounded-full border border-line px-2.5 py-1 text-xs text-ink-2 transition-colors duration-150 hover:border-brand hover:text-brand-text"
+                        onClick={() => setPaymentForm((f) => ({ ...f, amount: formatAmountNumber(v) }))}
+                      >
+                        {label} · <span className="tabular-nums">{fmtMoney(v)}</span>
+                      </button>
+                    ))}
+                </div>
+              )}
             </div>
-          )}
+            <Field label="Date">
+              <DatePickerField
+                value={paymentForm.payment_date}
+                onChange={(v) => setPaymentForm((f) => ({ ...f, payment_date: v }))}
+                disabled={paymentSaving}
+              />
+            </Field>
+            <Field label="Note" hint="Optional">
+              <input
+                type="text"
+                className={INPUT_CLASSES}
+                value={paymentForm.note}
+                onChange={(e) => setPaymentForm((f) => ({ ...f, note: e.target.value }))}
+                disabled={paymentSaving}
+              />
+            </Field>
 
-          <div className="flex flex-wrap gap-2">
+            {paymentFormError && (
+              <div className={ERROR_ALERT_CLASSES} role="alert">
+                {paymentFormError}
+              </div>
+            )}
+          </div>
+          <div className={DIALOG_FOOTER_CLASSES}>
+            <button type="button" disabled={paymentSaving} className={SECONDARY_BUTTON_CLASSES} onClick={closePaymentModal}>
+              Cancel
+            </button>
             <button type="submit" disabled={paymentSaving} className={PRIMARY_BUTTON_CLASSES}>
               {paymentSaving ? "Saving…" : "Record payment"}
-            </button>
-            <button
-              type="button"
-              disabled={paymentSaving}
-              className={SECONDARY_BUTTON_CLASSES}
-              onClick={closePaymentModal}
-            >
-              Cancel
             </button>
           </div>
         </form>
@@ -1024,55 +956,38 @@ export default function CreditCardClient() {
         open={balanceModalOpen}
         onClose={closeBalanceModal}
         ariaLabelledBy="credit-card-balance-title"
+        dialogClassName={`${DIALOG_CLASSES} max-w-md`}
       >
-        <div className="mb-4 flex items-start justify-between gap-2">
-          <h2
-            id="credit-card-balance-title"
-            className="text-lg font-semibold text-ink"
-          >
-            Edit available credit
-          </h2>
-          <button
-            type="button"
-            className={CLOSE_BUTTON_CLASSES}
-            onClick={closeBalanceModal}
-          >
-            Close
-          </button>
-        </div>
-        <p className="mb-4 text-xs text-ink-2">
-          Use this to match what your bank actually shows, e.g. if you&apos;ve made purchases or
-          other transactions this app hasn&apos;t recorded. This overwrites the current balance
-          shown above without touching your statement details.
-        </p>
-        <form onSubmit={submitBalanceForm} className="grid gap-4">
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-ink-2">Available credit</span>
-            <AmountInput
-              required
-              value={balanceForm}
-              onChange={setBalanceForm}
-              disabled={balanceSaving}
-            />
-          </label>
+        <ModalHeader
+          id="credit-card-balance-title"
+          title="Adjust available credit"
+          subtitle="Match what your bank shows, e.g. after purchases this app doesn't track. Statement details stay as they are."
+          onClose={closeBalanceModal}
+        />
+        <form onSubmit={submitBalanceForm} className="flex min-h-0 flex-1 flex-col">
+          <div className={`${DIALOG_BODY_CLASSES} grid gap-4`}>
+            <Field label="Available credit">
+              <AmountInput
+                required
+                autoFocus
+                value={balanceForm}
+                onChange={setBalanceForm}
+                disabled={balanceSaving}
+              />
+            </Field>
 
-          {balanceFormError && (
-            <div className={ERROR_ALERT_CLASSES} role="alert">
-              {balanceFormError}
-            </div>
-          )}
-
-          <div className="flex flex-wrap gap-2">
+            {balanceFormError && (
+              <div className={ERROR_ALERT_CLASSES} role="alert">
+                {balanceFormError}
+              </div>
+            )}
+          </div>
+          <div className={DIALOG_FOOTER_CLASSES}>
+            <button type="button" disabled={balanceSaving} className={SECONDARY_BUTTON_CLASSES} onClick={closeBalanceModal}>
+              Cancel
+            </button>
             <button type="submit" disabled={balanceSaving} className={PRIMARY_BUTTON_CLASSES}>
               {balanceSaving ? "Saving…" : "Save"}
-            </button>
-            <button
-              type="button"
-              disabled={balanceSaving}
-              className={SECONDARY_BUTTON_CLASSES}
-              onClick={closeBalanceModal}
-            >
-              Cancel
             </button>
           </div>
         </form>

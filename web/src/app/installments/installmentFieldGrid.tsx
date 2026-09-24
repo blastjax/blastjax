@@ -2,6 +2,7 @@
 
 import type { Dispatch, SetStateAction } from "react";
 import { AmountInput } from "@/components/AmountInput";
+import { Field } from "@/components/FinanceUI";
 import { INPUT_CLASSES } from "@/lib/ui";
 
 export type InstallmentFormState = {
@@ -31,131 +32,100 @@ export function InstallmentFieldGrid({
 }) {
   return (
     <>
-      <label className="flex flex-col gap-1 text-sm sm:col-span-2">
-        <span className="text-ink-2">Name</span>
+      <Field label="Name" className="sm:col-span-2">
         <input
           required
+          placeholder="e.g. Laptop"
           className={INPUT_CLASSES}
           value={form.name}
           onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
           disabled={saving}
         />
-      </label>
-      <label className="flex flex-col gap-1 text-sm">
-        <span className="text-ink-2">
-          Installment # (next to pay)
-        </span>
-        <input
-          required
-          type="number"
-          min={1}
-          className={INPUT_CLASSES}
-          value={form.installment_current}
-          onChange={(e) =>
-            setForm((f) => ({ ...f, installment_current: e.target.value }))
-          }
-          disabled={saving}
-        />
-      </label>
-      <label className="flex flex-col gap-1 text-sm">
-        <span className="text-ink-2">
-          Total installments (n)
-        </span>
+      </Field>
+      <Field label="Number of payments">
         <input
           required
           type="number"
           min={1}
           className={INPUT_CLASSES}
           value={form.installment_total}
-          onChange={(e) =>
-            setForm((f) => ({ ...f, installment_total: e.target.value }))
-          }
+          onChange={(e) => setForm((f) => ({ ...f, installment_total: e.target.value }))}
           disabled={saving}
         />
-      </label>
+      </Field>
+      <Field label="Next payment #" hint="1 for a brand-new plan">
+        <input
+          required
+          type="number"
+          min={1}
+          className={INPUT_CLASSES}
+          value={form.installment_current}
+          onChange={(e) => setForm((f) => ({ ...f, installment_current: e.target.value }))}
+          disabled={saving}
+        />
+      </Field>
       {!hideAmounts && (
         <>
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-ink-2">Principal</span>
+          <Field label="Principal" hint="Per payment">
             <AmountInput
               required
               value={form.principal}
               onChange={(v) => setForm((f) => ({ ...f, principal: v }))}
               disabled={saving}
             />
-          </label>
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-ink-2">
-              Interest (optional)
-            </span>
+          </Field>
+          <Field label="Interest" hint="Per payment · optional">
             <AmountInput
               value={form.interest}
               onChange={(v) => setForm((f) => ({ ...f, interest: v }))}
               disabled={saving}
             />
-          </label>
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-ink-2">
-              Total (per payment, optional)
-            </span>
+          </Field>
+          <Field label="Payment total" hint="Optional · defaults to principal + interest" className="sm:col-span-2">
             <AmountInput
               value={form.payment_total}
               onChange={(v) => setForm((f) => ({ ...f, payment_total: v }))}
               disabled={saving}
             />
-          </label>
+          </Field>
         </>
       )}
-      <label className="flex flex-col gap-1 text-sm">
-        <span className="text-ink-2">Start (mm-yyyy)</span>
+      <Field label="Start month" hint="Payment 1 is due the month after">
         <input
           required
           type="month"
           className={INPUT_CLASSES}
           value={form.start_date}
-          onChange={(e) =>
-            setForm((f) => ({ ...f, start_date: e.target.value }))
-          }
+          onChange={(e) => setForm((f) => ({ ...f, start_date: e.target.value }))}
           disabled={saving}
         />
-      </label>
-      <label className="flex flex-col gap-1 text-sm">
-        <span className="text-ink-2">
-          Finish (mm-yyyy, optional)
-        </span>
+      </Field>
+      <Field label="End month" hint="Optional · start + number of payments">
         <input
           type="month"
           className={INPUT_CLASSES}
           value={form.finish_date}
-          onChange={(e) =>
-            setForm((f) => ({ ...f, finish_date: e.target.value }))
-          }
+          onChange={(e) => setForm((f) => ({ ...f, finish_date: e.target.value }))}
           disabled={saving}
         />
-      </label>
+      </Field>
       {!hideAmounts && (
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="text-ink-2">
-            Remaining (optional)
-          </span>
-          <AmountInput
-            value={form.remaining}
-            onChange={(v) => setForm((f) => ({ ...f, remaining: v }))}
-            disabled={saving}
-          />
-        </label>
-      )}
-      {!hideAmounts && (
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="text-ink-2">
-            Original total (optional)
-          </span>
-          <AmountInput
-            value={form.original_total}
-            onChange={(v) => setForm((f) => ({ ...f, original_total: v }))}
-            disabled={saving}
-          />
-        </label>
+        <>
+          <Field label="Remaining" hint="Optional">
+            <AmountInput
+              value={form.remaining}
+              onChange={(v) => setForm((f) => ({ ...f, remaining: v }))}
+              disabled={saving}
+            />
+          </Field>
+          <Field label="Original total" hint="Optional">
+            <AmountInput
+              value={form.original_total}
+              onChange={(v) => setForm((f) => ({ ...f, original_total: v }))}
+              disabled={saving}
+            />
+          </Field>
+        </>
       )}
     </>
   );

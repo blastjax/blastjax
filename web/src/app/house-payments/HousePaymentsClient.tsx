@@ -1,9 +1,22 @@
 "use client";
 
 import { AmountInput } from "@/components/AmountInput";
+import { DatePickerField } from "@/components/DatePickerField";
 import { PageHeader } from "@/components/PageHeader";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Modal } from "@/components/Modal";
+import {
+  DIALOG_BODY_CLASSES,
+  DIALOG_CLASSES,
+  DIALOG_FOOTER_CLASSES,
+  Field,
+  IconAction,
+  LoadingBlocks,
+  Metric,
+  ModalHeader,
+  StatStrip,
+} from "@/components/FinanceUI";
+import { HomeIcon, PlusIcon } from "@/components/Icons";
 import {
   createHousePayment,
   createHousePaymentEntry,
@@ -18,44 +31,25 @@ import {
   type HousePaymentRow,
 } from "@/lib/api";
 import { formatAmountNumber, parseFormNumber } from "@/lib/parseFormNumber";
-import { formatDate as fmtDate } from "@/lib/dateFormat";
+import { formatDate as fmtDate, toIsoDateLocal } from "@/lib/dateFormat";
 import { fmtAmountOrDash, fmtCount } from "@/lib/formatNumber";
 import {
-  AMOUNT_POSITIVE_CLASSES,
-  CLOSE_BUTTON_CLASSES,
-  DASHED_EMPTY_CLASSES,
-  DELETE_BUTTON_CLASSES,
-  EDIT_BUTTON_CLASSES,
   ERROR_ALERT_CLASSES,
   INPUT_CLASSES,
-  LOADING_TEXT_CLASSES,
   PAGE_CONTAINER_CLASSES,
   PRIMARY_BUTTON_CLASSES,
   SECONDARY_BUTTON_CLASSES,
-  TABLE_CELL_CLASSES,
-  TABLE_HEAD_CELL_CLASSES,
-  TABLE_HEAD_ROW_CLASSES,
-  TABLE_ROW_CLASSES,
-  TABLE_WRAPPER_CLASSES,
-  alertClasses,
 } from "@/lib/ui";
 
 const fmtMoney = fmtAmountOrDash;
-
-/** Today as `yyyy-MM-dd` for default form value. */
-function todayIso(): string {
-  const d = new Date();
-  const y = d.getFullYear();
-  const mo = String(d.getMonth() + 1).padStart(2, "0");
-  const da = String(d.getDate()).padStart(2, "0");
-  return `${y}-${mo}-${da}`;
-}
 
 type PlanForm = { name: string; notes: string };
 const emptyPlanForm: PlanForm = { name: "", notes: "" };
 
 type EntryForm = { paid_on: string; amount: string };
-const emptyEntryForm = (): EntryForm => ({ paid_on: todayIso(), amount: "" });
+const emptyEntryForm = (): EntryForm => ({ paid_on: toIsoDateLocal(new Date()), amount: "" });
+
+const plural = (n: number, word: string) => `${fmtCount(n)} ${word}${n === 1 ? "" : "s"}`;
 
 export default function HousePaymentsClient() {
   const [rows, setRows] = useState<HousePaymentRow[]>([]);
@@ -99,6 +93,10 @@ export default function HousePaymentsClient() {
       sum_total_paid: rows.reduce((s, r) => s + (r.total_paid || 0), 0),
       total_entries: rows.reduce((s, r) => s + (r.entry_count || 0), 0),
       plan_count: rows.length,
+      last_paid_on: rows.reduce<string | null>(
+        (m, r) => (r.last_paid_on && (!m || r.last_paid_on > m) ? r.last_paid_on : m),
+        null,
+      ),
     }),
     [rows],
   );
@@ -120,6 +118,13 @@ export default function HousePaymentsClient() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  const openNewPlan = () => {
+    setError(null);
+    setEditingPlanId(null);
+    setPlanForm(emptyPlanForm);
+    setPlanModalOpen(true);
+  };
 
   const closePlanModal = useCallback(() => {
     setPlanModalOpen(false);
@@ -189,6 +194,7 @@ export default function HousePaymentsClient() {
   };
 
   const startEditPlan = (r: HousePaymentRow) => {
+    setError(null);
     setEditingPlanId(r.id);
     setPlanForm({ name: r.name, notes: r.notes ?? "" });
     setPlanModalOpen(true);
@@ -221,7 +227,7 @@ export default function HousePaymentsClient() {
       }
       const paid_on = entryForm.paid_on.trim();
       if (!/^\d{4}-\d{2}-\d{2}$/.test(paid_on)) {
-        throw new Error("Date must be a valid yyyy-mm-dd value.");
+        throw new Error("Pick the date the payment was made.");
       }
       const body = { paid_on, amount: amt };
       const fresh =
@@ -272,371 +278,279 @@ export default function HousePaymentsClient() {
     return detail.entries.reduce((s, e) => s + Number(e.amount || 0), 0);
   }, [detail]);
 
+  /** Entries arrive newest first; bucket them by year with a subtotal each. */
+  const entriesByYear = useMemo(() => {
+    const groups: { year: string; total: number; entries: HousePaymentEntry[] }[] = [];
+    for (const e of detail?.entries ?? []) {
+      const year = e.paid_on.slice(0, 4);
+      let g = groups[groups.length - 1];
+      if (!g || g.year !== year) {
+        g = { year, total: 0, entries: [] };
+        groups.push(g);
+      }
+      g.entries.push(e);
+      g.total += Number(e.amount || 0);
+    }
+    return groups;
+  }, [detail]);
+
+  const editingEntry = detail?.entries.find((e) => e.id === editingEntryId) ?? null;
+
   return (
     <div className={PAGE_CONTAINER_CLASSES}>
       <PageHeader
         title="House Payments"
-        description={
-          <>
-            Track payments made toward a house, with the date each payment was made.
-          </>
+        description="Every payment made toward a house, and when it was made."
+        actions={
+          <button type="button" className={PRIMARY_BUTTON_CLASSES} onClick={openNewPlan}>
+            <PlusIcon className="size-4" />
+            New plan
+          </button>
         }
       />
 
-      {error && (
+      {error && !planModalOpen && entriesModalId == null && (
         <div className={ERROR_ALERT_CLASSES} role="alert">
           {error}
         </div>
       )}
 
-      {!loading && (
-        <section>
-          <div className={`${alertClasses("success")} !p-4`}>
-            <p className="text-xs font-medium uppercase text-emerald-800 dark:text-emerald-200">
-              Total amount paid
-            </p>
-            <p className="mt-1 text-3xl font-semibold tabular-nums text-emerald-900 dark:text-emerald-100">
-              {fmtMoney(summary.sum_total_paid)}
-            </p>
-            <p className="mt-1 text-xs text-emerald-800/80 dark:text-emerald-200/80">
-              Across {fmtCount(summary.plan_count)} plan
-              {summary.plan_count === 1 ? "" : "s"} ·{" "}
-              {fmtCount(summary.total_entries)} payment
-              {summary.total_entries === 1 ? "" : "s"} recorded
-            </p>
-          </div>
-        </section>
+      {loading ? (
+        <LoadingBlocks label="Loading house payments…" rows={1} />
+      ) : (
+        <>
+          <StatStrip className="grid-cols-2 lg:grid-cols-4">
+            <Metric label="Total paid" value={fmtMoney(summary.sum_total_paid)} tone="brand" size="lg" />
+            <Metric label="Payments" value={fmtCount(summary.total_entries)} />
+            <Metric label="Plans" value={fmtCount(summary.plan_count)} />
+            <Metric label="Last payment" value={fmtDate(summary.last_paid_on)} />
+          </StatStrip>
+
+          <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            {rows.map((r) => (
+              <li key={r.id}>
+                <div
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => void openEntries(r.id)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      void openEntries(r.id);
+                    }
+                  }}
+                  className="group flex h-full cursor-pointer flex-col rounded-2xl border border-line bg-surface p-5 shadow-xs transition duration-150 hover:border-line-strong hover:shadow-md"
+                >
+                  <div className="flex items-start gap-3">
+                    <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-brand-soft text-brand-text">
+                      <HomeIcon className="size-5" />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <h3 className="truncate font-semibold text-ink">{r.name}</h3>
+                      <p className="mt-0.5 text-xs text-ink-3">{plural(r.entry_count, "payment")}</p>
+                    </div>
+                    <div className="-mr-2 -mt-1 flex">
+                      <IconAction kind="edit" label={`Edit ${r.name}`} disabled={saving} onClick={() => startEditPlan(r)} />
+                      <IconAction
+                        kind="delete"
+                        label={`Delete ${r.name}`}
+                        disabled={saving}
+                        onClick={() => void onDeletePlan(r.id)}
+                      />
+                    </div>
+                  </div>
+                  {r.notes && <p className="mt-3 line-clamp-2 whitespace-pre-line text-sm text-ink-3">{r.notes}</p>}
+                  <div className="mt-auto pt-5">
+                    <p className="text-xs font-medium text-ink-3">Total paid</p>
+                    <p className="mt-0.5 text-2xl font-semibold tabular-nums tracking-tight text-ink">
+                      {fmtMoney(r.total_paid)}
+                    </p>
+                    <div className="mt-4 flex items-center justify-between gap-2 border-t border-line-soft pt-3 text-xs">
+                      <span className="text-ink-3">
+                        {r.last_paid_on ? `Last paid ${fmtDate(r.last_paid_on)}` : "No payments yet"}
+                      </span>
+                      <span className="font-medium text-brand-text group-hover:underline">Payments →</span>
+                    </div>
+                  </div>
+                </div>
+              </li>
+            ))}
+            <li>
+              <button
+                type="button"
+                onClick={openNewPlan}
+                className="flex h-full min-h-[12rem] w-full flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-line-strong p-5 text-sm text-ink-3 transition-colors duration-150 hover:border-brand hover:text-brand-text"
+              >
+                <PlusIcon className="size-5" />
+                <span className="font-medium">{rows.length === 0 ? "Create your first plan" : "New plan"}</span>
+              </button>
+            </li>
+          </ul>
+        </>
       )}
 
       <Modal
         open={planModalOpen}
         onClose={closePlanModal}
         ariaLabelledBy="house-plan-title"
-        dialogClassName="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-xl border border-line bg-surface p-5 shadow-pop"
+        dialogClassName={`${DIALOG_CLASSES} max-w-md`}
       >
-        <div className="mb-4 flex items-start justify-between gap-2">
-          <h2
-            id="house-plan-title"
-            className="text-lg font-semibold text-ink"
-          >
-            {editingPlanId != null ? "Edit house payment" : "Add house payment"}
-          </h2>
-          <button
-            type="button"
-            className={CLOSE_BUTTON_CLASSES}
-            onClick={closePlanModal}
-          >
-            Close
-          </button>
-        </div>
-        <form onSubmit={submitPlan} className="grid gap-4">
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-ink-2">Name</span>
-            <input
-              required
-              className={INPUT_CLASSES}
-              value={planForm.name}
-              onChange={(e) =>
-                setPlanForm((f) => ({ ...f, name: e.target.value }))
-              }
-              disabled={saving}
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-ink-2">
-              Notes (optional)
-            </span>
-            <textarea
-              rows={3}
-              className={INPUT_CLASSES}
-              value={planForm.notes}
-              onChange={(e) =>
-                setPlanForm((f) => ({ ...f, notes: e.target.value }))
-              }
-              disabled={saving}
-            />
-          </label>
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="submit"
-              disabled={saving}
-              className={PRIMARY_BUTTON_CLASSES}
-            >
-              {saving ? "Saving…" : editingPlanId != null ? "Update" : "Add"}
-            </button>
-            <button
-              type="button"
-              disabled={saving}
-              className={SECONDARY_BUTTON_CLASSES}
-              onClick={closePlanModal}
-            >
+        <ModalHeader
+          id="house-plan-title"
+          title={editingPlanId != null ? "Edit plan" : "New plan"}
+          subtitle="A property or loan you're paying toward."
+          onClose={closePlanModal}
+        />
+        <form onSubmit={submitPlan} className="flex min-h-0 flex-1 flex-col">
+          <div className={`${DIALOG_BODY_CLASSES} grid gap-4`}>
+            <Field label="Name">
+              <input
+                required
+                autoFocus
+                placeholder="e.g. Condo unit 12B"
+                className={INPUT_CLASSES}
+                value={planForm.name}
+                onChange={(e) => setPlanForm((f) => ({ ...f, name: e.target.value }))}
+                disabled={saving}
+              />
+            </Field>
+            <Field label="Notes" hint="Optional">
+              <textarea
+                rows={3}
+                className={INPUT_CLASSES}
+                value={planForm.notes}
+                onChange={(e) => setPlanForm((f) => ({ ...f, notes: e.target.value }))}
+                disabled={saving}
+              />
+            </Field>
+            {error && (
+              <div className={ERROR_ALERT_CLASSES} role="alert">
+                {error}
+              </div>
+            )}
+          </div>
+          <div className={DIALOG_FOOTER_CLASSES}>
+            <button type="button" disabled={saving} className={SECONDARY_BUTTON_CLASSES} onClick={closePlanModal}>
               Cancel
+            </button>
+            <button type="submit" disabled={saving} className={PRIMARY_BUTTON_CLASSES}>
+              {saving ? "Saving…" : editingPlanId != null ? "Save changes" : "Create plan"}
             </button>
           </div>
         </form>
       </Modal>
 
-      <section>
-        <h2 className="text-lg font-medium text-ink">Plans</h2>
-        <ul className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3">
-          {!loading && (
-            <li>
-              <button
-                type="button"
-                onClick={() => {
-                  setEditingPlanId(null);
-                  setPlanForm(emptyPlanForm);
-                  setPlanModalOpen(true);
-                }}
-                className="flex min-h-[8rem] w-full flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-line-strong p-3 text-center text-sm text-ink-3 transition-colors duration-150 hover:border-brand hover:text-brand sm:p-4"
-              >
-                <span className="text-lg font-medium">+</span>
-                <span className="font-medium">Add house payment</span>
-              </button>
-            </li>
-          )}
-          {!loading &&
-            rows.map((r) => (
-              <li
-                key={r.id}
-                role="button"
-                tabIndex={0}
-                onClick={() => void openEntries(r.id)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    void openEntries(r.id);
-                  }
-                }}
-                className="min-w-0 cursor-pointer rounded-lg border border-line bg-surface p-3 transition-colors duration-150 hover:ring-2 hover:ring-indigo-300/60 sm:p-4 dark:hover:ring-indigo-700/50"
-              >
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
-                  <div className="min-w-0">
-                    <h3 className="truncate text-sm font-semibold text-ink sm:text-base">
-                      {r.name}
-                    </h3>
-                    <p className="mt-1 text-xs text-ink-2 sm:text-sm">
-                      {r.entry_count} payment{r.entry_count === 1 ? "" : "s"}
-                      {r.last_paid_on && (
-                        <>
-                          {" "}· last on{" "}
-                          <span className="font-mono tabular-nums">
-                            {fmtDate(r.last_paid_on)}
-                          </span>
-                        </>
-                      )}
-                    </p>
-                  </div>
-                  <div className="flex min-w-0 flex-wrap gap-1.5 sm:gap-2">
-                    <button
-                      type="button"
-                      disabled={saving}
-                      className={EDIT_BUTTON_CLASSES}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        startEditPlan(r);
-                      }}
-                    >
-                      Edit
-                    </button>
-                    <button
-                      type="button"
-                      disabled={saving}
-                      className={DELETE_BUTTON_CLASSES}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        void onDeletePlan(r.id);
-                      }}
-                    >
-                      Delete
-                    </button>
-                  </div>
-                </div>
-                <dl className="mt-3 grid gap-2 text-xs sm:mt-4 sm:gap-3 sm:text-sm sm:grid-cols-2">
-                  <div>
-                    <dt className="text-xs text-ink-3">Total paid</dt>
-                    <dd className={AMOUNT_POSITIVE_CLASSES}>
-                      {fmtMoney(r.total_paid)}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt className="text-xs text-ink-3">Last payment</dt>
-                    <dd className="tabular-nums">{fmtDate(r.last_paid_on)}</dd>
-                  </div>
-                  {r.notes && (
-                    <div className="sm:col-span-2">
-                      <dt className="text-xs text-ink-3">Notes</dt>
-                      <dd className="whitespace-pre-line text-ink-2">
-                        {r.notes}
-                      </dd>
-                    </div>
-                  )}
-                </dl>
-              </li>
-            ))}
-          {!loading && rows.length === 0 && (
-            <li className={`col-span-full ${DASHED_EMPTY_CLASSES}`}>
-              No house payment plans yet.
-            </li>
-          )}
-        </ul>
-      </section>
-
       <Modal
         open={entriesModalId != null}
         onClose={closeEntriesModal}
         ariaLabelledBy="house-entries-title"
-        backdropClassName="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4 sm:items-center"
-        dialogClassName="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-line bg-surface shadow-pop"
+        dialogClassName={`${DIALOG_CLASSES} max-w-2xl`}
       >
-            <div className="flex shrink-0 items-start justify-between gap-2 border-b border-line px-4 py-3">
-              <div className="min-w-0">
-                <h2
-                  id="house-entries-title"
-                  className="truncate text-lg font-semibold text-ink"
-                >
-                  {detail?.house_payment.name ?? "Payments"}
-                </h2>
-                {detail && (
-                  <p className="mt-0.5 text-xs text-ink-2">
-                    {detail.entries.length} payment
-                    {detail.entries.length === 1 ? "" : "s"} · total{" "}
-                    <span className="font-mono tabular-nums">
-                      {fmtMoney(detailTotalPaid)}
-                    </span>
-                  </p>
-                )}
-              </div>
-              <button
-                type="button"
-                className={CLOSE_BUTTON_CLASSES}
-                onClick={closeEntriesModal}
+        <ModalHeader
+          id="house-entries-title"
+          title={detail?.house_payment.name ?? "Payments"}
+          subtitle={
+            detail
+              ? `${plural(detail.entries.length, "payment")} · ${fmtMoney(detailTotalPaid)} paid`
+              : undefined
+          }
+          onClose={closeEntriesModal}
+        />
+        <div className={DIALOG_BODY_CLASSES}>
+          {detailLoading && (
+            <div className="h-40 animate-pulse rounded-xl bg-surface-2" role="status" aria-label="Loading payments" />
+          )}
+          {!detailLoading && detail && (
+            <div className="flex flex-col gap-5">
+              <form
+                onSubmit={submitEntry}
+                className={`rounded-xl border p-4 ${
+                  editingEntry ? "border-brand/40 bg-brand-soft" : "border-line bg-surface-2/50"
+                }`}
               >
-                Close
-              </button>
-            </div>
-
-            <div className="min-h-0 flex-1 overflow-auto p-4">
-              {detailLoading && (
-                <p className={LOADING_TEXT_CLASSES}>Loading payments…</p>
-              )}
-              {!detailLoading && detail && (
-                <>
-                  <form
-                    onSubmit={submitEntry}
-                    className="mb-4 grid grid-cols-1 gap-3 rounded-lg border border-line p-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end"
-                  >
-                    <label className="flex flex-col gap-1 text-sm">
-                      <span className="text-ink-2">
-                        Date paid
-                      </span>
-                      <input
-                        required
-                        type="date"
-                        className={INPUT_CLASSES}
-                        value={entryForm.paid_on}
-                        onChange={(e) =>
-                          setEntryForm((f) => ({ ...f, paid_on: e.target.value }))
-                        }
-                        disabled={savingEntry}
-                      />
-                    </label>
-                    <label className="flex flex-col gap-1 text-sm">
-                      <span className="text-ink-2">Amount</span>
-                      <AmountInput
-                        required
-                        value={entryForm.amount}
-                        onChange={(v) => setEntryForm((f) => ({ ...f, amount: v }))}
-                        disabled={savingEntry}
-                      />
-                    </label>
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        type="submit"
-                        disabled={savingEntry}
-                        className={PRIMARY_BUTTON_CLASSES}
-                      >
-                        {savingEntry
-                          ? "Saving…"
-                          : editingEntryId != null
-                            ? "Update"
-                            : "Add payment"}
+                <p className="mb-3 text-sm font-medium text-ink">
+                  {editingEntry ? `Editing the ${fmtDate(editingEntry.paid_on)} payment` : "Add a payment"}
+                </p>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+                  <Field label="Date paid">
+                    <DatePickerField
+                      value={entryForm.paid_on}
+                      onChange={(v) => setEntryForm((f) => ({ ...f, paid_on: v }))}
+                      disabled={savingEntry}
+                    />
+                  </Field>
+                  <Field label="Amount">
+                    <AmountInput
+                      required
+                      placeholder="0.00"
+                      value={entryForm.amount}
+                      onChange={(v) => setEntryForm((f) => ({ ...f, amount: v }))}
+                      disabled={savingEntry}
+                    />
+                  </Field>
+                  <div className="flex gap-2">
+                    {editingEntry && (
+                      <button type="button" disabled={savingEntry} className={SECONDARY_BUTTON_CLASSES} onClick={cancelEntryEdit}>
+                        Cancel
                       </button>
-                      {editingEntryId != null && (
-                        <button
-                          type="button"
-                          disabled={savingEntry}
-                          className={SECONDARY_BUTTON_CLASSES}
-                          onClick={cancelEntryEdit}
-                        >
-                          Cancel
-                        </button>
-                      )}
-                    </div>
-                  </form>
+                    )}
+                    <button type="submit" disabled={savingEntry} className={`flex-1 ${PRIMARY_BUTTON_CLASSES}`}>
+                      {savingEntry ? "Saving…" : editingEntry ? "Save" : "Add"}
+                    </button>
+                  </div>
+                </div>
+              </form>
 
-                  {detail.entries.length === 0 ? (
-                    <p className="text-sm text-ink">
-                      No payments yet. Add the first one above.
-                    </p>
-                  ) : (
-                    <div className={`${TABLE_WRAPPER_CLASSES} overflow-x-auto`}>
-                      <table className="w-full min-w-[28rem] text-left text-sm">
-                        <thead>
-                          <tr className={TABLE_HEAD_ROW_CLASSES}>
-                            <th className={TABLE_HEAD_CELL_CLASSES}>Date paid</th>
-                            <th className={`${TABLE_HEAD_CELL_CLASSES} text-right`}>Amount</th>
-                            <th className={`${TABLE_HEAD_CELL_CLASSES} text-right`}>Actions</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {detail.entries.map((entry) => {
-                            const isEditing = editingEntryId === entry.id;
-                            return (
-                              <tr
-                                key={entry.id}
-                                className={`${TABLE_ROW_CLASSES} ${
-                                  isEditing
-                                    ? "bg-indigo-50/80 hover:bg-indigo-50/80 dark:bg-indigo-950/30 dark:hover:bg-indigo-950/30"
-                                    : ""
-                                }`}
-                              >
-                                <td className={TABLE_CELL_CLASSES}>
-                                  {fmtDate(entry.paid_on)}
-                                </td>
-                                <td className={`${TABLE_CELL_CLASSES} text-right font-medium`}>
-                                  {fmtMoney(entry.amount)}
-                                </td>
-                                <td className={`${TABLE_CELL_CLASSES} text-right`}>
-                                  <div className="flex justify-end gap-1.5">
-                                    <button
-                                      type="button"
-                                      disabled={savingEntry}
-                                      className={EDIT_BUTTON_CLASSES}
-                                      onClick={() => startEditEntry(entry)}
-                                    >
-                                      Edit
-                                    </button>
-                                    <button
-                                      type="button"
-                                      disabled={savingEntry}
-                                      className={DELETE_BUTTON_CLASSES}
-                                      onClick={() => void onDeleteEntry(entry.id)}
-                                    >
-                                      Delete
-                                    </button>
-                                  </div>
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </>
+              {error && (
+                <div className={ERROR_ALERT_CLASSES} role="alert">
+                  {error}
+                </div>
+              )}
+
+              {detail.entries.length === 0 ? (
+                <p className="py-6 text-center text-sm text-ink-3">No payments yet. Add the first one above.</p>
+              ) : (
+                <div className="flex flex-col gap-4">
+                  {entriesByYear.map((g) => (
+                    <section key={g.year}>
+                      <div className="mb-1.5 flex items-baseline justify-between px-1">
+                        <h3 className="text-xs font-semibold uppercase tracking-wider text-ink-3">{g.year}</h3>
+                        <span className="text-xs font-semibold tabular-nums text-ink-2">{fmtMoney(g.total)}</span>
+                      </div>
+                      <ul className="divide-y divide-line-soft overflow-hidden rounded-xl border border-line">
+                        {g.entries.map((entry) => (
+                          <li
+                            key={entry.id}
+                            className={`flex items-center gap-3 py-1.5 pl-4 pr-2 ${
+                              entry.id === editingEntryId ? "bg-brand-soft" : ""
+                            }`}
+                          >
+                            <span className="flex-1 text-sm text-ink-2">{fmtDate(entry.paid_on)}</span>
+                            <span className="text-sm font-semibold tabular-nums text-ink">{fmtMoney(entry.amount)}</span>
+                            <div className="flex">
+                              <IconAction
+                                kind="edit"
+                                label="Edit payment"
+                                disabled={savingEntry}
+                                onClick={() => startEditEntry(entry)}
+                              />
+                              <IconAction
+                                kind="delete"
+                                label="Delete payment"
+                                disabled={savingEntry}
+                                onClick={() => void onDeleteEntry(entry.id)}
+                              />
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                    </section>
+                  ))}
+                </div>
               )}
             </div>
+          )}
+        </div>
       </Modal>
     </div>
   );

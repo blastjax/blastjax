@@ -307,6 +307,22 @@ export function PencilIcon(p: IconProps) {
   );
 }
 
+export function PlusIcon(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M12 5v14M5 12h14" />
+    </Svg>
+  );
+}
+
+export function CheckIcon(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="m5 12.5 4.5 4.5L19 7.5" />
+    </Svg>
+  );
+}
+
 export function TrashIcon(p: IconProps) {
   return (
     <Svg {...p}>
