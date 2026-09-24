@@ -1,15 +1,23 @@
 "use client";
 
-import {
-  CalendarIcon,
-  LayersIcon,
-  WalletIcon,
-} from "@/components/Icons";
 import { AmountInput } from "@/components/AmountInput";
 import { PageHeader } from "@/components/PageHeader";
-import { StatCard } from "@/components/StatCard";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Modal } from "@/components/Modal";
+import {
+  DANGER_TEXT_BUTTON_CLASSES,
+  DIALOG_BODY_CLASSES,
+  DIALOG_CLASSES,
+  DIALOG_FOOTER_CLASSES,
+  LoadingBlocks,
+  Metric,
+  Meter,
+  ModalHeader,
+  Pill,
+  StatStrip,
+  TEXT_BUTTON_CLASSES,
+} from "@/components/FinanceUI";
+import { CheckIcon, ChevronDownIcon, PlusIcon } from "@/components/Icons";
 import {
   createInstallment,
   deleteInstallment,
@@ -28,25 +36,18 @@ import {
 } from "@/lib/api";
 import { formatAmountNumber, parseFormNumber } from "@/lib/parseFormNumber";
 import { MONTH_NAMES_SHORT, formatMonthYear } from "@/lib/dateFormat";
-import { fmtAmount, fmtAmountOrDash } from "@/lib/formatNumber";
+import { fmtAmountOrDash } from "@/lib/formatNumber";
 import {
-  ACTION_BUTTON_CLASSES,
-  AMOUNT_POSITIVE_CLASSES,
-  CLOSE_BUTTON_CLASSES,
-  DASHED_EMPTY_CLASSES,
-  DELETE_BUTTON_CLASSES,
+  ADD_BUTTON_CLASSES,
+  EDIT_BUTTON_CLASSES,
   ERROR_ALERT_CLASSES,
-  LOADING_TEXT_CLASSES,
   PAGE_CONTAINER_CLASSES,
   PRIMARY_BUTTON_CLASSES,
   SECONDARY_BUTTON_CLASSES,
-  TABLE_CELL_CLASSES,
-  TABLE_HEAD_CELL_CLASSES,
-  TABLE_HEAD_ROW_CLASSES,
-  TABLE_ROW_CLASSES,
-  TABLE_WRAPPER_CLASSES,
-  TOGGLE_ACTIVE_BUTTON_CLASSES,
-  TOGGLE_INACTIVE_BUTTON_CLASSES,
+  SEGMENTED_BUTTON_ACTIVE_CLASSES,
+  SEGMENTED_BUTTON_CLASSES,
+  SEGMENTED_BUTTON_INACTIVE_CLASSES,
+  SEGMENTED_WRAPPER_CLASSES,
 } from "@/lib/ui";
 import { InstallmentFieldGrid } from "./installmentFieldGrid";
 
@@ -158,8 +159,6 @@ function installmentScheduleProgressPct(r: InstallmentRow): number {
   );
 }
 
-const fmtPct2 = fmtAmount;
-
 const emptyForm = {
   name: "",
   installment_current: "1",
@@ -210,6 +209,7 @@ export default function InstallmentsClient() {
     InstallmentDetailResponse[]
   >([]);
   const [showArchived, setShowArchived] = useState(false);
+  const [detailTab, setDetailTab] = useState<"schedule" | "details">("schedule");
   const [cardId, setCardId] = useState<number | null>(null);
   const [linkToCard, setLinkToCard] = useState(false);
   /** Per-payment principal/interest drafts for the Add form, keyed by seq (1..n). */
@@ -584,6 +584,7 @@ export default function InstallmentsClient() {
   }, [paymentsDetails]);
 
   const openDetail = async (id: number) => {
+    setDetailTab("schedule");
     setScheduleModalId(id);
     setDetail(null);
     setDetailLoading(true);
@@ -764,785 +765,598 @@ export default function InstallmentsClient() {
     }
     return s;
   }, [activeRows]);
+  const now = new Date();
+  const currentMonthKey = now.getFullYear() * 12 + now.getMonth();
+  const doneTotal = doneRows.reduce((s, r) => s + (r.original_total || 0), 0);
+
+  /** Payment #1's amounts copied onto every row of the Add form's schedule. */
+  const copyFirstRowToAll = () => {
+    const first = lineDrafts[1];
+    if (!first) return;
+    setLineDrafts(
+      Object.fromEntries(Array.from({ length: draftTotal }, (_, i) => [i + 1, { ...first }])),
+    );
+  };
+
+  const openAdd = () => {
+    setError(null);
+    setForm(emptyForm);
+    setLinkToCard(false);
+    setLineDrafts({});
+    setAddModalOpen(true);
+  };
+
+  const anyModalOpen = addModalOpen || scheduleModalId != null || paymentsModalOpen;
+
+  const errorBox = error && (
+    <div className={`sm:col-span-2 ${ERROR_ALERT_CLASSES}`} role="alert">
+      {error}
+    </div>
+  );
+
+  const linkToCardToggle = cardId != null && (
+    <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-line p-3.5 transition-colors duration-150 hover:bg-surface-2/60 sm:col-span-2">
+      <input
+        type="checkbox"
+        className="mt-0.5 size-4"
+        checked={linkToCard}
+        onChange={(e) => setLinkToCard(e.target.checked)}
+        disabled={saving}
+      />
+      <span className="text-sm">
+        <span className="block font-medium text-ink">Charged to my credit card</span>
+        <span className="text-ink-3">Counts toward the card&apos;s monthly dues.</span>
+      </span>
+    </label>
+  );
+
+  const deletePlanButton = scheduleModalId != null && (
+    <button
+      type="button"
+      disabled={saving}
+      className={DANGER_TEXT_BUTTON_CLASSES}
+      onClick={() => void onDelete(scheduleModalId)}
+    >
+      Delete plan
+    </button>
+  );
+
+  const TH = "px-3 py-2.5 text-left text-xs font-medium text-ink-3";
+  const TD = "px-3 py-2 text-sm tabular-nums text-ink-2";
 
   return (
     <div className={PAGE_CONTAINER_CLASSES}>
       <PageHeader
         title="Installments"
-        description={
-          <>
-            Track scheduled installment plans and record payments as they&apos;re made.
-          </>
-        }
+        description="Payment plans, what's due this month, and what's left to pay."
         actions={
           <>
-            {doneRows.length > 0 && (
-              <button
-                type="button"
-                className={
-                  showArchived
-                    ? TOGGLE_ACTIVE_BUTTON_CLASSES
-                    : TOGGLE_INACTIVE_BUTTON_CLASSES
-                }
-                onClick={() => setShowArchived((v) => !v)}
-              >
-                Archived ({doneRows.length})
-              </button>
-            )}
             <button
               type="button"
               disabled={loading || rows.length === 0}
-              className={ACTION_BUTTON_CLASSES}
+              className={SECONDARY_BUTTON_CLASSES}
               onClick={() => void openPayments()}
             >
-              Payments by month
+              Payment calendar
+            </button>
+            <button type="button" className={PRIMARY_BUTTON_CLASSES} onClick={openAdd}>
+              <PlusIcon className="size-4" />
+              Add plan
             </button>
           </>
         }
       />
 
-      {error && (
-        <div className={ERROR_ALERT_CLASSES} role="alert">
-          {error}
-        </div>
-      )}
+      {!anyModalOpen && errorBox}
 
-      {!loading && (
-        <section className="grid gap-4 sm:grid-cols-3">
-          <StatCard
-            label="Total (active plans)"
-            value={fmtMoney(summary.sum_original_total)}
-            icon={<LayersIcon className="size-5" />}
-            tone="brand"
-          />
-          <StatCard
-            label="Remaining"
-            value={fmtMoney(summary.sum_remaining)}
-            icon={<WalletIcon className="size-5" />}
-            tone="warning"
-          />
-          <StatCard
-            label="Due this month"
-            value={fmtMoney(summary.due_this_month)}
-            icon={<CalendarIcon className="size-5" />}
-            tone="success"
-          />
-        </section>
+      {loading ? (
+        <LoadingBlocks label="Loading installments…" />
+      ) : (
+        <>
+          <StatStrip className="grid-cols-2 lg:grid-cols-4">
+            <Metric
+              label="Due this month"
+              value={fmtMoney(summary.due_this_month)}
+              hint={`${dueIds.size} plan${dueIds.size === 1 ? "" : "s"} due`}
+              tone="brand"
+              size="lg"
+            />
+            <Metric label="Left to pay" value={fmtMoney(summary.sum_remaining)} hint="Across active plans" />
+            <Metric label="Active plans total" value={fmtMoney(summary.sum_original_total)} hint="Original amounts" />
+            <Metric label="Active plans" value={activeRows.length} hint={`${doneRows.length} paid off`} />
+          </StatStrip>
+
+          {activeRows.length === 0 ? (
+            <div className="flex flex-col items-center rounded-2xl border border-dashed border-line-strong px-6 py-12 text-center">
+              <p className="font-medium text-ink">
+                {doneRows.length > 0 ? "Everything is paid off." : "No installment plans yet"}
+              </p>
+              <p className="mt-1 text-sm text-ink-3">Add a plan to track its payments month by month.</p>
+              <button type="button" className={`mt-4 ${PRIMARY_BUTTON_CLASSES}`} onClick={openAdd}>
+                <PlusIcon className="size-4" />
+                Add plan
+              </button>
+            </div>
+          ) : (
+            <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+              {activeRows.map((r) => {
+                const due = dueIds.has(r.id);
+                const paid = Math.max(0, Math.min(r.installment_current - 1, r.installment_total));
+                return (
+                  <li key={r.id}>
+                    <div
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => void openDetail(r.id)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          void openDetail(r.id);
+                        }
+                      }}
+                      className={`flex h-full cursor-pointer flex-col rounded-2xl border bg-surface p-5 shadow-xs transition duration-150 hover:shadow-md ${
+                        due ? "border-brand/40" : "border-line hover:border-line-strong"
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <h3 className="truncate font-semibold text-ink">{r.name}</h3>
+                          <p className="mt-0.5 text-xs text-ink-3">
+                            Next due {fmtMonthYearFromDate(nextDueDate(r))}
+                          </p>
+                        </div>
+                        <div className="flex shrink-0 flex-wrap justify-end gap-1.5">
+                          {r.credit_card_id != null && <Pill>Card</Pill>}
+                          {due && <Pill tone="brand">Due this month</Pill>}
+                        </div>
+                      </div>
+                      <p className="mt-4 flex items-baseline gap-1.5">
+                        <span className="text-2xl font-semibold tabular-nums tracking-tight text-ink">
+                          {fmtMoney(r.due_payment ?? r.payment_total)}
+                        </span>
+                        <span className="text-sm text-ink-3">/ month</span>
+                      </p>
+                      <div className="mt-4">
+                        <div className="mb-1.5 flex items-baseline justify-between gap-2 text-xs">
+                          <span className="text-ink-3">
+                            {paid} of {r.installment_total} paid
+                          </span>
+                          <span className="font-medium tabular-nums text-ink-2">{fmtMoney(r.remaining)} left</span>
+                        </div>
+                        <Meter value={installmentScheduleProgressPct(r) / 100} label={`${r.name} progress`} />
+                      </div>
+                      <div className="mt-auto pt-5">
+                        <div className="flex items-center justify-between gap-2 border-t border-line-soft pt-3">
+                          <span className="truncate text-xs text-ink-4">Ends {fmtMonthYear(r.finish_date)}</span>
+                          <button
+                            type="button"
+                            disabled={saving}
+                            className={due ? ADD_BUTTON_CLASSES : EDIT_BUTTON_CLASSES}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void onPay(r.id);
+                            }}
+                          >
+                            <CheckIcon className="size-3.5" />
+                            Mark #{r.installment_current} paid
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+
+          {doneRows.length > 0 && (
+            <section className="overflow-hidden rounded-2xl border border-line bg-surface shadow-xs">
+              <button
+                type="button"
+                aria-expanded={showArchived}
+                onClick={() => setShowArchived((v) => !v)}
+                className="flex w-full items-center justify-between gap-3 px-5 py-4 text-left transition-colors duration-150 hover:bg-surface-2/50 sm:px-6"
+              >
+                <span className="min-w-0">
+                  <span className="font-semibold text-ink">Paid off</span>
+                  <span className="ml-2 text-sm text-ink-3">
+                    {doneRows.length} plan{doneRows.length === 1 ? "" : "s"} · {fmtMoney(doneTotal)}
+                  </span>
+                </span>
+                <ChevronDownIcon
+                  className={`size-5 shrink-0 text-ink-3 transition-transform duration-150 ${showArchived ? "rotate-180" : ""}`}
+                />
+              </button>
+              {showArchived && (
+                <ul className="divide-y divide-line-soft border-t border-line-soft">
+                  {doneRows.map((r) => (
+                    <li key={r.id}>
+                      <button
+                        type="button"
+                        onClick={() => void openDetail(r.id)}
+                        className="flex w-full items-center gap-3 px-5 py-3 text-left transition-colors duration-150 hover:bg-surface-2/50 sm:px-6"
+                      >
+                        <CheckIcon className="size-4 shrink-0 text-success-text" />
+                        <span className="min-w-0 flex-1 truncate text-sm font-medium text-ink">{r.name}</span>
+                        <span className="hidden text-xs text-ink-3 sm:inline">
+                          {r.installment_total} payments · ended {fmtMonthYear(r.finish_date)}
+                        </span>
+                        <span className="text-sm font-semibold tabular-nums text-ink-2">
+                          {fmtMoney(r.original_total)}
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          )}
+        </>
       )}
 
       <Modal
         open={addModalOpen}
         onClose={closeAddModal}
         ariaLabelledBy="installment-add-title"
-        dialogClassName="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-xl border border-line bg-surface p-5 shadow-pop"
+        dialogClassName={`${DIALOG_CLASSES} max-w-3xl`}
       >
-        <div className="mb-4 flex items-start justify-between gap-2">
-          <h2
-            id="installment-add-title"
-            className="text-lg font-semibold text-ink"
-          >
-            Add installment
-          </h2>
-          <button
-            type="button"
-            className={CLOSE_BUTTON_CLASSES}
-            onClick={closeAddModal}
-          >
-            Close
-          </button>
-        </div>
-        <form onSubmit={submitCreate} className="grid gap-4 sm:grid-cols-2">
-          <InstallmentFieldGrid
-            form={form}
-            setForm={setForm}
-            saving={saving}
-            hideAmounts
-          />
-          {draftTotal > 0 && (
-            <div className="sm:col-span-2">
-              <p className="mb-2 text-sm font-medium text-ink-2">
-                Per-payment amounts ({draftTotal} row{draftTotal === 1 ? "" : "s"})
-              </p>
-              <div className={`${TABLE_WRAPPER_CLASSES} max-h-64 overflow-x-auto overflow-y-auto`}>
-                <table className="w-full min-w-[420px] text-left text-sm">
-                  <thead className="sticky top-0 bg-surface-2">
-                    <tr className={TABLE_HEAD_ROW_CLASSES}>
-                      <th className={TABLE_HEAD_CELL_CLASSES}>#</th>
-                      <th className={TABLE_HEAD_CELL_CLASSES}>Due</th>
-                      <th className={TABLE_HEAD_CELL_CLASSES}>Principal</th>
-                      <th className={TABLE_HEAD_CELL_CLASSES}>Interest</th>
-                      <th className={TABLE_HEAD_CELL_CLASSES}>Total</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {Array.from({ length: draftTotal }, (_, i) => i + 1).map(
-                      (seq) => {
-                        const ld = lineDrafts[seq] ?? {
-                          principal: "",
-                          interest: "",
-                        };
+        <ModalHeader
+          id="installment-add-title"
+          title="New installment plan"
+          subtitle="Each payment's amount is entered below, so they can differ month to month."
+          onClose={closeAddModal}
+        />
+        <form onSubmit={submitCreate} className="flex min-h-0 flex-1 flex-col">
+          <div className={`${DIALOG_BODY_CLASSES} grid gap-4 sm:grid-cols-2`}>
+            <InstallmentFieldGrid form={form} setForm={setForm} saving={saving} hideAmounts />
+            {linkToCardToggle}
+            {draftTotal > 0 && (
+              <div className="sm:col-span-2">
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-sm font-medium text-ink-2">
+                    Payment amounts <span className="font-normal text-ink-4">· {draftTotal} payments</span>
+                  </p>
+                  <button
+                    type="button"
+                    className={TEXT_BUTTON_CLASSES}
+                    onClick={copyFirstRowToAll}
+                    disabled={saving || !lineDrafts[1]?.principal}
+                  >
+                    Copy #1 to all rows
+                  </button>
+                </div>
+                <div className="max-h-72 overflow-auto rounded-xl border border-line">
+                  <table className="w-full min-w-[28rem]">
+                    <thead className="sticky top-0 z-[1] bg-surface-2">
+                      <tr>
+                        <th className={TH}>#</th>
+                        <th className={TH}>Due</th>
+                        <th className={TH}>Principal</th>
+                        <th className={TH}>Interest</th>
+                        <th className={`${TH} text-right`}>Total</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-line-soft">
+                      {Array.from({ length: draftTotal }, (_, i) => i + 1).map((seq) => {
+                        const ld = lineDrafts[seq] ?? { principal: "", interest: "" };
                         const sdApi = monthToApiDate(form.start_date);
-                        const due = sdApi
-                          ? dueMonthForSeq(sdApi, seq)
-                          : new Date(NaN);
+                        const due = sdApi ? dueMonthForSeq(sdApi, seq) : new Date(NaN);
                         const p = parseFormNumber(ld.principal);
-                        const iRaw =
-                          ld.interest.trim() !== ""
-                            ? parseFormNumber(ld.interest)
-                            : 0;
+                        const iRaw = ld.interest.trim() !== "" ? parseFormNumber(ld.interest) : 0;
                         const rowTotal = (p ?? 0) + (iRaw ?? 0);
                         return (
-                          <tr
-                            key={seq}
-                            className={TABLE_ROW_CLASSES}
-                          >
-                            <td className={`${TABLE_CELL_CLASSES} font-mono`}>
-                              {seq}
-                            </td>
-                            <td className={TABLE_CELL_CLASSES}>
-                              {fmtMonthYearFromDate(due)}
-                            </td>
-                            <td className={TABLE_CELL_CLASSES}>
+                          <tr key={seq}>
+                            <td className={`${TD} font-mono text-ink-3`}>{seq}</td>
+                            <td className={`${TD} whitespace-nowrap`}>{fmtMonthYearFromDate(due)}</td>
+                            <td className={TD}>
                               <AmountInput
                                 required
-                                className="w-24"
+                                className="w-28"
                                 value={ld.principal}
                                 onChange={(v) =>
                                   setLineDrafts((prev) => ({
                                     ...prev,
-                                    [seq]: {
-                                      principal: v,
-                                      interest: prev[seq]?.interest ?? "",
-                                    },
+                                    [seq]: { principal: v, interest: prev[seq]?.interest ?? "" },
                                   }))
                                 }
                                 disabled={saving}
                               />
                             </td>
-                            <td className={TABLE_CELL_CLASSES}>
+                            <td className={TD}>
                               <AmountInput
                                 className="w-24"
                                 value={ld.interest}
                                 onChange={(v) =>
                                   setLineDrafts((prev) => ({
                                     ...prev,
-                                    [seq]: {
-                                      principal: prev[seq]?.principal ?? "",
-                                      interest: v,
-                                    },
+                                    [seq]: { principal: prev[seq]?.principal ?? "", interest: v },
                                   }))
                                 }
                                 disabled={saving}
                               />
                             </td>
-                            <td className={TABLE_CELL_CLASSES}>
-                              {fmtMoney(rowTotal)}
-                            </td>
+                            <td className={`${TD} text-right font-medium text-ink`}>{fmtMoney(rowTotal)}</td>
                           </tr>
                         );
-                      },
-                    )}
-                  </tbody>
-                </table>
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                <p className="mt-2 text-right text-xs tabular-nums text-ink-3">
+                  Principal {fmtMoney(draftSums.principal)} + interest {fmtMoney(draftSums.interest)} ={" "}
+                  <span className="font-semibold text-ink">{fmtMoney(draftSums.total)}</span>
+                </p>
               </div>
-              <p className="mt-2 text-xs text-ink-2">
-                Sum: principal {fmtMoney(draftSums.principal)} + interest{" "}
-                {fmtMoney(draftSums.interest)} = {fmtMoney(draftSums.total)}
-              </p>
-            </div>
-          )}
-          {cardId != null && (
-            <label className="flex items-center gap-2 text-sm sm:col-span-2">
-              <input
-                type="checkbox"
-                checked={linkToCard}
-                onChange={(e) => setLinkToCard(e.target.checked)}
-                disabled={saving}
-              />
-              <span className="text-ink-2">On my credit card</span>
-            </label>
-          )}
-          <div className="flex flex-wrap gap-2 sm:col-span-2">
-            <button
-              type="submit"
-              disabled={saving}
-              className={PRIMARY_BUTTON_CLASSES}
-            >
-              {saving ? "Saving…" : "Add"}
-            </button>
-            <button
-              type="button"
-              disabled={saving}
-              className={SECONDARY_BUTTON_CLASSES}
-              onClick={closeAddModal}
-            >
+            )}
+            {errorBox}
+          </div>
+          <div className={DIALOG_FOOTER_CLASSES}>
+            <button type="button" disabled={saving} className={SECONDARY_BUTTON_CLASSES} onClick={closeAddModal}>
               Cancel
+            </button>
+            <button type="submit" disabled={saving} className={PRIMARY_BUTTON_CLASSES}>
+              {saving ? "Saving…" : "Create plan"}
             </button>
           </div>
         </form>
       </Modal>
 
-      <section>
-        <h2 className="text-lg font-medium text-ink">
-          Plans
-        </h2>
-        <ul className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3">
-          {!loading && (
-            <li>
-              <button
-                type="button"
-                onClick={() => {
-                  setForm(emptyForm);
-                  setLineDrafts({});
-                  setAddModalOpen(true);
-                }}
-                className="flex min-h-[8rem] w-full flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-line-strong p-3 text-center text-sm text-ink-3 transition-colors duration-150 hover:border-brand hover:text-brand sm:p-4"
-              >
-                <span className="text-lg font-medium">+</span>
-                <span className="font-medium">Add installment</span>
-              </button>
-            </li>
-          )}
-          {!loading &&
-            activeRows.map((r) => {
-              const canPay =
-                r.installment_current <= r.installment_total && r.remaining > 0;
-              const due = dueIds.has(r.id);
-              const nn = `${r.installment_current}/${r.installment_total}`;
-              const orig = Number(r.original_total);
-              const rem = Number(r.remaining);
-              const pct = installmentScheduleProgressPct(r);
-              return (
-                <li
-                  key={`${r.id}-${orig}-${rem}-${r.installment_current}`}
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => void openDetail(r.id)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      void openDetail(r.id);
-                    }
-                  }}
-                  className={`min-w-0 cursor-pointer rounded-lg border p-3 transition-colors duration-150 hover:ring-2 hover:ring-indigo-300/60 sm:p-4 dark:hover:ring-indigo-700/50 ${
-                    due
-                      ? "border-emerald-300 bg-emerald-50/50 dark:border-emerald-800 dark:bg-emerald-950/20"
-                      : "border-line bg-surface"
-                  }`}
-                >
-                  <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between sm:gap-3">
-                    <div className="min-w-0">
-                      <h3 className="truncate text-sm font-semibold text-ink sm:text-base">
-                        {r.name}
-                      </h3>
-                      <p className="mt-1 text-xs text-ink-2 sm:text-sm">
-                        Installment{" "}
-                        <span className="font-mono font-medium tabular-nums">
-                          {nn}
-                        </span>
-                        {due && (
-                          <span className="ml-2 rounded-md bg-emerald-600 px-2 py-0.5 text-xs font-medium text-white">
-                            Due this month
-                          </span>
-                        )}
-                      </p>
-                    </div>
-                    <div className="flex min-w-0 flex-wrap gap-1.5 sm:gap-2">
-                      {canPay && (
-                        <button
-                          type="button"
-                          disabled={saving}
-                          className={PRIMARY_BUTTON_CLASSES}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            void onPay(r.id);
-                          }}
-                        >
-                          Record payment
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        disabled={saving}
-                        className={DELETE_BUTTON_CLASSES}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          void onDelete(r.id);
-                        }}
-                      >
-                        Delete
-                      </button>
-                    </div>
-                  </div>
-                  <dl className="mt-3 grid gap-2 text-xs sm:mt-4 sm:gap-3 sm:text-sm sm:grid-cols-2 lg:grid-cols-4">
-                    <div>
-                      <dt className="text-xs text-ink-3">Principal</dt>
-                      <dd className="tabular-nums font-medium">{fmtMoney(r.principal)}</dd>
-                    </div>
-                    <div>
-                      <dt className="text-xs text-ink-3">Interest</dt>
-                      <dd className="tabular-nums font-medium">
-                        {r.interest != null ? fmtMoney(r.interest) : "—"}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt className="text-xs text-ink-3">Total (per payment)</dt>
-                      <dd className="tabular-nums font-medium">
-                        {fmtMoney(r.payment_total)}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt className="text-xs text-ink-3">Next due</dt>
-                      <dd className="text-ink">
-                        {r.installment_current <= r.installment_total
-                          ? fmtMonthYearFromDate(nextDueDate(r))
-                          : "—"}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt className="text-xs text-ink-3">Start</dt>
-                      <dd className="tabular-nums">{fmtMonthYear(r.start_date)}</dd>
-                    </div>
-                    <div>
-                      <dt className="text-xs text-ink-3">Finish</dt>
-                      <dd className="tabular-nums">{fmtMonthYear(r.finish_date)}</dd>
-                    </div>
-                    <div>
-                      <dt className="text-xs text-ink-3">Original total</dt>
-                      <dd className="tabular-nums">{fmtMoney(r.original_total)}</dd>
-                    </div>
-                    <div>
-                      <dt className="text-xs text-ink-3">Remaining</dt>
-                      <dd className="tabular-nums font-semibold text-amber-800 dark:text-amber-200">
-                        {fmtMoney(r.remaining)}
-                      </dd>
-                    </div>
-                  </dl>
-                  <div className="mt-3 h-2 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
-                    <div
-                      className="h-full rounded-full bg-indigo-500 transition-[width] dark:bg-indigo-600"
-                      style={{ width: `${pct}%` }}
-                    />
-                  </div>
-                  <p className="mt-2 text-xs text-ink-2">
-                    {fmtPct2(pct)}% of schedule
-                  </p>
-                </li>
-              );
-            })}
-          {!loading && activeRows.length === 0 && (
-            <li className={`col-span-full ${DASHED_EMPTY_CLASSES}`}>
-              {doneRows.length > 0 ? "All plans are fully paid." : "No installment plans yet."}
-            </li>
-          )}
-        </ul>
-      </section>
-
-      {showArchived && doneRows.length > 0 && (
-        <section>
-          <h2 className="text-lg font-medium text-ink-3">
-            Archived — Fully Paid
-          </h2>
-          <ul className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3">
-            {doneRows.map((r) => {
-              const orig = Number(r.original_total);
-              const rem = Number(r.remaining);
-              const pct = installmentScheduleProgressPct(r);
-              return (
-                <li
-                  key={`${r.id}-${orig}-${rem}-${r.installment_current}`}
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => void openDetail(r.id)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      void openDetail(r.id);
-                    }
-                  }}
-                  className="min-w-0 cursor-pointer rounded-lg border border-line bg-surface-2 p-3 opacity-70 transition-colors duration-150 hover:opacity-100 hover:ring-2 hover:ring-indigo-300/60 sm:p-4 dark:hover:ring-indigo-700/50"
-                >
-                  <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between sm:gap-3">
-                    <div className="min-w-0">
-                      <h3 className="truncate text-sm font-semibold text-ink sm:text-base">
-                        {r.name}
-                      </h3>
-                      <p className="mt-1 text-xs text-ink-3 sm:text-sm">
-                        {r.installment_total}/{r.installment_total} payments ·{" "}
-                        <span className="rounded-md bg-zinc-300 px-2 py-0.5 text-xs font-medium text-ink-2 dark:bg-zinc-700">
-                          Paid off
-                        </span>
-                      </p>
-                    </div>
-                    <div className="flex min-w-0 flex-wrap gap-1.5 sm:gap-2">
-                      <button
-                        type="button"
-                        disabled={saving}
-                        className={DELETE_BUTTON_CLASSES}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          void onDelete(r.id);
-                        }}
-                      >
-                        Delete
-                      </button>
-                    </div>
-                  </div>
-                  <dl className="mt-3 grid gap-2 text-xs sm:mt-4 sm:gap-3 sm:text-sm sm:grid-cols-2 lg:grid-cols-4">
-                    <div>
-                      <dt className="text-xs text-ink-3">Principal</dt>
-                      <dd className="tabular-nums font-medium">{fmtMoney(r.principal)}</dd>
-                    </div>
-                    <div>
-                      <dt className="text-xs text-ink-3">Interest</dt>
-                      <dd className="tabular-nums font-medium">
-                        {r.interest != null ? fmtMoney(r.interest) : "—"}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt className="text-xs text-ink-3">Total (per payment)</dt>
-                      <dd className="tabular-nums font-medium">
-                        {fmtMoney(r.payment_total)}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt className="text-xs text-ink-3">Original total</dt>
-                      <dd className="tabular-nums">{fmtMoney(r.original_total)}</dd>
-                    </div>
-                    <div>
-                      <dt className="text-xs text-ink-3">Start</dt>
-                      <dd className="tabular-nums">{fmtMonthYear(r.start_date)}</dd>
-                    </div>
-                    <div>
-                      <dt className="text-xs text-ink-3">Finish</dt>
-                      <dd className="tabular-nums">{fmtMonthYear(r.finish_date)}</dd>
-                    </div>
-                  </dl>
-                  <div className="mt-3 h-2 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
-                    <div
-                      className="h-full rounded-full bg-zinc-400 transition-[width] dark:bg-zinc-500"
-                      style={{ width: `${pct}%` }}
-                    />
-                  </div>
-                  <p className="mt-2 text-xs text-ink-3">
-                    {fmtPct2(pct)}% of schedule
-                  </p>
-                </li>
-              );
-            })}
-          </ul>
-        </section>
-      )}
-
       <Modal
         open={scheduleModalId != null}
         onClose={closeScheduleModal}
         ariaLabelledBy="schedule-title"
-        backdropClassName="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4 sm:items-center"
-        dialogClassName="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-line bg-surface shadow-pop"
+        dialogClassName={`${DIALOG_CLASSES} max-w-3xl`}
       >
-            <div className="flex shrink-0 items-start justify-between gap-2 border-b border-line px-4 py-3">
-              <h2
-                id="schedule-title"
-                className="text-lg font-semibold text-ink"
-              >
-                {form.name.trim() || "Edit installment"}
-              </h2>
+        <ModalHeader
+          id="schedule-title"
+          title={form.name.trim() || "Installment"}
+          subtitle={
+            detail
+              ? detail.installment.installment_current > detail.installment.installment_total
+                ? `All ${detail.installment.installment_total} payments made`
+                : `Payment ${detail.installment.installment_current} of ${detail.installment.installment_total} next · ${fmtMoney(detail.installment.remaining)} left`
+              : undefined
+          }
+          onClose={closeScheduleModal}
+        />
+        <div className="shrink-0 px-5 pt-4 sm:px-6">
+          <div className={SEGMENTED_WRAPPER_CLASSES}>
+            {(
+              [
+                ["schedule", "Schedule"],
+                ["details", "Plan details"],
+              ] as const
+            ).map(([tab, label]) => (
               <button
+                key={tab}
                 type="button"
-                className={CLOSE_BUTTON_CLASSES}
-                onClick={closeScheduleModal}
+                aria-pressed={detailTab === tab}
+                className={`${SEGMENTED_BUTTON_CLASSES} ${
+                  detailTab === tab ? SEGMENTED_BUTTON_ACTIVE_CLASSES : SEGMENTED_BUTTON_INACTIVE_CLASSES
+                }`}
+                onClick={() => setDetailTab(tab)}
               >
-                Close
+                {label}
               </button>
-            </div>
-            <div className="min-h-0 flex-1 overflow-auto p-4">
-              <form
-                onSubmit={submitCreate}
-                className="grid gap-4 border-b border-line pb-5 sm:grid-cols-2"
-              >
-                <InstallmentFieldGrid
-                  form={form}
-                  setForm={setForm}
-                  saving={saving}
-                />
-                {cardId != null && (
-                  <label className="flex items-center gap-2 text-sm sm:col-span-2">
-                    <input
-                      type="checkbox"
-                      checked={linkToCard}
-                      onChange={(e) => setLinkToCard(e.target.checked)}
-                      disabled={saving}
-                    />
-                    <span className="text-ink-2">
-                      On my credit card
-                    </span>
-                  </label>
-                )}
-                <div className="sm:col-span-2">
-                  <button
-                    type="submit"
-                    disabled={saving}
-                    className={PRIMARY_BUTTON_CLASSES}
-                  >
-                    {saving ? "Saving…" : "Update"}
-                  </button>
-                </div>
-              </form>
-              <div className="mt-5">
+            ))}
+          </div>
+        </div>
+        {detailTab === "schedule" ? (
+          <>
+            <div className={`${DIALOG_BODY_CLASSES} space-y-3`}>
+              {errorBox}
               {detailLoading && (
-                <p className={LOADING_TEXT_CLASSES}>Loading schedule…</p>
+                <div className="h-56 animate-pulse rounded-xl bg-surface-2" role="status" aria-label="Loading schedule" />
               )}
               {!detailLoading && detail && detail.lines.length === 0 && (
-                <p className="text-sm text-ink">
-                  No monthly rows yet.
-                </p>
+                <p className="py-6 text-center text-sm text-ink-3">No payments scheduled.</p>
               )}
               {!detailLoading && detail && detail.lines.length > 0 && (
-                <div>
-                <p className="mb-3 text-xs text-ink-2">
-                  Drag a row to reorder payments. Due dates follow the new row order after you save.
-                </p>
-                <div className={`${TABLE_WRAPPER_CLASSES} overflow-x-auto`}>
-                <table className="w-full min-w-[36rem] text-left text-sm">
-                  <thead>
-                    <tr className={TABLE_HEAD_ROW_CLASSES}>
-                      <th className={TABLE_HEAD_CELL_CLASSES}>#</th>
-                      <th className={TABLE_HEAD_CELL_CLASSES}>Due</th>
-                      <th className={TABLE_HEAD_CELL_CLASSES}>Principal</th>
-                      <th className={TABLE_HEAD_CELL_CLASSES}>Interest</th>
-                      <th className={TABLE_HEAD_CELL_CLASSES}>Total</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {orderedScheduleLines.map((ln, idx) => {
-                      const ed = lineEdits[ln.id];
-                      const visPos = idx + 1;
-                      const p = ed
-                        ? (parseFormNumber(ed.principal) ?? NaN)
-                        : ln.principal;
-                      const iRaw =
-                        ed && ed.interest.trim() !== ""
-                          ? (parseFormNumber(ed.interest) ?? NaN)
-                          : ln.interest != null
-                            ? ln.interest
-                            : 0;
-                      const rowTotal =
-                        (Number.isFinite(p) ? p : 0) +
-                        (Number.isFinite(iRaw) ? iRaw : 0);
-                      const isNext =
-                        ln.seq === detail.installment.installment_current;
-                      return (
-                        <tr
-                          key={ln.id}
-                          draggable
-                          className={`cursor-grab active:cursor-grabbing ${TABLE_ROW_CLASSES} ${
-                            isNext
-                              ? "bg-indigo-50/80 hover:bg-indigo-50/80 dark:bg-indigo-950/30 dark:hover:bg-indigo-950/30"
-                              : ""
-                          }`}
-                          title="Drag row to reorder"
-                          onDragStart={(e) => {
-                            const el = e.target as HTMLElement | null;
-                            if (
-                              !el ||
-                              el.closest(
-                                "input, textarea, button, select, option",
-                              )
-                            ) {
-                              e.preventDefault();
-                              return;
-                            }
-                            e.dataTransfer.setData(
-                              "text/plain",
-                              String(ln.id),
-                            );
-                            e.dataTransfer.effectAllowed = "move";
-                          }}
-                          onDragOver={(e) => {
-                            e.preventDefault();
-                            e.dataTransfer.dropEffect = "move";
-                          }}
-                          onDrop={(e) => {
-                            e.preventDefault();
-                            const fromId = Number(
-                              e.dataTransfer.getData("text/plain"),
-                            );
-                            if (
-                              !Number.isFinite(fromId) ||
-                              fromId === ln.id
-                            ) {
-                              return;
-                            }
-                            setLineOrderIds((prev) => {
-                              const next = [...prev];
-                              const from = next.indexOf(fromId);
-                              const to = next.indexOf(ln.id);
-                              if (from < 0 || to < 0) return prev;
-                              next.splice(from, 1);
-                              next.splice(to, 0, fromId);
-                              return next;
-                            });
-                          }}
-                        >
-                          <td className={`${TABLE_CELL_CLASSES} font-mono`}>
-                            {visPos}
-                            {isNext && (
-                              <span className="ml-1 text-[10px] font-sans text-indigo-600 dark:text-indigo-300">
-                                (next)
-                              </span>
-                            )}
-                          </td>
-                          <td className={TABLE_CELL_CLASSES}>
-                            {fmtMonthYearFromDate(
-                              dueMonthForSeq(
-                                detail.installment.start_date,
-                                visPos,
-                              ),
-                            )}
-                          </td>
-                          <td className={`${TABLE_CELL_CLASSES} cursor-auto`}>
-                            <AmountInput
-                              draggable={false}
-                              className="w-28 cursor-text"
-                              value={ed?.principal ?? String(ln.principal)}
-                              onChange={(v) =>
-                                setLineEdits((prev) => ({
-                                  ...prev,
-                                  [ln.id]: {
-                                    principal: v,
-                                    interest:
-                                      prev[ln.id]?.interest ??
-                                      (ln.interest != null
-                                        ? String(ln.interest)
-                                        : ""),
-                                  },
-                                }))
-                              }
-                            />
-                          </td>
-                          <td className={`${TABLE_CELL_CLASSES} cursor-auto`}>
-                            <AmountInput
-                              draggable={false}
-                              className="w-24 cursor-text"
-                              value={
-                                ed?.interest ??
-                                (ln.interest != null ? String(ln.interest) : "")
-                              }
-                              onChange={(v) =>
-                                setLineEdits((prev) => ({
-                                  ...prev,
-                                  [ln.id]: {
-                                    principal:
-                                      prev[ln.id]?.principal ??
-                                      String(ln.principal),
-                                    interest: v,
-                                  },
-                                }))
-                              }
-                            />
-                          </td>
-                          <td className={TABLE_CELL_CLASSES}>
-                            {fmtMoney(rowTotal)}
-                          </td>
+                <>
+                  <p className="text-xs text-ink-3">
+                    Edit amounts in place. Drag a row to reorder; due months follow the new order once saved.
+                  </p>
+                  <div className="overflow-x-auto rounded-xl border border-line">
+                    <table className="w-full min-w-[38rem]">
+                      <thead className="bg-surface-2">
+                        <tr>
+                          <th className={TH}>#</th>
+                          <th className={TH}>Due</th>
+                          <th className={TH}>Principal</th>
+                          <th className={TH}>Interest</th>
+                          <th className={`${TH} text-right`}>Total</th>
+                          <th className={`${TH} text-right`}>
+                            <span className="sr-only">Status</span>
+                          </th>
                         </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-                </div>
-                </div>
+                      </thead>
+                      <tbody className="divide-y divide-line-soft">
+                        {orderedScheduleLines.map((ln, idx) => {
+                          const ed = lineEdits[ln.id];
+                          const visPos = idx + 1;
+                          const p = ed ? (parseFormNumber(ed.principal) ?? NaN) : ln.principal;
+                          const iRaw =
+                            ed && ed.interest.trim() !== ""
+                              ? (parseFormNumber(ed.interest) ?? NaN)
+                              : ln.interest != null
+                                ? ln.interest
+                                : 0;
+                          const rowTotal = (Number.isFinite(p) ? p : 0) + (Number.isFinite(iRaw) ? iRaw : 0);
+                          const isNext = ln.seq === detail.installment.installment_current;
+                          const isPaid = ln.seq < detail.installment.installment_current;
+                          return (
+                            <tr
+                              key={ln.id}
+                              draggable
+                              title="Drag to reorder"
+                              className={`cursor-grab transition-colors duration-150 active:cursor-grabbing ${
+                                isNext ? "bg-brand-soft" : "hover:bg-surface-2/50"
+                              }`}
+                              onDragStart={(e) => {
+                                const el = e.target as HTMLElement | null;
+                                if (!el || el.closest("input, textarea, button, select, option")) {
+                                  e.preventDefault();
+                                  return;
+                                }
+                                e.dataTransfer.setData("text/plain", String(ln.id));
+                                e.dataTransfer.effectAllowed = "move";
+                              }}
+                              onDragOver={(e) => {
+                                e.preventDefault();
+                                e.dataTransfer.dropEffect = "move";
+                              }}
+                              onDrop={(e) => {
+                                e.preventDefault();
+                                const fromId = Number(e.dataTransfer.getData("text/plain"));
+                                if (!Number.isFinite(fromId) || fromId === ln.id) return;
+                                setLineOrderIds((prev) => {
+                                  const next = [...prev];
+                                  const from = next.indexOf(fromId);
+                                  const to = next.indexOf(ln.id);
+                                  if (from < 0 || to < 0) return prev;
+                                  next.splice(from, 1);
+                                  next.splice(to, 0, fromId);
+                                  return next;
+                                });
+                              }}
+                            >
+                              <td className={`${TD} whitespace-nowrap`}>
+                                <span aria-hidden className="mr-2 select-none text-ink-4">
+                                  ⠿
+                                </span>
+                                <span className="font-mono">{visPos}</span>
+                              </td>
+                              <td className={`${TD} whitespace-nowrap ${isPaid ? "text-ink-4" : ""}`}>
+                                {fmtMonthYearFromDate(dueMonthForSeq(detail.installment.start_date, visPos))}
+                              </td>
+                              <td className={`${TD} cursor-auto`}>
+                                <AmountInput
+                                  draggable={false}
+                                  className="w-28 cursor-text"
+                                  value={ed?.principal ?? String(ln.principal)}
+                                  onChange={(v) =>
+                                    setLineEdits((prev) => ({
+                                      ...prev,
+                                      [ln.id]: {
+                                        principal: v,
+                                        interest:
+                                          prev[ln.id]?.interest ?? (ln.interest != null ? String(ln.interest) : ""),
+                                      },
+                                    }))
+                                  }
+                                />
+                              </td>
+                              <td className={`${TD} cursor-auto`}>
+                                <AmountInput
+                                  draggable={false}
+                                  className="w-24 cursor-text"
+                                  value={ed?.interest ?? (ln.interest != null ? String(ln.interest) : "")}
+                                  onChange={(v) =>
+                                    setLineEdits((prev) => ({
+                                      ...prev,
+                                      [ln.id]: {
+                                        principal: prev[ln.id]?.principal ?? String(ln.principal),
+                                        interest: v,
+                                      },
+                                    }))
+                                  }
+                                />
+                              </td>
+                              <td className={`${TD} text-right font-medium text-ink`}>{fmtMoney(rowTotal)}</td>
+                              <td className={`${TD} text-right`}>
+                                {isPaid ? <Pill tone="success">Paid</Pill> : isNext ? <Pill tone="brand">Next</Pill> : null}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
               )}
-              </div>
             </div>
-            {!detailLoading && detail && detail.lines.length > 0 && (
-              <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-line bg-surface px-4 py-3">
-                <button
-                  type="button"
-                  disabled={savingSchedule || !scheduleHasChanges}
-                  className={PRIMARY_BUTTON_CLASSES}
-                  onClick={() => void saveScheduleEdits()}
-                >
-                  {savingSchedule ? "Saving…" : "Save changes"}
-                </button>
-              </div>
-            )}
+            <div className={DIALOG_FOOTER_CLASSES}>
+              {deletePlanButton}
+              <button
+                type="button"
+                disabled={savingSchedule || !scheduleHasChanges}
+                className={PRIMARY_BUTTON_CLASSES}
+                onClick={() => void saveScheduleEdits()}
+              >
+                {savingSchedule ? "Saving…" : "Save schedule"}
+              </button>
+            </div>
+          </>
+        ) : (
+          <form onSubmit={submitCreate} className="flex min-h-0 flex-1 flex-col">
+            <div className={`${DIALOG_BODY_CLASSES} grid gap-4 sm:grid-cols-2`}>
+              <InstallmentFieldGrid form={form} setForm={setForm} saving={saving} />
+              {linkToCardToggle}
+              {errorBox}
+            </div>
+            <div className={DIALOG_FOOTER_CLASSES}>
+              {deletePlanButton}
+              <button type="submit" disabled={saving} className={PRIMARY_BUTTON_CLASSES}>
+                {saving ? "Saving…" : "Save details"}
+              </button>
+            </div>
+          </form>
+        )}
       </Modal>
 
       <Modal
         open={paymentsModalOpen}
         onClose={closePayments}
         ariaLabelledBy="payments-title"
-        backdropClassName="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4 sm:items-center"
-        dialogClassName="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-line bg-surface shadow-pop"
+        dialogClassName={`${DIALOG_CLASSES} max-w-4xl`}
       >
-        <div className="flex shrink-0 items-start justify-between gap-2 border-b border-line px-4 py-3">
-          <h2
-            id="payments-title"
-            className="text-lg font-semibold text-ink"
-          >
-            Payments by month
-          </h2>
-          <button
-            type="button"
-            className={CLOSE_BUTTON_CLASSES}
-            onClick={closePayments}
-          >
-            Close
-          </button>
-        </div>
-
+        <ModalHeader
+          id="payments-title"
+          title="Payment calendar"
+          subtitle="Every scheduled installment payment, by the month it's due."
+          onClose={closePayments}
+        />
         {!paymentsLoading && (
-          <div className="grid shrink-0 grid-cols-3 gap-2 border-b border-line px-4 py-3 text-center">
-            <div>
-              <p className="text-[11px] font-medium uppercase text-ink-3">Done</p>
-              <p className={`mt-0.5 text-base ${AMOUNT_POSITIVE_CLASSES}`}>
-                {fmtMoney(paymentsByMonth.grandDone)}
-              </p>
+          <div className="grid shrink-0 grid-cols-3 divide-x divide-line border-b border-line">
+            <div className="px-5 py-3 sm:px-6">
+              <Metric size="sm" label="Paid" value={fmtMoney(paymentsByMonth.grandDone)} tone="success" />
             </div>
-            <div>
-              <p className="text-[11px] font-medium uppercase text-ink-3">
-                To be made
-              </p>
-              <p className="mt-0.5 text-base font-semibold tabular-nums text-amber-700 dark:text-amber-300">
-                {fmtMoney(paymentsByMonth.grandToPay)}
-              </p>
+            <div className="px-5 py-3 sm:px-6">
+              <Metric size="sm" label="Still to pay" value={fmtMoney(paymentsByMonth.grandToPay)} tone="warning" />
             </div>
-            <div>
-              <p className="text-[11px] font-medium uppercase text-ink-3">Total</p>
-              <p className="mt-0.5 text-base font-semibold tabular-nums text-ink">
-                {fmtMoney(paymentsByMonth.grandTotal)}
-              </p>
+            <div className="px-5 py-3 sm:px-6">
+              <Metric size="sm" label="Total" value={fmtMoney(paymentsByMonth.grandTotal)} />
             </div>
           </div>
         )}
-
-        <div className="min-h-0 flex-1 overflow-auto p-4">
+        <div className={DIALOG_BODY_CLASSES}>
           {paymentsLoading && (
-            <p className={LOADING_TEXT_CLASSES}>Loading payments…</p>
+            <div className="h-64 animate-pulse rounded-xl bg-surface-2" role="status" aria-label="Loading payments" />
           )}
           {!paymentsLoading && paymentsByMonth.years.length === 0 && (
-            <p className="text-sm text-ink">
-              No scheduled payments.
-            </p>
+            <p className="py-6 text-center text-sm text-ink-3">No scheduled payments.</p>
           )}
           {!paymentsLoading && paymentsByMonth.years.length > 0 && (
             <div className="flex flex-col gap-6">
               {paymentsByMonth.years.map((year) => (
-                <div key={year}>
-                  <h3 className="mb-2 text-sm font-semibold tabular-nums text-ink">
-                    {year}
-                  </h3>
+                <section key={year}>
+                  <h3 className="mb-2 text-sm font-semibold tabular-nums text-ink">{year}</h3>
                   <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
                     {MONTH_NAMES_SHORT.map((abbr, m) => {
-                      const g = paymentsByMonth.map.get(year * 12 + m);
+                      const key = year * 12 + m;
+                      const g = paymentsByMonth.map.get(key);
+                      const isNow = key === currentMonthKey;
+                      const ring = isNow ? "ring-2 ring-brand" : "";
+                      const monthLabel = (
+                        <span className="text-xs font-semibold text-ink-2">
+                          {abbr}
+                          {isNow && <span className="ml-1 font-medium text-brand-text">· Now</span>}
+                        </span>
+                      );
                       if (!g) {
                         return (
-                          <div
-                            key={m}
-                            className="flex min-h-[5rem] flex-col rounded-lg border border-dashed border-line px-2 py-2 text-ink-4"
-                          >
-                            <span className="text-xs font-medium">{abbr}</span>
+                          <div key={m} className={`rounded-xl border border-dashed border-line p-3 opacity-60 ${ring}`}>
+                            {monthLabel}
                           </div>
                         );
                       }
@@ -1550,47 +1364,39 @@ export default function InstallmentsClient() {
                       return (
                         <div
                           key={m}
-                          className={`flex min-h-[5rem] flex-col rounded-lg border px-2 py-2 ${
-                            allDone
-                              ? "border-emerald-200 bg-emerald-50/60 dark:border-emerald-900/60 dark:bg-emerald-950/20"
-                              : "border-amber-200 bg-amber-50/60 dark:border-amber-900/60 dark:bg-amber-950/20"
-                          }`}
+                          className={`flex min-h-[5.5rem] flex-col rounded-xl border border-line p-3 ${
+                            allDone ? "bg-surface-2/60" : "bg-surface"
+                          } ${ring}`}
                         >
                           <div className="flex items-baseline justify-between gap-1">
-                            <span className="text-xs font-semibold text-ink-2">
-                              {abbr}
-                            </span>
-                            <span className="text-xs font-semibold tabular-nums text-ink">
-                              {fmtMoney(g.subtotal)}
-                            </span>
+                            {monthLabel}
+                            <span className="text-xs font-semibold tabular-nums text-ink">{fmtMoney(g.subtotal)}</span>
                           </div>
-                          <ul className="mt-1 flex flex-col gap-0.5">
+                          <ul className="mt-2 flex flex-col gap-1">
                             {g.items.map((it) => (
                               <li
                                 key={`${it.planId}-${it.seq}`}
-                                className="flex items-center justify-between gap-1 text-[11px] leading-tight"
-                                title={`${it.planName} #${it.seq} — ${it.paid ? "Done" : "To pay"}`}
+                                className="flex items-center gap-1.5 text-[11px] leading-tight"
+                                title={`${it.planName} #${it.seq} · ${it.paid ? "Paid" : "To pay"}`}
                               >
                                 <span
-                                  className={`min-w-0 truncate ${
-                                    it.paid
-                                      ? "text-emerald-700 line-through dark:text-emerald-400"
-                                      : "text-amber-800 dark:text-amber-300"
-                                  }`}
+                                  className={`size-1.5 shrink-0 rounded-full ${it.paid ? "bg-success" : "bg-warning"}`}
+                                />
+                                <span
+                                  className={`min-w-0 flex-1 truncate ${it.paid ? "text-ink-4 line-through" : "text-ink-2"}`}
                                 >
                                   {it.planName}
                                 </span>
-                                <span className="shrink-0 tabular-nums text-ink-2">
-                                  {fmtMoney(it.amount)}
-                                </span>
+                                <span className="shrink-0 tabular-nums text-ink-3">{fmtMoney(it.amount)}</span>
                               </li>
                             ))}
                           </ul>
+                          {allDone && <p className="mt-auto pt-2 text-[11px] font-medium text-success-text">All paid</p>}
                         </div>
                       );
                     })}
                   </div>
-                </div>
+                </section>
               ))}
             </div>
           )}

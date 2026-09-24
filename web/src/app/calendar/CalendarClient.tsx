@@ -1,6 +1,7 @@
 "use client";
 
 import { AmountInput } from "@/components/AmountInput";
+import { DatePickerField } from "@/components/DatePickerField";
 import { PageHeader } from "@/components/PageHeader";
 import {
   memo,
@@ -14,6 +15,23 @@ import {
 } from "react";
 import Link from "next/link";
 import { Modal } from "@/components/Modal";
+import {
+  DIALOG_BODY_CLASSES,
+  DIALOG_CLASSES,
+  DIALOG_FOOTER_CLASSES,
+  Field,
+  IconAction,
+  LoadingBlocks,
+  Metric,
+  Meter,
+  ModalHeader,
+  MonthStepper,
+  Panel,
+  Pill,
+  StatStrip,
+  TEXT_BUTTON_CLASSES,
+} from "@/components/FinanceUI";
+import { CalendarIcon, ChevronRightIcon, PlusIcon } from "@/components/Icons";
 import {
   bulkUpsertCalendarDayOverrides,
   createFixedExpense,
@@ -30,7 +48,7 @@ import {
   type MonthlyExpenseRow,
   type PayslipRow,
 } from "@/lib/api";
-import { formatMonthDayShort, formatMonthYear } from "@/lib/dateFormat";
+import { MONTH_NAMES_SHORT, formatMonthYear, parseDateOnlyLocal } from "@/lib/dateFormat";
 import { fmtAmount, fmtCompactMoney } from "@/lib/formatNumber";
 import {
   evaluateAmountExpression,
@@ -38,15 +56,8 @@ import {
   parseFormNumber,
 } from "@/lib/parseFormNumber";
 import {
-  ACTION_BUTTON_CLASSES,
-  CARD_CLASSES,
-  CLOSE_BUTTON_CLASSES,
-  DELETE_BUTTON_CLASSES,
-  EDIT_BUTTON_CLASSES,
   ERROR_ALERT_CLASSES,
-  ICON_BUTTON_CLASSES,
   INPUT_CLASSES,
-  LOADING_TEXT_CLASSES,
   PAGE_CONTAINER_CLASSES,
   PRIMARY_BUTTON_CLASSES,
   SECONDARY_BUTTON_CLASSES,
@@ -245,6 +256,8 @@ type DayCell = {
   /** The even-split default for this day's pay period, ignoring any stored override —
    *  what "auto-divide" resets active days back to. */
   defaultAmount: number | null;
+  /** A previous-month day shown in the leading blanks (see leadingOverflowDays). */
+  outside?: boolean;
 };
 
 type ExpenseForm = { amount: string; description: string };
@@ -283,6 +296,31 @@ type DayGridCellProps = {
   onDragEnd: () => void;
 };
 
+/** One hue per pay period — summary cards, day cells and the legend all agree. */
+const HALF_STYLE: Record<PeriodHalf, { label: string; dot: string; bar: string; tint: string }> = {
+  1: {
+    label: "1st pay period",
+    dot: "bg-amber-500",
+    bar: "bg-amber-400 dark:bg-amber-500/80",
+    tint: "bg-amber-500/[0.05] dark:bg-amber-400/[0.05]",
+  },
+  2: {
+    label: "2nd pay period",
+    dot: "bg-sky-500",
+    bar: "bg-sky-400 dark:bg-sky-500/80",
+    tint: "bg-sky-500/[0.05] dark:bg-sky-400/[0.05]",
+  },
+};
+
+const SHORT_DAY = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" });
+const LONG_DAY = new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric" });
+
+/** "Sep 14" (or "Mon, Sep 14" with `long`) for a "YYYY-MM-DD" string, parsed as a local date. */
+function fmtDay(iso: string, long = false): string {
+  const d = parseDateOnlyLocal(iso);
+  return d ? (long ? LONG_DAY : SHORT_DAY).format(d) : iso;
+}
+
 /**
  * One day in the month grid, memoized.
  *
@@ -308,22 +346,19 @@ const DayGridCell = memo(function DayGridCell({
   onDrop,
   onDragEnd,
 }: DayGridCellProps) {
-  const { day, iso, periodHalf, isPast, isToday, dailyBudget } = cell;
+  const { day, iso, periodHalf, isPast, isToday, dailyBudget, defaultAmount, outside } = cell;
   const draggable = dailyBudget != null;
-  /** Orange for the 1st-half pay period, blue for the 2nd — always visible so the
-   *  boundary between periods reads at a glance, even on past/today cells. */
-  const halfBorderClasses =
-    periodHalf === 1
-      ? "border-orange-400 dark:border-orange-600"
-      : "border-blue-400 dark:border-blue-600";
-  const halfBgClasses =
-    periodHalf === 1
-      ? "bg-orange-50/50 dark:bg-orange-950/20"
-      : "bg-blue-50/50 dark:bg-blue-950/20";
+  const half = HALF_STYLE[periodHalf];
+  /** The day no longer holds its even share — spend was logged or budget moved. */
+  const adjusted =
+    dailyBudget != null && defaultAmount != null && Math.abs(dailyBudget - defaultAmount) >= 0.005;
   return (
     <div
       role={draggable ? "button" : undefined}
       tabIndex={draggable ? 0 : undefined}
+      aria-label={
+        draggable ? `${fmtDay(iso, true)}, ${fmtMoney(dailyBudget)}${isToday ? ", today" : ""}` : undefined
+      }
       draggable={draggable}
       onClick={draggable ? () => onOpenSpend(cell) : undefined}
       onKeyDown={
@@ -341,37 +376,43 @@ const DayGridCell = memo(function DayGridCell({
       onDragLeave={draggable ? () => onDragLeave(iso) : undefined}
       onDrop={draggable ? (e) => onDrop(e, iso) : undefined}
       onDragEnd={onDragEnd}
-      className={`flex min-h-[5rem] min-w-0 flex-col items-center justify-center gap-1 rounded-lg border-2 px-1.5 py-2 text-center transition-colors duration-150 sm:min-h-[7rem] ${
-        draggable ? "cursor-grab active:cursor-grabbing" : ""
+      className={`relative flex min-h-[4rem] min-w-0 flex-col justify-between overflow-hidden rounded-xl border p-1.5 transition duration-150 sm:min-h-[6rem] sm:p-2.5 ${
+        draggable ? "cursor-grab hover:-translate-y-px hover:shadow-md active:cursor-grabbing" : ""
       } ${
         isDragOverTarget
-          ? "border-indigo-500 bg-indigo-100 ring-2 ring-indigo-500/60 dark:border-indigo-400 dark:bg-indigo-950/70"
+          ? "border-brand bg-brand-soft ring-2 ring-brand/40"
           : isToday
-            ? `${halfBorderClasses} bg-indigo-50 ring-2 ring-indigo-500/50 dark:bg-indigo-950/30`
+            ? "border-brand bg-surface ring-2 ring-brand/25"
             : isPast
-              ? `border-dashed ${halfBorderClasses} bg-zinc-50/60 opacity-60 dark:bg-zinc-900/30`
-              : `${halfBorderClasses} ${halfBgClasses}`
+              ? "border-line-soft bg-surface-2/40"
+              : `border-line ${half.tint}`
       } ${isDragSource ? "opacity-40" : ""}`}
     >
-      <span
-        className={`text-sm font-semibold tabular-nums ${
-          isToday
-            ? "text-indigo-900 dark:text-indigo-100"
-            : isPast
-              ? "text-ink-4"
-              : "text-ink"
-        }`}
-      >
-        {day}
-      </span>
+      <span aria-hidden className={`absolute inset-x-0 top-0 h-[3px] ${half.bar} ${isPast ? "opacity-40" : ""}`} />
+      <div className="flex items-start justify-between gap-1">
+        <span
+          className={`inline-flex h-6 min-w-6 items-center justify-center rounded-full px-1 text-xs font-semibold tabular-nums ${
+            isToday ? "bg-brand text-brand-on" : isPast ? "text-ink-4" : "text-ink"
+          }`}
+        >
+          {outside && (
+            <span className="mr-1 hidden font-medium sm:inline">
+              {MONTH_NAMES_SHORT[Number(iso.slice(5, 7)) - 1]}
+            </span>
+          )}
+          {day}
+        </span>
+        {adjusted && (
+          <span
+            title="Changed from the even split"
+            className="mt-1.5 size-1.5 shrink-0 rounded-full bg-ink-4"
+          />
+        )}
+      </div>
       <span
         title={dailyBudget != null ? fmtMoney(dailyBudget) : undefined}
-        className={`w-full min-w-0 truncate text-xs tabular-nums leading-tight ${
-          isToday
-            ? "font-semibold text-indigo-700 dark:text-indigo-300"
-            : isPast
-              ? "text-ink-4"
-              : "text-ink-2"
+        className={`block w-full min-w-0 truncate text-right text-[11px] tabular-nums leading-tight sm:text-sm ${
+          isToday ? "font-semibold text-brand-text" : isPast ? "text-ink-4" : "font-medium text-ink-2"
         }`}
       >
         {dailyBudget != null ? (
@@ -783,12 +824,6 @@ export default function CalendarClient() {
     [payslipFor],
   );
 
-  const fundingPayslipFor = useCallback(
-    (calendarHalf: PeriodHalf): PayslipRow | null =>
-      fundingPayslipForPeriod(viewedYear, viewedMonth, calendarHalf),
-    [fundingPayslipForPeriod, viewedYear, viewedMonth],
-  );
-
   const netPayForPeriod = useCallback(
     (periodYear: number, periodMonth: number, periodHalf: PeriodHalf): number | null =>
       fundingPayslipForPeriod(periodYear, periodMonth, periodHalf)?.total ?? null,
@@ -906,6 +941,7 @@ export default function CalendarClient() {
         isToday: iso === todayIso,
         dailyBudget: firstHalfBudget != null ? overrideAmount ?? firstHalfBudget : null,
         defaultAmount: firstHalfBudget,
+        outside: true,
       });
     }
     return result.slice(Math.max(0, result.length - firstWeekday));
@@ -1385,19 +1421,60 @@ export default function CalendarClient() {
   }, [payDateModalHalf, year, month]);
 
   const formatDayRangeLabel = useCallback(
-    (startIso: string, endIso: string) =>
-      `${formatMonthDayShort(startIso)} – ${formatMonthDayShort(endIso)}`,
+    (startIso: string, endIso: string) => `${fmtDay(startIso)} – ${fmtDay(endIso)}`,
     [],
   );
+
+  /** Still-open days (today or later) of a half in the viewed month — the days
+   * `remainingForHalf` sums, so "left to spend ÷ this" is the real pace. */
+  const activeDaysForHalf = (half: PeriodHalf) =>
+    [...leadingOverflowDays, ...dayCells].filter(
+      (d) =>
+        d.periodHalf === half &&
+        d.periodYear === year &&
+        d.periodMonth === month &&
+        !d.isPast &&
+        d.dailyBudget != null,
+    ).length;
+
+  /** Live "what happens to the rest" line under the Log spending input. */
+  const spendPreview = useMemo(() => {
+    if (!spendDay || spendDay.dailyBudget == null) return null;
+    const evaluated = evaluateAmountExpression(spendAmount);
+    const spent = evaluated != null ? parseFormNumber(evaluated) : null;
+    if (spent == null || spent < 0) return null;
+    const days = periodDayCells(spendDay.periodYear, spendDay.periodMonth, spendDay.periodHalf).filter(
+      (d) => d.iso !== spendDay.iso && !d.isPast && d.dailyBudget != null,
+    ).length;
+    return { delta: roundCents(spendDay.dailyBudget - roundCents(spent)), days };
+  }, [spendDay, spendAmount, periodDayCells]);
+
+  const transferMove = transfer ? parseFormNumber(transferAmount) : null;
+  const payDateRange =
+    payDateModalHalf === 1
+      ? formatDayRangeLabel(periodInfo.p1Start, periodInfo.p1End)
+      : formatDayRangeLabel(periodInfo.p2Start, periodInfo.p2End);
+  const modalRange =
+    expenseModalHalf === 1
+      ? formatDayRangeLabel(periodInfo.p1Start, periodInfo.p1End)
+      : formatDayRangeLabel(periodInfo.p2Start, periodInfo.p2End);
+
+  const evenOutButton =
+    "rounded-lg px-2.5 py-1.5 text-xs font-medium text-ink-2 transition-colors duration-150 hover:bg-surface-2 hover:text-ink disabled:opacity-50";
 
   return (
     <div className={PAGE_CONTAINER_CLASSES}>
       <PageHeader
         title="Calendar"
-        description={
+        description="Your daily spending budget: each paycheck, minus expenses, spread across its pay period."
+        actions={
           <>
-            {formatMonthYear(year, month)} — approximate daily budget from your last net pay, minus
-            fixed expenses, split across the semi-monthly pay periods.
+            {!isViewingCurrentMonth && (
+              <button type="button" onClick={goToToday} className={SECONDARY_BUTTON_CLASSES}>
+                Today
+              </button>
+            )}
+            <MonthStepper year={year} month={month} onPrev={goToPrevMonth} onNext={goToNextMonth} />
           </>
         }
       />
@@ -1409,220 +1486,154 @@ export default function CalendarClient() {
       )}
 
       {loading ? (
-        <p className={LOADING_TEXT_CLASSES}>Loading last salary…</p>
+        <LoadingBlocks label="Loading your budget…" />
       ) : (
         <>
-          <section className={CARD_CLASSES}>
-            <h2 className="text-lg font-medium text-ink">
-              Net pay — {formatMonthYear(year, month)}
-            </h2>
-            <p className="mt-1 text-sm text-ink-2">
-              The payslip that funds each pay period of this month, minus any fixed and monthly
-              expenses. Click a card to view its expenses.
-            </p>
-            <div className="mt-5 grid gap-4 sm:grid-cols-2">
-              {([1, 2] as const).map((half) => {
-                const payslip = fundingPayslipFor(half);
-                const netAfter = half === 1 ? firstHalfNetAfter : secondHalfNetAfter;
-                const total = expensesTotal(half);
-                const monthlyTotal = monthlyExpensesTotal(half);
-                const rangeLabel = formatDayRangeLabel(
-                  half === 1 ? periodInfo.p1Start : periodInfo.p2Start,
-                  half === 1 ? periodInfo.p1End : periodInfo.p2End,
-                );
-                return (
-                  <div
-                    key={half}
-                    className="group relative rounded-lg border border-emerald-200 bg-emerald-50/60 p-4 dark:border-emerald-800 dark:bg-emerald-950/30"
-                  >
+          <div className="grid gap-5 lg:grid-cols-2">
+            {([1, 2] as const).map((half) => {
+              const style = HALF_STYLE[half];
+              const netPay = netPayFor(half);
+              const netAfter = half === 1 ? firstHalfNetAfter : secondHalfNetAfter;
+              const perDay = half === 1 ? firstHalfBudget : secondHalfBudget;
+              const remaining = (half === 1 ? remainingFirstHalf : remainingSecondHalf) ?? 0;
+              const deductions = expensesTotal(half) + monthlyExpensesTotal(half);
+              const funding = fundingPeriodFor(half, year, month);
+              const daysLeft = activeDaysForHalf(half);
+              const ratio = netAfter != null && netAfter > 0 ? remaining / netAfter : 0;
+              return (
+                <section
+                  key={half}
+                  className="flex min-w-0 flex-col rounded-2xl border border-line bg-surface p-5 shadow-xs sm:p-6"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="flex items-center gap-2 text-sm font-semibold text-ink">
+                        <span className={`size-2.5 shrink-0 rounded-full ${style.dot}`} />
+                        {style.label}
+                      </p>
+                      <p className="mt-0.5 text-sm text-ink-3">
+                        {formatDayRangeLabel(
+                          half === 1 ? periodInfo.p1Start : periodInfo.p2Start,
+                          half === 1 ? periodInfo.p1End : periodInfo.p2End,
+                        )}{" "}
+                        · {half === 1 ? periodInfo.firstHalfDays : periodInfo.secondHalfDays} days
+                      </p>
+                    </div>
                     <button
                       type="button"
-                      onClick={() => openExpenseModal(half)}
-                      className="block w-full rounded-md text-left transition-opacity duration-150 hover:opacity-90"
-                    >
-                      <p className="pr-16 text-[11px] font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-400">
-                        {rangeLabel}
-                      </p>
-                      <p className="mt-2 text-sm font-medium tabular-nums text-emerald-700 dark:text-emerald-300">
-                        {payslip?.total != null ? fmtMoney(payslip.total) : "–"} net pay
-                      </p>
-                      <p className="text-2xl font-bold tabular-nums text-emerald-800 dark:text-emerald-200">
-                        {netAfter != null ? fmtMoney(netAfter) : "–"}
-                      </p>
-                      <p className="mt-1 text-xs text-ink-3">
-                        {payslip?.period_year != null && payslip?.period_month != null
-                          ? `From ${formatMonthYear(payslip.period_year, payslip.period_month)}`
-                          : "No payslip recorded yet"}
-                      </p>
-                      {total > 0 && (
-                        <p className="mt-1 text-xs text-red-600 dark:text-red-400">
-                          −{fmtMoney(total)} fixed expenses
-                        </p>
-                      )}
-                      {monthlyTotal > 0 && (
-                        <p className="mt-1 text-xs text-red-600 dark:text-red-400">
-                          −{fmtMoney(monthlyTotal)} monthly expenses
-                        </p>
-                      )}
-                      <p className="mt-2 text-[11px] font-medium text-emerald-700 group-hover:underline dark:text-emerald-400">
-                        View expenses →
-                      </p>
-                    </button>
-                    <button
-                      type="button"
-                      aria-label="Adjust pay date"
                       onClick={() => openPayDateModal(half)}
-                      className={`absolute right-3 top-3 ${EDIT_BUTTON_CLASSES}`}
+                      title="Paid early? Set the real pay date"
+                      className="-mr-1.5 inline-flex shrink-0 items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-medium text-ink-3 transition-colors duration-150 hover:bg-surface-2 hover:text-ink"
                     >
-                      Edit date
+                      <CalendarIcon className="size-4" />
+                      Pay date
                     </button>
                   </div>
-                );
-              })}
-            </div>
-          </section>
 
-          <section className={CARD_CLASSES}>
-            <h2 className="text-lg font-medium text-ink">
-              Remaining budget
-            </h2>
-            <p className="mt-1 text-sm text-ink-2">
-              What&apos;s left across each pay period&apos;s still-active days (today onward).
-            </p>
-            <div className="mt-5 grid gap-4 sm:grid-cols-2">
-              <div className="rounded-lg border border-line bg-zinc-50/90 p-4 dark:bg-zinc-900/50">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-ink-3">
-                  {formatDayRangeLabel(periodInfo.p1Start, periodInfo.p1End)}
-                </p>
-                <p className="mt-2 text-2xl font-bold tabular-nums text-ink">
-                  {remainingFirstHalf != null ? fmtMoney(remainingFirstHalf) : "–"}
-                </p>
-                <p className="mt-1 text-xs text-ink-3">remaining</p>
-              </div>
-              <div className="rounded-lg border border-line bg-zinc-50/90 p-4 dark:bg-zinc-900/50">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-ink-3">
-                  {formatDayRangeLabel(periodInfo.p2Start, periodInfo.p2End)}
-                </p>
-                <p className="mt-2 text-2xl font-bold tabular-nums text-ink">
-                  {remainingSecondHalf != null ? fmtMoney(remainingSecondHalf) : "–"}
-                </p>
-                <p className="mt-1 text-xs text-ink-3">remaining</p>
-              </div>
-            </div>
-          </section>
-
-          <section className={CARD_CLASSES}>
-            <h2 className="text-lg font-medium text-ink">
-              Semi-monthly daily budget
-            </h2>
-            <p className="mt-1 text-sm text-ink-2">
-              Last net pay minus fixed expenses, divided evenly across each pay period&apos;s
-              days.
-            </p>
-            <div className="mt-5 grid gap-4 sm:grid-cols-2">
-              <div className="rounded-lg border border-line bg-zinc-50/90 p-4 dark:bg-zinc-900/50">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-ink-3">
-                  {formatDayRangeLabel(periodInfo.p1Start, periodInfo.p1End)} ({periodInfo.firstHalfDays}{" "}
-                  days)
-                </p>
-                <p className="mt-2 text-2xl font-bold tabular-nums text-ink">
-                  {firstHalfBudget != null ? fmtMoney(firstHalfBudget) : "–"}
-                </p>
-                <p className="mt-1 text-xs text-ink-3">per day</p>
-              </div>
-              <div className="rounded-lg border border-line bg-zinc-50/90 p-4 dark:bg-zinc-900/50">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-ink-3">
-                  {formatDayRangeLabel(periodInfo.p2Start, periodInfo.p2End)} ({periodInfo.secondHalfDays}{" "}
-                  days)
-                </p>
-                <p className="mt-2 text-2xl font-bold tabular-nums text-ink">
-                  {secondHalfBudget != null ? fmtMoney(secondHalfBudget) : "–"}
-                </p>
-                <p className="mt-1 text-xs text-ink-3">per day</p>
-              </div>
-            </div>
-          </section>
-
-          <section className="flex min-w-0 flex-1 flex-col rounded-lg border border-line bg-surface p-4 sm:p-6">
-            <div className="flex flex-col items-center gap-3 sm:relative sm:flex-row sm:justify-center">
-              <div className="flex items-center justify-center gap-3">
-                <button
-                  type="button"
-                  aria-label="Previous month"
-                  onClick={goToPrevMonth}
-                  className={`${ICON_BUTTON_CLASSES} text-2xl leading-none`}
-                >
-                  ‹
-                </button>
-                <h2 className="text-lg font-medium text-ink">
-                  {formatMonthYear(year, month)}
-                </h2>
-                <button
-                  type="button"
-                  aria-label="Next month"
-                  onClick={goToNextMonth}
-                  className={`${ICON_BUTTON_CLASSES} text-2xl leading-none`}
-                >
-                  ›
-                </button>
-              </div>
-              <div className="flex flex-wrap items-center justify-center gap-2 sm:absolute sm:right-0">
-                {!isViewingCurrentMonth && (
+                  {netAfter == null ? (
+                    <p className="mt-5 flex-1 rounded-xl border border-dashed border-line-strong px-4 py-6 text-center text-sm text-ink-3">
+                      No payslip yet for {formatMonthYear(funding.year, funding.month)} (
+                      {payslipHalfFor(half) === 1 ? "1st–15th" : "16th–end"}), so these days have no budget.
+                    </p>
+                  ) : daysLeft === 0 ? (
+                    <div className="mt-5">
+                      <p className="text-xs font-medium text-ink-3">Period budget</p>
+                      <p className="mt-1 truncate text-3xl font-semibold tabular-nums tracking-tight text-ink-3">
+                        {fmtMoney(netAfter)}
+                      </p>
+                      <p className="mt-2 text-xs text-ink-3">This pay period has ended.</p>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="mt-5 flex items-end justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-xs font-medium text-ink-3">Left to spend</p>
+                          <p className="mt-1 truncate text-3xl font-semibold tabular-nums tracking-tight text-ink">
+                            {fmtMoney(remaining)}
+                          </p>
+                        </div>
+                        <p className="shrink-0 pb-1 text-right text-xs text-ink-3">
+                          of <span className="font-medium tabular-nums text-ink-2">{fmtMoney(netAfter)}</span>
+                        </p>
+                      </div>
+                      <Meter
+                        className="mt-3"
+                        value={ratio}
+                        tone={netAfter < 0 ? "danger" : "brand"}
+                        label={`${style.label} left to spend`}
+                      />
+                      <p className="mt-2 text-xs text-ink-3">
+                        {daysLeft} day{daysLeft === 1 ? "" : "s"} left · about {fmtMoney(remaining / daysLeft)} a day
+                      </p>
+                    </>
+                  )}
+                  {netAfter != null && (
+                    <div className="mt-5 grid grid-cols-3 gap-3 border-t border-line-soft pt-4">
+                      <Metric size="sm" label="Net pay" value={netPay != null ? fmtMoney(netPay) : "–"} />
+                      <Metric
+                        size="sm"
+                        label="Expenses"
+                        value={deductions > 0 ? `−${fmtMoney(deductions)}` : "None"}
+                        tone={deductions > 0 ? "danger" : "neutral"}
+                      />
+                      <Metric size="sm" label="Even split" value={perDay != null ? `${fmtMoney(perDay)}/day` : "–"} />
+                    </div>
+                  )}
                   <button
                     type="button"
-                    onClick={goToToday}
-                    className={ACTION_BUTTON_CLASSES}
+                    onClick={() => openExpenseModal(half)}
+                    className={`-ml-2 mt-4 self-start ${TEXT_BUTTON_CLASSES}`}
                   >
-                    Today
+                    Expenses for this period →
                   </button>
-                )}
+                </section>
+              );
+            })}
+          </div>
+
+          <Panel
+            title="Daily budget"
+            subtitle="Tap a day to log what you spent. Drag a day onto another in the same period to move money."
+            actions={
+              <div className="flex items-center gap-0.5 rounded-xl border border-line p-1">
+                <span className="px-2 text-xs font-medium text-ink-3">{autoDividing ? "Evening out…" : "Even out"}</span>
                 <button
                   type="button"
-                  onClick={() => void autoDivideActiveDays("activeToday")}
                   disabled={autoDividing}
-                  title="Reset today and future days this month to an even split of their pay period's budget"
-                  className={`${ACTION_BUTTON_CLASSES} disabled:cursor-not-allowed`}
+                  title="Reset today and every later day this month to an even split of its pay period"
+                  onClick={() => void autoDivideActiveDays("activeToday")}
+                  className={evenOutButton}
                 >
-                  {autoDividing ? "Dividing…" : "Auto-divide"}
+                  From today
                 </button>
                 <button
                   type="button"
-                  onClick={() => void autoDivideActiveDays("future")}
                   disabled={autoDividing}
-                  title="Reset days after today (not today) this month to an even split of their pay period's budget"
-                  className={`${ACTION_BUTTON_CLASSES} disabled:cursor-not-allowed`}
+                  title="Reset the days after today to an even split, leaving today as it is"
+                  onClick={() => void autoDivideActiveDays("future")}
+                  className={evenOutButton}
                 >
-                  {autoDividing ? "Dividing…" : "Auto-divide (future)"}
+                  After today
                 </button>
               </div>
-            </div>
-            <p className="mt-1 text-sm text-ink-2">
-              Past days are greyed out; today is highlighted. Click a day to log what you spent —
-              the rest is spread across that pay period&apos;s other active days (today or
-              later), never a day that&apos;s already past — or drag a day onto any other day in
-              the same pay period, earlier or later, to move budget between them.
-            </p>
-
-            <div className="mt-5 grid grid-cols-7 gap-1.5 sm:gap-2">
+            }
+          >
+            <div className="grid grid-cols-7 gap-1.5 sm:gap-2">
               {WEEKDAY_LABELS.map((label) => (
                 <div
                   key={label}
-                  className="px-1 pb-1 text-center text-[11px] font-semibold uppercase tracking-wide text-ink-3"
+                  className="pb-1 text-center text-[11px] font-medium uppercase tracking-wider text-ink-4"
                 >
                   {label}
                 </div>
               ))}
-            </div>
-            <div className="mt-1.5 grid flex-1 grid-cols-7 gap-1.5 sm:gap-2">
               {gridCells.map((cell, idx) =>
                 cell ? (
                   <DayGridCell
                     key={cell.iso}
                     cell={cell}
                     isDragSource={dragSourceIso === cell.iso}
-                    isDragOverTarget={
-                      dragOverIso === cell.iso && dragSourceIso !== cell.iso
-                    }
+                    isDragOverTarget={dragOverIso === cell.iso && dragSourceIso !== cell.iso}
                     onOpenSpend={openSpendModal}
                     onDragStart={handleDayDragStart}
                     onDragOver={handleDayDragOver}
@@ -1631,11 +1642,27 @@ export default function CalendarClient() {
                     onDragEnd={handleDayDragEnd}
                   />
                 ) : (
-                  <div key={`blank-${idx}`} />
+                  <div key={`blank-${idx}`} aria-hidden />
                 ),
               )}
             </div>
-          </section>
+            <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-ink-3">
+              {([1, 2] as const).map((half) => (
+                <span key={half} className="flex items-center gap-2">
+                  <span className={`h-1.5 w-4 rounded-full ${HALF_STYLE[half].bar}`} />
+                  {HALF_STYLE[half].label}
+                </span>
+              ))}
+              <span className="flex items-center gap-2">
+                <span className="size-3 rounded-full bg-brand" />
+                Today
+              </span>
+              <span className="flex items-center gap-2">
+                <span className="size-1.5 rounded-full bg-ink-4" />
+                Changed from the even split
+              </span>
+            </div>
+          </Panel>
         </>
       )}
 
@@ -1643,188 +1670,118 @@ export default function CalendarClient() {
         open={expenseModalHalf != null}
         onClose={closeExpenseModal}
         ariaLabelledBy="fixed-expense-title"
-        dialogClassName="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-line bg-surface shadow-pop"
+        dialogClassName={`${DIALOG_CLASSES} max-w-2xl`}
       >
-        <div className="flex shrink-0 items-start justify-between gap-2 border-b border-line px-4 py-3">
-          <div className="min-w-0">
-            <h2
-              id="fixed-expense-title"
-              className="truncate text-lg font-semibold text-ink"
-            >
-              Expenses —{" "}
-              {expenseModalHalf === 1
-                ? formatDayRangeLabel(periodInfo.p1Start, periodInfo.p1End)
-                : formatDayRangeLabel(periodInfo.p2Start, periodInfo.p2End)}
-            </h2>
-            <p className="mt-0.5 text-xs text-ink-2">
-              Fixed and monthly expenses subtracted from this period&apos;s net pay and its
-              calendar daily budget.
-            </p>
-          </div>
-          <button
-            type="button"
-            className={CLOSE_BUTTON_CLASSES}
-            onClick={closeExpenseModal}
-          >
-            Close
-          </button>
-        </div>
-
-        <div className="min-h-0 flex-1 overflow-auto p-4">
-          <div className="mb-4 grid grid-cols-2 gap-3 rounded-lg border border-line p-3 text-sm sm:grid-cols-4">
-            <div>
-              <p className="text-[11px] uppercase text-ink-3">Net pay</p>
-              <p className="mt-1 font-semibold tabular-nums text-ink">
-                {modalNetPay != null ? fmtMoney(modalNetPay) : "–"}
-              </p>
-            </div>
-            <div>
-              <p className="text-[11px] uppercase text-ink-3">
-                Fixed expenses
-              </p>
-              <p className="mt-1 font-semibold tabular-nums text-red-600 dark:text-red-400">
-                −{fmtMoney(modalExpensesTotal)}
-              </p>
-            </div>
-            <div>
-              <p className="text-[11px] uppercase text-ink-3">
-                Monthly expenses
-              </p>
-              <p className="mt-1 font-semibold tabular-nums text-red-600 dark:text-red-400">
-                −{fmtMoney(modalMonthlyExpensesTotal)}
-              </p>
-            </div>
-            <div>
-              <p className="text-[11px] uppercase text-ink-3">Left</p>
-              <p className="mt-1 font-semibold tabular-nums text-emerald-700 dark:text-emerald-300">
-                {modalNetAfter != null ? fmtMoney(modalNetAfter) : "–"}
-              </p>
-            </div>
-          </div>
-
-          <form
-            onSubmit={submitExpense}
-            className="mb-4 grid grid-cols-1 gap-3 rounded-lg border border-line p-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end"
-          >
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="text-ink-2">Amount</span>
-              <AmountInput
-                required
-                value={expenseForm.amount}
-                onChange={(v) => setExpenseForm((f) => ({ ...f, amount: v }))}
-                disabled={savingExpense}
+        <ModalHeader
+          id="fixed-expense-title"
+          title={`Expenses · ${modalRange}`}
+          subtitle="Taken out of this period's net pay before it's split into daily budgets."
+          onClose={closeExpenseModal}
+        />
+        <div className={`${DIALOG_BODY_CLASSES} space-y-6`}>
+          <StatStrip className="grid-cols-2 sm:grid-cols-4">
+            <Metric size="sm" label="Net pay" value={modalNetPay != null ? fmtMoney(modalNetPay) : "–"} />
+            {(
+              [
+                ["Fixed", modalExpensesTotal],
+                ["Monthly", modalMonthlyExpensesTotal],
+              ] as const
+            ).map(([label, total]) => (
+              <Metric
+                key={label}
+                size="sm"
+                label={label}
+                value={total > 0 ? `−${fmtMoney(total)}` : fmtMoney(0)}
+                tone={total > 0 ? "danger" : "neutral"}
               />
-            </label>
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="text-ink-2">Description</span>
+            ))}
+            <Metric
+              size="sm"
+              label="Left to budget"
+              value={modalNetAfter != null ? fmtMoney(modalNetAfter) : "–"}
+              tone="success"
+            />
+          </StatStrip>
+
+          <section>
+            <div className="mb-2 flex items-baseline justify-between gap-2">
+              <h3 className="text-sm font-semibold text-ink">Fixed expenses</h3>
+              <span className="text-xs text-ink-3">This pay period only</span>
+            </div>
+            <form onSubmit={submitExpense} className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_10rem_auto]">
               <input
                 type="text"
+                aria-label="Description"
+                placeholder="What's it for?"
                 className={INPUT_CLASSES}
                 value={expenseForm.description}
                 onChange={(e) => setExpenseForm((f) => ({ ...f, description: e.target.value }))}
                 disabled={savingExpense}
               />
-            </label>
-            <button type="submit" disabled={savingExpense} className={PRIMARY_BUTTON_CLASSES}>
-              {savingExpense ? "Saving…" : "Add"}
-            </button>
-          </form>
-
-          {expenseError && (
-            <div className={`mb-4 ${ERROR_ALERT_CLASSES}`} role="alert">
-              {expenseError}
-            </div>
-          )}
-
-          {modalExpenses.length === 0 ? (
-            <p className="text-sm text-ink">
-              No fixed expenses yet for this period.
-            </p>
-          ) : (
-            <table className="w-full table-fixed text-left text-sm">
-              <thead>
-                <tr className="border-b border-line text-xs uppercase text-ink-3">
-                  <th className="w-1/2 pb-2 pr-2">Description</th>
-                  <th className="w-1/4 pb-2 pr-2 text-right">Amount</th>
-                  <th className="w-1/4 pb-2 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
+              <AmountInput
+                required
+                aria-label="Amount"
+                placeholder="0.00"
+                value={expenseForm.amount}
+                onChange={(v) => setExpenseForm((f) => ({ ...f, amount: v }))}
+                disabled={savingExpense}
+              />
+              <button type="submit" disabled={savingExpense} className={PRIMARY_BUTTON_CLASSES}>
+                <PlusIcon className="size-4" />
+                {savingExpense ? "Adding…" : "Add"}
+              </button>
+            </form>
+            {expenseError && (
+              <div className={`mt-3 ${ERROR_ALERT_CLASSES}`} role="alert">
+                {expenseError}
+              </div>
+            )}
+            {modalExpenses.length === 0 ? (
+              <p className="mt-3 text-sm text-ink-3">No fixed expenses for this period.</p>
+            ) : (
+              <ul className="mt-3 divide-y divide-line-soft rounded-xl border border-line">
                 {modalExpenses.map((exp) => (
-                  <tr key={exp.id} className="border-b border-line-soft">
-                    <td className="py-2 pr-2 text-ink">
-                      <span className="block truncate">{exp.description || "—"}</span>
-                    </td>
-                    <td className="py-2 pr-2 text-right tabular-nums font-medium">
-                      {fmtMoney(exp.amount)}
-                    </td>
-                    <td className="py-2 text-right">
-                      <button
-                        type="button"
-                        className={DELETE_BUTTON_CLASSES}
-                        onClick={() => void onDeleteExpense(exp.id)}
-                      >
-                        Delete
-                      </button>
-                    </td>
-                  </tr>
+                  <li key={exp.id} className="flex items-center gap-3 py-1.5 pl-4 pr-2">
+                    <span className="min-w-0 flex-1 truncate text-sm text-ink">{exp.description || "Untitled"}</span>
+                    <span className="text-sm font-semibold tabular-nums text-ink">{fmtMoney(exp.amount)}</span>
+                    <IconAction kind="delete" label="Delete expense" onClick={() => void onDeleteExpense(exp.id)} />
+                  </li>
                 ))}
-              </tbody>
-            </table>
-          )}
+              </ul>
+            )}
+          </section>
 
-          <div className="mt-6 flex items-center justify-between gap-2">
-            <h3 className="text-sm font-semibold text-ink">
-              Monthly expenses
-            </h3>
-            <Link
-              href="/monthly-expenses"
-              className="text-xs font-medium text-indigo-600 hover:underline dark:text-indigo-400"
-            >
-              Manage monthly expenses →
-            </Link>
-          </div>
-
-          {modalMonthlyExpenses.length === 0 ? (
-            <p className="mt-2 text-sm text-ink">
-              No monthly expenses yet for this period.
-            </p>
-          ) : (
-            <table className="mt-2 w-full table-fixed text-left text-sm">
-              <thead>
-                <tr className="border-b border-line text-xs uppercase text-ink-3">
-                  <th className="w-1/3 pb-2 pr-2">Name</th>
-                  <th className="w-1/4 pb-2 pr-2">Description</th>
-                  <th className="w-1/5 pb-2 pr-2 text-right">Amount</th>
-                  <th className="w-1/5 pb-2 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
+          <section>
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <h3 className="text-sm font-semibold text-ink">Monthly expenses</h3>
+              <Link href="/monthly-expenses" className={`-mr-2 ${TEXT_BUTTON_CLASSES}`}>
+                Manage →
+              </Link>
+            </div>
+            {modalMonthlyExpenses.length === 0 ? (
+              <p className="text-sm text-ink-3">No monthly expenses for this period.</p>
+            ) : (
+              <ul className="divide-y divide-line-soft rounded-xl border border-line">
                 {modalMonthlyExpenses.map((exp) => (
-                  <tr key={exp.id} className="border-b border-line-soft">
-                    <td className="py-2 pr-2 text-ink">
-                      <span className="block truncate">{exp.name}</span>
-                    </td>
-                    <td className="py-2 pr-2 text-ink">
-                      <span className="block truncate">{exp.description || "—"}</span>
-                    </td>
-                    <td className="py-2 pr-2 text-right tabular-nums font-medium">
-                      {fmtMoney(exp.amount)}
-                    </td>
-                    <td className="py-2 text-right">
-                      <button
-                        type="button"
-                        className={DELETE_BUTTON_CLASSES}
-                        onClick={() => void onDeleteMonthlyExpense(exp.id)}
-                      >
-                        Delete
-                      </button>
-                    </td>
-                  </tr>
+                  <li key={exp.id} className="flex items-center gap-3 py-1.5 pl-4 pr-2">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <span className="truncate text-sm text-ink">{exp.name}</span>
+                        {exp.is_recurring && <Pill tone="brand">Recurring</Pill>}
+                      </div>
+                      {exp.description && <p className="truncate text-xs text-ink-3">{exp.description}</p>}
+                    </div>
+                    <span className="text-sm font-semibold tabular-nums text-ink">{fmtMoney(exp.amount)}</span>
+                    <IconAction
+                      kind="delete"
+                      label={`Delete ${exp.name}`}
+                      onClick={() => void onDeleteMonthlyExpense(exp.id)}
+                    />
+                  </li>
                 ))}
-              </tbody>
-            </table>
-          )}
+              </ul>
+            )}
+          </section>
         </div>
       </Modal>
 
@@ -1832,63 +1789,82 @@ export default function CalendarClient() {
         open={transfer != null}
         onClose={closeTransferModal}
         ariaLabelledBy="transfer-title"
-        dialogClassName="w-full max-w-sm rounded-xl border border-line bg-surface p-5 shadow-pop"
+        dialogClassName={`${DIALOG_CLASSES} max-w-md`}
       >
         {transfer && (
           <>
-            <h2
+            <ModalHeader
               id="transfer-title"
-              className="text-lg font-semibold text-ink"
-            >
-              Move budget
-            </h2>
-            <p className="mt-1 text-sm text-ink-2">
-              From day {transfer.fromDay} ({fmtMoney(transfer.fromAmount)}) to day{" "}
-              {transfer.toDay} ({fmtMoney(transfer.toAmount)}).
-            </p>
-            <form onSubmit={submitTransfer} className="mt-4 flex flex-col gap-3">
-              <label className="flex flex-col gap-1 text-sm">
-                <span className="text-ink-2">
-                  Amount spent on day {transfer.fromDay} today
-                </span>
-                <AmountInput
-                  autoFocus
-                  value={transferSpent}
-                  onChange={handleTransferSpentChange}
-                  disabled={savingTransfer}
-                />
-                <span className="text-xs text-ink-3">
-                  Fills in the amount to move below: {fmtMoney(transfer.fromAmount)} budget − spent.
-                </span>
-              </label>
-              <label className="flex flex-col gap-1 text-sm">
-                <span className="text-ink-2">
-                  Amount to move (max {fmtMoney(transfer.fromAmount)})
-                </span>
-                <div className="flex gap-2">
+              title="Move budget"
+              subtitle="Between two days in the same pay period."
+              onClose={closeTransferModal}
+            />
+            <form onSubmit={submitTransfer} className="flex min-h-0 flex-1 flex-col">
+              <div className={`${DIALOG_BODY_CLASSES} space-y-4`}>
+                <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+                  {(
+                    [
+                      ["From", transfer.fromIso, transfer.fromAmount, -1],
+                      null,
+                      ["To", transfer.toIso, transfer.toAmount, 1],
+                    ] as const
+                  ).map((side, i) =>
+                    side == null ? (
+                      <ChevronRightIcon key={i} className="size-5 text-ink-4" />
+                    ) : (
+                      <div key={i} className="min-w-0 rounded-xl border border-line px-3.5 py-3">
+                        <p className="truncate text-xs text-ink-3">
+                          {side[0]} {fmtDay(side[1], true)}
+                        </p>
+                        <p className="mt-0.5 truncate text-lg font-semibold tabular-nums text-ink">{fmtMoney(side[2])}</p>
+                        {transferMove != null && transferMove > 0 && (
+                          <p className="truncate text-xs tabular-nums text-ink-3">
+                            becomes {fmtMoney(Math.max(0, side[2] + side[3] * transferMove))}
+                          </p>
+                        )}
+                      </div>
+                    ),
+                  )}
+                </div>
+                <Field
+                  label={`Already spent on ${fmtDay(transfer.fromIso)}`}
+                  hint="Optional · fills in the amount to move with what's left"
+                >
                   <AmountInput
-                    required
-                    className="flex-1"
-                    value={transferAmount}
-                    onChange={setTransferAmount}
+                    autoFocus
+                    placeholder="0.00"
+                    value={transferSpent}
+                    onChange={handleTransferSpentChange}
                     disabled={savingTransfer}
                   />
-                  <button
-                    type="button"
-                    className={ACTION_BUTTON_CLASSES}
-                    onClick={() => setTransferAmount(formatAmountNumber(roundCents(transfer.fromAmount)))}
-                    disabled={savingTransfer}
-                  >
-                    Max
-                  </button>
-                </div>
-              </label>
-              {transferError && (
-                <div className={ERROR_ALERT_CLASSES} role="alert">
-                  {transferError}
-                </div>
-              )}
-              <div className="mt-1 flex justify-end gap-2">
+                </Field>
+                <Field label="Amount to move" hint={`Up to ${fmtMoney(transfer.fromAmount)}`}>
+                  <div className="flex gap-2">
+                    <AmountInput
+                      required
+                      placeholder="0.00"
+                      className="min-w-0 flex-1"
+                      value={transferAmount}
+                      onChange={setTransferAmount}
+                      disabled={savingTransfer}
+                    />
+                    <button
+                      type="button"
+                      className={SECONDARY_BUTTON_CLASSES}
+                      onClick={() => setTransferAmount(formatAmountNumber(roundCents(transfer.fromAmount)))}
+                      disabled={savingTransfer}
+                    >
+                      Max
+                    </button>
+                  </div>
+                </Field>
+                {transferError && (
+                  <div className={ERROR_ALERT_CLASSES} role="alert">
+                    {transferError}
+                  </div>
+                )}
+              </div>
+              <div className={DIALOG_FOOTER_CLASSES}>
                 <button
                   type="button"
                   className={SECONDARY_BUTTON_CLASSES}
@@ -1897,12 +1873,8 @@ export default function CalendarClient() {
                 >
                   Cancel
                 </button>
-                <button
-                  type="submit"
-                  className={PRIMARY_BUTTON_CLASSES}
-                  disabled={savingTransfer}
-                >
-                  {savingTransfer ? "Moving…" : "Move"}
+                <button type="submit" className={PRIMARY_BUTTON_CLASSES} disabled={savingTransfer}>
+                  {savingTransfer ? "Moving…" : "Move budget"}
                 </button>
               </div>
             </form>
@@ -1914,38 +1886,62 @@ export default function CalendarClient() {
         open={spendDay != null}
         onClose={closeSpendModal}
         ariaLabelledBy="spend-title"
-        dialogClassName="w-full max-w-sm rounded-xl border border-line bg-surface p-5 shadow-pop"
+        dialogClassName={`${DIALOG_CLASSES} max-w-sm`}
       >
         {spendDay && spendDay.dailyBudget != null && (
           <>
-            <h2 id="spend-title" className="text-lg font-semibold text-ink">
-              Log spend — day {spendDay.day}
-            </h2>
-            <p className="mt-1 text-sm text-ink-2">
-              Budget for this day is {fmtMoney(spendDay.dailyBudget)}. Whatever isn&apos;t spent
-              (or any overspend) is spread evenly across this pay period&apos;s other active days
-              — today or later, never a day that&apos;s already past.
-            </p>
-            <form onSubmit={submitSpend} className="mt-4 flex flex-col gap-3">
-              <label className="flex flex-col gap-1 text-sm">
-                <span className="text-ink-2">
-                  Amount spent (e.g. 100-10 or 100+10)
-                </span>
-                <AmountInput
-                  required
-                  mode="expression"
-                  autoFocus
-                  value={spendAmount}
-                  onChange={setSpendAmount}
-                  disabled={savingSpend}
-                />
-              </label>
-              {spendError && (
-                <div className={ERROR_ALERT_CLASSES} role="alert">
-                  {spendError}
+            <ModalHeader
+              id="spend-title"
+              title="Log spending"
+              subtitle={fmtDay(spendDay.iso, true)}
+              onClose={closeSpendModal}
+            />
+            <form onSubmit={submitSpend} className="flex min-h-0 flex-1 flex-col">
+              <div className={`${DIALOG_BODY_CLASSES} space-y-4`}>
+                <div className="rounded-xl bg-surface-2/70 px-4 py-3">
+                  <p className="text-xs font-medium text-ink-3">Budget for this day</p>
+                  <p className="mt-0.5 text-2xl font-semibold tabular-nums tracking-tight text-ink">
+                    {fmtMoney(spendDay.dailyBudget)}
+                  </p>
                 </div>
-              )}
-              <div className="mt-1 flex justify-end gap-2">
+                <Field label="Amount spent" hint="Math works too, e.g. 120+45.50">
+                  <AmountInput
+                    required
+                    mode="expression"
+                    autoFocus
+                    placeholder="0.00"
+                    value={spendAmount}
+                    onChange={setSpendAmount}
+                    disabled={savingSpend}
+                  />
+                </Field>
+                {spendPreview && (
+                  <p
+                    aria-live="polite"
+                    className={`rounded-lg px-3 py-2 text-sm ${
+                      spendPreview.days === 0
+                        ? "bg-danger-soft text-danger-text"
+                        : spendPreview.delta >= 0
+                          ? "bg-success-soft text-success-text"
+                          : "bg-warning-soft text-warning-text"
+                    }`}
+                  >
+                    {spendPreview.days === 0
+                      ? "No other open days in this pay period to spread the difference to."
+                      : spendPreview.delta === 0
+                        ? "Right on budget. Other days stay as they are."
+                        : spendPreview.delta > 0
+                          ? `${fmtMoney(spendPreview.delta)} left over, adding about ${fmtMoney(spendPreview.delta / spendPreview.days)} to each of the other ${spendPreview.days} days.`
+                          : `${fmtMoney(-spendPreview.delta)} over, taking about ${fmtMoney(-spendPreview.delta / spendPreview.days)} from each of the other ${spendPreview.days} days.`}
+                  </p>
+                )}
+                {spendError && (
+                  <div className={ERROR_ALERT_CLASSES} role="alert">
+                    {spendError}
+                  </div>
+                )}
+              </div>
+              <div className={DIALOG_FOOTER_CLASSES}>
                 <button
                   type="button"
                   className={SECONDARY_BUTTON_CLASSES}
@@ -1967,93 +1963,63 @@ export default function CalendarClient() {
         open={payDateModalHalf != null}
         onClose={closePayDateModal}
         ariaLabelledBy="pay-date-title"
-        dialogClassName="w-full max-w-sm rounded-xl border border-line bg-surface p-5 shadow-pop"
+        dialogClassName={`${DIALOG_CLASSES} max-w-md`}
       >
         {payDateModalHalf != null && (
           <>
-            <h2 id="pay-date-title" className="text-lg font-semibold text-ink">
-              Adjust pay date —{" "}
-              {payDateModalHalf === 1
-                ? formatDayRangeLabel(periodInfo.p1Start, periodInfo.p1End)
-                : formatDayRangeLabel(periodInfo.p2Start, periodInfo.p2End)}
-            </h2>
-            <p className="mt-1 text-sm text-ink-2">
-              If this paycheck actually lands earlier than the{" "}
-              {payDateModalHalf === 1 ? "1st" : "16th"}, set the real date here. The covered budget
-              period stretches to match, and the neighboring period shortens to keep the calendar
-              contiguous.
-            </p>
-            <form onSubmit={submitPayDate} className="mt-4 flex flex-col gap-3">
-              <label className="flex flex-col gap-1 text-sm">
-                <span className="text-ink-2">Actual pay date</span>
-                <input
-                  required
-                  type="date"
-                  className={INPUT_CLASSES}
-                  value={payDateForm}
-                  min={payDateBounds[payDateModalHalf].min}
-                  max={payDateBounds[payDateModalHalf].max}
-                  onChange={(e) => setPayDateForm(e.target.value)}
-                  disabled={savingPayDate}
-                />
-              </label>
-              <label className="flex flex-col gap-1 text-sm">
-                <span className="text-ink-2">
-                  End date <span className="text-ink-4">(optional)</span>
-                </span>
-                <div className="flex gap-2">
-                  <input
-                    type="date"
-                    className={INPUT_CLASSES}
-                    value={payDateEndForm}
-                    min={payDateEndBounds[payDateModalHalf].min}
-                    max={payDateEndBounds[payDateModalHalf].max}
-                    onChange={(e) => setPayDateEndForm(e.target.value)}
+            <ModalHeader id="pay-date-title" title="Adjust pay date" subtitle={payDateRange} onClose={closePayDateModal} />
+            <form onSubmit={submitPayDate} className="flex min-h-0 flex-1 flex-col">
+              <div className={`${DIALOG_BODY_CLASSES} space-y-4`}>
+                <p className="text-sm text-ink-3">
+                  Paid before the {payDateModalHalf === 1 ? "1st" : "16th"}? Set the real date. This period
+                  then starts that day and the one before it gets shorter, so the calendar has no gaps.
+                </p>
+                <Field label="Paid on">
+                  <DatePickerField
+                    value={payDateForm}
+                    onChange={setPayDateForm}
+                    minDate={payDateBounds[payDateModalHalf].min}
+                    maxDate={payDateBounds[payDateModalHalf].max}
                     disabled={savingPayDate}
                   />
-                  {payDateEndForm && (
-                    <button
-                      type="button"
-                      className="text-xs font-medium text-ink-3 hover:underline"
-                      onClick={() => setPayDateEndForm("")}
-                      disabled={savingPayDate}
-                    >
-                      Clear
-                    </button>
-                  )}
-                </div>
-                <span className="text-xs text-ink-3">
-                  Shortens this period to end here and pushes the next period&apos;s start to the
-                  following day, so the calendar stays contiguous.
-                </span>
-              </label>
-              {payDateError && (
-                <div className={ERROR_ALERT_CLASSES} role="alert">
-                  {payDateError}
-                </div>
-              )}
-              <div className="mt-1 flex items-center justify-between gap-2">
+                </Field>
+                <Field label="Period ends" hint="Optional · the next period then starts the day after">
+                  <DatePickerField
+                    value={payDateEndForm}
+                    onChange={setPayDateEndForm}
+                    minDate={payDateEndBounds[payDateModalHalf].min}
+                    maxDate={payDateEndBounds[payDateModalHalf].max}
+                    placeholder="Default end"
+                    clearLabel="Use default"
+                    disabled={savingPayDate}
+                  />
+                </Field>
+                {payDateError && (
+                  <div className={ERROR_ALERT_CLASSES} role="alert">
+                    {payDateError}
+                  </div>
+                )}
+              </div>
+              <div className={DIALOG_FOOTER_CLASSES}>
                 <button
                   type="button"
-                  className="text-xs font-medium text-ink-3 hover:underline"
+                  className="mr-auto rounded-lg px-2 py-1.5 text-sm font-medium text-ink-3 transition-colors duration-150 hover:bg-surface-2 hover:text-ink disabled:opacity-50"
                   onClick={() => void resetPayDate()}
                   disabled={savingPayDate}
                 >
                   Reset to default
                 </button>
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    className={SECONDARY_BUTTON_CLASSES}
-                    onClick={closePayDateModal}
-                    disabled={savingPayDate}
-                  >
-                    Cancel
-                  </button>
-                  <button type="submit" className={PRIMARY_BUTTON_CLASSES} disabled={savingPayDate}>
-                    {savingPayDate ? "Saving…" : "Save"}
-                  </button>
-                </div>
+                <button
+                  type="button"
+                  className={SECONDARY_BUTTON_CLASSES}
+                  onClick={closePayDateModal}
+                  disabled={savingPayDate}
+                >
+                  Cancel
+                </button>
+                <button type="submit" className={PRIMARY_BUTTON_CLASSES} disabled={savingPayDate}>
+                  {savingPayDate ? "Saving…" : "Save"}
+                </button>
               </div>
             </form>
           </>

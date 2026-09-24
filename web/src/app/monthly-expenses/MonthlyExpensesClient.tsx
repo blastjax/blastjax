@@ -5,37 +5,51 @@ import { PageHeader } from "@/components/PageHeader";
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { Modal } from "@/components/Modal";
 import {
+  DANGER_TEXT_BUTTON_CLASSES,
+  DIALOG_BODY_CLASSES,
+  DIALOG_CLASSES,
+  DIALOG_FOOTER_CLASSES,
+  Field,
+  IconAction,
+  LoadingBlocks,
+  Metric,
+  ModalHeader,
+  MonthStepper,
+  Panel,
+  Pill,
+  StatStrip,
+  TEXT_BUTTON_CLASSES,
+} from "@/components/FinanceUI";
+import { PlusIcon } from "@/components/Icons";
+import {
   createMonthlyExpense,
   deleteMonthlyExpense,
   getMonthlyExpenses,
   updateMonthlyExpense,
   type MonthlyExpenseRow,
 } from "@/lib/api";
-import { formatMonthYearShort, monthKey, parseMonthKey } from "@/lib/dateFormat";
+import { addMonths, formatMonthYear, formatMonthYearShort, monthKey, parseMonthKey } from "@/lib/dateFormat";
 import { fmtAmount } from "@/lib/formatNumber";
 import { formatAmountNumber, parseFormNumber } from "@/lib/parseFormNumber";
 import {
-  AMOUNT_NEGATIVE_CLASSES,
-  CARD_CLASSES,
-  CLOSE_BUTTON_CLASSES,
-  DASHED_EMPTY_CLASSES,
-  DELETE_BUTTON_CLASSES,
   ERROR_ALERT_CLASSES,
   INPUT_CLASSES,
-  LOADING_TEXT_CLASSES,
   PAGE_CONTAINER_CLASSES,
   PRIMARY_BUTTON_CLASSES,
   SECONDARY_BUTTON_CLASSES,
   SEGMENTED_BUTTON_ACTIVE_CLASSES,
+  SEGMENTED_BUTTON_CLASSES,
   SEGMENTED_BUTTON_INACTIVE_CLASSES,
   SEGMENTED_WRAPPER_CLASSES,
+  TOGGLE_ACTIVE_BUTTON_CLASSES,
+  TOGGLE_INACTIVE_BUTTON_CLASSES,
 } from "@/lib/ui";
 
 type PeriodHalf = 1 | 2;
 
-const HALF_LABEL: Record<PeriodHalf, string> = {
-  1: "1st half",
-  2: "2nd half",
+const HALF: Record<PeriodHalf, { label: string; days: string }> = {
+  1: { label: "1st half", days: "Days 1–15" },
+  2: { label: "2nd half", days: "Days 16–end" },
 };
 
 const fmtMoney = fmtAmount;
@@ -68,6 +82,10 @@ export default function MonthlyExpensesClient() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  /** The stepper's month; `showAll` swaps the month filter for every expense on file. */
+  const [month, setMonth] = useState(() => ({ y: today.getFullYear(), m: today.getMonth() + 1 }));
+  const [showAll, setShowAll] = useState(false);
+
   const [modalOpen, setModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState<ExpenseForm>(emptyForm(currentMonthKey));
@@ -91,27 +109,37 @@ export default function MonthlyExpensesClient() {
     void load();
   }, [load]);
 
+  /** Same rule as the API's month filter (and the calendar): recurring rows
+   * apply to every month, one-offs only to the month they were filed under. */
+  const visible = useMemo(
+    () =>
+      showAll
+        ? expenses
+        : expenses.filter(
+            (e) => e.is_recurring || (e.period_year === month.y && e.period_month === month.m),
+          ),
+    [expenses, month, showAll],
+  );
+
   const byHalf = useMemo(() => {
     const map: Record<PeriodHalf, MonthlyExpenseRow[]> = { 1: [], 2: [] };
-    for (const e of expenses) {
+    for (const e of visible) {
       if (e.period_half === 1 || e.period_half === 2) map[e.period_half].push(e);
     }
     return map;
-  }, [expenses]);
+  }, [visible]);
 
-  const totalFor = useCallback(
-    (half: PeriodHalf) => byHalf[half].reduce((s, e) => s + e.amount, 0),
-    [byHalf],
-  );
+  const totalFor = (half: PeriodHalf) => byHalf[half].reduce((s, e) => s + e.amount, 0);
+  const recurring = visible.filter((e) => e.is_recurring);
 
   const openModal = useCallback(
     (half: PeriodHalf = 1) => {
       setFormError(null);
       setEditingId(null);
-      setForm(emptyForm(currentMonthKey, half));
+      setForm(emptyForm(showAll ? currentMonthKey : monthKey(month.y, month.m), half));
       setModalOpen(true);
     },
-    [currentMonthKey],
+    [currentMonthKey, month, showAll],
   );
 
   const openEditModal = useCallback((exp: MonthlyExpenseRow) => {
@@ -186,22 +214,43 @@ export default function MonthlyExpensesClient() {
       setError(null);
       try {
         await deleteMonthlyExpense(id);
+        closeModal();
         await load();
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to delete expense");
       }
     },
-    [load],
+    [load, closeModal],
   );
+
+  const scopeLabel = showAll ? "All months" : formatMonthYear(month.y, month.m);
 
   return (
     <div className={PAGE_CONTAINER_CLASSES}>
       <PageHeader
         title="Monthly Expenses"
-        description={
+        description="Bills taken out of your calendar budget, by pay period."
+        actions={
           <>
-            All monthly expenses, split by pay period half. Each one applies only to the month
-            you pick for it — the calendar page only shows it for that month.
+            <MonthStepper
+              year={month.y}
+              month={month.m}
+              onPrev={() => setMonth((v) => addMonths(v.y, v.m, -1))}
+              onNext={() => setMonth((v) => addMonths(v.y, v.m, 1))}
+              disabled={showAll}
+            />
+            <button
+              type="button"
+              aria-pressed={showAll}
+              className={showAll ? TOGGLE_ACTIVE_BUTTON_CLASSES : TOGGLE_INACTIVE_BUTTON_CLASSES}
+              onClick={() => setShowAll((v) => !v)}
+            >
+              All months
+            </button>
+            <button type="button" className={PRIMARY_BUTTON_CLASSES} onClick={() => openModal(1)}>
+              <PlusIcon className="size-4" />
+              Add expense
+            </button>
           </>
         }
       />
@@ -213,212 +262,217 @@ export default function MonthlyExpensesClient() {
       )}
 
       {loading ? (
-        <p className={LOADING_TEXT_CLASSES}>Loading monthly expenses…</p>
+        <LoadingBlocks label="Loading monthly expenses…" />
       ) : (
-        <div className="grid gap-6 sm:grid-cols-2">
-          {([1, 2] as const).map((half) => (
-            <section
-              key={half}
-              className={CARD_CLASSES}
-            >
-              <div className="flex items-baseline justify-between gap-2">
-                <h2 className="text-lg font-medium text-ink">
-                  {HALF_LABEL[half]}
-                </h2>
-                <p className={`text-sm ${AMOUNT_NEGATIVE_CLASSES}`}>
-                  −{fmtMoney(totalFor(half))}
-                </p>
-              </div>
+        <>
+          <StatStrip className="grid-cols-2 lg:grid-cols-4">
+            <Metric
+              label={`Total · ${scopeLabel}`}
+              value={fmtMoney(totalFor(1) + totalFor(2))}
+              hint={`${visible.length} expense${visible.length === 1 ? "" : "s"}`}
+              tone="danger"
+              size="lg"
+            />
+            <Metric label={`1st half · ${HALF[1].days}`} value={fmtMoney(totalFor(1))} hint={`${byHalf[1].length} items`} />
+            <Metric label={`2nd half · ${HALF[2].days}`} value={fmtMoney(totalFor(2))} hint={`${byHalf[2].length} items`} />
+            <Metric
+              label="Recurring"
+              value={fmtMoney(recurring.reduce((s, e) => s + e.amount, 0))}
+              hint={`${recurring.length} every month`}
+            />
+          </StatStrip>
 
-              {byHalf[half].length === 0 ? (
-                <button
-                  type="button"
-                  onClick={() => openModal(half)}
-                  className={`mt-4 flex w-full flex-col items-center gap-1 ${DASHED_EMPTY_CLASSES} transition-colors duration-150 hover:border-brand hover:text-brand`}
-                >
-                  <span>No monthly expenses yet.</span>
-                  <span className="font-medium">+ Add monthly expense</span>
-                </button>
-              ) : (
-                <ul className="mt-4 flex flex-col gap-2">
-                  {byHalf[half].map((exp) => (
-                    <li
-                      key={exp.id}
-                      role="button"
-                      tabIndex={0}
-                      onClick={() => openEditModal(exp)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" || e.key === " ") {
-                          e.preventDefault();
-                          openEditModal(exp);
-                        }
-                      }}
-                      className="flex cursor-pointer items-start justify-between gap-2 rounded-lg border border-line p-3 transition-colors duration-150 hover:ring-2 hover:ring-indigo-300/60 dark:hover:ring-indigo-700/50"
+          <div className="grid gap-5 lg:grid-cols-2">
+            {([1, 2] as const).map((half) => (
+              <Panel
+                key={half}
+                flush
+                title={HALF[half].label}
+                subtitle={`${HALF[half].days} · ${scopeLabel}`}
+                actions={
+                  <span className="text-lg font-semibold tabular-nums text-danger-text">
+                    −{fmtMoney(totalFor(half))}
+                  </span>
+                }
+              >
+                {byHalf[half].length === 0 ? (
+                  <div className="px-5 pb-5 sm:px-6 sm:pb-6">
+                    <button
+                      type="button"
+                      onClick={() => openModal(half)}
+                      className="flex w-full flex-col items-center gap-1 rounded-xl border border-dashed border-line-strong px-4 py-10 text-sm text-ink-3 transition-colors duration-150 hover:border-brand hover:text-brand-text"
                     >
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-medium text-ink">
-                          {exp.name}
-                        </p>
-                        {exp.description && (
-                          <p className="mt-0.5 truncate text-xs text-ink-2">
-                            {exp.description}
-                          </p>
-                        )}
-                        <p className="mt-0.5 text-xs text-indigo-600 dark:text-indigo-400">
-                          {exp.is_recurring
-                            ? "Recurring every month"
-                            : formatMonthYearShort(exp.period_year, exp.period_month)}
-                        </p>
-                      </div>
-                      <div className="flex shrink-0 items-center gap-2">
-                        <span className="text-sm font-semibold tabular-nums text-ink">
-                          {fmtMoney(exp.amount)}
-                        </span>
-                        <button
-                          type="button"
-                          className={DELETE_BUTTON_CLASSES}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            void onDelete(exp.id);
-                          }}
-                        >
-                          Delete
-                        </button>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              )}
-              {byHalf[half].length > 0 && (
-                <button
-                  type="button"
-                  onClick={() => openModal(half)}
-                  className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-line-strong px-4 py-2.5 text-sm font-medium text-ink-3 transition-colors duration-150 hover:border-brand hover:text-brand"
-                >
-                  + Add monthly expense
-                </button>
-              )}
-            </section>
-          ))}
-        </div>
+                      <span>Nothing deducted from the {HALF[half].label}.</span>
+                      <span className="font-medium">+ Add an expense</span>
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <ul className="divide-y divide-line-soft border-t border-line-soft">
+                      {byHalf[half].map((exp) => (
+                        <li key={exp.id}>
+                          <div
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => openEditModal(exp)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" || e.key === " ") {
+                                e.preventDefault();
+                                openEditModal(exp);
+                              }
+                            }}
+                            className="flex cursor-pointer items-center gap-3 px-5 py-3 transition-colors duration-150 hover:bg-surface-2/60 sm:px-6"
+                          >
+                            <div className="min-w-0 flex-1">
+                              <div className="flex min-w-0 items-center gap-2">
+                                <p className="truncate text-sm font-medium text-ink">{exp.name}</p>
+                                {exp.is_recurring ? (
+                                  <Pill tone="brand">Recurring</Pill>
+                                ) : (
+                                  showAll && <Pill>{formatMonthYearShort(exp.period_year, exp.period_month)}</Pill>
+                                )}
+                              </div>
+                              {exp.description && (
+                                <p className="mt-0.5 truncate text-xs text-ink-3">{exp.description}</p>
+                              )}
+                            </div>
+                            <span className="shrink-0 text-sm font-semibold tabular-nums text-ink">
+                              {fmtMoney(exp.amount)}
+                            </span>
+                            <IconAction kind="delete" label={`Delete ${exp.name}`} onClick={() => void onDelete(exp.id)} />
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                    <div className="border-t border-line-soft px-3 py-2 sm:px-4">
+                      <button type="button" onClick={() => openModal(half)} className={TEXT_BUTTON_CLASSES}>
+                        <PlusIcon className="size-4" />
+                        Add to {HALF[half].label}
+                      </button>
+                    </div>
+                  </>
+                )}
+              </Panel>
+            ))}
+          </div>
+        </>
       )}
 
       <Modal
         open={modalOpen}
         onClose={closeModal}
         ariaLabelledBy="monthly-expense-title"
-        dialogClassName="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-xl border border-line bg-surface p-5 shadow-pop"
+        dialogClassName={`${DIALOG_CLASSES} max-w-md`}
       >
-        <div className="mb-4 flex items-start justify-between gap-2">
-          <div>
-            <h2
-              id="monthly-expense-title"
-              className="text-lg font-semibold text-ink"
-            >
-              {editingId != null ? "Edit monthly expense" : "Add monthly expense"}
-            </h2>
-          </div>
-          <button
-            type="button"
-            className={CLOSE_BUTTON_CLASSES}
-            onClick={closeModal}
-          >
-            Close
-          </button>
-        </div>
-        <form onSubmit={submitForm} className="grid gap-4">
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-ink-2">Name</span>
-            <input
-              required
-              type="text"
-              className={INPUT_CLASSES}
-              value={form.name}
-              onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-              disabled={saving}
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-ink-2">Description (optional)</span>
-            <input
-              type="text"
-              className={INPUT_CLASSES}
-              value={form.description}
-              onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
-              disabled={saving}
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-ink-2">Amount</span>
-            <AmountInput
-              required
-              value={form.amount}
-              onChange={(v) => setForm((f) => ({ ...f, amount: v }))}
-              disabled={saving}
-            />
-          </label>
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={form.is_recurring}
-              onChange={(e) => setForm((f) => ({ ...f, is_recurring: e.target.checked }))}
-              disabled={saving}
-            />
-            <span className="text-ink-2">
-              Recurring — always show in the calendar&apos;s deductions, every month
-            </span>
-          </label>
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-ink-2">
-              Month{form.is_recurring ? " (ignored while recurring)" : ""}
-            </span>
-            <input
-              required
-              type="month"
-              className={INPUT_CLASSES}
-              value={form.month}
-              onChange={(e) => setForm((f) => ({ ...f, month: e.target.value }))}
-              disabled={saving || form.is_recurring}
-            />
-          </label>
-          <div className="flex flex-col items-center gap-1 text-sm">
-            <span className="text-ink-2">Half of the month</span>
-            <div className={`${SEGMENTED_WRAPPER_CLASSES} w-full`}>
-              {([1, 2] as const).map((half) => (
-                <button
-                  key={half}
-                  type="button"
-                  className={`flex-1 rounded-md px-4 py-2.5 text-base font-medium transition-colors duration-150 ${
-                    form.period_half === half
-                      ? SEGMENTED_BUTTON_ACTIVE_CLASSES
-                      : SEGMENTED_BUTTON_INACTIVE_CLASSES
-                  }`}
-                  onClick={() => setForm((f) => ({ ...f, period_half: half }))}
+        <ModalHeader
+          id="monthly-expense-title"
+          title={editingId != null ? "Edit expense" : "New expense"}
+          subtitle="Subtracted from that half's daily budget on the calendar."
+          onClose={closeModal}
+        />
+        <form onSubmit={submitForm} className="flex min-h-0 flex-1 flex-col">
+          <div className={`${DIALOG_BODY_CLASSES} grid gap-4`}>
+            <Field label="Name">
+              <input
+                required
+                autoFocus
+                type="text"
+                placeholder="e.g. Internet"
+                className={INPUT_CLASSES}
+                value={form.name}
+                onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                disabled={saving}
+              />
+            </Field>
+            <Field label="Amount">
+              <AmountInput
+                required
+                placeholder="0.00"
+                value={form.amount}
+                onChange={(v) => setForm((f) => ({ ...f, amount: v }))}
+                disabled={saving}
+              />
+            </Field>
+            <Field label="Note" hint="Optional">
+              <input
+                type="text"
+                className={INPUT_CLASSES}
+                value={form.description}
+                onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
+                disabled={saving}
+              />
+            </Field>
+
+            <div className="flex flex-col gap-1.5 text-sm">
+              <span className="font-medium text-ink-2">Deduct from</span>
+              <div className={`${SEGMENTED_WRAPPER_CLASSES} w-full`}>
+                {([1, 2] as const).map((half) => (
+                  <button
+                    key={half}
+                    type="button"
+                    aria-pressed={form.period_half === half}
+                    className={`flex-1 ${SEGMENTED_BUTTON_CLASSES} ${
+                      form.period_half === half ? SEGMENTED_BUTTON_ACTIVE_CLASSES : SEGMENTED_BUTTON_INACTIVE_CLASSES
+                    }`}
+                    onClick={() => setForm((f) => ({ ...f, period_half: half }))}
+                    disabled={saving}
+                  >
+                    {HALF[half].label}
+                    <span className="ml-1.5 text-xs opacity-70">{HALF[half].days}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-line p-3.5 transition-colors duration-150 hover:bg-surface-2/60">
+              <input
+                type="checkbox"
+                className="mt-0.5 size-4"
+                checked={form.is_recurring}
+                onChange={(e) => setForm((f) => ({ ...f, is_recurring: e.target.checked }))}
+                disabled={saving}
+              />
+              <span className="text-sm">
+                <span className="block font-medium text-ink">Repeats every month</span>
+                <span className="text-ink-3">Deducted in every month on the calendar.</span>
+              </span>
+            </label>
+
+            {!form.is_recurring && (
+              <Field label="Month">
+                <input
+                  required
+                  type="month"
+                  className={INPUT_CLASSES}
+                  value={form.month}
+                  onChange={(e) => setForm((f) => ({ ...f, month: e.target.value }))}
                   disabled={saving}
-                >
-                  {HALF_LABEL[half]}
-                </button>
-              ))}
-            </div>
+                />
+              </Field>
+            )}
+
+            {formError && (
+              <div className={ERROR_ALERT_CLASSES} role="alert">
+                {formError}
+              </div>
+            )}
           </div>
-
-          {formError && (
-            <div className={ERROR_ALERT_CLASSES} role="alert">
-              {formError}
-            </div>
-          )}
-
-          <div className="flex flex-wrap gap-2">
-            <button type="submit" disabled={saving} className={PRIMARY_BUTTON_CLASSES}>
-              {saving ? "Saving…" : editingId != null ? "Update" : "Add"}
-            </button>
-            <button
-              type="button"
-              disabled={saving}
-              className={SECONDARY_BUTTON_CLASSES}
-              onClick={closeModal}
-            >
+          <div className={DIALOG_FOOTER_CLASSES}>
+            {editingId != null && (
+              <button
+                type="button"
+                disabled={saving}
+                className={DANGER_TEXT_BUTTON_CLASSES}
+                onClick={() => void onDelete(editingId)}
+              >
+                Delete
+              </button>
+            )}
+            <button type="button" disabled={saving} className={SECONDARY_BUTTON_CLASSES} onClick={closeModal}>
               Cancel
+            </button>
+            <button type="submit" disabled={saving} className={PRIMARY_BUTTON_CLASSES}>
+              {saving ? "Saving…" : editingId != null ? "Save changes" : "Add expense"}
             </button>
           </div>
         </form>
