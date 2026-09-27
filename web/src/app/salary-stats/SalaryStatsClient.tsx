@@ -265,6 +265,7 @@ function SalaryStatsView({ company, data }: { company: string; data: Month[] }) 
       <StatsHeader company={company} title="Salary Stats" description={DESCRIPTION}>
         <YearStepper
           lg
+          arrowKeys
           year={year}
           sub={partial ? `${MN[ms[0]!]} – ${MN[ms[ms.length - 1]!]}` : "Full year"}
           canPrev={year > firstYear}

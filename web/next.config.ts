@@ -20,14 +20,19 @@ const nextConfig: NextConfig = {
   /**
    * On Windows, webpack’s default filesystem cache often hits ENOENT/rename races
    * (PackFileCacheStrategy, missing routes-manifest). Memory cache avoids that.
-   * Turbopack (`next dev --turbopack`) does not use this hook.
+   * Turbopack (`--turbopack` sets TURBOPACK=1) ignores this hook, and Next warns
+   * "Webpack is configured while Turbopack is not" if it is present, so omit it there.
    */
-  webpack: (config, { dev }) => {
-    if (dev && process.platform === "win32") {
-      config.cache = { type: "memory" };
-    }
-    return config;
-  },
+  ...(process.env.TURBOPACK
+    ? {}
+    : {
+        webpack: (config, { dev }) => {
+          if (dev && process.platform === "win32") {
+            config.cache = { type: "memory" };
+          }
+          return config;
+        },
+      }),
 };
 
 export default nextConfig;

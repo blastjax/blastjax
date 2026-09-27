@@ -115,7 +115,8 @@ export default function PayslipClient({ company = "Sophos" }: { company?: string
   // Bulk/less-common actions tucked behind one toggle instead of competing
   // with the page's actual content for attention (same pattern as Lotto).
   const [showDataTools, setShowDataTools] = useState(false);
-  const [showEarlierYears, setShowEarlierYears] = useState(false);
+  // Shared by the stats stepper and the calendar so both show the same year.
+  const [year, setYear] = useState(() => new Date().getFullYear());
   const modalFormRef = useRef(modalForm);
   modalFormRef.current = modalForm;
   const navRef = useRef(nav);
@@ -408,10 +409,6 @@ export default function PayslipClient({ company = "Sophos" }: { company?: string
   }, [nav, rows]);
 
   const index = useMemo(() => buildPayslipIndex(rows), [rows]);
-  const allYears = index.years;
-  const currentYear = new Date().getFullYear();
-  const recentYears = allYears.filter((y) => y >= currentYear);
-  const earlierYears = allYears.filter((y) => y < currentYear);
   const unsorted = index.unscheduled;
   const flags = companyColumnFlags(companies, company);
 
@@ -483,49 +480,23 @@ export default function PayslipClient({ company = "Sophos" }: { company?: string
         </div>
 
         {!loading && (
-          <PayslipYearStatsSection index={index} flags={flags} />
+          <PayslipYearStatsSection
+            index={index}
+            flags={flags}
+            statsYear={year}
+            setStatsYear={setYear}
+            arrowKeysDisabled={nav != null}
+          />
         )}
 
         {!loading && (
-          <div className="flex flex-col gap-6">
-            {recentYears.map((year) => (
-              <YearPayslipBlock
-                key={year}
-                year={year}
-                yearSlots={yearSlotsFromIndex(index, year)}
-                saving={saving}
-                showGross={showGross}
-                onOpenSlot={openSlot}
-              />
-            ))}
-          </div>
-        )}
-
-        {!loading && earlierYears.length > 0 && (
-          <button
-            type="button"
-            onClick={() => setShowEarlierYears((v) => !v)}
-            className={`${PAYSLIP_SECONDARY_BUTTON} mb-6 mt-6`}
-          >
-            {showEarlierYears
-              ? "Hide earlier years"
-              : `Show earlier years (${earlierYears[0]}–${earlierYears[earlierYears.length - 1]})`}
-          </button>
-        )}
-
-        {!loading && showEarlierYears && earlierYears.length > 0 && (
-          <div className="flex flex-col gap-6">
-            {earlierYears.map((year) => (
-              <YearPayslipBlock
-                key={year}
-                year={year}
-                yearSlots={yearSlotsFromIndex(index, year)}
-                saving={saving}
-                showGross={showGross}
-                onOpenSlot={openSlot}
-              />
-            ))}
-          </div>
+          <YearPayslipBlock
+            year={year}
+            yearSlots={yearSlotsFromIndex(index, year)}
+            saving={saving}
+            showGross={showGross}
+            onOpenSlot={openSlot}
+          />
         )}
 
         {!loading && unsorted.length > 0 && (

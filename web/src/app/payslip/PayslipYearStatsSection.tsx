@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState, type Dispatch, type SetStateAction } from "react";
 import {
   DEFAULT_COMPANY_COLUMN_FLAGS,
   type CompanyColumnFlags,
@@ -23,6 +23,7 @@ import {
   PAYSLIP_DANGER_TEXT,
   PAYSLIP_ICON_BUTTON,
   PAYSLIP_MONO,
+  PAYSLIP_SECONDARY_BUTTON,
   PAYSLIP_TEXT_2,
   PAYSLIP_TEXT_DIM,
   PAYSLIP_TEXT_INK,
@@ -44,18 +45,47 @@ import {
 export function PayslipYearStatsSection({
   index,
   flags = DEFAULT_COMPANY_COLUMN_FLAGS,
+  statsYear,
+  setStatsYear,
+  arrowKeysDisabled = false,
 }: {
   index: PayslipIndex;
   /** Settings → Companies decides which of these show up per company (some
    * companies just don't have commission), so the stat cards follow suit. */
   flags?: CompanyColumnFlags;
+  /** Owned by the parent so the calendar below follows the same year. */
+  statsYear: number;
+  setStatsYear: Dispatch<SetStateAction<number>>;
+  /** True while the parent's payslip modal is open (it uses ←/→ itself). */
+  arrowKeysDisabled?: boolean;
 }) {
-  const [statsYear, setStatsYear] = useState(() => new Date().getFullYear());
+  const currentYear = new Date().getFullYear();
+  // Step range: first payslip year → current year (`index.years` is newest first).
+  const minYear = Math.min(currentYear, index.years.at(-1) ?? currentYear);
+  const maxYear = Math.max(currentYear, index.years[0] ?? currentYear);
   const [fieldModal, setFieldModal] = useState<{
     label: string;
     fieldKey: PayslipFieldKey;
     isDeduction: boolean;
   } | null>(null);
+
+  // ←/→ step the year, same as the calendar page's month keys.
+  useEffect(() => {
+    if (arrowKeysDisabled || fieldModal) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        setStatsYear((y) => Math.max(minYear, y - 1));
+      } else if (e.key === "ArrowRight") {
+        e.preventDefault();
+        setStatsYear((y) => Math.min(maxYear, y + 1));
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [arrowKeysDisabled, fieldModal, setStatsYear, minYear, maxYear]);
   const categoryCardOrder = DEFAULT_STAT_CARD_ORDER.filter((id) => {
     if (id === "total" || id === "months_remaining") return false;
     switch (id) {
@@ -224,8 +254,8 @@ export function PayslipYearStatsSection({
           type="button"
           className={PAYSLIP_ICON_BUTTON}
           aria-label="Previous year"
-          disabled={statsYear <= 1900}
-          onClick={() => setStatsYear((y) => Math.max(1900, y - 1))}
+          disabled={statsYear <= minYear}
+          onClick={() => setStatsYear((y) => Math.max(minYear, y - 1))}
         >
           ‹
         </button>
@@ -236,10 +266,18 @@ export function PayslipYearStatsSection({
           type="button"
           className={PAYSLIP_ICON_BUTTON}
           aria-label="Next year"
-          disabled={statsYear >= 2200}
-          onClick={() => setStatsYear((y) => Math.min(2200, y + 1))}
+          disabled={statsYear >= maxYear}
+          onClick={() => setStatsYear((y) => Math.min(maxYear, y + 1))}
         >
           ›
+        </button>
+        <button
+          type="button"
+          className={PAYSLIP_SECONDARY_BUTTON}
+          disabled={statsYear === currentYear}
+          onClick={() => setStatsYear(currentYear)}
+        >
+          Today
         </button>
       </div>
 

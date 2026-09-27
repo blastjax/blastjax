@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { Geist, Geist_Mono } from "next/font/google";
-import { useCallback, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { ChevronLeftIcon, ChevronRightIcon } from "@/components/Icons";
 import { MONTH_NAMES_SHORT as MN } from "@/lib/dateFormat";
 
@@ -144,6 +144,7 @@ export function YearStepper({
   onPrev,
   onNext,
   lg = false,
+  arrowKeys = false,
 }: {
   year: number;
   sub?: string;
@@ -152,7 +153,26 @@ export function YearStepper({
   onPrev: () => void;
   onNext: () => void;
   lg?: boolean;
+  /** ←/→ step the year too. Enable on one stepper per page only. */
+  arrowKeys?: boolean;
 }) {
+  useEffect(() => {
+    if (!arrowKeys) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      if (e.key === "ArrowLeft" && canPrev) {
+        e.preventDefault();
+        onPrev();
+      } else if (e.key === "ArrowRight" && canNext) {
+        e.preventDefault();
+        onNext();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [arrowKeys, canPrev, canNext, onPrev, onNext]);
+
   const btn = `grid place-items-center text-st-2 hover:bg-st-hover disabled:opacity-30 disabled:hover:bg-transparent ${
     lg ? "size-8 rounded-[7px]" : "size-7 rounded-md"
   }`;

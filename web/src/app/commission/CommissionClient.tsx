@@ -148,8 +148,8 @@ function CommissionView({ company, hist }: { company: string; hist: MonthValue[]
   ];
 
   /* ---- Trend & forecast chart ---- */
-  const cYears = [...new Set([...years, ...fc.map((f) => f.y)])];
-  const cy = Math.min(cYear, cYears[cYears.length - 1]!);
+  // Stepper range: first → latest payslip year (forecast-only years excluded).
+  const cy = Math.min(cYear, last.y);
   const yMode = cRange === "Year";
   const hs = yMode
     ? hist.filter((d) => d.y === cy)
@@ -243,9 +243,10 @@ function CommissionView({ company, hist }: { company: string; hist: MonthValue[]
           <div className="flex flex-wrap items-center gap-2">
             {yMode && (
               <YearStepper
+                arrowKeys
                 year={cy}
-                canPrev={cy > cYears[0]!}
-                canNext={cy < cYears[cYears.length - 1]!}
+                canPrev={cy > years[0]!}
+                canNext={cy < last.y}
                 onPrev={() => stepYear(cy - 1)}
                 onNext={() => stepYear(cy + 1)}
               />
