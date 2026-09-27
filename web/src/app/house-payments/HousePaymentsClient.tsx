@@ -14,9 +14,10 @@ import {
   LoadingBlocks,
   Metric,
   ModalHeader,
+  Panel,
   StatStrip,
 } from "@/components/FinanceUI";
-import { HomeIcon, PlusIcon } from "@/components/Icons";
+import { CheckIcon, HomeIcon, PlusIcon } from "@/components/Icons";
 import {
   createHousePayment,
   createHousePaymentEntry,
@@ -39,6 +40,7 @@ import {
   PAGE_CONTAINER_CLASSES,
   PRIMARY_BUTTON_CLASSES,
   SECONDARY_BUTTON_CLASSES,
+  SECTION_LABEL_CLASSES,
 } from "@/lib/ui";
 
 const fmtMoney = fmtAmountOrDash;
@@ -49,7 +51,20 @@ const emptyPlanForm: PlanForm = { name: "", notes: "" };
 type EntryForm = { paid_on: string; amount: string };
 const emptyEntryForm = (): EntryForm => ({ paid_on: toIsoDateLocal(new Date()), amount: "" });
 
+/** Validate an entry form into an API body; throws a user-facing message. */
+function toEntryBody(f: EntryForm) {
+  const amount = parseFormNumber(f.amount);
+  if (amount == null || amount < 0) throw new Error("Amount must be a non-negative number.");
+  const paid_on = f.paid_on.trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(paid_on)) throw new Error("Pick the date the payment was made.");
+  return { paid_on, amount };
+}
+
 const plural = (n: number, word: string) => `${fmtCount(n)} ${word}${n === 1 ? "" : "s"}`;
+
+/** Date · amount · action row, shared by the page's add form and the modal's inline edit. */
+const ENTRY_GRID_CLASSES =
+  "grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end";
 
 export default function HousePaymentsClient() {
   const [rows, setRows] = useState<HousePaymentRow[]>([]);
@@ -60,6 +75,12 @@ export default function HousePaymentsClient() {
   const [planForm, setPlanForm] = useState<PlanForm>(emptyPlanForm);
   const [editingPlanId, setEditingPlanId] = useState<number | null>(null);
   const [planModalOpen, setPlanModalOpen] = useState(false);
+
+  const [payPlanId, setPayPlanId] = useState<number | null>(null);
+  const [payForm, setPayForm] = useState<EntryForm>(emptyEntryForm());
+  const [paying, setPaying] = useState(false);
+  const [payError, setPayError] = useState<string | null>(null);
+  const [lastAdded, setLastAdded] = useState<string | null>(null);
 
   const [entriesModalId, setEntriesModalId] = useState<number | null>(null);
   const [detail, setDetail] = useState<HousePaymentDetailResponse | null>(null);
@@ -100,6 +121,12 @@ export default function HousePaymentsClient() {
     }),
     [rows],
   );
+
+  /** The add form's target: the user's pick, else the most recently paid plan. */
+  const payPlan =
+    rows.find((r) => r.id === payPlanId) ??
+    rows.find((r) => r.last_paid_on === summary.last_paid_on) ??
+    rows[0];
 
   const upsertRow = useCallback((row: HousePaymentRow) => {
     setRows((rs) => {
@@ -183,6 +210,8 @@ export default function HousePaymentsClient() {
           ? await updateHousePayment(editingPlanId, body)
           : await createHousePayment(body);
       upsertRow(fresh);
+      // A plan just created is almost certainly the one about to be paid.
+      if (editingPlanId == null) setPayPlanId(fresh.id);
       setPlanModalOpen(false);
       setEditingPlanId(null);
       setPlanForm(emptyPlanForm);
@@ -215,28 +244,36 @@ export default function HousePaymentsClient() {
     }
   };
 
-  const submitEntry = async (e: React.FormEvent) => {
+  const submitPayment = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (entriesModalId == null) return;
+    if (!payPlan) return;
+    setPaying(true);
+    setPayError(null);
+    setLastAdded(null);
+    try {
+      const body = toEntryBody(payForm);
+      const fresh = await createHousePaymentEntry(payPlan.id, body);
+      upsertRow(fresh.house_payment);
+      setPayPlanId(payPlan.id);
+      // Keep plan + date so a run of back-dated payments is quick to enter.
+      setPayForm((f) => ({ ...f, amount: "" }));
+      setLastAdded(`Added ${fmtMoney(body.amount)} to ${payPlan.name} for ${fmtDate(body.paid_on)}.`);
+    } catch (err) {
+      setPayError(err instanceof Error ? err.message : "Save failed");
+    } finally {
+      setPaying(false);
+    }
+  };
+
+  const submitEntryEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (entriesModalId == null || editingEntryId == null) return;
     setSavingEntry(true);
     setError(null);
     try {
-      const amt = parseFormNumber(entryForm.amount);
-      if (amt == null || amt < 0) {
-        throw new Error("Amount must be a non-negative number.");
-      }
-      const paid_on = entryForm.paid_on.trim();
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(paid_on)) {
-        throw new Error("Pick the date the payment was made.");
-      }
-      const body = { paid_on, amount: amt };
-      const fresh =
-        editingEntryId != null
-          ? await updateHousePaymentEntry(entriesModalId, editingEntryId, body)
-          : await createHousePaymentEntry(entriesModalId, body);
+      const fresh = await updateHousePaymentEntry(entriesModalId, editingEntryId, toEntryBody(entryForm));
       applyDetail(fresh);
-      setEntryForm(emptyEntryForm());
-      setEditingEntryId(null);
+      cancelEntryEdit();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Save failed");
     } finally {
@@ -294,15 +331,18 @@ export default function HousePaymentsClient() {
     return groups;
   }, [detail]);
 
-  const editingEntry = detail?.entries.find((e) => e.id === editingEntryId) ?? null;
-
   return (
     <div className={PAGE_CONTAINER_CLASSES}>
       <PageHeader
         title="House Payments"
         description="Every payment made toward a house, and when it was made."
         actions={
-          <button type="button" className={PRIMARY_BUTTON_CLASSES} onClick={openNewPlan}>
+          // Filled only while it's the page's one job; once plans exist, "Add payment" owns the fill.
+          <button
+            type="button"
+            className={rows.length === 0 ? PRIMARY_BUTTON_CLASSES : SECONDARY_BUTTON_CLASSES}
+            onClick={openNewPlan}
+          >
             <PlusIcon className="size-4" />
             New plan
           </button>
@@ -316,7 +356,17 @@ export default function HousePaymentsClient() {
       )}
 
       {loading ? (
-        <LoadingBlocks label="Loading house payments…" rows={1} />
+        <LoadingBlocks label="Loading house payments…" rows={2} />
+      ) : rows.length === 0 ? (
+        <section className="flex flex-col items-center rounded-2xl border border-line bg-surface px-6 py-14 text-center shadow-xs">
+          <span className="grid size-12 place-items-center rounded-2xl bg-brand-soft text-brand-text">
+            <HomeIcon className="size-6" />
+          </span>
+          <h2 className="mt-4 text-base font-semibold text-ink">No plans yet</h2>
+          <p className="mt-1 max-w-sm text-sm text-ink-3">
+            Create a plan for the property or loan you&apos;re paying toward with <strong className="font-medium text-ink-2">New plan</strong>. Then log each payment right here.
+          </p>
+        </section>
       ) : (
         <>
           <StatStrip className="grid-cols-2 lg:grid-cols-4">
@@ -326,66 +376,127 @@ export default function HousePaymentsClient() {
             <Metric label="Last payment" value={fmtDate(summary.last_paid_on)} />
           </StatStrip>
 
-          <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            {rows.map((r) => (
-              <li key={r.id}>
-                <div
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => void openEntries(r.id)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      void openEntries(r.id);
-                    }
-                  }}
-                  className="group flex h-full cursor-pointer flex-col rounded-2xl border border-line bg-surface p-5 shadow-xs transition duration-150 hover:border-line-strong hover:shadow-md"
-                >
-                  <div className="flex items-start gap-3">
-                    <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-brand-soft text-brand-text">
-                      <HomeIcon className="size-5" />
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <h3 className="truncate font-semibold text-ink">{r.name}</h3>
-                      <p className="mt-0.5 text-xs text-ink-3">{plural(r.entry_count, "payment")}</p>
+          {payPlan && (
+            <Panel
+              title="Add a payment"
+              subtitle={rows.length === 1 ? `Toward ${payPlan.name}` : "Pick the plan, then when and how much."}
+            >
+              <form onSubmit={submitPayment} className="flex flex-col gap-4">
+                {rows.length > 1 && (
+                  <fieldset className="min-w-0">
+                    <legend className="mb-2 text-sm font-medium text-ink-2">Plan</legend>
+                    <div className="flex flex-wrap gap-2">
+                      {rows.map((r) => (
+                        <label
+                          key={r.id}
+                          className="inline-flex cursor-pointer items-center gap-2 rounded-full border border-line-strong bg-surface py-1.5 pl-2.5 pr-3.5 text-sm font-medium text-ink-2 transition-colors duration-150 hover:bg-surface-2 has-checked:border-brand has-checked:bg-brand-soft has-checked:text-brand-text has-focus-visible:ring-4 has-focus-visible:ring-brand/20"
+                        >
+                          <input
+                            type="radio"
+                            name="pay-plan"
+                            className="sr-only"
+                            checked={r.id === payPlan.id}
+                            onChange={() => setPayPlanId(r.id)}
+                            disabled={paying}
+                          />
+                          <HomeIcon className="size-4" />
+                          <span className="max-w-[16rem] truncate">{r.name}</span>
+                        </label>
+                      ))}
                     </div>
-                    <div className="-mr-2 -mt-1 flex">
-                      <IconAction kind="edit" label={`Edit ${r.name}`} disabled={saving} onClick={() => startEditPlan(r)} />
-                      <IconAction
-                        kind="delete"
-                        label={`Delete ${r.name}`}
-                        disabled={saving}
-                        onClick={() => void onDeletePlan(r.id)}
-                      />
-                    </div>
-                  </div>
-                  {r.notes && <p className="mt-3 line-clamp-2 whitespace-pre-line text-sm text-ink-3">{r.notes}</p>}
-                  <div className="mt-auto pt-5">
-                    <p className="text-xs font-medium text-ink-3">Total paid</p>
-                    <p className="mt-0.5 text-2xl font-semibold tabular-nums tracking-tight text-ink">
-                      {fmtMoney(r.total_paid)}
-                    </p>
-                    <div className="mt-4 flex items-center justify-between gap-2 border-t border-line-soft pt-3 text-xs">
-                      <span className="text-ink-3">
-                        {r.last_paid_on ? `Last paid ${fmtDate(r.last_paid_on)}` : "No payments yet"}
-                      </span>
-                      <span className="font-medium text-brand-text group-hover:underline">Payments →</span>
-                    </div>
-                  </div>
+                  </fieldset>
+                )}
+                <div className={ENTRY_GRID_CLASSES}>
+                  <Field label="Date paid">
+                    <DatePickerField
+                      value={payForm.paid_on}
+                      onChange={(v) => setPayForm((f) => ({ ...f, paid_on: v }))}
+                      disabled={paying}
+                    />
+                  </Field>
+                  <Field label="Amount">
+                    <AmountInput
+                      required
+                      placeholder="0.00"
+                      value={payForm.amount}
+                      onChange={(v) => {
+                        setLastAdded(null);
+                        setPayForm((f) => ({ ...f, amount: v }));
+                      }}
+                      disabled={paying}
+                    />
+                  </Field>
+                  <button type="submit" disabled={paying} className={PRIMARY_BUTTON_CLASSES}>
+                    <PlusIcon className="size-4" />
+                    {paying ? "Adding…" : "Add payment"}
+                  </button>
                 </div>
-              </li>
-            ))}
-            <li>
-              <button
-                type="button"
-                onClick={openNewPlan}
-                className="flex h-full min-h-[12rem] w-full flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-line-strong p-5 text-sm text-ink-3 transition-colors duration-150 hover:border-brand hover:text-brand-text"
-              >
-                <PlusIcon className="size-5" />
-                <span className="font-medium">{rows.length === 0 ? "Create your first plan" : "New plan"}</span>
-              </button>
-            </li>
-          </ul>
+                {payError && <ErrorAlert>{payError}</ErrorAlert>}
+                <p role="status" className="empty:hidden flex items-center gap-2 text-sm font-medium text-success-text">
+                  {lastAdded && (
+                    <>
+                      <CheckIcon className="size-4 shrink-0" />
+                      {lastAdded}
+                    </>
+                  )}
+                </p>
+              </form>
+            </Panel>
+          )}
+
+          <section className="flex flex-col gap-3">
+            <h2 className={SECTION_LABEL_CLASSES}>Plans</h2>
+            <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+              {rows.map((r) => (
+                <li key={r.id}>
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => void openEntries(r.id)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        void openEntries(r.id);
+                      }
+                    }}
+                    className="group flex h-full cursor-pointer flex-col rounded-2xl border border-line bg-surface p-5 shadow-xs transition duration-150 hover:border-line-strong hover:shadow-md"
+                  >
+                    <div className="flex items-start gap-3">
+                      <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-brand-soft text-brand-text">
+                        <HomeIcon className="size-5" />
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <h3 className="truncate font-semibold text-ink">{r.name}</h3>
+                        <p className="mt-0.5 text-xs text-ink-3">{plural(r.entry_count, "payment")}</p>
+                      </div>
+                      <div className="-mr-2 -mt-1 flex">
+                        <IconAction kind="edit" label={`Edit ${r.name}`} disabled={saving} onClick={() => startEditPlan(r)} />
+                        <IconAction
+                          kind="delete"
+                          label={`Delete ${r.name}`}
+                          disabled={saving}
+                          onClick={() => void onDeletePlan(r.id)}
+                        />
+                      </div>
+                    </div>
+                    {r.notes && <p className="mt-3 line-clamp-2 whitespace-pre-line text-sm text-ink-3">{r.notes}</p>}
+                    <div className="mt-auto pt-5">
+                      <p className="text-xs font-medium text-ink-3">Total paid</p>
+                      <p className="mt-0.5 text-2xl font-semibold tabular-nums tracking-tight text-ink">
+                        {fmtMoney(r.total_paid)}
+                      </p>
+                      <div className="mt-4 flex items-center justify-between gap-2 border-t border-line-soft pt-3 text-xs">
+                        <span className="text-ink-3">
+                          {r.last_paid_on ? `Last paid ${fmtDate(r.last_paid_on)}` : "No payments yet"}
+                        </span>
+                        <span className="font-medium text-brand-text group-hover:underline">History →</span>
+                      </div>
+                    </div>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </section>
         </>
       )}
 
@@ -462,45 +573,6 @@ export default function HousePaymentsClient() {
           )}
           {!detailLoading && detail && (
             <div className="flex flex-col gap-5">
-              <form
-                onSubmit={submitEntry}
-                className={`rounded-xl border p-4 ${
-                  editingEntry ? "border-brand/40 bg-brand-soft" : "border-line bg-surface-2/50"
-                }`}
-              >
-                <p className="mb-3 text-sm font-medium text-ink">
-                  {editingEntry ? `Editing the ${fmtDate(editingEntry.paid_on)} payment` : "Add a payment"}
-                </p>
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
-                  <Field label="Date paid">
-                    <DatePickerField
-                      value={entryForm.paid_on}
-                      onChange={(v) => setEntryForm((f) => ({ ...f, paid_on: v }))}
-                      disabled={savingEntry}
-                    />
-                  </Field>
-                  <Field label="Amount">
-                    <AmountInput
-                      required
-                      placeholder="0.00"
-                      value={entryForm.amount}
-                      onChange={(v) => setEntryForm((f) => ({ ...f, amount: v }))}
-                      disabled={savingEntry}
-                    />
-                  </Field>
-                  <div className="flex gap-2">
-                    {editingEntry && (
-                      <button type="button" disabled={savingEntry} className={SECONDARY_BUTTON_CLASSES} onClick={cancelEntryEdit}>
-                        Cancel
-                      </button>
-                    )}
-                    <button type="submit" disabled={savingEntry} className={`flex-1 ${PRIMARY_BUTTON_CLASSES}`}>
-                      {savingEntry ? "Saving…" : editingEntry ? "Save" : "Add"}
-                    </button>
-                  </div>
-                </div>
-              </form>
-
               {error && (
                 <ErrorAlert>
                   {error}
@@ -508,7 +580,7 @@ export default function HousePaymentsClient() {
               )}
 
               {detail.entries.length === 0 ? (
-                <p className="py-6 text-center text-sm text-ink-3">No payments yet. Add the first one above.</p>
+                <p className="py-6 text-center text-sm text-ink-3">No payments yet.</p>
               ) : (
                 <div className="flex flex-col gap-4">
                   {entriesByYear.map((g) => (
@@ -518,31 +590,63 @@ export default function HousePaymentsClient() {
                         <span className="text-xs font-semibold tabular-nums text-ink-2">{fmtMoney(g.total)}</span>
                       </div>
                       <ul className="divide-y divide-line-soft overflow-hidden rounded-xl border border-line">
-                        {g.entries.map((entry) => (
-                          <li
-                            key={entry.id}
-                            className={`flex items-center gap-3 py-1.5 pl-4 pr-2 ${
-                              entry.id === editingEntryId ? "bg-brand-soft" : ""
-                            }`}
-                          >
-                            <span className="flex-1 text-sm text-ink-2">{fmtDate(entry.paid_on)}</span>
-                            <span className="text-sm font-semibold tabular-nums text-ink">{fmtMoney(entry.amount)}</span>
-                            <div className="flex">
-                              <IconAction
-                                kind="edit"
-                                label="Edit payment"
-                                disabled={savingEntry}
-                                onClick={() => startEditEntry(entry)}
-                              />
-                              <IconAction
-                                kind="delete"
-                                label="Delete payment"
-                                disabled={savingEntry}
-                                onClick={() => void onDeleteEntry(entry.id)}
-                              />
-                            </div>
-                          </li>
-                        ))}
+                        {g.entries.map((entry) =>
+                          entry.id === editingEntryId ? (
+                            <li key={entry.id} className="bg-brand-soft p-3">
+                              <form onSubmit={submitEntryEdit} className={ENTRY_GRID_CLASSES}>
+                                <Field label="Date paid">
+                                  <DatePickerField
+                                    value={entryForm.paid_on}
+                                    onChange={(v) => setEntryForm((f) => ({ ...f, paid_on: v }))}
+                                    disabled={savingEntry}
+                                  />
+                                </Field>
+                                <Field label="Amount">
+                                  <AmountInput
+                                    required
+                                    autoFocus
+                                    placeholder="0.00"
+                                    value={entryForm.amount}
+                                    onChange={(v) => setEntryForm((f) => ({ ...f, amount: v }))}
+                                    disabled={savingEntry}
+                                  />
+                                </Field>
+                                <div className="flex gap-2">
+                                  <button
+                                    type="button"
+                                    disabled={savingEntry}
+                                    className={`flex-1 ${SECONDARY_BUTTON_CLASSES}`}
+                                    onClick={cancelEntryEdit}
+                                  >
+                                    Cancel
+                                  </button>
+                                  <button type="submit" disabled={savingEntry} className={`flex-1 ${PRIMARY_BUTTON_CLASSES}`}>
+                                    {savingEntry ? "Saving…" : "Save"}
+                                  </button>
+                                </div>
+                              </form>
+                            </li>
+                          ) : (
+                            <li key={entry.id} className="flex items-center gap-3 py-1.5 pl-4 pr-2">
+                              <span className="flex-1 text-sm text-ink-2">{fmtDate(entry.paid_on)}</span>
+                              <span className="text-sm font-semibold tabular-nums text-ink">{fmtMoney(entry.amount)}</span>
+                              <div className="flex">
+                                <IconAction
+                                  kind="edit"
+                                  label="Edit payment"
+                                  disabled={savingEntry || editingEntryId != null}
+                                  onClick={() => startEditEntry(entry)}
+                                />
+                                <IconAction
+                                  kind="delete"
+                                  label="Delete payment"
+                                  disabled={savingEntry}
+                                  onClick={() => void onDeleteEntry(entry.id)}
+                                />
+                              </div>
+                            </li>
+                          ),
+                        )}
                       </ul>
                     </section>
                   ))}
