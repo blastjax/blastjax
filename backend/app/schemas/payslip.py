@@ -27,6 +27,7 @@ class PayslipCreate(BaseModel):
         default=None,
         validation_alias=AliasChoices("pag_ibig", "employee_hdmf"),
     )
+    bereavement_asst: float | None = None
 
     @model_validator(mode="after")
     def _check_company(self) -> "PayslipCreate":

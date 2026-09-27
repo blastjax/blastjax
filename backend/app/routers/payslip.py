@@ -81,6 +81,7 @@ def payslip_create(body: PayslipCreate) -> dict[str, Any]:
         body.sss_contribution,
         body.philhealth,
         body.pag_ibig,
+        body.bereavement_asst,
         company=body.company.strip(),
     )
     return _serialize_payslip(row)
@@ -138,6 +139,7 @@ def payslip_replace(payslip_id: int, body: PayslipCreate) -> dict[str, Any]:
         body.sss_contribution,
         body.philhealth,
         body.pag_ibig,
+        body.bereavement_asst,
         company=body.company.strip(),
     )
     if row is None:

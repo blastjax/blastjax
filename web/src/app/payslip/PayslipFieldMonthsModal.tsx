@@ -37,6 +37,7 @@ export type PayslipFieldKey = Extract<
   | "philhealth"
   | "pag_ibig"
   | "mp2"
+  | "bereavement_asst"
 >;
 
 function sumField(rows: PayslipRow[], key: PayslipFieldKey): number {

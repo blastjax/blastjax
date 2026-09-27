@@ -117,6 +117,17 @@ export function PayslipFormFields({
           />
         </label>
       )}
+      {flags.show_bereavement_asst && (
+        <label className="flex flex-col gap-1 text-sm">
+          <span className={PAYSLIP_TEXT_DIM}>Bereavement asst</span>
+          <AmountInput
+            value={form.bereavement_asst}
+            onChange={onAmountChange("bereavement_asst")}
+            disabled={disabled}
+            className={PAYSLIP_INPUT_OVERRIDE}
+          />
+        </label>
+      )}
     </>
   );
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type Dispatch, type SetStateAction } from "react";
+import { useEffect, useState } from "react";
 import {
   DEFAULT_COMPANY_COLUMN_FLAGS,
   type CompanyColumnFlags,
@@ -47,6 +47,8 @@ export function PayslipYearStatsSection({
   flags = DEFAULT_COMPANY_COLUMN_FLAGS,
   statsYear,
   setStatsYear,
+  minYear,
+  maxYear,
   arrowKeysDisabled = false,
 }: {
   index: PayslipIndex;
@@ -55,14 +57,14 @@ export function PayslipYearStatsSection({
   flags?: CompanyColumnFlags;
   /** Owned by the parent so the calendar below follows the same year. */
   statsYear: number;
-  setStatsYear: Dispatch<SetStateAction<number>>;
+  setStatsYear: (year: number) => void;
+  /** Step range (parent decides; see PayslipClient). */
+  minYear: number;
+  maxYear: number;
   /** True while the parent's payslip modal is open (it uses ←/→ itself). */
   arrowKeysDisabled?: boolean;
 }) {
   const currentYear = new Date().getFullYear();
-  // Step range: first payslip year → current year (`index.years` is newest first).
-  const minYear = Math.min(currentYear, index.years.at(-1) ?? currentYear);
-  const maxYear = Math.max(currentYear, index.years[0] ?? currentYear);
   const [fieldModal, setFieldModal] = useState<{
     label: string;
     fieldKey: PayslipFieldKey;
@@ -77,15 +79,15 @@ export function PayslipYearStatsSection({
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
       if (e.key === "ArrowLeft") {
         e.preventDefault();
-        setStatsYear((y) => Math.max(minYear, y - 1));
+        setStatsYear(Math.max(minYear, statsYear - 1));
       } else if (e.key === "ArrowRight") {
         e.preventDefault();
-        setStatsYear((y) => Math.min(maxYear, y + 1));
+        setStatsYear(Math.min(maxYear, statsYear + 1));
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [arrowKeysDisabled, fieldModal, setStatsYear, minYear, maxYear]);
+  }, [arrowKeysDisabled, fieldModal, setStatsYear, statsYear, minYear, maxYear]);
   const categoryCardOrder = DEFAULT_STAT_CARD_ORDER.filter((id) => {
     if (id === "total" || id === "months_remaining") return false;
     switch (id) {
@@ -127,7 +129,8 @@ export function PayslipYearStatsSection({
     sums.sss_contribution +
     sums.philhealth +
     sums.pag_ibig +
-    sums.mp2;
+    sums.mp2 +
+    sums.bereavement_asst;
   const totalPlusDeductions = sums.total + deductionsSumYtd;
   /** Breakdown cards: compare line items to gross (net + deductions), falling back to net if gross is unset. */
   const pctDenominator =
@@ -255,7 +258,7 @@ export function PayslipYearStatsSection({
           className={PAYSLIP_ICON_BUTTON}
           aria-label="Previous year"
           disabled={statsYear <= minYear}
-          onClick={() => setStatsYear((y) => Math.max(minYear, y - 1))}
+          onClick={() => setStatsYear(Math.max(minYear, statsYear - 1))}
         >
           ‹
         </button>
@@ -267,18 +270,20 @@ export function PayslipYearStatsSection({
           className={PAYSLIP_ICON_BUTTON}
           aria-label="Next year"
           disabled={statsYear >= maxYear}
-          onClick={() => setStatsYear((y) => Math.min(maxYear, y + 1))}
+          onClick={() => setStatsYear(Math.min(maxYear, statsYear + 1))}
         >
           ›
         </button>
-        <button
-          type="button"
-          className={PAYSLIP_SECONDARY_BUTTON}
-          disabled={statsYear === currentYear}
-          onClick={() => setStatsYear(currentYear)}
-        >
-          Today
-        </button>
+        {currentYear >= minYear && currentYear <= maxYear && (
+          <button
+            type="button"
+            className={PAYSLIP_SECONDARY_BUTTON}
+            disabled={statsYear === currentYear}
+            onClick={() => setStatsYear(currentYear)}
+          >
+            Today
+          </button>
+        )}
       </div>
 
       {/* Hero row: net income + months remaining / medical reimbursement */}
@@ -388,6 +393,7 @@ export function PayslipYearStatsSection({
             ["Philhealth", sums.philhealth, flags.show_philhealth, "philhealth"],
             ["Pag-ibig (Employee HDMF)", sums.pag_ibig, flags.show_pag_ibig, "pag_ibig"],
             ["MP2", sums.mp2, flags.show_mp2, "mp2"],
+            ["Bereavement asst", sums.bereavement_asst, flags.show_bereavement_asst, "bereavement_asst"],
           ] as const
         )
           .filter(([, , shown]) => shown)

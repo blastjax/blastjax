@@ -24,6 +24,7 @@ class PayslipDefaultForm(BaseModel):
     sss_contribution: str = ""
     philhealth: str = ""
     pag_ibig: str = ""
+    bereavement_asst: str = ""
 
 
 class PayslipDefaultsUpsert(BaseModel):

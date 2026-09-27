@@ -409,6 +409,20 @@ export default function PayslipClient({ company = "Sophos" }: { company?: string
   }, [nav, rows]);
 
   const index = useMemo(() => buildPayslipIndex(rows), [rows]);
+  // Year stepper range: first → last payslip year, stretched to include the
+  // current year except for a past employer. (`index.years` always injects
+  // the current year, so keep only years that actually hold payslips.)
+  // ponytail: past employer matched by name; make it a Settings → Companies
+  // flag if another company needs it.
+  const currentYear = new Date().getFullYear();
+  const dataYears = index.years.filter((y) => index.byYear.has(y));
+  const rangeYears =
+    company === "Questronix" && dataYears.length > 0
+      ? dataYears
+      : [...dataYears, currentYear];
+  const minYear = Math.min(...rangeYears);
+  const maxYear = Math.max(...rangeYears);
+  const shownYear = Math.min(maxYear, Math.max(minYear, year));
   const unsorted = index.unscheduled;
   const flags = companyColumnFlags(companies, company);
 
@@ -483,16 +497,18 @@ export default function PayslipClient({ company = "Sophos" }: { company?: string
           <PayslipYearStatsSection
             index={index}
             flags={flags}
-            statsYear={year}
+            statsYear={shownYear}
             setStatsYear={setYear}
+            minYear={minYear}
+            maxYear={maxYear}
             arrowKeysDisabled={nav != null}
           />
         )}
 
         {!loading && (
           <YearPayslipBlock
-            year={year}
-            yearSlots={yearSlotsFromIndex(index, year)}
+            year={shownYear}
+            yearSlots={yearSlotsFromIndex(index, shownYear)}
             saving={saving}
             showGross={showGross}
             onOpenSlot={openSlot}

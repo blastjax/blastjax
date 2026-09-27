@@ -25,8 +25,8 @@ import {
 
 /** Every per-company column toggle, grouped and ordered to match the two
  * halves of the Add/Edit Payslip form (the main grid vs. the "Deductions"
- * aside — see PayslipFormFields). All default to shown — see
- * `DEFAULT_COMPANY_COLUMN_FLAGS`. */
+ * aside — see PayslipFormFields). Defaults (all shown except bereavement
+ * asst) — see `DEFAULT_COMPANY_COLUMN_FLAGS`. */
 const INCOME_COLUMN_TOGGLES: { key: keyof CompanyColumnFlags; label: string }[] = [
   { key: "show_total", label: "Total" },
   { key: "show_basic_salary", label: "Basic salary" },
@@ -44,14 +44,18 @@ const DEDUCTION_COLUMN_TOGGLES: { key: keyof CompanyColumnFlags; label: string }
   { key: "show_philhealth", label: "Philhealth" },
   { key: "show_pag_ibig", label: "Pag-ibig" },
   { key: "show_mp2", label: "MP2" },
+  { key: "show_bereavement_asst", label: "Bereavement asst" },
 ];
 
 const ALL_COLUMN_TOGGLES = [...INCOME_COLUMN_TOGGLES, ...DEDUCTION_COLUMN_TOGGLES];
 
-/** "All columns shown" for a company that never diverged from the defaults
- * (every flag defaults to shown), otherwise which columns it hides. */
+/** "All columns shown" for a company that never diverged from the defaults,
+ * otherwise which default-on columns it hides (off-by-default ones like
+ * bereavement asst don't count). */
 function describeFlags(flags: CompanyColumnFlags): string {
-  const hidden = ALL_COLUMN_TOGGLES.filter((t) => !flags[t.key]).map((t) => t.label);
+  const hidden = ALL_COLUMN_TOGGLES.filter(
+    (t) => !flags[t.key] && DEFAULT_COMPANY_COLUMN_FLAGS[t.key],
+  ).map((t) => t.label);
   return hidden.length ? `Hides ${hidden.join(", ")}` : "All columns shown";
 }
 

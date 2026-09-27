@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field, model_validator
 # db._COMPANY_FLAG_COLUMNS -- income-side fields first (the main grid in
 # PayslipFormFields), then deduction-side fields (the "Deductions" aside).
 # All default to shown (matches every column's behavior before this toggle
-# existed).
+# existed), except show_bereavement_asst.
 _FLAG_DEFAULTS: dict[str, bool] = {
     "show_total": True,
     "show_basic_salary": True,
@@ -23,6 +23,8 @@ _FLAG_DEFAULTS: dict[str, bool] = {
     "show_philhealth": True,
     "show_pag_ibig": True,
     "show_mp2": True,
+    # Off by default: only some companies (Questronix) have this deduction.
+    "show_bereavement_asst": False,
 }
 
 
@@ -40,6 +42,7 @@ class _CompanyColumnFlags(BaseModel):
     show_philhealth: bool = _FLAG_DEFAULTS["show_philhealth"]
     show_pag_ibig: bool = _FLAG_DEFAULTS["show_pag_ibig"]
     show_mp2: bool = _FLAG_DEFAULTS["show_mp2"]
+    show_bereavement_asst: bool = _FLAG_DEFAULTS["show_bereavement_asst"]
 
     def flags_dict(self) -> dict[str, bool]:
         """This model's flags, keyed by column name -- ``db.insert_company``/

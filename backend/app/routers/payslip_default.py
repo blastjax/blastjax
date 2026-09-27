@@ -42,6 +42,7 @@ def _fallback_form(half: int) -> dict[str, Any]:
         "sss_contribution": "",
         "philhealth": "",
         "pag_ibig": "",
+        "bereavement_asst": "",
     }
 
 

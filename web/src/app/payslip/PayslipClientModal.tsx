@@ -303,6 +303,14 @@ export function PayslipClientModal({
                           </dd>
                         </div>
                       )}
+                      {detailFlags.show_bereavement_asst && (
+                        <div>
+                          <dt className={`text-xs ${PAYSLIP_TEXT_DIM}`}>Bereavement asst</dt>
+                          <dd className={PAYSLIP_DANGER_TEXT}>
+                            {fmtNum(row.bereavement_asst)}
+                          </dd>
+                        </div>
+                      )}
                       <div className={`mt-1 border-t ${PAYSLIP_BORDER} pt-3`}>
                         <dt className={`text-xs font-semibold ${PAYSLIP_TEXT_2}`}>
                           Deductions total

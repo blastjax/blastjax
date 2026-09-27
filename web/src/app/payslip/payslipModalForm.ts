@@ -19,6 +19,7 @@ export type FormState = {
   sss_contribution: string;
   philhealth: string;
   pag_ibig: string;
+  bereavement_asst: string;
 };
 
 export const MONTHS = Array.from({ length: 12 }, (_, i) => i + 1);
@@ -43,6 +44,7 @@ export function emptyForm(): FormState {
     sss_contribution: "",
     philhealth: "",
     pag_ibig: "",
+    bereavement_asst: "",
   };
 }
 

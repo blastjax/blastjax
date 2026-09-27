@@ -116,6 +116,7 @@ export type PayslipRow = {
   sss_contribution: number | null;
   philhealth: number | null;
   pag_ibig: number | null;
+  bereavement_asst: number | null;
   has_pdf?: boolean;
   created_at: string;
 };
@@ -139,6 +140,7 @@ export type PayslipCreateBody = {
   sss_contribution?: number | null;
   philhealth?: number | null;
   pag_ibig?: number | null;
+  bereavement_asst?: number | null;
 };
 
 export async function getPayslips(limit?: number, company?: string) {
@@ -872,6 +874,7 @@ export type PayslipDefaultFormDto = {
   sss_contribution: string;
   philhealth: string;
   pag_ibig: string;
+  bereavement_asst: string;
 };
 
 export type PayslipDefaultsBundleDto = {
@@ -1214,7 +1217,7 @@ export async function verifyAppUserPassword(username: string, password: string) 
   });
 }
 
-/** The 14 per-company "show this field?" toggles — one per payslip amount
+/** The per-company "show this field?" toggles — one per payslip amount
  * field, income-side first (the main grid in PayslipFormFields), then
  * deduction-side (the "Deductions" aside). */
 export type CompanyColumnFlags = {
@@ -1232,6 +1235,7 @@ export type CompanyColumnFlags = {
   show_philhealth: boolean;
   show_pag_ibig: boolean;
   show_mp2: boolean;
+  show_bereavement_asst: boolean;
 };
 
 /** A company payslips are tagged under; managed via Settings → Companies. */
@@ -1242,8 +1246,8 @@ export type CompanyRow = CompanyColumnFlags & {
   sort_order: number;
 };
 
-/** What every column defaulted to before this toggle existed (all shown).
- * Used whenever a payslip's `company` string doesn't match any managed
+/** What every column defaulted to before this toggle existed (all shown),
+ * except bereavement asst, which only some companies have. Used whenever a payslip's `company` string doesn't match any managed
  * company (e.g. an old/deleted one) so fields still show up rather than
  * vanishing. */
 export const DEFAULT_COMPANY_COLUMN_FLAGS: CompanyColumnFlags = {
@@ -1260,6 +1264,7 @@ export const DEFAULT_COMPANY_COLUMN_FLAGS: CompanyColumnFlags = {
   show_philhealth: true,
   show_pag_ibig: true,
   show_mp2: true,
+  show_bereavement_asst: false,
 };
 
 /** Looks up `companyName` in `companies` and returns its column-visibility
@@ -1284,6 +1289,7 @@ export function companyColumnFlags(
     show_philhealth: c.show_philhealth,
     show_pag_ibig: c.show_pag_ibig,
     show_mp2: c.show_mp2,
+    show_bereavement_asst: c.show_bereavement_asst,
   };
 }
 

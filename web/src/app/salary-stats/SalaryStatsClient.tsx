@@ -43,6 +43,7 @@ const DED = [
   { k: "philhealth", n: "PhilHealth", c: "#facc15" },
   { k: "sss_contribution", n: "SSS contribution", c: "#f472b6" },
   { k: "pag_ibig", n: "Pag-IBIG", c: "#fca5a5" },
+  { k: "bereavement_asst", n: "Bereavement asst", c: "#e879f9" },
 ] as const;
 
 type Series = (typeof INC)[number] | (typeof DED)[number];

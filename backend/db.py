@@ -524,6 +524,7 @@ _PAYSLIP_RETURN_COLS = """
     thirteenth_month, basic_salary,
     period_year, period_month, period_half, notes,
     withholding_tax, sss_contribution, philhealth, pag_ibig,
+    bereavement_asst,
     company,
     (pdf_data IS NOT NULL) AS has_pdf,
     created_at
@@ -548,6 +549,7 @@ def insert_payslip(
     sss_contribution: float | None = None,
     philhealth: float | None = None,
     pag_ibig: float | None = None,
+    bereavement_asst: float | None = None,
     *,
     company: str,
 ) -> dict[str, Any]:
@@ -569,8 +571,9 @@ def insert_payslip(
                     thirteenth_month, basic_salary,
                     period_year, period_month, period_half, notes,
                     withholding_tax, sss_contribution, philhealth, pag_ibig,
+                    bereavement_asst,
                     company
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING {_PAYSLIP_RETURN_COLS}
                 """,
                 (
@@ -591,6 +594,7 @@ def insert_payslip(
                     sss_contribution,
                     philhealth,
                     pag_ibig,
+                    bereavement_asst,
                     company,
                 ),
             )
@@ -615,6 +619,7 @@ _PAYSLIP_INSERT_COLS: tuple[str, ...] = (
     "sss_contribution",
     "philhealth",
     "pag_ibig",
+    "bereavement_asst",
 )
 
 
@@ -701,6 +706,7 @@ def update_payslip(
     sss_contribution: float | None = None,
     philhealth: float | None = None,
     pag_ibig: float | None = None,
+    bereavement_asst: float | None = None,
     *,
     company: str,
 ) -> dict[str, Any] | None:
@@ -727,6 +733,7 @@ def update_payslip(
                     sss_contribution = %s,
                     philhealth = %s,
                     pag_ibig = %s,
+                    bereavement_asst = %s,
                     company = %s
                 WHERE id = %s
                 RETURNING {_PAYSLIP_RETURN_COLS}
@@ -749,6 +756,7 @@ def update_payslip(
                     sss_contribution,
                     philhealth,
                     pag_ibig,
+                    bereavement_asst,
                     company,
                     payslip_id,
                 ),
@@ -2070,6 +2078,7 @@ _PAYSLIP_DEFAULT_FORM_COLS = (
     "sss_contribution",
     "philhealth",
     "pag_ibig",
+    "bereavement_asst",
 )
 
 
@@ -2716,11 +2725,15 @@ _COMPANY_FLAG_COLUMNS: tuple[str, ...] = (
     "show_philhealth",
     "show_pag_ibig",
     "show_mp2",
+    "show_bereavement_asst",
 )
 
 # Every flag defaults to shown -- that was every column's behavior before
-# per-company visibility existed.
-_COMPANY_FLAG_DEFAULTS: dict[str, bool] = {c: True for c in _COMPANY_FLAG_COLUMNS}
+# per-company visibility existed -- except bereavement asst, which only some
+# companies (Questronix) have.
+_COMPANY_FLAG_DEFAULTS: dict[str, bool] = {
+    c: c != "show_bereavement_asst" for c in _COMPANY_FLAG_COLUMNS
+}
 
 _COMPANY_PUBLIC_COLS = (
     "id, name, created_at, sort_order, " + ", ".join(_COMPANY_FLAG_COLUMNS)
