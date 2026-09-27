@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { ReactNode, Ref } from "react";
 import {
   ChevronLeftIcon,
   ChevronRightIcon,
@@ -50,6 +50,7 @@ export function Panel({
   actions,
   flush = false,
   className = "",
+  ref,
   children,
 }: {
   title?: ReactNode;
@@ -57,11 +58,13 @@ export function Panel({
   actions?: ReactNode;
   flush?: boolean;
   className?: string;
+  ref?: Ref<HTMLElement>;
   children: ReactNode;
 }) {
   const head = title != null || actions != null;
   return (
     <section
+      ref={ref}
       className={`min-w-0 rounded-2xl border border-line bg-surface shadow-xs ${className}`}
     >
       {head && (

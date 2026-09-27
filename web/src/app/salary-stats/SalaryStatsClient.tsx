@@ -6,6 +6,7 @@ import { fmtAmount as fmt } from "@/lib/formatNumber";
 import { MONTH_NAMES_FULL as MF, MONTH_NAMES_SHORT as MN } from "@/lib/dateFormat";
 import { ErrorAlert } from "@/components/ErrorAlert";
 import { LOADING_TEXT_CLASSES } from "@/lib/ui";
+import { useWheelStep } from "@/lib/useWheelStep";
 import { ArrowDownRightIcon, ArrowUpRightIcon } from "@/components/Icons";
 import {
   Chip,
@@ -155,6 +156,11 @@ function SalaryStatsView({ company, data }: { company: string; data: Month[] }) 
     setRange("Year");
     setHover(null);
   };
+  // Wheel over Month by month pages the year (up = previous, down = next).
+  const monthWheelRef = useWheelStep((dir) => {
+    const y = year + dir;
+    if (y >= firstYear && y <= lastYear) pickYear(y);
+  });
 
   /* ---- Selected year vs the same months of the year before ---- */
   const yearRows = data.filter((d) => d.y === year);
@@ -266,7 +272,6 @@ function SalaryStatsView({ company, data }: { company: string; data: Month[] }) 
       <StatsHeader company={company} title="Salary Stats" description={DESCRIPTION}>
         <YearStepper
           lg
-          arrowKeys
           year={year}
           sub={partial ? `${MN[ms[0]!]} – ${MN[ms[ms.length - 1]!]}` : "Full year"}
           canPrev={year > firstYear}
@@ -340,7 +345,7 @@ function SalaryStatsView({ company, data }: { company: string; data: Month[] }) 
         </div>
       </section>
 
-      <section className={`${STATS_CARD_CLASSES} flex flex-col gap-[18px]`}>
+      <section ref={monthWheelRef} className={`${STATS_CARD_CLASSES} flex flex-col gap-[18px]`}>
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <h2 className={STATS_H2_CLASSES}>Month by month</h2>

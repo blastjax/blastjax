@@ -6,6 +6,7 @@ import { fmtAmount as fmt } from "@/lib/formatNumber";
 import { MONTH_NAMES_FULL as MF, MONTH_NAMES_SHORT as MN } from "@/lib/dateFormat";
 import { ErrorAlert } from "@/components/ErrorAlert";
 import { LOADING_TEXT_CLASSES } from "@/lib/ui";
+import { useWheelStep } from "@/lib/useWheelStep";
 import { ChevronDownIcon, ChevronUpIcon } from "@/components/Icons";
 import {
   Chip,
@@ -181,6 +182,15 @@ function CommissionView({ company, hist }: { company: string; hist: MonthValue[]
     setCYear(y);
     setCHover(null);
   };
+  // Wheel over the trend chart pages years while it's in Year view.
+  const trendWheelRef = useWheelStep(
+    yMode
+      ? (dir) => {
+          const y = cy + dir;
+          if (y >= years[0]! && y <= last.y) stepYear(y);
+        }
+      : null,
+  );
 
   /* ---- Heatmap + seasonal lines ---- */
   const hmx = Math.max(1, ...hist.map((d) => d.v));
@@ -231,7 +241,7 @@ function CommissionView({ company, hist }: { company: string; hist: MonthValue[]
         ))}
       </div>
 
-      <section className={`${STATS_CARD_CLASSES} flex flex-col gap-[18px]`}>
+      <section ref={trendWheelRef} className={`${STATS_CARD_CLASSES} flex flex-col gap-[18px]`}>
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <h2 className={STATS_H2_CLASSES}>Trend &amp; forecast</h2>
@@ -243,7 +253,6 @@ function CommissionView({ company, hist }: { company: string; hist: MonthValue[]
           <div className="flex flex-wrap items-center gap-2">
             {yMode && (
               <YearStepper
-                arrowKeys
                 year={cy}
                 canPrev={cy > years[0]!}
                 canNext={cy < last.y}

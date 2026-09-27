@@ -43,6 +43,7 @@ import { PayslipClientModal } from "./PayslipClientModal";
 import { PayslipYearStatsSection } from "./PayslipYearStatsSection";
 import { YearPayslipBlock } from "./YearPayslipBlock";
 import { PAGE_CONTAINER_CLASSES } from "@/lib/ui";
+import { useWheelStep } from "@/lib/useWheelStep";
 import {
   PAYSLIP_ACCENT_TEXT,
   PAYSLIP_BG_0,
@@ -423,6 +424,10 @@ export default function PayslipClient({ company = "Sophos" }: { company?: string
   const minYear = Math.min(...rangeYears);
   const maxYear = Math.max(...rangeYears);
   const shownYear = Math.min(maxYear, Math.max(minYear, year));
+  // Wheel over the year calendar pages years (up = previous, down = next).
+  const yearWheelRef = useWheelStep((dir) =>
+    setYear(Math.min(maxYear, Math.max(minYear, shownYear + dir))),
+  );
   const unsorted = index.unscheduled;
   const flags = companyColumnFlags(companies, company);
 
@@ -501,18 +506,19 @@ export default function PayslipClient({ company = "Sophos" }: { company?: string
             setStatsYear={setYear}
             minYear={minYear}
             maxYear={maxYear}
-            arrowKeysDisabled={nav != null}
           />
         )}
 
         {!loading && (
-          <YearPayslipBlock
-            year={shownYear}
-            yearSlots={yearSlotsFromIndex(index, shownYear)}
-            saving={saving}
-            showGross={showGross}
-            onOpenSlot={openSlot}
-          />
+          <div ref={yearWheelRef}>
+            <YearPayslipBlock
+              year={shownYear}
+              yearSlots={yearSlotsFromIndex(index, shownYear)}
+              saving={saving}
+              showGross={showGross}
+              onOpenSlot={openSlot}
+            />
+          </div>
         )}
 
         {!loading && unsorted.length > 0 && (

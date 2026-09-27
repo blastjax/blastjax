@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   DEFAULT_COMPANY_COLUMN_FLAGS,
   type CompanyColumnFlags,
@@ -49,7 +49,6 @@ export function PayslipYearStatsSection({
   setStatsYear,
   minYear,
   maxYear,
-  arrowKeysDisabled = false,
 }: {
   index: PayslipIndex;
   /** Settings → Companies decides which of these show up per company (some
@@ -61,8 +60,6 @@ export function PayslipYearStatsSection({
   /** Step range (parent decides; see PayslipClient). */
   minYear: number;
   maxYear: number;
-  /** True while the parent's payslip modal is open (it uses ←/→ itself). */
-  arrowKeysDisabled?: boolean;
 }) {
   const currentYear = new Date().getFullYear();
   const [fieldModal, setFieldModal] = useState<{
@@ -71,23 +68,6 @@ export function PayslipYearStatsSection({
     isDeduction: boolean;
   } | null>(null);
 
-  // ←/→ step the year, same as the calendar page's month keys.
-  useEffect(() => {
-    if (arrowKeysDisabled || fieldModal) return;
-    const onKeyDown = (e: KeyboardEvent) => {
-      const tag = (e.target as HTMLElement | null)?.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
-      if (e.key === "ArrowLeft") {
-        e.preventDefault();
-        setStatsYear(Math.max(minYear, statsYear - 1));
-      } else if (e.key === "ArrowRight") {
-        e.preventDefault();
-        setStatsYear(Math.min(maxYear, statsYear + 1));
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [arrowKeysDisabled, fieldModal, setStatsYear, statsYear, minYear, maxYear]);
   const categoryCardOrder = DEFAULT_STAT_CARD_ORDER.filter((id) => {
     if (id === "total" || id === "months_remaining") return false;
     switch (id) {

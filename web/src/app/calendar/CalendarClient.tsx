@@ -62,6 +62,7 @@ import {
   PRIMARY_BUTTON_CLASSES,
   SECONDARY_BUTTON_CLASSES,
 } from "@/lib/ui";
+import { useWheelStep } from "@/lib/useWheelStep";
 
 const WEEKDAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
 
@@ -487,7 +488,7 @@ export default function CalendarClient() {
 
   /**
    * Per-month expense lists already fetched this session, keyed "YYYY-M".
-   * Paging with ←/→ paints from here on the same tick and then revalidates in
+   * Paging months paints from here on the same tick and then revalidates in
    * the background, so a month that's already been seen never blanks out
    * waiting on the network. A ref (not state) because writing to it must not
    * itself trigger a render — the setState calls fed from it already do.
@@ -560,7 +561,7 @@ export default function CalendarClient() {
   /**
    * Payslips and both override lists cover every month at once, so they load
    * exactly once per mount — they used to be bundled into the same callback as
-   * the month-scoped expense lists, which meant every ←/→ press refetched all
+   * the month-scoped expense lists, which meant every month change refetched all
    * seven endpoints and flipped `loading` back on, blanking the whole grid.
    */
   const loadSharedData = useCallback(async () => {
@@ -605,7 +606,7 @@ export default function CalendarClient() {
   /**
    * Month-scoped refresh, including the first one. Already-visited months paint
    * from `monthExpenseCache` on this same tick and then revalidate in the
-   * background, so paging with ←/→ stays responsive instead of dropping to a
+   * background, so paging months stays responsive instead of dropping to a
    * spinner — `monthLoaded` latches after the first fetch and never clears.
    */
   useEffect(() => {
@@ -661,25 +662,8 @@ export default function CalendarClient() {
     setViewedMonth(today.getMonth() + 1);
   }, [today]);
 
-  const anyModalOpen =
-    expenseModalHalf != null || payDateModalHalf != null || transfer != null || spendDay != null;
-
-  useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (anyModalOpen) return;
-      const tag = (e.target as HTMLElement | null)?.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
-      if (e.key === "ArrowLeft") {
-        e.preventDefault();
-        goToPrevMonth();
-      } else if (e.key === "ArrowRight") {
-        e.preventDefault();
-        goToNextMonth();
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [anyModalOpen, goToPrevMonth, goToNextMonth]);
+  // Wheel over the Daily budget card pages months (up = previous, down = next).
+  const calendarWheelRef = useWheelStep((dir) => (dir < 0 ? goToPrevMonth() : goToNextMonth()));
 
   const isViewingCurrentMonth =
     viewedYear === today.getFullYear() && viewedMonth === today.getMonth() + 1;
@@ -1592,6 +1576,7 @@ export default function CalendarClient() {
           </div>
 
           <Panel
+            ref={calendarWheelRef}
             title="Daily budget"
             subtitle="Tap a day to log what you spent. Drag a day onto another in the same period to move money."
             actions={
