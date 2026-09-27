@@ -8,11 +8,11 @@ import {
 } from "@/lib/api";
 import { rowsForSlot } from "@/app/payslip/payslipAggregates";
 import { slotTitle } from "@/app/payslip/payslipDisplay";
+import { ErrorAlert } from "@/components/ErrorAlert";
 import {
   ACTION_BUTTON_CLASSES,
   ADD_BUTTON_CLASSES,
   DELETE_BUTTON_CLASSES,
-  ERROR_ALERT_CLASSES,
   PRIMARY_BUTTON_CLASSES,
 } from "@/lib/ui";
 
@@ -205,9 +205,9 @@ export function PdfBulkUploadClient() {
     <div className="flex min-w-0 flex-col gap-6">
 
       {loadErr && (
-        <div className={ERROR_ALERT_CLASSES} role="alert">
+        <ErrorAlert>
           {loadErr}
-        </div>
+        </ErrorAlert>
       )}
 
       {/* Drop zone */}

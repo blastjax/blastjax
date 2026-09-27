@@ -11,13 +11,13 @@ import {
   type AppUserRow,
 } from "@/lib/api";
 import { RESTRICTABLE_PAGES } from "@/lib/nav";
+import { ErrorAlert } from "@/components/ErrorAlert";
 import {
   ACTION_BUTTON_CLASSES,
   CARD_CLASSES,
   DASHED_EMPTY_CLASSES,
   DELETE_BUTTON_CLASSES,
   EDIT_BUTTON_CLASSES,
-  ERROR_ALERT_CLASSES,
   INPUT_CLASSES,
   LOADING_TEXT_CLASSES,
   PRIMARY_BUTTON_CLASSES,
@@ -95,9 +95,9 @@ function AccessControls({
         </div>
       )}
       {error && (
-        <div className={`mt-2 ${ERROR_ALERT_CLASSES}`} role="alert">
+        <ErrorAlert className="mt-2">
           {error}
-        </div>
+        </ErrorAlert>
       )}
     </div>
   );
@@ -263,7 +263,7 @@ export function UsersSettingsPanel() {
         {loading ? (
           <p className={LOADING_TEXT_CLASSES}>Loading users…</p>
         ) : loadError ? (
-          <div className={ERROR_ALERT_CLASSES} role="alert">{loadError}</div>
+          <ErrorAlert>{loadError}</ErrorAlert>
         ) : users.length === 0 ? (
           <div className={DASHED_EMPTY_CLASSES}>No users yet.</div>
         ) : (
@@ -315,7 +315,7 @@ export function UsersSettingsPanel() {
                         />
                       </div>
                     </div>
-                    {editError && <div className={ERROR_ALERT_CLASSES} role="alert">{editError}</div>}
+                    {editError && <ErrorAlert>{editError}</ErrorAlert>}
                     <div className="flex flex-wrap items-center gap-2">
                       <button
                         type="button"
@@ -414,7 +414,7 @@ export function UsersSettingsPanel() {
             />
           </div>
         </div>
-        {verifyError && <div className={`mt-3 ${ERROR_ALERT_CLASSES}`} role="alert">{verifyError}</div>}
+        {verifyError && <ErrorAlert className="mt-3">{verifyError}</ErrorAlert>}
         <div className="mt-4 flex flex-wrap items-center gap-3">
           <button
             type="button"
@@ -479,7 +479,7 @@ export function UsersSettingsPanel() {
             />
           </div>
         </div>
-        {addError && <div className={`mt-3 ${ERROR_ALERT_CLASSES}`} role="alert">{addError}</div>}
+        {addError && <ErrorAlert className="mt-3">{addError}</ErrorAlert>}
         <div className="mt-4 flex flex-wrap items-center gap-3">
           <button
             type="button"

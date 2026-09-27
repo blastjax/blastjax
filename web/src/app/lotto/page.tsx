@@ -42,12 +42,12 @@ function nextDrawLabel(gameName: string): string | null {
   next.setDate(next.getDate() + offset);
   return formatDate(toIsoDateLocal(next));
 }
+import { ErrorAlert } from "@/components/ErrorAlert";
 import {
   ACTION_BUTTON_CLASSES,
   alertClasses,
   CARD_CLASSES,
   CLOSE_BUTTON_CLASSES,
-  ERROR_ALERT_CLASSES,
   INPUT_CLASSES,
   LOADING_TEXT_CLASSES,
   PAGE_CONTAINER_CLASSES,
@@ -253,12 +253,10 @@ export default function LottoGamesPage() {
         )}
       </header>
 
-      {error && <p className={ERROR_ALERT_CLASSES}>{error}</p>}
-      {syncNote && (
-        <p
-          className={syncNote.tone === "error" ? ERROR_ALERT_CLASSES : alertClasses("success")}
-          role="status"
-        >
+      {error && <ErrorAlert>{error}</ErrorAlert>}
+      {syncNote?.tone === "error" && <ErrorAlert>{syncNote.text}</ErrorAlert>}
+      {syncNote?.tone === "success" && (
+        <p className={alertClasses("success")} role="status">
           {syncNote.text}
         </p>
       )}
@@ -325,9 +323,9 @@ export default function LottoGamesPage() {
         </div>
         <form onSubmit={submitImport} className="flex flex-col gap-4">
           {importError && (
-            <div className={ERROR_ALERT_CLASSES} role="alert">
+            <ErrorAlert>
               {importError}
-            </div>
+            </ErrorAlert>
           )}
           {importSummary && (
             <div className={alertClasses("success")}>

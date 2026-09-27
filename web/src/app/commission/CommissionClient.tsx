@@ -4,7 +4,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { getPayslips, type PayslipRow } from "@/lib/api";
 import { fmtAmount as fmt } from "@/lib/formatNumber";
 import { MONTH_NAMES_FULL as MF, MONTH_NAMES_SHORT as MN } from "@/lib/dateFormat";
-import { ERROR_ALERT_CLASSES, LOADING_TEXT_CLASSES } from "@/lib/ui";
+import { ErrorAlert } from "@/components/ErrorAlert";
+import { LOADING_TEXT_CLASSES } from "@/lib/ui";
 import { ChevronDownIcon, ChevronUpIcon } from "@/components/Icons";
 import {
   Chip,
@@ -85,7 +86,7 @@ export default function CommissionClient({ company = "Sophos" }: { company?: str
       <div className={STATS_PAGE_CLASSES}>
         <StatsHeader company={company} title="Commission" description={DESCRIPTION} />
         {error ? (
-          <div className={ERROR_ALERT_CLASSES} role="alert">{error}</div>
+          <ErrorAlert>{error}</ErrorAlert>
         ) : (
           <p className={LOADING_TEXT_CLASSES}>
             {loading

@@ -55,8 +55,8 @@ import {
   formatAmountNumber,
   parseFormNumber,
 } from "@/lib/parseFormNumber";
+import { ErrorAlert } from "@/components/ErrorAlert";
 import {
-  ERROR_ALERT_CLASSES,
   INPUT_CLASSES,
   PAGE_CONTAINER_CLASSES,
   PRIMARY_BUTTON_CLASSES,
@@ -1480,9 +1480,9 @@ export default function CalendarClient() {
       />
 
       {error && (
-        <div className={ERROR_ALERT_CLASSES} role="alert">
+        <ErrorAlert>
           {error}
-        </div>
+        </ErrorAlert>
       )}
 
       {loading ? (
@@ -1732,9 +1732,9 @@ export default function CalendarClient() {
               </button>
             </form>
             {expenseError && (
-              <div className={`mt-3 ${ERROR_ALERT_CLASSES}`} role="alert">
+              <ErrorAlert className="mt-3">
                 {expenseError}
-              </div>
+              </ErrorAlert>
             )}
             {modalExpenses.length === 0 ? (
               <p className="mt-3 text-sm text-ink-3">No fixed expenses for this period.</p>
@@ -1859,9 +1859,9 @@ export default function CalendarClient() {
                   </div>
                 </Field>
                 {transferError && (
-                  <div className={ERROR_ALERT_CLASSES} role="alert">
+                  <ErrorAlert>
                     {transferError}
-                  </div>
+                  </ErrorAlert>
                 )}
               </div>
               <div className={DIALOG_FOOTER_CLASSES}>
@@ -1936,9 +1936,9 @@ export default function CalendarClient() {
                   </p>
                 )}
                 {spendError && (
-                  <div className={ERROR_ALERT_CLASSES} role="alert">
+                  <ErrorAlert>
                     {spendError}
-                  </div>
+                  </ErrorAlert>
                 )}
               </div>
               <div className={DIALOG_FOOTER_CLASSES}>
@@ -1995,9 +1995,9 @@ export default function CalendarClient() {
                   />
                 </Field>
                 {payDateError && (
-                  <div className={ERROR_ALERT_CLASSES} role="alert">
+                  <ErrorAlert>
                     {payDateError}
-                  </div>
+                  </ErrorAlert>
                 )}
               </div>
               <div className={DIALOG_FOOTER_CLASSES}>

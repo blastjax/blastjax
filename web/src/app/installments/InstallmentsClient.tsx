@@ -37,10 +37,10 @@ import {
 import { formatAmountNumber, parseFormNumber } from "@/lib/parseFormNumber";
 import { MONTH_NAMES_SHORT, formatMonthYear } from "@/lib/dateFormat";
 import { fmtAmountOrDash } from "@/lib/formatNumber";
+import { ErrorAlert } from "@/components/ErrorAlert";
 import {
   ADD_BUTTON_CLASSES,
   EDIT_BUTTON_CLASSES,
-  ERROR_ALERT_CLASSES,
   PAGE_CONTAINER_CLASSES,
   PRIMARY_BUTTON_CLASSES,
   SECONDARY_BUTTON_CLASSES,
@@ -789,9 +789,9 @@ export default function InstallmentsClient() {
   const anyModalOpen = addModalOpen || scheduleModalId != null || paymentsModalOpen;
 
   const errorBox = error && (
-    <div className={`sm:col-span-2 ${ERROR_ALERT_CLASSES}`} role="alert">
+    <ErrorAlert className="sm:col-span-2">
       {error}
-    </div>
+    </ErrorAlert>
   );
 
   const linkToCardToggle = cardId != null && (

@@ -11,12 +11,12 @@ import {
   type CompanyColumnFlags,
   type CompanyRow,
 } from "@/lib/api";
+import { ErrorAlert } from "@/components/ErrorAlert";
 import {
   CARD_CLASSES,
   DASHED_EMPTY_CLASSES,
   DELETE_BUTTON_CLASSES,
   EDIT_BUTTON_CLASSES,
-  ERROR_ALERT_CLASSES,
   INPUT_CLASSES,
   LOADING_TEXT_CLASSES,
   PRIMARY_BUTTON_CLASSES,
@@ -279,13 +279,13 @@ export function CompaniesSettingsPanel() {
         {loading ? (
           <p className={LOADING_TEXT_CLASSES}>Loading companies…</p>
         ) : loadError ? (
-          <div className={ERROR_ALERT_CLASSES} role="alert">{loadError}</div>
+          <ErrorAlert>{loadError}</ErrorAlert>
         ) : companies.length === 0 ? (
           <div className={DASHED_EMPTY_CLASSES}>No companies yet.</div>
         ) : (
           <>
             {reorderError && (
-              <div className={`mb-3 ${ERROR_ALERT_CLASSES}`} role="alert">{reorderError}</div>
+              <ErrorAlert className="mb-3">{reorderError}</ErrorAlert>
             )}
             <ul className="divide-y divide-zinc-200 rounded-lg border border-line dark:divide-zinc-900">
               {companies.map((company) => (
@@ -317,7 +317,7 @@ export function CompaniesSettingsPanel() {
                       </span>
                       <ColumnToggleFieldset flags={editFlags} setFlags={setEditFlags} />
                     </div>
-                    {editError && <div className={ERROR_ALERT_CLASSES} role="alert">{editError}</div>}
+                    {editError && <ErrorAlert>{editError}</ErrorAlert>}
                     <div className="flex flex-wrap items-center gap-2">
                       <button
                         type="button"
@@ -387,7 +387,7 @@ export function CompaniesSettingsPanel() {
           </span>
           <ColumnToggleFieldset flags={newFlags} setFlags={setNewFlags} />
         </div>
-        {addError && <div className={`mt-3 ${ERROR_ALERT_CLASSES}`} role="alert">{addError}</div>}
+        {addError && <ErrorAlert className="mt-3">{addError}</ErrorAlert>}
         <div className="mt-4 flex flex-wrap items-center gap-3">
           <button
             type="button"

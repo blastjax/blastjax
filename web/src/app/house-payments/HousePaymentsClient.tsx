@@ -33,8 +33,8 @@ import {
 import { formatAmountNumber, parseFormNumber } from "@/lib/parseFormNumber";
 import { formatDate as fmtDate, toIsoDateLocal } from "@/lib/dateFormat";
 import { fmtAmountOrDash, fmtCount } from "@/lib/formatNumber";
+import { ErrorAlert } from "@/components/ErrorAlert";
 import {
-  ERROR_ALERT_CLASSES,
   INPUT_CLASSES,
   PAGE_CONTAINER_CLASSES,
   PRIMARY_BUTTON_CLASSES,
@@ -310,9 +310,9 @@ export default function HousePaymentsClient() {
       />
 
       {error && !planModalOpen && entriesModalId == null && (
-        <div className={ERROR_ALERT_CLASSES} role="alert">
+        <ErrorAlert>
           {error}
-        </div>
+        </ErrorAlert>
       )}
 
       {loading ? (
@@ -424,9 +424,9 @@ export default function HousePaymentsClient() {
               />
             </Field>
             {error && (
-              <div className={ERROR_ALERT_CLASSES} role="alert">
+              <ErrorAlert>
                 {error}
-              </div>
+              </ErrorAlert>
             )}
           </div>
           <div className={DIALOG_FOOTER_CLASSES}>
@@ -502,9 +502,9 @@ export default function HousePaymentsClient() {
               </form>
 
               {error && (
-                <div className={ERROR_ALERT_CLASSES} role="alert">
+                <ErrorAlert>
                   {error}
-                </div>
+                </ErrorAlert>
               )}
 
               {detail.entries.length === 0 ? (

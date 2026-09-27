@@ -26,13 +26,13 @@ import {
   parseDateOnlyLocal,
 } from "@/lib/dateFormat";
 import { fmtCount, fmtJackpotCompact } from "@/lib/formatNumber";
+import { ErrorAlert } from "@/components/ErrorAlert";
 import {
   ACTION_BUTTON_CLASSES,
   ADD_BUTTON_CLASSES,
   CARD_CLASSES,
   CLOSE_BUTTON_CLASSES,
   DASHED_EMPTY_CLASSES,
-  ERROR_ALERT_CLASSES,
   ICON_BUTTON_CLASSES,
   INPUT_CLASSES,
   PAGE_CONTAINER_CLASSES,
@@ -2019,9 +2019,9 @@ export default function LottoClient({ gameId }: { gameId: number }) {
       </header>
 
       {error && (
-        <div className={ERROR_ALERT_CLASSES} role="alert">
+        <ErrorAlert>
           {error}
-        </div>
+        </ErrorAlert>
       )}
 
       {!loading && draws.length === 0 && (
@@ -2385,9 +2385,9 @@ export default function LottoClient({ gameId }: { gameId: number }) {
         </div>
         <form onSubmit={submitDraw} className="flex flex-col gap-4">
           {drawFormError && (
-            <div className={ERROR_ALERT_CLASSES} role="alert">
+            <ErrorAlert>
               {drawFormError}
-            </div>
+            </ErrorAlert>
           )}
           <label className="flex flex-col gap-1 text-sm">
             <span className="text-ink-2">Draw date</span>
@@ -2473,9 +2473,9 @@ export default function LottoClient({ gameId }: { gameId: number }) {
         </div>
         <form onSubmit={submitAttemptsModal} className="flex flex-col gap-4">
           {attemptsFormError && (
-            <div className={ERROR_ALERT_CLASSES} role="alert">
+            <ErrorAlert>
               {attemptsFormError}
-            </div>
+            </ErrorAlert>
           )}
           <label className="flex flex-col gap-1 text-sm">
             <span className="text-ink-2">Your numbers</span>
@@ -2561,9 +2561,9 @@ export default function LottoClient({ gameId }: { gameId: number }) {
         </div>
         <form onSubmit={submitPasteAttempts} className="flex flex-col gap-4">
           {pasteFormError && (
-            <div className={ERROR_ALERT_CLASSES} role="alert">
+            <ErrorAlert>
               {pasteFormError}
-            </div>
+            </ErrorAlert>
           )}
           <label className="flex flex-col gap-1 text-sm">
             <span className="text-ink-2">Draw date</span>
@@ -2633,9 +2633,9 @@ export default function LottoClient({ gameId }: { gameId: number }) {
         </div>
         <form onSubmit={submitImport} className="flex flex-col gap-4">
           {importFormError && (
-            <div className={ERROR_ALERT_CLASSES} role="alert">
+            <ErrorAlert>
               {importFormError}
-            </div>
+            </ErrorAlert>
           )}
           {importSummary && (
             <div className={alertClasses("success")}>

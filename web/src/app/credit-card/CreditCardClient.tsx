@@ -37,8 +37,8 @@ import {
 import { formatAmountNumber, parseFormNumber } from "@/lib/parseFormNumber";
 import { formatDate, parseDateOnlyLocal, toIsoDateLocal } from "@/lib/dateFormat";
 import { fmtAmountOrDash } from "@/lib/formatNumber";
+import { ErrorAlert } from "@/components/ErrorAlert";
 import {
-  ERROR_ALERT_CLASSES,
   INPUT_CLASSES,
   PAGE_CONTAINER_CLASSES,
   PRIMARY_BUTTON_CLASSES,
@@ -490,9 +490,9 @@ export default function CreditCardClient() {
       />
 
       {error && (
-        <div className={ERROR_ALERT_CLASSES} role="alert">
+        <ErrorAlert>
           {error}
-        </div>
+        </ErrorAlert>
       )}
 
       {loading ? (
@@ -843,9 +843,9 @@ export default function CreditCardClient() {
             </Field>
 
             {cardFormError && (
-              <div className={`sm:col-span-2 ${ERROR_ALERT_CLASSES}`} role="alert">
+              <ErrorAlert className="sm:col-span-2">
                 {cardFormError}
-              </div>
+              </ErrorAlert>
             )}
           </div>
           <div className={DIALOG_FOOTER_CLASSES}>
@@ -936,9 +936,9 @@ export default function CreditCardClient() {
             </Field>
 
             {paymentFormError && (
-              <div className={ERROR_ALERT_CLASSES} role="alert">
+              <ErrorAlert>
                 {paymentFormError}
-              </div>
+              </ErrorAlert>
             )}
           </div>
           <div className={DIALOG_FOOTER_CLASSES}>
@@ -977,9 +977,9 @@ export default function CreditCardClient() {
             </Field>
 
             {balanceFormError && (
-              <div className={ERROR_ALERT_CLASSES} role="alert">
+              <ErrorAlert>
                 {balanceFormError}
-              </div>
+              </ErrorAlert>
             )}
           </div>
           <div className={DIALOG_FOOTER_CLASSES}>

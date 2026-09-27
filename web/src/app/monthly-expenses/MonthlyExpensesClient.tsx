@@ -31,8 +31,8 @@ import {
 import { addMonths, formatMonthYear, formatMonthYearShort, monthKey, parseMonthKey } from "@/lib/dateFormat";
 import { fmtAmount } from "@/lib/formatNumber";
 import { formatAmountNumber, parseFormNumber } from "@/lib/parseFormNumber";
+import { ErrorAlert } from "@/components/ErrorAlert";
 import {
-  ERROR_ALERT_CLASSES,
   INPUT_CLASSES,
   PAGE_CONTAINER_CLASSES,
   PRIMARY_BUTTON_CLASSES,
@@ -256,9 +256,9 @@ export default function MonthlyExpensesClient() {
       />
 
       {error && (
-        <div className={ERROR_ALERT_CLASSES} role="alert">
+        <ErrorAlert>
           {error}
-        </div>
+        </ErrorAlert>
       )}
 
       {loading ? (
@@ -452,9 +452,9 @@ export default function MonthlyExpensesClient() {
             )}
 
             {formError && (
-              <div className={ERROR_ALERT_CLASSES} role="alert">
+              <ErrorAlert>
                 {formError}
-              </div>
+              </ErrorAlert>
             )}
           </div>
           <div className={DIALOG_FOOTER_CLASSES}>

@@ -29,10 +29,10 @@ import {
 import { chartScrollMinWidth, xAxisTickInterval } from "@/lib/chartAxis";
 import { getChartTooltipStyle } from "@/lib/chartTooltipStyle";
 import { formatDateTime, formatMonthDayShort } from "@/lib/dateFormat";
+import { ErrorAlert } from "@/components/ErrorAlert";
 import {
   CARD_CLASSES,
   DASHED_EMPTY_CLASSES,
-  ERROR_ALERT_CLASSES,
   ICON_BUTTON_CLASSES,
   INPUT_CLASSES,
   LOADING_TEXT_CLASSES,
@@ -330,9 +330,9 @@ export default function BloodPressureClient() {
       />
 
       {error && !modalOpen && (
-        <div className={ERROR_ALERT_CLASSES} role="alert">
+        <ErrorAlert>
           {error}
-        </div>
+        </ErrorAlert>
       )}
 
       {loading ? (
@@ -575,9 +575,9 @@ export default function BloodPressureClient() {
         <p className="mt-1 text-sm text-ink-3">Log whatever you measured — every group is optional.</p>
         <form onSubmit={submit} className="mt-5 flex flex-col gap-5">
           {error && (
-            <div className={ERROR_ALERT_CLASSES} role="alert">
+            <ErrorAlert>
               {error}
-            </div>
+            </ErrorAlert>
           )}
           <fieldset className="grid grid-cols-3 gap-3">
             <legend className={`${SECTION_LABEL_CLASSES} mb-2`}>
