@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import BloodPressureClient from "./BloodPressureClient";
 
 export const metadata: Metadata = {
-  title: "Blood Pressure",
-  description: "Record and chart blood-pressure readings (systolic, diastolic, pulse)",
+  title: "Health",
+  description: "Log and chart blood pressure, pulse, SpO2, temperature, and weight",
 };
 
 export default function BloodPressurePage() {
