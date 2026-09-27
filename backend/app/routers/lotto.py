@@ -14,7 +14,6 @@ draw — linked to it (and so to its date) via ``draw_id``.
 from __future__ import annotations
 
 import datetime as dt
-import time
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -297,34 +296,17 @@ def lotto_import_text(body: LottoImportText) -> dict[str, Any]:
     return {**summary, "errors": errors}
 
 
-# pcso.gov.ph is only asked from 10 PM PH time, when the night's draws are
-# posted, and then at most once per _PCSO_SYNC_EVERY however often the Lotto
-# page loads -- few enough requests to stay under Akamai's bot protection. The
-# API runs a single uvicorn worker, so a module global is all the state.
-_PCSO_SYNC_FROM = dt.time(22)
-_PCSO_SYNC_EVERY = 15 * 60
-_pcso_synced_at: float | None = None
-
-
 @router.post("/api/lotto/sync-pcso")
 def lotto_sync_pcso() -> dict[str, Any]:
     """Pull every tracked game's results newer than what's stored from
-    pcso.gov.ph -- the Lotto page fires this on load, but it's a no-op before
-    10 PM PH time. Only the gap is searched (from the day after the game
-    furthest behind, see ``sync_start``), so a night the page wasn't opened is
-    caught up the next one, and a game+date that already has a result is
-    skipped, never overwritten (see ``insert_lotto_results``). ``inserted`` is
-    how many draws were added."""
-    global _pcso_synced_at
-    ph_now = dt.datetime.now(PH_TIME)
-    if ph_now.time() < _PCSO_SYNC_FROM:
-        return {"inserted": 0}
-    now = time.monotonic()
-    if _pcso_synced_at is not None and now - _pcso_synced_at < _PCSO_SYNC_EVERY:
-        return {"inserted": 0}
-    _pcso_synced_at = now  # stamped up front, so a failing PCSO isn't retried on every load either
+    pcso.gov.ph -- only ever run from the Lotto page's "Update results"
+    button, so pcso.gov.ph (and its Akamai bot protection) sees a request only
+    when someone asks for one. Only the gap is searched (from the day after
+    the game furthest behind, see ``sync_start``), and a game+date that
+    already has a result is skipped, never overwritten (see
+    ``insert_lotto_results``). ``inserted`` is how many draws were added."""
     games = list_lotto_latest_results()
-    today = ph_now.date()
+    today = dt.datetime.now(PH_TIME).date()
     start = sync_start((g["latest"] for g in games), today)
     if start > today:
         return {"inserted": 0}

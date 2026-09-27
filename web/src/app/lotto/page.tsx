@@ -111,7 +111,10 @@ export default function LottoGamesPage() {
   const [importError, setImportError] = useState<string | null>(null);
   const [importSummary, setImportSummary] = useState<ImportSummary | null>(null);
   const [saving, setSaving] = useState(false);
-  const [syncError, setSyncError] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [syncNote, setSyncNote] = useState<{ tone: "success" | "error"; text: string } | null>(
+    null,
+  );
 
   const load = async () => {
     try {
@@ -124,16 +127,32 @@ export default function LottoGamesPage() {
 
   useEffect(() => {
     void load();
-    // New results from pcso.gov.ph land in the background, alongside the
-    // cards; they only reload when something was added (a new jackpot).
-    syncLottoResultsFromPcso()
-      .then((r) => {
-        if (r.inserted > 0) void load();
-      })
-      .catch((e: unknown) =>
-        setSyncError(e instanceof Error ? e.message : "Couldn't check PCSO for new results."),
-      );
   }, []);
+
+  /** pcso.gov.ph is only ever asked from this button — never on page load —
+   * so its bot protection sees a request only when you want one. */
+  const updateResults = async () => {
+    setSyncing(true);
+    setSyncNote(null);
+    try {
+      const { inserted } = await syncLottoResultsFromPcso();
+      setSyncNote({
+        tone: "success",
+        text:
+          inserted > 0
+            ? `Added ${fmtCount(inserted)} new result${inserted === 1 ? "" : "s"} from PCSO.`
+            : "Already up to date — no new results on PCSO yet.",
+      });
+      if (inserted > 0) await load();
+    } catch (e: unknown) {
+      setSyncNote({
+        tone: "error",
+        text: `Couldn't update from PCSO: ${e instanceof Error ? e.message : "unknown error"}`,
+      });
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   const openImport = () => {
     setImportError(null);
@@ -197,14 +216,25 @@ export default function LottoGamesPage() {
           title="Lotto"
           description="Pick a game to log draws and check your attempts."
           actions={
-            <button
-              type="button"
-              className={ACTION_BUTTON_CLASSES}
-              aria-expanded={showDataTools}
-              onClick={() => setShowDataTools((v) => !v)}
-            >
-              Data tools <span aria-hidden>{showDataTools ? "▴" : "▾"}</span>
-            </button>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                className={PRIMARY_BUTTON_CLASSES}
+                disabled={syncing || games === null}
+                onClick={() => void updateResults()}
+                title="Fetch any 6/42–6/58 results newer than what's saved here from pcso.gov.ph"
+              >
+                {syncing ? "Updating…" : "Update results"}
+              </button>
+              <button
+                type="button"
+                className={ACTION_BUTTON_CLASSES}
+                aria-expanded={showDataTools}
+                onClick={() => setShowDataTools((v) => !v)}
+              >
+                Data tools <span aria-hidden>{showDataTools ? "▴" : "▾"}</span>
+              </button>
+            </div>
           }
         />
 
@@ -224,8 +254,13 @@ export default function LottoGamesPage() {
       </header>
 
       {error && <p className={ERROR_ALERT_CLASSES}>{error}</p>}
-      {syncError && (
-        <p className="text-sm text-ink-3">Couldn&apos;t fetch new results from PCSO: {syncError}</p>
+      {syncNote && (
+        <p
+          className={syncNote.tone === "error" ? ERROR_ALERT_CLASSES : alertClasses("success")}
+          role="status"
+        >
+          {syncNote.text}
+        </p>
       )}
       {!error && games === null && <p className={LOADING_TEXT_CLASSES}>Loading…</p>}
 

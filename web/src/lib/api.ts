@@ -1150,9 +1150,8 @@ export async function importLottoDrawResultsText(gameId: number, text: string) {
 }
 
 /** Pulls every game's results newer than what's stored from pcso.gov.ph —
- * the Lotto page fires this on load; the server only actually scrapes from
- * 10 PM PH time, at most every 15 minutes. A date that already has a result
- * is skipped, never overwritten. */
+ * only from the Lotto page's "Update results" button. A date that already
+ * has a result is skipped, never overwritten. */
 export async function syncLottoResultsFromPcso() {
   return sendJson<{ inserted: number }>("POST", "/api/lotto/sync-pcso");
 }
