@@ -1,0 +1,6 @@
+# Base config for the shared edge proxy (docker/edge/docker-compose.yml).
+# Installed to /srv/edge/caddy/Caddyfile by the blastjax deploy.
+#
+# Holds no sites of its own: each app's deploy drops its site block into
+# sites/<app>.caddy via /srv/edge/bin/edge-install, and this picks them all up.
+import sites/*.caddy

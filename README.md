@@ -95,6 +95,8 @@ Login is opt-in and needs no environment variable: the app is open until you add
 
 [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) runs on every push to `main` (or manual dispatch). It builds the API and web images on GitHub-hosted runners and pushes them to GHCR, then deploys via **AWS SSM** (no SSH/port 22 required): it `git pull --ff-only`s on the instance, pulls the new images, and restarts the stack. It then waits for both containers to report **healthy** and fails the job otherwise, so a red run means "not deployed" rather than "deployed and broken". Deploys are serialized via a `concurrency` group.
 
+The instance also hosts the `portfolio-film` and `icrc` sites. All three sit behind one shared Caddy (the **edge proxy**), which this repo owns and this deploy installs and starts. See [`docker/edge/README.md`](docker/edge/README.md) for how the sites plug into it and for the one-time steps that moved the other two sites onto this host.
+
 One-time setup on the EC2 instance:
 1. Clone this repo at the path you'll use below, point the domain in [`docker/Caddyfile`](docker/Caddyfile) at the instance, and create `.env` (see `.env.example`) if you need to override any defaults — `NEXT_PUBLIC_API_URL` is normally left unset so the built-in web image build arg (`http://127.0.0.1:8000`) is overridden instead by `secrets.NEXT_PUBLIC_API_URL` at build time in CI, set to the site's own public URL (see "Before exposing this publicly" below).
 2. Install Docker + the Compose plugin, and run `docker compose up -d` once by hand to confirm it works.
@@ -103,7 +105,7 @@ One-time setup on the EC2 instance:
 
 ### Before exposing this publicly
 
-- **TLS is already terminated by Caddy** (see `docker/Caddyfile`), which auto-provisions and renews a Let's Encrypt cert for the domain configured there and proxies `/api/*` to the `api` service, everything else to `web` — a domain name pointed at the instance is the only prerequisite. `api` and `web` publish no host ports of their own in `docker-compose.yml`, so they're only reachable through Caddy.
+- **TLS is already terminated by Caddy**: the shared edge proxy on the instance, running the site block in `docker/Caddyfile`. It auto-provisions and renews a Let's Encrypt cert for the domain configured there and proxies `/api/*` to the `api` service, everything else to `web` — a domain name pointed at the instance is the only prerequisite. `api` and `web` publish no host ports of their own in `docker-compose.yml`, so they're only reachable through Caddy.
 - **Restrict the security group** to just ports 80/443 (and 22/SSM as needed) — Redis is published loopback-only and the API/web containers aren't exposed directly.
 - Because the API is proxied under the same origin as the web app, set `NEXT_PUBLIC_API_URL` to the site's own URL (e.g. `https://blastjax.example.com`) — this avoids CORS entirely.
 

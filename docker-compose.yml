@@ -39,6 +39,12 @@ services:
     user: "${API_UID:-1000}:${API_GID:-1000}"
     # No host port publish - only reachable through Caddy (see below) or
     # from other containers on the compose network by service name.
+    # blastjax-api is the name docker/Caddyfile proxies to. It's unique, unlike
+    # `api`, so the same site block also works on the shared edge network
+    # (docker-compose.edge.yml).
+    networks:
+      default:
+        aliases: [blastjax-api]
     # Explicit allow-list instead of `env_file: .env` — the container only
     # ever gets exactly these variables, substituted from a root `.env` if
     # one exists (compose auto-loads it for ${...} interpolation; no file is
@@ -98,6 +104,10 @@ services:
       args:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}
     # No host port publish - only reachable through Caddy (see below).
+    # See the note on api's alias.
+    networks:
+      default:
+        aliases: [blastjax-web]
     depends_on:
       api:
         condition: service_healthy
@@ -123,6 +133,9 @@ services:
     # Sole public entry point: terminates TLS (auto-provisions and renews
     # the Let's Encrypt cert for the domain in the Caddyfile) and routes
     # /api/* to the backend, everything else to the Next.js frontend.
+    # Only for a standalone run of this stack: the Lightsail deploy adds
+    # docker-compose.edge.yml, which switches this off in favour of the shared
+    # edge proxy (docker/edge/) that fronts every site on the host.
     ports:
       - "80:80"
       - "443:443"
