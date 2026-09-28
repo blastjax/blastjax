@@ -40,8 +40,9 @@ app over an external Docker network called `edge`.
   repo still runs on its own with its own Caddy.
 
 Deploys from the three repos can run at the same time: each only touches its own compose project and its
-own site file, and each logs in to GHCR with a private `DOCKER_CONFIG`, so one repo's
-`docker logout` can't break another's pull.
+own site file, each logs in to GHCR with a private `DOCKER_CONFIG`, so one repo's
+`docker logout` can't break another's pull, and each copies its deploy script to a path unique to that
+repo and run, so one repo's script can't overwrite another's mid-run.
 
 ## Moving portfolio-film and icrc onto this host (one-time)
 

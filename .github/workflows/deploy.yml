@@ -221,5 +221,9 @@ jobs:
           echo "edge-caddy is running and reaches blastjax-api / blastjax-web"
           SCRIPT
 
-          scp -i ~/.ssh/deploy_key /tmp/deploy.sh "ubuntu@${{ secrets.DEPLOY_HOST }}:/tmp/deploy.sh"
-          ssh -i ~/.ssh/deploy_key "ubuntu@${{ secrets.DEPLOY_HOST }}" 'bash /tmp/deploy.sh'
+          # Unique per repo and run: all three repos deploy to the same host, and
+          # a shared /tmp/deploy.sh let one repo's script overwrite another's
+          # mid-run. Removed afterwards since it embeds this run's secrets.
+          remote="/tmp/deploy-${{ github.event.repository.name }}-${{ github.run_id }}.sh"
+          scp -i ~/.ssh/deploy_key /tmp/deploy.sh "ubuntu@${{ secrets.DEPLOY_HOST }}:$remote"
+          ssh -i ~/.ssh/deploy_key "ubuntu@${{ secrets.DEPLOY_HOST }}" "bash $remote; rc=\$?; rm -f $remote; exit \$rc"
