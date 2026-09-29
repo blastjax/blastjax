@@ -4,11 +4,6 @@ import { useState, type ReactNode } from "react";
 import { CloseIcon } from "@/components/Icons";
 import { ERROR_ALERT_CLASSES } from "@/lib/ui";
 
-/**
- * Error banner with a close button in its top-right corner. Dismissal is
- * remembered per message: a different message (or a remount after the error
- * clears) brings the banner back.
- */
 export function ErrorAlert({ className = "", children }: { className?: string; children: ReactNode }) {
   const [dismissed, setDismissed] = useState<ReactNode>(null);
   if (dismissed === children) return null;

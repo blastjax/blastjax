@@ -6,22 +6,13 @@ import { useMemo, type ReactNode } from "react";
 import { ChevronRightIcon } from "@/components/Icons";
 import { activeDestination } from "@/lib/nav";
 
-/**
- * The band every page opens with: title on the left, breadcrumb on the right,
- * matching the reference dashboard's page header.
- *
- * The trail is derived from the nav map rather than passed in, so a page can't
- * disagree with the sidebar about where it lives.
- */
 export function PageHeader({
   title,
   description,
   actions,
 }: {
   title: string;
-  /** One or two lines of context under the title. Optional. */
   description?: ReactNode;
-  /** Page-level controls, right-aligned beside the title on wide screens. */
   actions?: ReactNode;
 }) {
   const pathname = usePathname();

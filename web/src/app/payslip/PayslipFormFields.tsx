@@ -26,27 +26,13 @@ export function PayslipFormFields({
   companies,
   disabled,
   lockPeriod,
-  /** Fixes Company to whatever `form.company` already is (no picking a
-   * different one) — used when adding a payslip from a company-scoped page,
-   * where the company is already decided by which page you're on. */
   lockCompany,
-  /** When true, half of month is always 1st or 2nd (no blank option). */
   requirePeriodHalf,
-  /** Set false to hide Period year / Month — used when editing a default
-   * *template* (Settings → Payslip defaults), where only the half matters:
-   * the year/month get overwritten by the actual slot every time the
-   * template is applied. */
   showPeriodYearMonth = true,
-  /** Which fields Settings → Companies has turned on for this payslip's
-   * company (some companies just don't have Commission, Pag-ibig, etc.).
-   * Defaults to everything shown — same as before this toggle existed. */
   flags = DEFAULT_COMPANY_COLUMN_FLAGS,
 }: {
   form: FormState;
   setForm: Dispatch<SetStateAction<FormState>>;
-  /** Managed companies (Settings → Companies) a payslip can be tagged under.
-   * Omit to hide the Company field entirely — used when editing a default
-   * *template* (Settings → Payslip defaults), which isn't tied to a company. */
   companies?: CompanyRow[];
   disabled?: boolean;
   lockPeriod?: boolean;

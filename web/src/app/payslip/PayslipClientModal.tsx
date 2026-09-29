@@ -501,13 +501,6 @@ export function PayslipClientModal({
   );
 }
 
-
-/**
- * PDF attachment for a single payslip entry: one PDF per entry. Shows an
- * upload control when none is attached, and a "Show payslip" toggle that
- * renders the stored PDF inline once one exists. Keeps its own state so it can
- * refresh the embedded viewer after an upload/replace without a full reload.
- */
 function PayslipPdfPanel({
   payslipId,
   initialHasPdf,
@@ -521,16 +514,10 @@ function PayslipPdfPanel({
   const [showing, setShowing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  // Bumped on upload/replace so the blob fetch below re-runs instead of
-  // showing a cached copy of the previous PDF.
   const [version, setVersion] = useState(0);
-  // The PDF route requires the session header, which a plain <iframe>/<a>
-  // src can't carry — so it's fetched through apiFetch and rendered from a
-  // blob: URL instead of pointing straight at the API URL.
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  // Reset when the modal navigates to a different payslip.
   useEffect(() => {
     setHasPdf(initialHasPdf);
     setShowing(false);
@@ -652,7 +639,6 @@ function PayslipPdfPanel({
           className="hidden"
           onChange={(e) => {
             const f = e.target.files?.[0];
-            // Clear so re-picking the same file still fires onChange.
             e.target.value = "";
             if (f) void handleUpload(f);
           }}

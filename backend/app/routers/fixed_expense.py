@@ -1,5 +1,3 @@
-"""Fixed (recurring) expense endpoints, scoped per semi-monthly pay period half."""
-
 from __future__ import annotations
 
 from typing import Any

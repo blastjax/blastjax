@@ -82,7 +82,6 @@ export default function MonthlyExpensesClient() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  /** The stepper's month; `showAll` swaps the month filter for every expense on file. */
   const [month, setMonth] = useState(() => ({ y: today.getFullYear(), m: today.getMonth() + 1 }));
   const [showAll, setShowAll] = useState(false);
 
@@ -109,8 +108,6 @@ export default function MonthlyExpensesClient() {
     void load();
   }, [load]);
 
-  /** Same rule as the API's month filter (and the calendar): recurring rows
-   * apply to every month, one-offs only to the month they were filed under. */
   const visible = useMemo(
     () =>
       showAll

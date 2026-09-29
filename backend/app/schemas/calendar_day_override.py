@@ -1,5 +1,3 @@
-"""Calendar day-override API models (move budget between days, or spread it across a pay period)."""
-
 from __future__ import annotations
 
 from pydantic import BaseModel, Field

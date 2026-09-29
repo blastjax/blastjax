@@ -11,14 +11,6 @@ const ICON_TONE: Record<StatTone, string> = {
   info: "bg-info-soft text-info-text",
 };
 
-/**
- * The reference dashboard's overview tile: a tinted icon chip, the number at
- * display size, its label beneath, and an optional signed delta.
- *
- * `delta` is a *number*, not a string, so the arrow and the color are derived
- * from the sign in one place instead of each caller deciding — a "+" that
- * renders red is the kind of drift these components exist to prevent.
- */
 export function StatCard({
   label,
   value,
@@ -27,7 +19,6 @@ export function StatCard({
   delta,
   deltaSuffix = "%",
   deltaLabel,
-  /** Set when a rise is bad (spending, blood pressure) so the colors invert. */
   invertDelta = false,
   footer,
 }: {

@@ -21,16 +21,13 @@ function readBool(key: string, fallback: boolean): boolean {
     if (raw === "1" || raw === "true") return true;
     if (raw === "0" || raw === "false") return false;
   } catch {
-    /* private mode / blocked storage — fall through to the default */
   }
   return fallback;
 }
 
 type ShellLayoutValue = {
-  /** Desktop (`lg` and up): sidebar shown as an icon rail instead of full width. */
   sidebarCollapsed: boolean;
   toggleSidebar: () => void;
-  /** Slide-over navigation (viewports below `lg` only). */
   mobileNavOpen: boolean;
   setMobileNavOpen: Dispatch<SetStateAction<boolean>>;
   closeMobileNav: () => void;
@@ -43,8 +40,6 @@ export function ShellLayoutProvider({ children }: { children: ReactNode }) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
-  // Read persisted state after mount: the server render has no localStorage,
-  // so starting from the default and correcting here keeps hydration stable.
   useEffect(() => {
     setSidebarCollapsed(readBool(LS_SIDEBAR_COLLAPSED, false));
     setHydrated(true);
@@ -55,7 +50,6 @@ export function ShellLayoutProvider({ children }: { children: ReactNode }) {
     try {
       localStorage.setItem(LS_SIDEBAR_COLLAPSED, sidebarCollapsed ? "1" : "0");
     } catch {
-      /* nothing to do — the preference just won't survive a reload */
     }
   }, [hydrated, sidebarCollapsed]);
 
@@ -67,8 +61,6 @@ export function ShellLayoutProvider({ children }: { children: ReactNode }) {
     setMobileNavOpen(false);
   }, []);
 
-  // Growing past `lg` turns the slide-over into the docked sidebar; leaving it
-  // open would strand a backdrop over the page.
   useEffect(() => {
     const mq = window.matchMedia("(min-width: 1024px)");
     const onChange = () => {
@@ -78,7 +70,6 @@ export function ShellLayoutProvider({ children }: { children: ReactNode }) {
     return () => mq.removeEventListener("change", onChange);
   }, []);
 
-  // Lock the page behind the open slide-over so touch scrolling stays in it.
   useEffect(() => {
     if (!mobileNavOpen) return;
     const prev = document.body.style.overflow;

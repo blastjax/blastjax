@@ -1,6 +1,5 @@
 import { BUDGET_THEME_STORAGE_KEY, THEME_COLOR } from "@/lib/theme";
 
-/** Runs before paint so the first frame matches stored / system theme (avoids flash). */
 export function ThemeInitScript() {
   const js = `(function(){
   try {

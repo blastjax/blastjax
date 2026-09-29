@@ -1,16 +1,10 @@
-# Compatible-release pins (`~=`): patch/security updates still install, but a
-# new minor (FastAPI is pre-1.0, so minors do break) can't silently land in a
-# production image rebuild. Bump these deliberately.
 fastapi~=0.137.1
 uvicorn[standard]~=0.49.0
 python-dotenv~=1.2
 python-multipart~=0.0.32
 redis~=8.1
 argon2-cffi~=25.1
-# Postgres driver (Neon). psycopg2-binary ships prebuilt wheels, so the image
-# needs no libpq/compiler at build time.
 psycopg2-binary~=2.9
-# PCSO results sync (app/services/pcso_results.py): pcso.gov.ph's Akamai
-# front 403s python-requests, so curl_cffi impersonates Chrome's TLS.
+sqlalchemy~=2.1.1
 curl_cffi~=0.16.3
 beautifulsoup4~=4.15

@@ -1,29 +1,4 @@
 #!/usr/bin/env python3
-"""
-PCSO lotto results scraper - https://www.pcso.gov.ph/SearchLottoResult.aspx
-
-The results page is an ASP.NET WebForms form with no JSON API behind it, so the
-bot does what the Search button does in a browser: load the page, read its hidden
-form state (__VIEWSTATE, __EVENTVALIDATION, ...), set the date dropdowns and post
-the form back. Dropdown names are discovered from the page instead of being
-hard-coded, long ranges are split into chunks, and requests are spaced out.
-
-The site sits behind Akamai Bot Manager, which 403s python-requests on its TLS
-fingerprint alone, so requests go through curl_cffi impersonating Chrome.
-
-Setup:
-    pip install curl_cffi beautifulsoup4
-
-Examples:
-    python pcso_scraper.py                                    # last 7 days -> pcso_results.csv
-    python pcso_scraper.py --start 2025-01-01 --end 2025-06-30 --csv h1_2025.csv
-    python pcso_scraper.py --start 2025-01-01 --game 6/58 --game 6/55
-    python pcso_scraper.py --start 2020-01-01 --db lotto.db   # backfill into SQLite
-    python pcso_scraper.py --db lotto.db --update             # daily run: only what's new
-
-Tip: if you open the CSV in Excel, import "combination" as Text, otherwise
-2D/3D results such as 12-25 or 4-7-1 get turned into dates.
-"""
 from __future__ import annotations
 
 import argparse
@@ -43,7 +18,7 @@ from bs4 import BeautifulSoup
 from curl_cffi import requests
 
 DEFAULT_URL = "https://www.pcso.gov.ph/SearchLottoResult.aspx"
-PH_TIME = timezone(timedelta(hours=8))  # the Philippines has no DST, so a fixed offset is exact
+PH_TIME = timezone(timedelta(hours=8))
 RETRIES = 3
 MONTHS = ["January", "February", "March", "April", "May", "June", "July",
           "August", "September", "October", "November", "December"]
@@ -55,14 +30,12 @@ log = logging.getLogger("pcso")
 
 
 class ScrapeError(RuntimeError):
-    """The site returned something we can't work with; the message says what."""
-
-
+    pass
 @dataclass
 class Draw:
     game: str
     combination: str
-    draw_date: str              # YYYY-MM-DD
+    draw_date: str
     jackpot: float | None
     winners: int | None
 
@@ -74,13 +47,12 @@ class Draw:
 @dataclass
 class Form:
     action: str
-    fields: dict[str, str]                      # what a browser would post unchanged
-    selects: dict[str, list[tuple[str, str]]]   # dropdown name -> [(value, label), ...]
-    submit: tuple[str, str] | None              # the Search button's (name, value)
-    roles: dict[str, str] = field(default_factory=dict)  # "start_month", "game", ... -> dropdown name
+    fields: dict[str, str]
+    selects: dict[str, list[tuple[str, str]]]
+    submit: tuple[str, str] | None
+    roles: dict[str, str] = field(default_factory=dict)
 
 
-# ----------------------------------------------------------------------------- page parsing
 
 def parse_form(html: str, page_url: str) -> Form:
     soup = BeautifulSoup(html, "html.parser")
@@ -115,7 +87,7 @@ def parse_form(html: str, page_url: str) -> Form:
         if chosen is not None:
             fields[name] = chosen.get("value", chosen.get_text(strip=True))
 
-    def button_score(button: tuple[str, str]) -> int:  # prefer "Search Lotto" over e.g. a site-search box
+    def button_score(button: tuple[str, str]) -> int:
         name, value = button[0].lower(), button[1].lower()
         return 4 * ("lotto" in value) + 2 * name.endswith("btnsearch") + ("search" in name)
 
@@ -124,7 +96,6 @@ def parse_form(html: str, page_url: str) -> Form:
 
 
 def classify_dropdowns(selects: dict[str, list[tuple[str, str]]]) -> dict[str, str]:
-    """Work out which dropdown is which from names like ...$ddlStartMonth or ...$ddlEndDay."""
     roles: dict[str, str] = {}
     for name in selects:
         key = name.rsplit("$", 1)[-1].lower()
@@ -144,7 +115,6 @@ def classify_dropdowns(selects: dict[str, list[tuple[str, str]]]) -> dict[str, s
 
 
 def pick(options: list[tuple[str, str]], *wanted: str) -> str | None:
-    """Value of the first option whose value or label matches one of `wanted`."""
     wanted_lower = {w.lower() for w in wanted}
     for value, label in options:
         if value.strip().lower() in wanted_lower or label.strip().lower() in wanted_lower:
@@ -210,7 +180,6 @@ def parse_number(text: str) -> float | None:
 
 
 def parse_results(html: str) -> tuple[list[Draw], list[tuple[str, str]]]:
-    """Draws in the results grid, plus pager links as (event target, argument) if it's paginated."""
     soup = BeautifulSoup(html, "html.parser")
     draws: list[Draw] = []
     for table in soup.find_all("table"):
@@ -224,7 +193,7 @@ def parse_results(html: str) -> tuple[list[Draw], list[tuple[str, str]]]:
         for row in rows[1:]:
             cells = _cells(row)
             if len(cells) < len(header):
-                continue                                  # pager or footer row
+                continue
             try:
                 drawn = parse_date(cells[col["draw_date"]])
             except ValueError:
@@ -236,7 +205,7 @@ def parse_results(html: str) -> tuple[list[Draw], list[tuple[str, str]]]:
                               draw_date=drawn.isoformat(),
                               jackpot=jackpot,
                               winners=int(winners) if winners is not None else None))
-        break                                             # the first matching table is the grid
+        break
     pager = []
     for link in soup.find_all("a", href=True):
         match = PAGER_LINK.search(link["href"])
@@ -246,7 +215,6 @@ def parse_results(html: str) -> tuple[list[Draw], list[tuple[str, str]]]:
 
 
 def next_page(pager: list[tuple[str, str]], current: int):
-    """The pager link to the page after `current`, as ((target, argument), page_number), or None."""
     numbered = sorted((int(arg[5:]), (target, arg)) for target, arg in pager if arg[5:].isdigit())
     for number, link in numbered:
         if number > current:
@@ -257,7 +225,6 @@ def next_page(pager: list[tuple[str, str]], current: int):
     return None
 
 
-# ----------------------------------------------------------------------------- HTTP client
 
 class PcsoClient:
     def __init__(self, url: str = DEFAULT_URL, delay: float = 3.0, dump_dir: str | None = None):
@@ -265,7 +232,6 @@ class PcsoClient:
         self.dump_dir = Path(dump_dir) if dump_dir else None
         if self.dump_dir:
             self.dump_dir.mkdir(parents=True, exist_ok=True)
-        # impersonate sets Chrome's TLS/HTTP2 fingerprint and matching headers (User-Agent included)
         self.session = requests.Session(impersonate="chrome")
         self._last_request = 0.0
         self._count = 0
@@ -309,7 +275,6 @@ class PcsoClient:
         return form
 
     def search(self, start: date, end: date, form: Form | None = None) -> list[Draw]:
-        """Every game's draws from start to end (inclusive)."""
         form = form or self.load_form()
         if form.submit is None:
             raise ScrapeError("Couldn't find the Search button on the page.")
@@ -339,7 +304,6 @@ class PcsoClient:
         return in_range
 
     def _with_remaining_pages(self, html: str, page_url: str) -> list[Draw]:
-        """Follow the grid's pager links, in case the results are paginated."""
         draws, pager = parse_results(html)
         current = 1
         for _ in range(MAX_PAGES):
@@ -359,7 +323,6 @@ class PcsoClient:
         return draws
 
 
-# ----------------------------------------------------------------------------- storage
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS draws (
@@ -385,7 +348,6 @@ ON CONFLICT (game, draw_date, combination) DO UPDATE SET
 
 
 def save_db(path: str, draws: list[Draw]) -> int:
-    """Upsert draws into SQLite; returns how many were new."""
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
     with closing(sqlite3.connect(path)) as con:
         con.executescript(SCHEMA)
@@ -402,7 +364,7 @@ def latest_draw_date(path: str) -> date | None:
     with closing(sqlite3.connect(path)) as con:
         try:
             (latest,) = con.execute("SELECT MAX(draw_date) FROM draws").fetchone()
-        except sqlite3.OperationalError:              # file exists but has no draws table yet
+        except sqlite3.OperationalError:
             return None
     return date.fromisoformat(latest) if latest else None
 
@@ -417,7 +379,6 @@ def save_csv(path: str, draws: list[Draw]) -> None:
                              "" if d.winners is None else d.winners])
 
 
-# ----------------------------------------------------------------------------- CLI
 
 def iso_date(text: str) -> date:
     try:
@@ -469,7 +430,7 @@ def main(argv: list[str] | None = None) -> int:
             parser.error("--update needs --db")
         latest = latest_draw_date(args.db)
         if latest:
-            start = latest - timedelta(days=2)        # small overlap catches late or corrected postings
+            start = latest - timedelta(days=2)
         elif not args.start:
             parser.error(f"{args.db} has no draws yet; run once with --start to backfill it")
     if start > end:
@@ -505,7 +466,7 @@ def main(argv: list[str] | None = None) -> int:
         ok = False
 
     draws = sorted(collected.values(), key=lambda d: (d.draw_date, d.game))
-    if args.csv and (draws or ok):                    # don't clobber an old CSV with an empty failed run
+    if args.csv and (draws or ok):
         save_csv(args.csv, draws)
         log.info("Wrote %d draws to %s", len(draws), args.csv)
     if args.db:

@@ -1,26 +1,3 @@
-"""Mambo (a.k.a. Takuzu / Binairo) solver, deduction engine and generator.
-
-Rules — mirrors web/src/app/games/mambo/logic.ts:
-
-  * Every cell holds one of two symbols: 0 = circle, 1 = square.
-  * No three identical symbols consecutively in any row or column.
-  * Each row and column holds equally many of the two symbols, so both side
-    lengths must be even.
-  * An "=" sign between two neighbouring cells forces them to match; an "x"
-    sign forces them to differ.
-
-There is deliberately no "every row distinct" rule — that belongs to other
-Binairo variants, not to Mambo as described by the puzzle's own rules.
-
-Everything here is built on one constraint propagator over those rules.
-``solve`` wraps it in a backtracking search that counts solutions (capped at
-2, which is all a uniqueness check needs). ``solve_steps`` re-derives the same
-fill one cell at a time and labels each deduction with the technique a human
-would have used, so the UI can narrate a solve. ``generate`` builds a random
-full board, sprinkles signs, then removes as much as it can while the puzzle
-stays solvable by the technique tier the requested difficulty allows.
-"""
-
 from __future__ import annotations
 
 import random
@@ -43,9 +20,6 @@ Signs = list[list[int]]
 MIN_SIDE = 4
 MAX_SIDE = 16
 
-# Technique names, in the order a human reaches for them. Everything up to
-# TECH_COUNT is "basic" (tier 0) — the three strategies in the game's own
-# rules; the two forcing techniques are what a solver falls back on.
 TECH_SIGN_EQUAL = "sign-equal"
 TECH_SIGN_OPPOSITE = "sign-opposite"
 TECH_PAIR = "pair"
@@ -55,21 +29,13 @@ TECH_ELIMINATION = "elimination"
 TECH_DEEP = "deep"
 
 DIFFICULTIES = ("easy", "medium", "hard")
-"""Difficulty is the highest technique tier the puzzle *requires*: tier 0
-(basic rules only) is easy, tier 1 (a value that breaks a rule at once) is
-medium, tier 2 (a value that only fails several steps later) is hard."""
 
 
-# --------------------------------------------------------------------------
-# puzzle geometry
-# --------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
 class Line:
-    """One row or column: the cells that must split evenly between symbols."""
-
-    kind: str  # "row" | "col"
+    kind: str
     index: int
     cells: tuple[int, ...]
 
@@ -80,19 +46,10 @@ class Line:
 
 @dataclass(frozen=True)
 class Puzzle:
-    """Everything about a board that doesn't change as cells get filled.
-
-    The `cell_*` members are reverse indexes: which constraints mention a given
-    cell. Propagation uses them to revisit only the constraints a change can
-    possibly have affected instead of rescanning the whole board.
-    """
-
     rows: int
     cols: int
-    # (cell a, cell b, SIGN_EQUAL | SIGN_OPPOSITE) for every sign present.
     pair_signs: tuple[tuple[int, int, int], ...]
     lines: tuple[Line, ...]
-    # Every window of three consecutive cells, across rows and columns.
     triples: tuple[tuple[int, int, int], ...]
     cell_pairs: tuple[tuple[tuple[int, int], ...], ...]
     cell_triples: tuple[tuple[int, ...], ...]
@@ -123,11 +80,6 @@ def _check_sign_shape(signs: Signs, rows: int, cols: int, name: str) -> None:
 
 
 def build_puzzle(rows: int, cols: int, h_signs: Signs, v_signs: Signs) -> Puzzle:
-    """Precompute the constraint structures for a `rows` x `cols` board.
-
-    `h_signs` is rows x (cols - 1) — the sign between (r, c) and (r, c + 1);
-    `v_signs` is (rows - 1) x cols — the sign between (r, c) and (r + 1, c).
-    """
     _validate_dims(rows, cols)
     _check_sign_shape(h_signs, rows, cols - 1, "Horizontal signs")
     _check_sign_shape(v_signs, rows - 1, cols, "Vertical signs")
@@ -188,7 +140,6 @@ def build_puzzle(rows: int, cols: int, h_signs: Signs, v_signs: Signs) -> Puzzle
 
 
 def _parse_board(grid: Grid, pz: Puzzle) -> list[int]:
-    """Flatten a caller-supplied grid, rejecting anything but -1 / 0 / 1."""
     if len(grid) != pz.rows or any(len(row) != pz.cols for row in grid):
         raise ValueError(f"Grid must be {pz.rows}x{pz.cols}.")
     board: list[int] = []
@@ -211,28 +162,9 @@ def _first_empty(board: list[int]) -> int:
         return -1
 
 
-# --------------------------------------------------------------------------
-# constraint propagation
-# --------------------------------------------------------------------------
 
 
 def _propagate(board: list[int], pz: Puzzle, dirty: tuple[int, ...] | None = None) -> bool:
-    """Fill everything the three rules plus the signs force, in place.
-
-    Returns False as soon as the board is proven contradictory. `dirty` names
-    the cells that changed since the board was last at a fixpoint, so only the
-    constraints touching them get revisited; pass None (the default) for a
-    board that has never been propagated, which checks everything. Passing a
-    `dirty` set for a board that *isn't* at a fixpoint is not wrong, just
-    weaker — it can miss forced cells, never invent one.
-
-    This is the bulk twin of `_basic_deduction` below: same rules, but it
-    applies all of them instead of stopping at the first, because the search
-    runs it in its hot loop. Any rule added to one belongs in the other too.
-
-    Terminates because cells only ever go from empty to filled, so each cell
-    can be queued at most once per assignment.
-    """
     queue = list(range(len(board))) if dirty is None else list(dirty)
 
     while queue:
@@ -295,11 +227,6 @@ def _propagate(board: list[int], pz: Puzzle, dirty: tuple[int, ...] | None = Non
 
 
 def _has_conflict(board: list[int], pz: Puzzle) -> bool:
-    """True if the cells already filled break a rule between themselves.
-
-    Distinct from `_propagate` returning False, which also covers boards that
-    are merely dead ends — nothing visibly wrong yet, but unfillable.
-    """
     for a, b, sign in pz.pair_signs:
         va, vb = board[a], board[b]
         if va != EMPTY and vb != EMPTY and (va == vb) != (sign == SIGN_EQUAL):
@@ -316,18 +243,9 @@ def _has_conflict(board: list[int], pz: Puzzle) -> bool:
     return False
 
 
-# --------------------------------------------------------------------------
-# search
-# --------------------------------------------------------------------------
 
 
 class _Search:
-    """Backtracking solution counter with a wall-clock budget.
-
-    `timed_out` means the counts it returned are lower bounds, not answers, so
-    every caller checks it before trusting a 0 or a 1.
-    """
-
     def __init__(self, pz: Puzzle, deadline: float | None) -> None:
         self.pz = pz
         self.deadline = deadline
@@ -349,11 +267,6 @@ class _Search:
         limit: int,
         dirty: tuple[int, ...] | None = None,
     ) -> int:
-        """How many ways `board` can be finished, counted up to `limit`.
-
-        `dirty` is passed straight to `_propagate`, so callers holding a board
-        already at a fixpoint can name just the cell they changed.
-        """
         self.first = None
         return self._count(list(board), limit, dirty)
 
@@ -372,16 +285,12 @@ class _Search:
         for val in (CIRCLE, SQUARE):
             child = list(board)
             child[idx] = val
-            # The parent is at a fixpoint, so the assignment is all that's new.
             total += self._count(child, limit - total, (idx,))
             if total >= limit or self.timed_out:
                 break
         return total
 
 
-# --------------------------------------------------------------------------
-# deductions
-# --------------------------------------------------------------------------
 
 
 @dataclass
@@ -394,9 +303,6 @@ class Deduction:
 
 
 def _basic_deduction(board: list[int], pz: Puzzle) -> Deduction | None:
-    """The first cell forced by the game's own three strategies, with the
-    human-readable reason why. Scanned in the order a player would look."""
-
     def make(idx: int, value: int, technique: str, detail: str) -> Deduction:
         return Deduction(idx // pz.cols, idx % pz.cols, value, technique, detail)
 
@@ -481,22 +387,6 @@ def _forcing_deduction(
     search: _Search,
     deep: bool,
 ) -> tuple[Deduction | None, bool]:
-    """A cell where one of the two symbols can be ruled out by trying it.
-
-    With `deep` false the trial only has to break a rule under propagation —
-    cheap, and the kind of one-step-ahead check a player does in their head.
-    With `deep` true it runs the full search, which catches values that only
-    fail much later.
-
-    The second element of the result is True when some cell has *no* legal
-    symbol left, which proves the board can't be completed at all. That makes
-    the caller's solvability check unnecessary: ruling out one symbol always
-    prompts a check of the other, so a dead end reports itself.
-
-    Assumes `board` is at a fixpoint of the basic rules — which is exactly when
-    callers reach for this — so each trial need only propagate from the cell it
-    assigns.
-    """
     for idx, cur in enumerate(board):
         if cur != EMPTY:
             continue
@@ -542,7 +432,6 @@ def _next_deduction(
     *,
     search: _Search,
 ) -> tuple[Deduction | None, bool]:
-    """The next forced cell, or a flag saying the board can't be completed."""
     d = _basic_deduction(board, pz)
     if d is not None:
         return d, False
@@ -560,13 +449,6 @@ def _run_engine(
     search: _Search,
     steps: list[Deduction] | None = None,
 ) -> tuple[bool, bool]:
-    """Fill `board` in place with forced cells until nothing more is forced.
-
-    Returns (completed, dead_end), and appends every deduction to `steps` when
-    one is given. Because each technique only ever fills a cell that *must*
-    hold that symbol, completing the board is also a proof that the solution is
-    unique — see `_has_single_solution`.
-    """
     while _first_empty(board) >= 0:
         if search.expired():
             return False, False
@@ -577,27 +459,12 @@ def _run_engine(
         if steps is not None:
             steps.append(d)
 
-    # Every deduction is only implied by "assume this board has a solution", so
-    # on a board that has none they can cheerfully fill in nonsense. A filled
-    # board therefore has to be checked against the rules before it counts as a
-    # solution; failing that check proves no solution existed to begin with.
     if _has_conflict(board, pz):
         return False, True
     return True, False
 
 
 def _has_single_solution(board: list[int], pz: Puzzle, *, search: _Search) -> bool:
-    """Whether `board` has exactly one completion.
-
-    Equivalent to counting completions and getting 1, but usually far quicker:
-    every deduction is forced, so finishing the board proves uniqueness, and
-    conversely a board with one solution always yields to the deep tier (the
-    wrong symbol in any cell has no completion, so trying it fails). Counting
-    instead has to exhaust the whole tree to prove nothing else fits.
-
-    False also covers "no solution" and "ran out of time", so callers that need
-    to tell those apart must ask further questions.
-    """
     completed, _ = _run_engine(list(board), pz, search=search)
     return completed
 
@@ -609,18 +476,6 @@ def _logic_level(
     search: _Search,
     max_level: int,
 ) -> int | None:
-    """Highest technique tier needed to fill `board` completely, in place.
-
-    `max_level` is 0 (the basic rules alone) or 1 (also one-step trials). The
-    deep tier is deliberately not on offer: for a board known to have a single
-    solution deep trials always succeed, so allowing them here would answer
-    nothing that `_Search` doesn't answer faster.
-
-    None means the allowed techniques stall or the clock ran out; for a board
-    known to be solvable, stalling means it has more than one solution. Uses
-    bulk propagation rather than `_next_deduction`'s narrated single steps,
-    because the generator calls this once per candidate clue removal.
-    """
     level = 0
     if not _propagate(board, pz):
         return None
@@ -638,9 +493,6 @@ def _logic_level(
     return level
 
 
-# --------------------------------------------------------------------------
-# public API
-# --------------------------------------------------------------------------
 
 
 def _deadline(time_budget_ms: int) -> float:
@@ -650,7 +502,6 @@ def _deadline(time_budget_ms: int) -> float:
 @dataclass
 class SolveResult:
     solution: Grid | None
-    # Capped at 2, so 2 means "two or more".
     solution_count: int
     unique: bool
     timed_out: bool
@@ -664,15 +515,10 @@ def solve(
     *,
     time_budget_ms: int = 3000,
 ) -> SolveResult:
-    """Complete `grid`, and say whether the completion is the only one."""
     pz = build_puzzle(len(grid), len(grid[0]) if grid else 0, h_signs, v_signs)
     board = _parse_board(grid, pz)
     deadline = _deadline(time_budget_ms)
 
-    # Fast path: forced-cell reasoning both finds the answer and proves it's
-    # the only one, and it beats counting solutions by a wide margin. A puzzle
-    # with more than one answer stalls the engine quickly, so it falls through
-    # to the search with most of the budget intact.
     probe = list(board)
     probe_search = _Search(pz, min(deadline, time.monotonic() + time_budget_ms / 2000.0))
     completed, dead_end = _run_engine(probe, pz, search=probe_search)
@@ -711,8 +557,6 @@ class StepsResult:
     solved: bool
     unique: bool
     solution_count: int
-    # True when the entries already on the board break a rule against each
-    # other, as opposed to merely leading nowhere.
     conflict: bool
     timed_out: bool
 
@@ -724,13 +568,6 @@ def solve_steps(
     *,
     time_budget_ms: int = 5000,
 ) -> StepsResult:
-    """Narrate a solve from `grid`: one forced cell per step, with reasons.
-
-    The walkthrough runs before any solution counting, because on a sparse
-    board the count is by far the more expensive of the two and usually turns
-    out to be unnecessary: finishing the board by forced cells alone proves the
-    answer is unique, and a dead end reports itself as one.
-    """
     pz = build_puzzle(len(grid), len(grid[0]) if grid else 0, h_signs, v_signs)
     board = _parse_board(grid, pz)
     if _has_conflict(board, pz):
@@ -741,15 +578,11 @@ def solve_steps(
     solved, dead_end = _run_engine(board, pz, search=search, steps=steps)
 
     if dead_end:
-        # Nothing fits in some cell, so the entries already on the board can't
-        # be completed however the rest is filled.
         return StepsResult(steps, False, False, 0, False, search.timed_out)
 
     if solved:
         return StepsResult(steps, True, True, 1, False, search.timed_out)
 
-    # Stalled with cells to spare: only now is a count worth paying for, to
-    # tell "ambiguous" apart from "ran out of time".
     count = search.completions(board, 2)
     return StepsResult(
         steps=steps,
@@ -762,8 +595,6 @@ def solve_steps(
 
 
 def _random_solution(pz: Puzzle, rng: random.Random, deadline: float) -> list[int] | None:
-    """A random board satisfying every rule (signs are added afterwards)."""
-
     def fill(board: list[int], dirty: tuple[int, ...] | None) -> bool:
         if time.monotonic() > deadline:
             return False
@@ -792,11 +623,7 @@ class GenerateResult:
     solution: Grid
     h_signs: Signs
     v_signs: Signs
-    # The difficulty actually achieved, which `exact_match` compares to the
-    # one that was asked for.
     difficulty: str
-    # False when the clock ran out before the tier could be established, in
-    # which case `difficulty` is the worst case rather than a measurement.
     difficulty_confirmed: bool
     exact_match: bool
     attempts: int
@@ -813,26 +640,11 @@ def generate(
     time_budget_ms: int = 8000,
     seed: int | None = None,
 ) -> GenerateResult:
-    """Build a puzzle with exactly one solution at (or near) `difficulty`.
-
-    Strategy: take a random full board, label a scattering of neighbouring
-    pairs with the sign they happen to satisfy, then walk the clues and signs
-    removing everything that can go while the puzzle still solves under the
-    techniques `difficulty` permits. Whatever survives is minimal in that
-    sense, so almost nothing on the board is redundant.
-
-    A handful of signs are held back from removal entirely: left to the pruner
-    the signs almost all turn out to be redundant, and a Mambo board with no =
-    or x on it is just a plain Takuzu grid.
-    """
     _validate_dims(rows, cols)
     if difficulty not in DIFFICULTIES:
         raise ValueError(f"Difficulty must be one of {', '.join(DIFFICULTIES)}.")
     wanted = DIFFICULTIES.index(difficulty)
     deadline = _deadline(time_budget_ms)
-    # Hold a slice of the budget back for the difficulty measurement. It only
-    # takes milliseconds, but starting it with no time left would leave the
-    # puzzle unlabelled, so pruning stops early enough to leave room.
     prune_deadline = deadline - min(1.0, time_budget_ms / 1000.0 * 0.15)
     rng = random.Random(seed)
 
@@ -872,11 +684,6 @@ def generate(
         grid = _unflatten(solution, empty_pz)
 
         def solvable_within(level: int) -> bool:
-            """Does the puzzle as it stands solve using tier <= `level`?
-
-            A complete fill by sound techniques is also a uniqueness proof, so
-            none of these need a separate solution count.
-            """
             pz = build_puzzle(rows, cols, h_signs, v_signs)
             search = _Search(pz, prune_deadline)
             board = _parse_board(grid, pz)
@@ -884,8 +691,6 @@ def generate(
                 return _has_single_solution(board, pz, search=search)
             return _logic_level(board, pz, search=search, max_level=level) is not None
 
-        # Clues and signs are offered up interleaved so the puzzle ends up
-        # leaning on both, rather than stripping one kind down to nothing.
         items: list[tuple[str, int, int]] = [
             ("cell", r, c) for r in range(rows) for c in range(cols)
         ]
@@ -913,10 +718,6 @@ def generate(
                     (h_signs if kind == "h" else v_signs)[r][c] = saved
                     signs_left += 1
 
-        # Rate the finished puzzle by the cheapest tier that cracks it. Only
-        # the two cheap tiers get tried: the puzzle is known to have a single
-        # solution, so "tier 1 can't finish it" already means deep reasoning is
-        # required, and running those deep trials would only confirm it slowly.
         final_pz = build_puzzle(rows, cols, h_signs, v_signs)
         level: int | None = DIFFICULTIES.index("hard")
         for tier in (0, 1):
@@ -928,7 +729,6 @@ def generate(
                 level = tier
                 break
             if probe.timed_out:
-                # Out of time: the tier is unknown, not necessarily the hardest.
                 level = None
                 break
         achieved = DIFFICULTIES[level] if level is not None else DIFFICULTIES[-1]

@@ -14,14 +14,6 @@ import { activeDestination, searchDestinations } from "@/lib/nav";
 import { useShellLayout } from "@/lib/shellLayoutContext";
 import { ICON_BUTTON_CLASSES } from "@/lib/ui";
 
-/**
- * Quick jump across the nav map.
- *
- * The shortcut hint is real: ⌘K / Ctrl-K focuses the field, ↑/↓ walk the
- * results, Enter opens the highlighted one, Escape gives the page back. A
- * decorative search box in an admin shell is worse than none, so this one
- * actually navigates.
- */
 function NavSearch() {
   const router = useRouter();
   const [query, setQuery] = useState("");
@@ -154,11 +146,6 @@ function ThemeToggle() {
   );
 }
 
-/**
- * Sticky top chrome: sidebar controls and quick search on the left, theme on
- * the right. Below `lg` the sidebar is a slide-over and search gives way to
- * the current page's name, which is the only thing telling you where you are.
- */
 export function Header() {
   const pathname = usePathname();
   const { toggleSidebar, sidebarCollapsed, setMobileNavOpen, mobileNavOpen } =
@@ -189,7 +176,6 @@ export function Header() {
         <SidebarToggleIcon className="size-5" />
       </button>
 
-      {/* Small screens lose the sidebar, so the header carries the page name. */}
       <span className="min-w-0 flex-1 truncate text-sm font-semibold tracking-[-0.2px] text-ink lg:hidden">
         {destination?.label ?? "Blastjax"}
       </span>

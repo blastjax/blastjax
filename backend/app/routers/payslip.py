@@ -1,5 +1,3 @@
-"""Payslip CRUD and JSON import."""
-
 from __future__ import annotations
 
 import base64
@@ -34,7 +32,6 @@ from db import (
 
 router = APIRouter(tags=["payslip"], dependencies=[Depends(require_db)])
 
-# Payslip PDFs are single-page statements; cap the upload well below that.
 _MAX_PDF_BYTES = 10 * 1024 * 1024
 
 
@@ -89,7 +86,6 @@ def payslip_create(body: PayslipCreate) -> dict[str, Any]:
 
 @router.post("/api/payslip/import-json")
 def payslip_import_json(body: dict[str, Any] = Body(...)) -> dict[str, Any]:
-    """Import nested year → category → month JSON (arrays [1st half, 2nd half])."""
     if not isinstance(body, dict):
         raise HTTPException(status_code=400, detail="JSON root must be an object.")
     recs = _payslip_records_from_nested_json(body)
@@ -99,7 +95,6 @@ def payslip_import_json(body: dict[str, Any] = Body(...)) -> dict[str, Any]:
             detail="No payslip rows were produced. Expected shape: { "
             '"2024": { "Total": { "January": [a, b], ... }, "Commission": { ... }, ... } }',
         )
-    # One transaction for the whole import: all rows commit together or none do.
     ids = insert_payslips_bulk(recs)
     return {"filename": "payslip-import.json", "inserted": len(ids), "ids": ids}
 
@@ -159,7 +154,6 @@ async def payslip_upload_pdf(
     payslip_id: int,
     file: UploadFile = File(...),
 ) -> dict[str, Any]:
-    """Attach (or replace) the one PDF tied to this payslip entry."""
     if get_payslip(payslip_id) is None:
         raise HTTPException(status_code=404, detail="Payslip not found.")
     data = await file.read()
@@ -180,7 +174,6 @@ async def payslip_upload_pdf(
 
 @router.get("/api/payslip/{payslip_id}/pdf")
 def payslip_get_pdf(payslip_id: int) -> Response:
-    """Serve the payslip's PDF inline so the browser can render it."""
     key = f"payslip:pdf:{payslip_id}"
     cached = cache.get(key)
     if cached is not None:

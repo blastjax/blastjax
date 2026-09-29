@@ -1,6 +1,5 @@
 import type { PayslipRow } from "@/lib/api";
 
-/** Calendar year of April 1 that begins the med year containing this month. */
 export function medicalYearStartFromPeriod(
   periodYear: number,
   periodMonth: number,
@@ -14,7 +13,6 @@ function medicalYearStartFromDate(d: Date): number {
   return m >= 4 ? y : y - 1;
 }
 
-/** Which Apr-start med year this row counts toward (scheduled uses pay period; else `created_at`). */
 export function medicalBucketStartYear(r: PayslipRow): number | null {
   const py = r.period_year;
   const pm = r.period_month;
@@ -37,8 +35,6 @@ export function medicalBucketStartYear(r: PayslipRow): number | null {
   return null;
 }
 
-/** `year * 12 + (month - 1)` of the calendar month containing this pay period
- * (scheduled: period year/month; else created_at). */
 export function calendarMonthIndex(r: PayslipRow): number | null {
   const py = r.period_year;
   const pm = r.period_month;
@@ -61,13 +57,11 @@ export function calendarMonthIndex(r: PayslipRow): number | null {
   return null;
 }
 
-/** Calendar year containing this pay period (scheduled: period year; else created_at). */
 export function calendarYearForRow(r: PayslipRow): number | null {
   const t = calendarMonthIndex(r);
   return t == null ? null : Math.floor(t / 12);
 }
 
-/** Sum of withholding, SSS, Philhealth, Pag-ibig, MP2, and bereavement asst for one payslip row. */
 export function deductionsTotalFromRow(r: PayslipRow): number {
   const num = (v: number | null | undefined) =>
     v != null && Number.isFinite(v) ? v : 0;
@@ -81,7 +75,6 @@ export function deductionsTotalFromRow(r: PayslipRow): number {
   );
 }
 
-/** Gross pay: basic + commission minus statutory deductions (SSS, Philhealth, Pag-ibig). */
 export function grossTotalFromRow(r: PayslipRow): number {
   const num = (v: number | null | undefined) =>
     v != null && Number.isFinite(v) ? v : 0;
@@ -109,7 +102,6 @@ export function rowsForSlot(
   );
 }
 
-/** Neighbors in `rows` list order (matches ‹ › in details): older = next index, newer = previous. */
 export function detailPayslipNeighbors(
   rows: PayslipRow[],
   currentId: number,
@@ -120,24 +112,10 @@ export function detailPayslipNeighbors(
   return { older, newer };
 }
 
-/**
- * Per-row gross matching the year-stats Total card: net (`total`) plus the
- * deductions (see `deductionsTotalFromRow`). Returns ``null`` when ``total``
- * is missing so callers can skip empty slots rather than counting them as zero.
- */
 export function grossWithDeductionsFromRow(r: PayslipRow): number | null {
   if (r.total == null || !Number.isFinite(r.total)) return null;
   return r.total + deductionsTotalFromRow(r);
 }
-
-// ---------------------------------------------------------------------------
-// Single-pass index used by the calendar UI.
-//
-// Building this once per `rows` change replaces ~6 `rows.filter` passes per
-// month × 12 months × N years (in the previous design) with a single O(rows)
-// loop. Toggling unrelated UI state (e.g. show/hide gross) no longer
-// re-runs any of these aggregations, just re-reads the cached index.
-// ---------------------------------------------------------------------------
 
 export interface YearFieldSums {
   total: number;
@@ -157,45 +135,28 @@ export interface YearFieldSums {
 }
 
 export interface MonthSlot {
-  /** Scheduled rows with `period_half === 1`. */
   rows1: PayslipRow[];
-  /** Scheduled rows with `period_half === 2`. */
   rows2: PayslipRow[];
-  /** Sum of `total` across both halves; ``null`` when no row had a total. */
   netSum: number | null;
-  /** Sum of net + statutory deductions; ``null`` when no row had a total. */
   grossSum: number | null;
-  /** Sum of `total` for half 1; ``null`` when no row had a total. */
   netSum1: number | null;
-  /** Sum of `total` for half 2; ``null`` when no row had a total. */
   netSum2: number | null;
-  /** Sum of gross for half 1; ``null`` when no row had a total. */
   grossSum1: number | null;
-  /** Sum of gross for half 2; ``null`` when no row had a total. */
   grossSum2: number | null;
 }
 
 export interface YearSlots {
-  /** Months (1-12) → MonthSlot. Missing months have no scheduled rows. */
   months: Map<number, MonthSlot>;
-  /** Year-wide net sum across scheduled half-slots. ``null`` when none had totals. */
   netSum: number | null;
-  /** Year-wide gross sum across scheduled half-slots. ``null`` when none had totals. */
   grossSum: number | null;
-  /** Year stat-card field sums, one running total per payslip field. */
   fieldSums: YearFieldSums;
-  /** Number of scheduled half-slot rows in this calendar year (0..N). */
   paySlotCount: number;
 }
 
 export interface PayslipIndex {
-  /** Years the calendar should render (descending; always includes current year). */
   years: number[];
-  /** Per-year aggregates keyed by calendar year. */
   byYear: Map<number, YearSlots>;
-  /** Medical reimbursement totals keyed by April-start year (policy year). */
   medicalByPolicyYear: Map<number, number>;
-  /** Rows that don't fit a scheduled year/month/half slot. */
   unscheduled: PayslipRow[];
 }
 
@@ -224,7 +185,6 @@ const EMPTY_YEAR_SLOTS: YearSlots = Object.freeze({
   paySlotCount: 0,
 }) as YearSlots;
 
-/** Public accessor so callers don't have to manage the empty case themselves. */
 export function yearSlotsFromIndex(
   idx: PayslipIndex,
   year: number,
@@ -284,12 +244,6 @@ export function buildPayslipIndex(rows: PayslipRow[]): PayslipIndex {
     const py = r.period_year;
     const pm = r.period_month;
     const ph = r.period_half;
-    // A scheduled row needs period_year/month/half non-null and
-    // ``period_half`` in [1, 2]. ``period_month`` is *not* range-checked here,
-    // so a row with an out-of-range month still counts toward the year totals
-    // instead of vanishing from them. The calendar UI itself only iterates
-    // months 1–12, so any oddballs slotted into ``ys.months`` are simply
-    // never rendered.
     const isScheduledHalf =
       py != null &&
       Number.isFinite(py) &&

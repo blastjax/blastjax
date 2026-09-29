@@ -1,10 +1,3 @@
-"""Payslip default-template endpoints (Settings → Payslip defaults).
-
-Stores the two prefill templates (first-half / second-half) used when
-opening the payslip "add" / "new entry" modals, plus which of the two is
-currently active. Previously lived in browser localStorage only.
-"""
-
 from __future__ import annotations
 
 from typing import Any
@@ -18,8 +11,6 @@ from db import get_payslip_defaults, save_payslip_defaults
 
 router = APIRouter(tags=["payslip_default"], dependencies=[Depends(require_db)])
 
-# Matches the frontend's builtin fallback (payslipModalForm.ts) so a fresh
-# database and a fresh browser start out showing the same values.
 _BUILTIN = {"mp2": "5,000.00", "allowances": "1,108.30"}
 
 
@@ -68,9 +59,6 @@ def payslip_defaults_put(body: PayslipDefaultsUpsert) -> dict[str, Any]:
     save_payslip_defaults(
         company, body.form_first.model_dump(), body.form_second.model_dump(), body.settings_half
     )
-    # Echo back what was just saved instead of re-reading through the (not
-    # yet invalidated) cache — the app-wide write middleware busts it after
-    # this response returns.
     return {
         "formFirst": {**body.form_first.model_dump(), "period_half": "1"},
         "formSecond": {**body.form_second.model_dump(), "period_half": "2"},

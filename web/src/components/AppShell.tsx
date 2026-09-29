@@ -24,9 +24,6 @@ function MobileNavBackdrop() {
   );
 }
 
-/** Blocks direct navigation (typed URL, bookmark, back/forward) to a page
- * Settings → Users has hidden from this user — SidebarNav/Home already don't
- * link to it, but a URL still reaches it without this. */
 function usePageAccessGuard() {
   const pathname = usePathname();
   const router = useRouter();
@@ -44,9 +41,6 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
   const allowed = usePageAccessGuard();
 
   return (
-    // Scrolling happens at the document level so both the sidebar and the
-    // header can be plain `sticky` elements instead of fixed overlays the
-    // content has to be padded around.
     <div className="flex min-h-screen min-h-[100dvh] w-full bg-page">
       <SidebarNav />
       <MobileNavBackdrop />

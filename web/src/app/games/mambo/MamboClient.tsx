@@ -48,18 +48,11 @@ const CIRCLE_COLOR = "#6366f1";
 const SQUARE_COLOR = "#f59e0b";
 
 const MAX_BOARD_PX = 560;
-/** Reserved space around the board in full-screen mode: the fixed-width side
- * panel (+ gaps/padding) horizontally, the compact header vertically. Both
- * edges carry labels, so each axis gives up two of them. */
 const ROW_LABEL_W = 26;
 const COL_LABEL_H = 18;
 const FULLSCREEN_RESERVE_W = 380 + 2 * ROW_LABEL_W;
 const FULLSCREEN_RESERVE_H = 170 + 2 * COL_LABEL_H;
-/** Below this the settings panel stacks above the board instead of beside it
- * (see layoutClasses) — matches Tailwind's `lg` breakpoint. */
 const STACKED_LAYOUT_MAX_WIDTH = 1024;
-/** Page padding + row-label column + board border, reserved when sizing the
- * board to the viewport outside full-screen mode. */
 const STACKED_RESERVE_W = 80;
 
 type Busy = "solve" | "steps" | "hint" | null;
@@ -78,8 +71,6 @@ function techniqueLabel(technique: string): string {
   return TECHNIQUE_LABELS[technique] ?? technique;
 }
 
-/** Always holds the latest value, for reading fresh state from inside a
- * setInterval callback without recreating the interval every render. */
 function useLatest<T>(value: T) {
   const ref = useRef(value);
   useEffect(() => {
@@ -99,7 +90,6 @@ function useWindowSize() {
   return size;
 }
 
-/** The two symbols, drawn at a size relative to the cell they sit in. */
 function SymbolMark({ value, faded }: { value: number; faded: boolean }) {
   if (value === EMPTY) return null;
   const circle = value === CIRCLE;
@@ -110,8 +100,6 @@ function SymbolMark({ value, faded }: { value: number; faded: boolean }) {
         width: circle ? "62%" : "58%",
         height: circle ? "62%" : "58%",
         background: circle ? CIRCLE_COLOR : SQUARE_COLOR,
-        // Cells the solver filled in stay visibly lighter than the puzzle's
-        // own clues, the way a pencilled-in answer would.
         opacity: faded ? 0.72 : 1,
       }}
     />
@@ -122,8 +110,6 @@ export default function MamboClient() {
   const [rows, setRows] = useState(8);
   const [cols, setCols] = useState(8);
 
-  /** The board as configured: EMPTY everywhere not yet given a clue. `grid`
-   * starts as a copy and only diverges once a solve fills in the rest. */
   const [puzzle, setPuzzle] = useState<Grid>(() => emptyGrid(8, 8));
   const [grid, setGrid] = useState<Grid>(() => emptyGrid(8, 8));
   const [hSigns, setHSigns] = useState<SignGrid>(() => emptyHSigns(8, 8));
@@ -187,8 +173,6 @@ export default function MamboClient() {
     [puzzle, hSigns, vSigns],
   );
 
-  /** Any change to the board makes a fetched solution stale, since every step
-   * was derived from the exact state it was requested for. */
   const invalidateSteps = useCallback(() => {
     stopPlaying();
     setSteps(null);
@@ -246,7 +230,6 @@ export default function MamboClient() {
     invalidateSteps();
   }
 
-  /** Clears any revealed solution or walkthrough fills, back to just the clues. */
   function resetBoard() {
     setGrid(cloneGrid(puzzle));
     invalidateSteps();
@@ -268,8 +251,6 @@ export default function MamboClient() {
       const signCount =
         result.hSigns.flat().filter((s) => s !== SIGN_NONE).length +
         result.vSigns.flat().filter((s) => s !== SIGN_NONE).length;
-      // Three outcomes worth telling apart: the level asked for, a level the
-      // generator settled for, and a level it never got to confirm.
       const levelText = result.exactMatch
         ? result.difficulty
         : !result.difficultyConfirmed
@@ -319,8 +300,6 @@ export default function MamboClient() {
     }
   }
 
-  /** Fetches the forced-cell walkthrough for the board as it stands. Returns
-   * the steps so `hint` can apply the first one immediately. */
   async function fetchSteps(kind: "steps" | "hint"): Promise<MamboStep[] | null> {
     stopPlaying();
     setBusy(kind);
@@ -472,14 +451,9 @@ export default function MamboClient() {
       windowSize.width > 0 &&
       windowSize.width < STACKED_LAYOUT_MAX_WIDTH
     ) {
-      // Below `lg` the board no longer sits beside the settings panel — it's
-      // full width on its own row — so size it to the viewport instead of
-      // always rendering at the desktop-sized default, which overflowed the
-      // screen on phones.
       boardPx = Math.min(MAX_BOARD_PX, Math.max(160, windowSize.width - STACKED_RESERVE_W));
     }
     const n = Math.max(rows, cols);
-    // n cells plus (n - 1) gaps, each gap ~0.3 of a cell.
     const cell = Math.min(54, Math.max(16, Math.floor(boardPx / (n + 0.3 * (n - 1)))));
     return { cellPx: cell, gapPx: Math.min(16, Math.max(7, Math.round(cell * 0.3))) };
   }, [rows, cols, fullscreen, windowSize]);
@@ -499,8 +473,6 @@ export default function MamboClient() {
     [rows, cellPx, gapPx],
   );
 
-  /** Per-line tint for the edge labels: red when a symbol overflows its half,
-   * green once the line is full and even. */
   const lineState = useCallback(
     (counts: [number, number], length: number) => {
       const half = length / 2;
@@ -511,8 +483,6 @@ export default function MamboClient() {
     [],
   );
 
-  // The board sits on its own white panel in both themes, so its labels,
-  // cells and signs keep their light-mode colours throughout.
   const labelClass = (state: string) =>
     `flex items-center justify-center overflow-hidden text-[10px] font-medium ${
       state === "over"
@@ -522,8 +492,6 @@ export default function MamboClient() {
           : "text-ink-3"
     }`;
 
-  /** Edge labels, rendered on both sides of each axis so a line's number is
-   * reachable from whichever end you're reading from. */
   const colLabels = (
     <div className="flex" style={{ paddingLeft: ROW_LABEL_W, gap: gapPx }}>
       {Array.from({ length: cols }, (_, c) => (
@@ -870,11 +838,6 @@ export default function MamboClient() {
             </div>
           )}
 
-          {/* The board itself stays a white "paper" panel in both themes (see
-              SymbolMark / labelClass) so its labels and pieces keep their
-              light-mode colours — but it sits inside a dark-aware bezel so it
-              reads as an intentional inset on AMOLED instead of an unstyled
-              white rectangle floating on black. */}
           <div className="max-w-full rounded-lg border border-line bg-surface-2 p-2">
             <div className="flex max-w-full flex-col items-start overflow-x-auto rounded-md bg-surface p-3 ring-1 ring-black/10">
               {colLabels}
@@ -984,7 +947,6 @@ export default function MamboClient() {
   );
 }
 
-/** The gap between two neighbouring cells, which holds their = or ✕ sign. */
 function SignSlot({
   sign,
   bad,

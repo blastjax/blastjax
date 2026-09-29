@@ -1,13 +1,3 @@
-/**
- * The app's icon set — hand-rolled inline SVG rather than an icon package,
- * so the shell stays dependency-free and every glyph shares one grid.
- *
- * House rules: 24-unit viewBox, 1.5 stroke, round caps/joins, `currentColor`
- * for both stroke and fill. Size comes from the `className` (`size-5`), never
- * from hardcoded width/height, so a single icon works in nav, buttons, and
- * stat tiles without variants.
- */
-
 export type IconProps = {
   className?: string;
 };
@@ -32,8 +22,6 @@ function Svg({
     </svg>
   );
 }
-
-/* ---------------------------------------------------------------- Navigation */
 
 export function CalendarIcon(p: IconProps) {
   return (
@@ -186,8 +174,6 @@ export function SettingsIcon(p: IconProps) {
   );
 }
 
-/* -------------------------------------------------------------------- Chrome */
-
 export function MenuIcon(p: IconProps) {
   return (
     <Svg {...p}>
@@ -295,8 +281,6 @@ export function SidebarToggleIcon(p: IconProps) {
     </Svg>
   );
 }
-
-/* -------------------------------------------------------------------- Actions */
 
 export function PencilIcon(p: IconProps) {
   return (

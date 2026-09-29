@@ -61,10 +61,8 @@ import {
   PAYSLIP_TEXT_INK,
 } from "./payslipTheme";
 
-/** localStorage key for the show/hide-gross toggle on the calendar. */
 const LS_PAYSLIP_SHOW_GROSS = "blastjax:payslip:showGross";
 
-/** Outline eye icon (visible state). */
 function EyeIcon({ className = "h-4 w-4" }: { className?: string }) {
   return (
     <svg
@@ -83,7 +81,6 @@ function EyeIcon({ className = "h-4 w-4" }: { className?: string }) {
   );
 }
 
-/** Outline eye-with-slash icon (hidden state). */
 function EyeOffIcon({ className = "h-4 w-4" }: { className?: string }) {
   return (
     <svg
@@ -113,10 +110,7 @@ export default function PayslipClient({ company = "Sophos" }: { company?: string
   const [nav, setNav] = useState<Nav | null>(null);
   const [modalForm, setModalForm] = useState<FormState>(emptyForm());
   const [showGross, setShowGross] = useState(true);
-  // Bulk/less-common actions tucked behind one toggle instead of competing
-  // with the page's actual content for attention (same pattern as Lotto).
   const [showDataTools, setShowDataTools] = useState(false);
-  // Shared by the stats stepper and the calendar so both show the same year.
   const [year, setYear] = useState(() => new Date().getFullYear());
   const modalFormRef = useRef(modalForm);
   modalFormRef.current = modalForm;
@@ -128,7 +122,6 @@ export default function PayslipClient({ company = "Sophos" }: { company?: string
       const raw = localStorage.getItem(LS_PAYSLIP_SHOW_GROSS);
       if (raw === "0" || raw === "false") setShowGross(false);
     } catch {
-      /* ignore */
     }
   }, []);
 
@@ -136,7 +129,6 @@ export default function PayslipClient({ company = "Sophos" }: { company?: string
     try {
       localStorage.setItem(LS_PAYSLIP_SHOW_GROSS, showGross ? "1" : "0");
     } catch {
-      /* ignore */
     }
   }, [showGross]);
 
@@ -153,13 +145,6 @@ export default function PayslipClient({ company = "Sophos" }: { company?: string
     }
   }, [company]);
 
-  /**
-   * Patch the in-memory ``rows`` list instead of re-fetching all 2000 rows
-   * after every save. Updates keep their current array position; new rows
-   * are prepended (matches the server's newest-first ordering for fresh
-   * inserts). Callers should pass the row exactly as the server returned
-   * it, including its server-set ``created_at``.
-   */
   const upsertRow = useCallback((row: PayslipRow) => {
     setRows((rs) => {
       const i = rs.findIndex((r) => r.id === row.id);
@@ -174,7 +159,6 @@ export default function PayslipClient({ company = "Sophos" }: { company?: string
     setRows((rs) => rs.filter((r) => r.id !== id));
   }, []);
 
-  /** Keep the in-memory row's `has_pdf` flag current after a PDF upload/remove. */
   const setRowPdfFlag = useCallback((id: number, hasPdf: boolean) => {
     setRows((rs) =>
       rs.map((r) => (r.id === id ? { ...r, has_pdf: hasPdf } : r)),
@@ -189,17 +173,9 @@ export default function PayslipClient({ company = "Sophos" }: { company?: string
     getCompanies()
       .then((r) => setCompanies(r.companies))
       .catch(() => {
-        /* the company select just falls back to showing the row's own
-         * value (see PayslipFormFields) if this never loads */
       });
   }, []);
 
-  /**
-   * Warm each payslip's PDF (browser HTTP cache + backend Redis cache) as
-   * soon as the list loads, so opening a payslip's detail modal later
-   * doesn't wait on the first fetch. Fire-and-forget; dedup by id so
-   * re-renders (e.g. `setRowPdfFlag`) don't re-warm the same PDF.
-   */
   const warmedPdfIdsRef = useRef<Set<number>>(new Set());
   useEffect(() => {
     for (const row of rows) {
@@ -220,9 +196,6 @@ export default function PayslipClient({ company = "Sophos" }: { company?: string
     }
   };
 
-  /** Data tools' "+ Add payslip" — opens the add modal without a calendar
-   * slot to anchor it to, so period year/month/half start editable (today's
-   * date is just a starting point, not a lock). */
   const openAddPayslipFreeform = () => {
     const today = new Date();
     const half: 1 | 2 = today.getDate() <= 15 ? 1 : 2;
@@ -293,10 +266,6 @@ export default function PayslipClient({ company = "Sophos" }: { company?: string
     setError(null);
     try {
       const body = formToCreateBody(modalForm);
-      // The period fields are editable when the modal was opened freeform
-      // (Data tools), so what actually gets saved can differ from the slot
-      // the modal was opened for — check for a collision, and navigate back,
-      // against what's in the form rather than the original nav.
       const year = body.period_year ?? nav.year;
       const month = body.period_month ?? nav.month;
       const half = (body.period_half ?? nav.half) as 1 | 2;
@@ -319,7 +288,6 @@ export default function PayslipClient({ company = "Sophos" }: { company?: string
     }
   };
 
-  /** Prefill form for the "add" nav screen given a defaults bundle; `null` for any other screen. */
   const formForNavDefaults = useCallback(
     (n: Nav, b: PayslipDefaultsBundle): FormState | null => {
       if (n.screen === "add") {
@@ -336,7 +304,6 @@ export default function PayslipClient({ company = "Sophos" }: { company?: string
     [company],
   );
 
-  // Sync modal form when entering edit/add (restore session draft if present)
   useEffect(() => {
     if (!nav) return;
     if (nav.screen === "edit") {
@@ -355,9 +322,6 @@ export default function PayslipClient({ company = "Sophos" }: { company?: string
     }
   }, [nav, formForNavDefaults, company]);
 
-  // The in-memory defaults cache starts out as builtin fallback values until
-  // this resolves — fetch once on mount and re-apply to an already-open
-  // add modal so it doesn't stay stuck showing the fallback.
   useEffect(() => {
     void refreshPayslipDefaultsBundle(company).then((b) => {
       const n = navRef.current;
@@ -410,11 +374,6 @@ export default function PayslipClient({ company = "Sophos" }: { company?: string
   }, [nav, rows]);
 
   const index = useMemo(() => buildPayslipIndex(rows), [rows]);
-  // Year stepper range: first → last payslip year, stretched to include the
-  // current year except for a past employer. (`index.years` always injects
-  // the current year, so keep only years that actually hold payslips.)
-  // ponytail: past employer matched by name; make it a Settings → Companies
-  // flag if another company needs it.
   const currentYear = new Date().getFullYear();
   const dataYears = index.years.filter((y) => index.byYear.has(y));
   const rangeYears =
@@ -424,7 +383,6 @@ export default function PayslipClient({ company = "Sophos" }: { company?: string
   const minYear = Math.min(...rangeYears);
   const maxYear = Math.max(...rangeYears);
   const shownYear = Math.min(maxYear, Math.max(minYear, year));
-  // Wheel over the year calendar pages years (up = previous, down = next).
   const yearWheelRef = useWheelStep((dir) =>
     setYear(Math.min(maxYear, Math.max(minYear, shownYear + dir))),
   );

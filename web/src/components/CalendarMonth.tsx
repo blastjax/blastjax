@@ -4,7 +4,6 @@ import { ChevronLeftIcon, ChevronRightIcon } from "@/components/Icons";
 import { ICON_BUTTON_CLASSES } from "@/lib/ui";
 import { MONTH_NAMES_FULL, toIsoDateLocal } from "@/lib/dateFormat";
 
-/** `anchor`: a reference day drawn as a ring, e.g. an end-date picker's start date. */
 export type DayState = "none" | "today" | "anchor" | "selected" | "range-start" | "range-end" | "range-middle";
 
 const WEEKDAY_LABELS = ["S", "M", "T", "W", "T", "F", "S"];
@@ -20,28 +19,16 @@ function shiftIso(iso: string, days: number): string {
 
 export type CalendarMonthProps = {
   year: number;
-  /** 1-12 */
   month: number;
   onSelectDay: (iso: string) => void;
   dayState: (iso: string) => DayState;
-  /** Omit to hide that arrow (its slot stays reserved so the title stays centered) —
-   * used to put a single prev/next pair on the outer edges of a multi-month picker. */
   onPrev?: () => void;
   onNext?: () => void;
-  /** Days this returns `true` for render dimmed and can't be picked — e.g.
-   * restricting a trip's day picker to dates within the trip's own range. */
   disabledDay?: (iso: string) => boolean;
-  /** Days to tint as a soft band (e.g. a trip's dates). A selected range
-   * draws over it. */
   highlightDay?: (iso: string) => boolean;
-  /** Called with the day under the pointer (or keyboard focus), and `null`
-   * when it leaves the grid — lets a range picker preview the span. */
   onHoverDay?: (iso: string | null) => void;
 };
 
-/** One month's day grid: header (title + optional prev/next) and a 7-column grid of
- * day cells. Used standalone for a single-date picker, or side by side (each with
- * only one of the nav arrows) for a range picker. */
 export function CalendarMonth({
   year,
   month,
@@ -106,8 +93,6 @@ export function CalendarMonth({
           const isCap = state === "selected" || state === "range-start" || state === "range-end";
           const inRangeBg = state === "range-middle" || state === "range-start" || state === "range-end";
           const hl = !inRangeBg && !disabled && !!highlightDay?.(iso);
-          // Both bands are continuous strips, rounded where they start/stop
-          // and at the week's edges.
           const bgClasses = inRangeBg
             ? [
                 "bg-indigo-100 dark:bg-indigo-800/60",

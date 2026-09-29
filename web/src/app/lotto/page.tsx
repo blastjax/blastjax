@@ -15,9 +15,6 @@ import {
 import { formatDate, toIsoDateLocal } from "@/lib/dateFormat";
 import { fmtCount, fmtJackpotCompact } from "@/lib/formatNumber";
 
-/** PCSO's fixed weekly draw schedule per game (`Date.getDay()`: 0=Sunday..
- * 6=Saturday) — real-world scheduling, not something anyone edits from this
- * app, so it lives as a UI constant rather than a database column. */
 const DRAW_SCHEDULE: Record<string, number[]> = {
   "Ultra Lotto 6/58": [0, 2, 5],
   "Grand Lotto 6/55": [1, 3, 6],
@@ -26,9 +23,6 @@ const DRAW_SCHEDULE: Record<string, number[]> = {
   "Lotto 6/42": [2, 4, 6],
 };
 
-/** "Today"/"Tomorrow", or the next scheduled draw date's `formatDate`
- * display — null for a game with no known schedule (so the card just omits
- * the line). */
 function nextDrawLabel(gameName: string): string | null {
   const schedule = DRAW_SCHEDULE[gameName];
   if (!schedule || schedule.length === 0) return null;
@@ -55,20 +49,8 @@ import {
   SECONDARY_BUTTON_CLASSES,
 } from "@/lib/ui";
 
-/** One game's slice of a mixed paste: the game it routes to, and the rows
- * addressed to it, verbatim. */
 type RoutedRows = { game: LottoGame; lines: string[] };
 
-/** Splits a results paste across games by its leading game-name column.
- *
- * The results site lists a day's draws in one table — 6/42 through 6/58
- * alongside the 2D/3D/4D/6D games this app doesn't track — so a paste
- * arrives mixed. The name before the first tab picks the game; a row naming
- * something untracked (`3D Lotto 2PM`) is discarded, as is a row with no
- * name column at all, since there's nothing to route it by. The rest of the
- * row is passed through untouched for the server's parser, which discards
- * the name column itself.
- */
 function routeRowsByGame(
   text: string,
   games: LottoGame[],
@@ -89,7 +71,6 @@ function routeRowsByGame(
     slice.lines.push(line);
     routed.set(game.id, slice);
   }
-  // Card order, so the summary reads in the same order as the page.
   return { routed: games.flatMap((g) => routed.get(g.id) ?? []), discarded };
 }
 
@@ -99,9 +80,6 @@ type ImportSummary = {
   errors: string[];
 };
 
-/** `/lotto` picks a game first — each one keeps its own draws and attempts,
- * all through the same page underneath. Data tools here works across games:
- * one paste of a day's results table loads every game it names. */
 export default function LottoGamesPage() {
   const [games, setGames] = useState<LottoGame[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -129,8 +107,6 @@ export default function LottoGamesPage() {
     void load();
   }, []);
 
-  /** pcso.gov.ph is only ever asked from this button — never on page load —
-   * so its bot protection sees a request only when you want one. */
   const updateResults = async () => {
     setSyncing(true);
     setSyncNote(null);
@@ -167,10 +143,6 @@ export default function LottoGamesPage() {
     setImportSummary(null);
   };
 
-  /** Imports a mixed paste through the per-game endpoint that already
-   * exists (`POST /api/lotto/import-text`), one call per game the paste
-   * actually names — upsert-by-date there means re-pasting a day's table
-   * backfills jackpot/winners rather than duplicating draws. */
   const submitImport = async (e: React.FormEvent) => {
     e.preventDefault();
     setImportError(null);

@@ -28,7 +28,6 @@ import {
 } from "@/components/StatsPage";
 import { buildForecast, monthlyCommission, type MonthValue } from "./commissionForecast";
 
-/** One line color per year, oldest first; cycles past six years. */
 const YEAR_COLORS = ["#60a5fa", "#fb923c", "#2dd4bf", "#fbbf24", "#f472b6", "#4ade80"];
 
 const HORIZONS = [
@@ -116,12 +115,9 @@ function CommissionView({ company, hist }: { company: string; hist: MonthValue[]
   const byIndex = useMemo(() => new Map(hist.map((d) => [d.y * 12 + d.m, d.v])), [hist]);
   const cv = (y: number, m: number) => byIndex.get(y * 12 + m) ?? null;
   const fc = useMemo(() => buildForecast(hist, h), [hist, h]);
-  // Heatmap always forecasts through next December so year totals are full-year
-  // projections; each month trends independently, so overlap matches `fc`.
   const hfc = useMemo(() => buildForecast(hist, 23 - last.m), [hist, last.m]);
   const years = [...new Set(hist.map((d) => d.y))];
 
-  /* ---- KPIs ---- */
   const f0 = fc[0]!;
   const fLast = fc[fc.length - 1]!;
   const ly0 = cv(f0.y - 1, f0.m);
@@ -152,8 +148,6 @@ function CommissionView({ company, hist }: { company: string; hist: MonthValue[]
     { label: "Monthly average", value: fmt(avg), sub: `All-time, across ${hist.length} months` },
   ];
 
-  /* ---- Trend & forecast chart ---- */
-  // Stepper range: first → latest payslip year (forecast-only years excluded).
   const cy = Math.min(cYear, last.y);
   const yMode = cRange === "Year";
   const hs = yMode
@@ -186,7 +180,6 @@ function CommissionView({ company, hist }: { company: string; hist: MonthValue[]
     setCYear(y);
     setCHover(null);
   };
-  // Wheel over the trend chart pages years while it's in Year view.
   const trendWheelRef = useWheelStep(
     yMode
       ? (dir) => {
@@ -196,7 +189,6 @@ function CommissionView({ company, hist }: { company: string; hist: MonthValue[]
       : null,
   );
 
-  /* ---- Heatmap + seasonal lines ---- */
   const hmx = Math.max(1, ...hist.map((d) => d.v));
   const LH = 300, lpl = 52, lpr = 12, lpt = 10, lpb = 30;
   const liw = LW - lpl - lpr, lih = LH - lpt - lpb;

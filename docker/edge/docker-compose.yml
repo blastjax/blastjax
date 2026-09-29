@@ -1,29 +1,14 @@
-# Shared reverse proxy for every site hosted on the Lightsail instance
-# (blastjax, portfolio-film, icrc). It is the only thing that binds host ports
-# 80/443: it terminates TLS for all of them (auto-provisions and renews each
-# domain's Let's Encrypt cert) and forwards to each app over the external
-# `edge` Docker network. See docker/edge/README.md.
-#
-# This repo owns it - the blastjax deploy installs and starts it - but the
-# other repos' deploys only ever add their own site block to it through
-# /srv/edge/bin/edge-install, never touch this file.
 name: edge
 
 services:
   caddy:
     image: caddy:2-alpine
-    # Fixed name so edge-install and the other repos' deploy scripts can
-    # `docker exec` into it without knowing where this compose file lives.
     container_name: edge-caddy
     restart: always
     ports:
       - "80:80"
       - "443:443"
     volumes:
-      # A directory bind mount, not single files: installing a new Caddyfile or
-      # site block replaces the file (new inode), which a single-file mount
-      # wouldn't see. With the whole directory mounted a `caddy reload` picks
-      # up the new file, so sites are added and changed without a restart.
       - ${EDGE_DIR:-/srv/edge}/caddy:/etc/caddy:ro
       - caddy_data:/data
       - caddy_config:/config
@@ -31,10 +16,6 @@ services:
       - edge
 
 networks:
-  # Created by the deploy scripts (`docker network create edge`). Each app
-  # joins it through its own docker-compose.edge.yml under a unique alias
-  # (blastjax-web, portfolio-web, icrc-web, ...), which is what the site blocks
-  # proxy to.
   edge:
     external: true
 

@@ -1,4 +1,3 @@
-"""Installment / loan schedules."""
 from __future__ import annotations
 from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -84,7 +83,6 @@ def installment_list(
 def installment_schedules(
     limit: int = Query(default=500, ge=1, le=2000),
 ) -> dict[str, Any]:
-    """All plans with their schedule lines in one response (payments-by-month view)."""
     key = f"installment:schedules:{limit}"
     hit = cache.get(key)
     if hit is not None:
@@ -165,7 +163,6 @@ def installment_lines_bulk_update(
     installment_id: int,
     body: InstallmentLinesBulkUpdate,
 ) -> dict[str, Any]:
-    """Update principal/interest for many schedule rows in a single round trip."""
     row = get_installment(installment_id)
     if not row:
         raise HTTPException(status_code=404, detail="Installment not found.")
@@ -189,7 +186,6 @@ def installment_lines_reorder(
     installment_id: int,
     body: InstallmentLinesReorder,
 ) -> dict[str, Any]:
-    """Reorder schedule rows (month order); renumbers ``seq`` and recomputes aggregates."""
     if not get_installment(installment_id):
         raise HTTPException(status_code=404, detail="Installment not found.")
     detail = reorder_installment_lines(installment_id, body.line_ids)
@@ -232,7 +228,6 @@ def installment_remove(installment_id: int) -> dict[str, Any]:
 
 @router.post("/api/installment/{installment_id}/pay")
 def installment_pay(installment_id: int) -> dict[str, Any]:
-    """Record one payment: reduces remaining and advances installment_current."""
     row = installment_apply_payment(installment_id)
     if not row:
         raise HTTPException(

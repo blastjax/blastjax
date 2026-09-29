@@ -1,5 +1,3 @@
-"""Payslip default-template API models (Settings → Payslip defaults)."""
-
 from __future__ import annotations
 
 from typing import Literal

@@ -1,14 +1,7 @@
-"""Company management API models (Settings → Companies). See app/routers/company.py."""
-
 from __future__ import annotations
 
 from pydantic import BaseModel, Field, model_validator
 
-# Every per-company column-visibility toggle. Keep this in sync with
-# db._COMPANY_FLAG_COLUMNS -- income-side fields first (the main grid in
-# PayslipFormFields), then deduction-side fields (the "Deductions" aside).
-# All default to shown (matches every column's behavior before this toggle
-# existed), except show_bereavement_asst.
 _FLAG_DEFAULTS: dict[str, bool] = {
     "show_total": True,
     "show_basic_salary": True,
@@ -23,7 +16,7 @@ _FLAG_DEFAULTS: dict[str, bool] = {
     "show_philhealth": True,
     "show_pag_ibig": True,
     "show_mp2": True,
-    # Off by default: only some companies (Questronix) have this deduction.
+
     "show_bereavement_asst": False,
 }
 
@@ -45,8 +38,6 @@ class _CompanyColumnFlags(BaseModel):
     show_bereavement_asst: bool = _FLAG_DEFAULTS["show_bereavement_asst"]
 
     def flags_dict(self) -> dict[str, bool]:
-        """This model's flags, keyed by column name -- ``db.insert_company``/
-        ``update_company``'s ``flags`` argument."""
         return {k: getattr(self, k) for k in _FLAG_DEFAULTS}
 
 
@@ -71,6 +62,4 @@ class CompanyUpdate(_CompanyColumnFlags):
 
 
 class CompanyReorder(BaseModel):
-    """Every company id, in the desired display order (top to bottom)."""
-
     ids: list[int] = Field(..., min_length=1)

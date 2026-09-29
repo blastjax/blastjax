@@ -8,15 +8,6 @@ import {
 } from "@/components/Icons";
 import { formatMonthYear } from "@/lib/dateFormat";
 
-/**
- * Building blocks shared by the money pages (Calendar, Monthly Expenses,
- * Credit Card, Installments, House Payments), so the five read as one
- * product: a panel with a title row, a divided strip of headline numbers,
- * a meter, and one modal layout (header / scrolling body / footer).
- *
- * Colors are the semantic tokens from globals.css only.
- */
-
 type Tone = "neutral" | "brand" | "success" | "warning" | "danger";
 
 const TEXT_TONE: Record<Tone, string> = {
@@ -43,7 +34,6 @@ const PILL_TONE: Record<Tone, string> = {
   danger: "bg-danger-soft text-danger-text ring-danger/20",
 };
 
-/** A titled card. `flush` drops the body padding for edge-to-edge lists. */
 export function Panel({
   title,
   subtitle,
@@ -83,8 +73,6 @@ export function Panel({
   );
 }
 
-/** Headline numbers in one card, divided by hairlines. Pick `className` grid
- * columns so every row is full (an empty cell shows the divider color). */
 export function StatStrip({ className = "", children }: { className?: string; children: ReactNode }) {
   return (
     <div
@@ -120,7 +108,6 @@ export function Metric({
   );
 }
 
-/** Progress bar; `value` is a 0–1 fraction (clamped). */
 export function Meter({
   value,
   tone = "brand",
@@ -160,7 +147,6 @@ export function Pill({ tone = "neutral", children }: { tone?: Tone; children: Re
   );
 }
 
-/** Row-level edit/delete as an icon button with an accessible name. */
 export function IconAction({
   kind,
   label,
@@ -194,7 +180,6 @@ export function IconAction({
   );
 }
 
-/** ‹ Month Year › stepper. */
 export function MonthStepper({
   year,
   month,
@@ -228,7 +213,6 @@ export function MonthStepper({
   );
 }
 
-/** Form field: label above, control, optional hint below. */
 export function Field({
   label,
   hint,
@@ -249,14 +233,11 @@ export function Field({
   );
 }
 
-/** Low-emphasis text buttons: brand for "+ Add …" row links, danger for a
- * modal footer's delete (pushed left, away from Save). */
 export const TEXT_BUTTON_CLASSES =
   "inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm font-medium text-brand-text transition-colors duration-150 hover:bg-brand-soft disabled:opacity-50";
 export const DANGER_TEXT_BUTTON_CLASSES =
   "mr-auto rounded-lg px-2 py-1.5 text-sm font-medium text-danger-text transition-colors duration-150 hover:bg-danger-soft disabled:opacity-50";
 
-/** Dialog shell for `<Modal dialogClassName>` — add a `max-w-*`. */
 export const DIALOG_CLASSES =
   "flex max-h-[90vh] w-full flex-col overflow-hidden rounded-2xl border border-line bg-surface shadow-pop";
 export const DIALOG_BODY_CLASSES = "min-h-0 flex-1 overflow-y-auto px-5 py-5 sm:px-6";
@@ -294,7 +275,6 @@ export function ModalHeader({
   );
 }
 
-/** Placeholder blocks while a page's first fetch is in flight. */
 export function LoadingBlocks({ label, rows = 2 }: { label: string; rows?: number }) {
   return (
     <div role="status" className="flex flex-col gap-4">

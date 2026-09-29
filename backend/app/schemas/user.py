@@ -1,5 +1,3 @@
-"""App user management API models (settings-only for now — see app/routers/user.py)."""
-
 from __future__ import annotations
 
 from pydantic import BaseModel, Field, model_validator
@@ -30,19 +28,10 @@ class AppUserUpdate(BaseModel):
 
 
 class AppUserAccessUpdate(BaseModel):
-    """Which nav pages (hrefs from web/src/lib/nav.ts) a user can see.
-    Replaces the stored set wholesale — not a partial patch like
-    ``AppUserUpdate`` — since Settings → Users always submits the full
-    checkbox state at once."""
-
     is_superuser: bool
     allowed_pages: list[str] | None = None
 
 
 class AppUserVerify(BaseModel):
-    """Checked against the stored hash, not used to authenticate a session —
-    just lets Settings confirm a password was saved correctly. No minimum
-    length: a too-short guess should come back ``valid: false``, not a 422."""
-
     username: str = Field(..., min_length=1, max_length=100)
     password: str = Field(..., min_length=1, max_length=200)

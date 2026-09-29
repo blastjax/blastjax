@@ -1,13 +1,3 @@
-"""Travel trip API models.
-
-A trip spans a real start/end date range and holds a list of cities visited
-plus four kinds of nested records: flights, ground transport (bus/train),
-itinerary items, and accommodations. Locations on itinerary/accommodation
-rows (and a flight's or transport leg's origin/destination) carry an
-optional custom Google Maps link; when one isn't set, the frontend builds a
-maps search link from the location's name instead.
-"""
-
 from __future__ import annotations
 
 import datetime as dt
@@ -24,13 +14,6 @@ def _clean_optional(v: str | None) -> str | None:
 
 
 def _blank_time_to_none(v: object) -> object:
-    """Let an empty or whitespace-only string mean "no time".
-
-    Runs before Pydantic parses the value, because the time fields are typed
-    ``dt.time`` now that the columns are real TIME: clearing the field in the
-    UI sends ``""``, which would otherwise fail validation instead of unsetting
-    the value the way it did when these were plain strings.
-    """
     if isinstance(v, str):
         return v.strip() or None
     return v
@@ -86,15 +69,11 @@ class TravelCityCreate(BaseModel):
 class TravelFlightCreate(BaseModel):
     flight_number: str = Field(min_length=1)
     flight_date: dt.date | None = None
-    # Set only when the flight lands on a later calendar date than it departs
-    # (an overnight/red-eye) — None means it lands the same day.
     arrival_date: dt.date | None = None
     departure_time: dt.time | None = None
     arrival_time: dt.time | None = None
     from_location: str | None = None
     from_map_url: str | None = None
-    # City/country the maps link resolved to, if it was one -- used to build
-    # a "City, Country" calendar title instead of the full place name.
     from_city: str | None = None
     from_country: str | None = None
     to_location: str | None = None
@@ -102,8 +81,6 @@ class TravelFlightCreate(BaseModel):
     to_city: str | None = None
     to_country: str | None = None
     notes: str | None = None
-    # Booking details. `title` is an optional display name; the UI falls
-    # back to "From → To" when it's unset.
     title: str | None = None
     airline: str | None = None
     seat: str | None = None
@@ -152,15 +129,9 @@ class TravelFlightCreate(BaseModel):
 
 
 class TravelTransportCreate(BaseModel):
-    """A bus, train, or ferry leg — same shape as a flight, plus a mode, with
-    the number optional since a bus/ferry route isn't always known/labeled
-    the way a flight number is."""
-
     mode: Literal["bus", "train", "ferry"]
     number: str | None = None
     travel_date: dt.date | None = None
-    # Set only when the leg arrives on a later calendar date than it departs
-    # (an overnight train/ferry) — None means it arrives the same day.
     arrival_date: dt.date | None = None
     departure_time: dt.time | None = None
     arrival_time: dt.time | None = None
@@ -216,8 +187,6 @@ class TravelTransportCreate(BaseModel):
 
 class TravelItineraryCreate(BaseModel):
     item_date: dt.date
-    # Optional — set only when the item spans past its start date (an
-    # overnight train, a multi-day trek). None means a same-day item.
     item_end_date: dt.date | None = None
     start_time: dt.time | None = None
     end_time: dt.time | None = None

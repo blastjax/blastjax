@@ -39,7 +39,7 @@ Personal dashboard app: browse and edit transactions in a web UI, with calendar 
    cp .env.example .env
    ```
 
-   Set `DATABASE_URL` to your Neon Postgres connection string, using the *pooled* endpoint (the host containing `-pooler`). Startup verifies the expected tables exist and fails loudly if they don't; [`backend/schema.py`](backend/schema.py) owns the schema and its `create_all()` builds it on an empty database.
+   Set `DATABASE_URL` to your Neon Postgres connection string, using the *pooled* endpoint (the host containing `-pooler`). Startup verifies the expected tables exist and fails loudly if they don't; [`backend/schema.py`](backend/schema.py) defines the schema as SQLAlchemy models and its `create_all()` builds it on an empty database.
 
 4. **Frontend dependencies**
 

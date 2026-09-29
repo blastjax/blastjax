@@ -51,7 +51,6 @@ const emptyPlanForm: PlanForm = { name: "", notes: "" };
 type EntryForm = { paid_on: string; amount: string };
 const emptyEntryForm = (): EntryForm => ({ paid_on: toIsoDateLocal(new Date()), amount: "" });
 
-/** Validate an entry form into an API body; throws a user-facing message. */
 function toEntryBody(f: EntryForm) {
   const amount = parseFormNumber(f.amount);
   if (amount == null || amount < 0) throw new Error("Amount must be a non-negative number.");
@@ -62,7 +61,6 @@ function toEntryBody(f: EntryForm) {
 
 const plural = (n: number, word: string) => `${fmtCount(n)} ${word}${n === 1 ? "" : "s"}`;
 
-/** Date · amount · action row, shared by the page's add form and the modal's inline edit. */
 const ENTRY_GRID_CLASSES =
   "grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end";
 
@@ -103,12 +101,6 @@ export default function HousePaymentsClient() {
     }
   }, []);
 
-  /**
-   * Summary card values derive directly from ``rows`` so we don't have
-   * to re-fetch the whole list (and its server-side aggregates) after
-   * every save. ``rows`` is patched in place by the create / update /
-   * delete handlers below.
-   */
   const summary = useMemo(
     () => ({
       sum_total_paid: rows.reduce((s, r) => s + (r.total_paid || 0), 0),
@@ -122,7 +114,6 @@ export default function HousePaymentsClient() {
     [rows],
   );
 
-  /** The add form's target: the user's pick, else the most recently paid plan. */
   const payPlan =
     rows.find((r) => r.id === payPlanId) ??
     rows.find((r) => r.last_paid_on === summary.last_paid_on) ??
@@ -185,7 +176,6 @@ export default function HousePaymentsClient() {
     }
   };
 
-  /** Apply a fresh detail response to the modal + the matching list row. */
   const applyDetail = useCallback(
     (d: HousePaymentDetailResponse) => {
       setDetail(d);
@@ -210,7 +200,6 @@ export default function HousePaymentsClient() {
           ? await updateHousePayment(editingPlanId, body)
           : await createHousePayment(body);
       upsertRow(fresh);
-      // A plan just created is almost certainly the one about to be paid.
       if (editingPlanId == null) setPayPlanId(fresh.id);
       setPlanModalOpen(false);
       setEditingPlanId(null);
@@ -255,7 +244,6 @@ export default function HousePaymentsClient() {
       const fresh = await createHousePaymentEntry(payPlan.id, body);
       upsertRow(fresh.house_payment);
       setPayPlanId(payPlan.id);
-      // Keep plan + date so a run of back-dated payments is quick to enter.
       setPayForm((f) => ({ ...f, amount: "" }));
       setLastAdded(`Added ${fmtMoney(body.amount)} to ${payPlan.name} for ${fmtDate(body.paid_on)}.`);
     } catch (err) {
@@ -315,7 +303,6 @@ export default function HousePaymentsClient() {
     return detail.entries.reduce((s, e) => s + Number(e.amount || 0), 0);
   }, [detail]);
 
-  /** Entries arrive newest first; bucket them by year with a subtotal each. */
   const entriesByYear = useMemo(() => {
     const groups: { year: string; total: number; entries: HousePaymentEntry[] }[] = [];
     for (const e of detail?.entries ?? []) {
@@ -337,7 +324,6 @@ export default function HousePaymentsClient() {
         title="House Payments"
         description="Every payment made toward a house, and when it was made."
         actions={
-          // Filled only while it's the page's one job; once plans exist, "Add payment" owns the fill.
           <button
             type="button"
             className={rows.length === 0 ? PRIMARY_BUTTON_CLASSES : SECONDARY_BUTTON_CLASSES}

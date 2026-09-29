@@ -26,9 +26,6 @@ import { CardTile, SetSymbol } from "./shapes";
 const EMPTY_BUILDER: Card = { symbol: 0, color: 0, texture: 0, count: 0 };
 const sectionHeading = "text-xs font-semibold uppercase tracking-wider text-ink-4";
 
-/** Tone-classed banner box, matching ui.ts's `ERROR_ALERT_CLASSES` pattern
- * (border + tinted background + tinted text, no shadow) for the tones it
- * doesn't cover. */
 const ALERT_TONE_CLASSES: Record<"good" | "warn" | "bad", string> = {
   good: "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200",
   warn: "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200",
@@ -38,9 +35,6 @@ const ALERT_TONE_CLASSES: Record<"good" | "warn" | "bad", string> = {
 type Relation = "same" | "different" | "broken";
 
 export default function SetsClient() {
-  // Starts empty so server and client render the same markup, then deals a
-  // random spread once mounted — dealBoard() uses Math.random(), which would
-  // otherwise differ between the server render and the client hydration pass.
   const [board, setBoard] = useState<Card[]>([]);
   const [builder, setBuilder] = useState<Card>(EMPTY_BUILDER);
   const [selectedIndices, setSelectedIndices] = useState<number[]>([]);

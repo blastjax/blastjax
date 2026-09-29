@@ -9,7 +9,6 @@ import {
   PAYSLIP_TRACK_BG,
 } from "./payslipTheme";
 
-/** Annual ceiling; allowance resets each April 1 (Apr → Mar policy year). */
 export const MEDICAL_REIMBURSEMENT_ANNUAL_CAP = 11500;
 
 export type DraggableStatId =
@@ -73,11 +72,6 @@ export type StatTheme = {
   barFill: string;
 };
 
-/**
- * The mock doesn't color-code categories by hue — every tile shares one
- * neutral dark panel, with the teal accent carried entirely by the bar fill.
- * One flat theme covers every stat id (and the pinned medical card).
- */
 const FLAT_THEME: StatTheme = {
   border: PAYSLIP_BORDER_SOFT,
   bg: PAYSLIP_BG_3,
@@ -88,8 +82,6 @@ const FLAT_THEME: StatTheme = {
   barFill: PAYSLIP_ACCENT_BG,
 };
 
-/** Theme for the pinned medical card (not part of drag order). Same flat
- * panel; title picks up the accent color to stay visually anchored. */
 export const MEDICAL_REIMBURSEMENT_STAT_THEME: StatTheme = {
   ...FLAT_THEME,
   title: PAYSLIP_ACCENT_TEXT,
@@ -107,14 +99,11 @@ export const STAT_THEMES: Record<DraggableStatId, StatTheme> = {
   months_remaining: FLAT_THEME,
 };
 
-/** Shared shell: stretch with grid row height (match tallest card in the row). */
 export const PAYSLIP_STAT_CARD_SHELL =
   "flex h-full min-h-0 min-w-0 flex-col rounded-xl border px-4 py-3.5";
 
-/** Pinned stat card (e.g. medical): same layout, no drag cursor. */
 export const PAYSLIP_STAT_CARD_SHELL_PINNED =
   "flex h-full min-h-0 min-w-0 cursor-default flex-col rounded-xl border px-4 py-3.5";
 
-/** Deduction year totals: same grid density as stats, no progress bars. */
 export const PAYSLIP_DEDUCTION_CARD_SHELL =
   `flex h-full min-h-0 min-w-0 flex-col rounded-xl border ${PAYSLIP_BORDER_SOFT} ${PAYSLIP_BG_3} px-4 py-3.5`;

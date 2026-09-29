@@ -1,39 +1,16 @@
-# Next.js production image (standalone). Build with context directory `web/`.
-# syntax=docker/dockerfile:1
-
-# Deps are installed in the build stage rather than a separate `deps` stage that
-# gets `COPY --from`'d. That copy produced a second 178MB node_modules layer,
-# which cost ~16s of every CI build (10s pulling it from the build cache, 5s
-# extracting it) and stored the same tree twice in the exported cache. Installing
-# in place keeps the identical cache key - the `npm ci` layer is still reused
-# whenever package-lock.json is unchanged - without the duplicate.
 FROM node:20-bookworm-slim AS builder
 WORKDIR /app
 
 COPY package.json package-lock.json ./
-# These flags only affect the cold path (a lock-file change); the warm path is a
-# layer cache hit that runs nothing at all.
 RUN --mount=type=cache,target=/root/.npm \
     npm ci --prefer-offline --no-audit --fund=false
 
-# node_modules and .next are both in web/.dockerignore, so this neither clobbers
-# the install above nor leaks a stale local build into the image.
 COPY . .
 
 ARG NEXT_PUBLIC_API_URL=http://127.0.0.1:8000
 ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL} \
     NEXT_TELEMETRY_DISABLED=1
 
-# Webpack prod build (predictable trace for `output: "standalone"`); dev still
-# uses Turbopack locally. Measured on this app 2026-08: `next build --turbopack`
-# is ~2.5x slower cold (74s vs 30s) and ships much larger route bundles
-# (144kB vs 102kB shared, /salary-stats 134kB vs 13.4kB), so the production
-# build deliberately stays on webpack.
-#
-# The .next/cache mount only pays off for repeated *local* builds: BuildKit cache
-# mounts are never written out by the registry/GHA cache exporters, so in CI it
-# starts empty every run. Persisting it externally was measured and rejected -
-# a fully warm cache saves ~5s here for 168MB of cache traffic.
 RUN --mount=type=cache,target=/root/.npm \
     --mount=type=cache,target=/app/.next/cache \
     npx next build

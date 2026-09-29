@@ -47,9 +47,6 @@ function sumField(rows: PayslipRow[], key: PayslipFieldKey): number {
   }, 0);
 }
 
-/** Month-by-month breakdown of one income or deduction field for a year —
- * opened from a stat card so "what months made up this number" doesn't
- * require opening every payslip individually. */
 export function PayslipFieldMonthsModal({
   year,
   label,

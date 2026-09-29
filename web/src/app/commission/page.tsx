@@ -5,8 +5,6 @@ import { useRouter } from "next/navigation";
 import { getCompanies } from "@/lib/api";
 import { LOADING_TEXT_CLASSES, PAGE_CONTAINER_CLASSES } from "@/lib/ui";
 
-/** `/commission` has no company of its own — send visitors to the first
- * company with commission turned on (Settings → Companies decides which one). */
 export default function CommissionRedirectPage() {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);

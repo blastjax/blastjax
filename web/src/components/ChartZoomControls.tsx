@@ -1,7 +1,5 @@
 import { CHART_ZOOM_BUTTON_CLASSES } from "@/lib/ui";
 
-/** Zoom in/out controls for a scrollable time-series chart — pair with
- * `useChartZoom` and feed its `zoom` value into `chartScrollMinWidth`. */
 export function ChartZoomControls({
   zoom,
   onZoomIn,

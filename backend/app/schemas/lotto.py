@@ -1,10 +1,3 @@
-"""Lotto draw & attempt API models.
-
-A draw is the official result for one date: 6 unique numbers, 1-58. Attempts
-are the user's own picks checked against that date's draw, stored the same
-shape.
-"""
-
 from __future__ import annotations
 
 import datetime as dt
@@ -28,11 +21,7 @@ class LottoNumbers(BaseModel):
 class LottoDrawCreate(BaseModel):
     game_id: int = Field(..., gt=0)
     draw_date: dt.date
-    # Optional: a draw can be logged by date alone before its winning numbers
-    # are announced, so attempts can be recorded ahead of the actual draw.
     numbers: list[int] | None = None
-    # Optional: the jackpot at stake for this draw, and how many tickets
-    # matched all 6 numbers. Both fill in once the result is announced.
     jackpot_prize: float | None = None
     winners: int = 0
 
@@ -65,21 +54,13 @@ class LottoDrawCreate(BaseModel):
 
 
 class LottoAttemptCreate(LottoNumbers):
-    # Groups this attempt with the other board plays on the same physical
-    # ticket (up to a handful of picks per ticket), so the UI can cluster
-    # them. None means the attempt isn't part of a ticket group.
     ticket: int | None = None
 
 
 class LottoAttemptsBulkCreate(BaseModel):
-    # "Paste attempts" can carry a few dozen board plays across several
-    # tickets in one go; saving them one at a time meant a network round
-    # trip per line (see insert_lotto_attempts_bulk).
     attempts: list[LottoAttemptCreate] = Field(min_length=1)
 
 
 class LottoImportText(BaseModel):
     game_id: int = Field(..., gt=0)
-    # Pasted historic-results text — see `parse_lotto_draw_text` for the
-    # accepted row shapes.
     text: str

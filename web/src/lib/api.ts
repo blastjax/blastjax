@@ -1,12 +1,5 @@
 import { AUTH_UNAUTHORIZED_EVENT, clearSessionToken, getSessionToken } from "@/lib/auth";
 
-/**
- * API origin (FastAPI). Defaults to same-origin ("") since Caddy already
- * reverse-proxies /api/* to the backend on the page's own host - a browser
- * on any device just hits the origin it loaded the page from. Only set
- * `NEXT_PUBLIC_API_URL` if the API is genuinely served from a different
- * origin than the UI.
- */
 export function dataApiBase(): string {
   const rawApi = process.env.NEXT_PUBLIC_API_URL?.trim();
   return rawApi && rawApi.length > 0 ? rawApi.replace(/\/$/, "") : "";
@@ -50,7 +43,6 @@ function messageFromErrorResponseBody(text: string): string {
       if (parts.length) return parts.join("; ");
     }
   } catch {
-    /* not JSON */
   }
   return trimmed;
 }
@@ -151,7 +143,6 @@ export async function createPayslip(body: PayslipCreateBody) {
   return sendJson<PayslipRow>("POST", "/api/payslip", body);
 }
 
-
 export async function updatePayslip(id: number, body: PayslipCreateBody) {
   return sendJson<PayslipRow>("PUT", `/api/payslip/${id}`, body);
 }
@@ -160,8 +151,6 @@ export async function deletePayslip(id: number) {
   return sendJson<{ ok: boolean }>("DELETE", `/api/payslip/${id}`);
 }
 
-
-/** URL that serves the payslip's attached PDF inline (for `<iframe>`/links). */
 export function payslipPdfUrl(id: number): string {
   return `${dataApiBase()}/api/payslip/${id}/pdf`;
 }
@@ -169,7 +158,6 @@ export function payslipPdfUrl(id: number): string {
 export async function uploadPayslipPdf(id: number, file: File) {
   const body = new FormData();
   body.append("file", file);
-  // No JSON headers — the browser sets the multipart boundary itself.
   return j<{ ok: boolean; has_pdf: boolean }>(
     await apiFetch(`${dataApiBase()}/api/payslip/${id}/pdf`, {
       method: "POST",
@@ -391,8 +379,6 @@ export type MosaicSolveResult = {
   moves: number[];
   optimal: boolean;
   nodeCount: number;
-  /** False only if the time budget cut the search short before a conclusive
-   * answer — i.e. inconclusive, not proven. */
   proven: boolean;
 };
 
@@ -400,9 +386,6 @@ export async function solveMosaic(
   grid: number[][],
   seed: MosaicCell,
   timeBudgetMs?: number,
-  /** When set, the backend gives up as soon as it's proven no solution of
-   * this length or shorter exists, instead of searching for the true
-   * (possibly much larger) optimum. */
   maxMoves?: number,
 ): Promise<MosaicSolveResult> {
   const res = await sendJson<{
@@ -424,7 +407,6 @@ export async function solveMosaic(
   };
 }
 
-/** A move under the "tap any tile" rule: repaint the blob at (r, c). */
 export type MosaicFreeMove = { r: number; c: number; color: number };
 
 export type MosaicFreeSolveResult = {
@@ -434,8 +416,6 @@ export type MosaicFreeSolveResult = {
   proven: boolean;
 };
 
-/** Optimal solve where each move may repaint any blob, not just the blob
- * containing a fixed start tile. */
 export async function solveMosaicFree(
   grid: number[][],
   numColors?: number,
@@ -529,11 +509,6 @@ export async function generateMosaicPuzzle(
   };
 }
 
-/**
- * Mambo (Takuzu / Binairo). `hSigns` is rows x (cols - 1) — the sign between
- * (r, c) and (r, c + 1); `vSigns` is (rows - 1) x cols, between (r, c) and
- * (r + 1, c). Sign values: 0 none, 1 "=", 2 "✕".
- */
 export type MamboBoard = {
   grid: number[][];
   hSigns: number[][];
@@ -551,11 +526,8 @@ function mamboBody(board: MamboBoard, timeBudgetMs?: number) {
 
 export type MamboSolveResult = {
   solution: number[][] | null;
-  /** Capped at 2, so 2 means "two or more". */
   solutionCount: number;
   unique: boolean;
-  /** True only if the budget cut the search short, making the counts above
-   * lower bounds rather than answers. */
   timedOut: boolean;
   nodeCount: number;
 };
@@ -580,7 +552,6 @@ export async function solveMambo(
   };
 }
 
-/** One cell the board forces, plus the technique and wording to explain it. */
 export type MamboStep = {
   r: number;
   c: number;
@@ -594,7 +565,6 @@ export type MamboStepsResult = {
   solved: boolean;
   unique: boolean;
   solutionCount: number;
-  /** The entries already on the board break a rule against each other. */
   conflict: boolean;
   timedOut: boolean;
 };
@@ -628,11 +598,7 @@ export type MamboGenerateResult = {
   solution: number[][];
   hSigns: number[][];
   vSigns: number[][];
-  /** The difficulty actually achieved, which `exactMatch` compares to the one
-   * that was asked for. */
   difficulty: MamboDifficulty;
-  /** False when the clock ran out before the difficulty could be established,
-   * in which case `difficulty` is the worst case rather than a measurement. */
   difficultyConfirmed: boolean;
   exactMatch: boolean;
   attempts: number;
@@ -856,7 +822,6 @@ export async function upsertPayPeriodStartOverride(body: {
   );
 }
 
-/** Wire shape for a Settings → Payslip defaults template (Payslip's `FormState` minus `period_half`). */
 export type PayslipDefaultFormDto = {
   period_year: string;
   period_month: string;
@@ -973,7 +938,6 @@ export async function deleteCreditCard(id: number) {
   return sendJson<{ ok: boolean }>("DELETE", `/api/credit-card/${id}`);
 }
 
-/** Directly correct available credit, e.g. for purchases this app never recorded. */
 export async function adjustCreditCardBalance(id: number, availableLimit: number) {
   return sendJson<{ card: CreditCardRow }>("PATCH", `/api/credit-card/${id}/balance`, {
     available_limit: availableLimit,
@@ -1001,11 +965,7 @@ export async function deleteCreditCardPayment(paymentId: number) {
 export type LottoGame = {
   id: number;
   name: string;
-  /** The game's current jackpot — its newest draw that has one. Null until a
-   * draw with a prize is logged. */
   jackpot_prize: number | null;
-  /** Date of the newest draw with attempts logged against it — the last draw
-   * played. Null until the game has an attempt. */
   last_attempt_draw_date: string | null;
 };
 
@@ -1013,11 +973,6 @@ export async function getLottoGames() {
   return getJson<{ games: LottoGame[] }>("/api/lotto/games");
 }
 
-/** URL-friendly identifier for a game, derived from its name -- "Megalotto
- * 6/45" -> "megalotto", "Lotto 6/42" -> "lotto" -- so `/lotto/[slug]` reads
- * as the game instead of an opaque numeric id. Resolving a slug back to a
- * game is just finding the one whose name slugifies to it (see the
- * `[gameSlug]` route), so there's nothing to keep in sync server-side. */
 export function lottoGameSlug(name: string): string {
   return name
     .replace(/\s*\d+\/\d+\s*$/, "")
@@ -1037,8 +992,6 @@ export type LottoDrawRow = {
 export type LottoAttemptRow = {
   id: number;
   draw_id: number;
-  /** Groups this attempt with the other board plays on the same physical
-   * ticket, so the UI can cluster them. `null` means ungrouped. */
   ticket: number | null;
   numbers: number[];
   created_at: string;
@@ -1053,10 +1006,6 @@ export async function getLottoDraws(gameId: number, limit?: number) {
   return getJson<{ draws: LottoDrawDetail[] }>("/api/lotto", { game_id: gameId, limit });
 }
 
-/** `numbers: null` logs just the date — the result can be filled in later
- * once it's announced, so attempts can be recorded ahead of the draw.
- * `jackpotPrize`/`winners` default to "not set yet" (null / 0), same as the
- * backend does when they're omitted. */
 export async function setLottoDraw(
   gameId: number,
   drawDate: string,
@@ -1105,9 +1054,6 @@ export async function createLottoAttempt(
   });
 }
 
-/** Saves every attempt in one request instead of one `createLottoAttempt`
- * call per line — what "Paste attempts" uses, since a multi-ticket paste
- * otherwise costs a network round trip per board play. */
 export async function createLottoAttemptsBulk(
   drawId: number,
   attempts: { numbers: number[]; ticket?: number | null }[],
@@ -1137,12 +1083,6 @@ export async function deleteLottoAttempt(drawId: number, attemptId: number) {
   );
 }
 
-/** Bulk-loads historic results from pasted text — one row per draw:
- * `| n1-n2-n3-n4-n5-n6 | m/d/yyyy | jackpot | winners |` (a leading
- * tab-separated game-name column, e.g. pasted straight from a spreadsheet,
- * is fine too — it's discarded). Each row is upserted by date, so re-pasting
- * (e.g. to backfill jackpot/winners on draws already here) overwrites
- * rather than duplicating. */
 export async function importLottoDrawResultsText(gameId: number, text: string) {
   return sendJson<{
     inserted: number;
@@ -1152,23 +1092,14 @@ export async function importLottoDrawResultsText(gameId: number, text: string) {
   }>("POST", "/api/lotto/import-text", { game_id: gameId, text });
 }
 
-/** Pulls every game's results newer than what's stored from pcso.gov.ph —
- * only from the Lotto page's "Update results" button. A date that already
- * has a result is skipped, never overwritten. */
 export async function syncLottoResultsFromPcso() {
   return sendJson<{ inserted: number }>("POST", "/api/lotto/sync-pcso");
 }
 
-/** An app-managed user account. Passwords are Argon2id-hashed server-side —
- * this type never carries one. These are the credentials checked at login
- * (see AuthGate) once at least one user exists; managed via Settings → Users. */
 export type AppUserRow = {
   id: number;
   username: string;
-  /** Bypasses `allowed_pages` — always sees every page. */
   is_superuser: boolean;
-  /** Nav hrefs (see lib/nav.ts) this user's sidebar/home page is limited to.
-   * `null` means no restriction — every page, same as a freshly-added user. */
   allowed_pages: string[] | null;
   created_at: string;
 };
@@ -1208,8 +1139,6 @@ export async function deleteAppUser(id: number) {
   return sendJson<{ ok: boolean }>("DELETE", `/api/users/${id}`);
 }
 
-/** Checks a username/password pair against the stored hash. Doesn't sign
- * anyone in — just confirms a password was saved correctly. */
 export async function verifyAppUserPassword(username: string, password: string) {
   return sendJson<{ valid: boolean }>("POST", "/api/users/verify", {
     username,
@@ -1217,13 +1146,9 @@ export async function verifyAppUserPassword(username: string, password: string) 
   });
 }
 
-/** The per-company "show this field?" toggles — one per payslip amount
- * field, income-side first (the main grid in PayslipFormFields), then
- * deduction-side (the "Deductions" aside). */
 export type CompanyColumnFlags = {
   show_total: boolean;
   show_basic_salary: boolean;
-  /** Whether the Commission field/stat card show up on this company's Payslip page. */
   show_commission: boolean;
   show_reimbursement: boolean;
   show_medical_reimbursement: boolean;
@@ -1238,7 +1163,6 @@ export type CompanyColumnFlags = {
   show_bereavement_asst: boolean;
 };
 
-/** A company payslips are tagged under; managed via Settings → Companies. */
 export type CompanyRow = CompanyColumnFlags & {
   id: number;
   name: string;
@@ -1246,10 +1170,6 @@ export type CompanyRow = CompanyColumnFlags & {
   sort_order: number;
 };
 
-/** What every column defaulted to before this toggle existed (all shown),
- * except bereavement asst, which only some companies have. Used whenever a payslip's `company` string doesn't match any managed
- * company (e.g. an old/deleted one) so fields still show up rather than
- * vanishing. */
 export const DEFAULT_COMPANY_COLUMN_FLAGS: CompanyColumnFlags = {
   show_total: true,
   show_basic_salary: true,
@@ -1267,8 +1187,6 @@ export const DEFAULT_COMPANY_COLUMN_FLAGS: CompanyColumnFlags = {
   show_bereavement_asst: false,
 };
 
-/** Looks up `companyName` in `companies` and returns its column-visibility
- * flags, falling back to `DEFAULT_COMPANY_COLUMN_FLAGS` when not found. */
 export function companyColumnFlags(
   companies: CompanyRow[],
   companyName: string,
@@ -1315,10 +1233,6 @@ export async function deleteCompany(id: number) {
   return sendJson<{ ok: boolean }>("DELETE", `/api/companies/${id}`);
 }
 
-/** Persists a new display order — `ids` must list every company id exactly
- * once, top to bottom. Drives both the Companies list and the sidebar's
- * per-company Payslip entries, since both just render `getCompanies()`'s
- * order as-is. */
 export async function reorderCompanies(ids: number[]) {
   return sendJson<{ companies: CompanyRow[] }>("PUT", "/api/companies/reorder", { ids });
 }
@@ -1332,9 +1246,6 @@ export type TravelTripRow = {
   created_at: string;
 };
 
-/** A place visited during the trip, shown as a chip on the card grid and
- * trip header. `start_date`/`end_date` are optional — a chip can just be a
- * name with no date range attached. */
 export type TravelCityRow = {
   id: number;
   trip_id: number;
@@ -1350,20 +1261,14 @@ export type TravelFlightRow = {
   trip_id: number;
   flight_number: string;
   flight_date: string | null;
-  /** Set only for an overnight/red-eye landing on a later calendar date;
-   * `null` means it lands the same day. */
   arrival_date: string | null;
   departure_time: string | null;
   arrival_time: string | null;
   from_location: string | null;
-  /** Custom Google Maps link; when unset the UI builds a search link from `from_location`. */
   from_map_url: string | null;
-  /** City/country resolved from `from_map_url`, if it was a maps link — used
-   * to build a "City, Country" calendar title instead of the full place name. */
   from_city: string | null;
   from_country: string | null;
   to_location: string | null;
-  /** Custom Google Maps link; when unset the UI builds a search link from `to_location`. */
   to_map_url: string | null;
   to_city: string | null;
   to_country: string | null;
@@ -1378,27 +1283,20 @@ export type TravelFlightRow = {
   created_at: string;
 };
 
-/** A bus, train, or ferry leg — same shape as a flight, plus a `mode`; the
- * number is optional since a bus/ferry route isn't always known/labeled the
- * way a flight number is. */
 export type TravelTransportRow = {
   id: number;
   trip_id: number;
   mode: "bus" | "train" | "ferry";
   number: string | null;
   travel_date: string | null;
-  /** Set only for an overnight leg arriving on a later calendar date;
-   * `null` means it arrives the same day. */
   arrival_date: string | null;
   departure_time: string | null;
   arrival_time: string | null;
   from_location: string | null;
-  /** Custom Google Maps link; when unset the UI builds a search link from `from_location`. */
   from_map_url: string | null;
   from_city: string | null;
   from_country: string | null;
   to_location: string | null;
-  /** Custom Google Maps link; when unset the UI builds a search link from `to_location`. */
   to_map_url: string | null;
   to_city: string | null;
   to_country: string | null;
@@ -1416,14 +1314,11 @@ export type TravelItineraryRow = {
   id: number;
   trip_id: number;
   item_date: string;
-  /** Set only when the item spans past its start date (an overnight train,
-   * a multi-day trek) — `null` means a same-day item. */
   item_end_date: string | null;
   start_time: string | null;
   end_time: string | null;
   activity: string;
   location_name: string | null;
-  /** Custom Google Maps link; when unset the UI builds a search link from `location_name`. */
   location_map_url: string | null;
   notes: string | null;
   booked_via: string | null;
@@ -1440,13 +1335,11 @@ export type TravelAccommodationRow = {
   checkout_date: string;
   checkin_time: string | null;
   checkout_time: string | null;
-  /** Derived from checkin/checkout on every read — never stored. */
   nights: number;
   days: number;
   booking_confirmation: string | null;
   instructions: string | null;
   location_name: string | null;
-  /** Custom Google Maps link; when unset the UI builds a search link from `location_name`. */
   location_map_url: string | null;
   notes: string | null;
   room: string | null;
@@ -1563,11 +1456,6 @@ export async function getTravelTrips(limit?: number) {
   return getJson<{ trips: TravelTripDetail[] }>("/api/travel", { limit });
 }
 
-/** Resolves a pasted Google Maps link to its place name (e.g. a
- * `maps.app.goo.gl` short link to "Bang Sue Grand Station") plus the city
- * and country its coordinates reverse-geocode to, so the field can show a
- * real name instead of the raw URL and the calendar can build a shorter
- * "City, Country" title. Each field is `null` when it couldn't be resolved. */
 export async function resolveMapLink(url: string) {
   return getJson<{ name: string | null; city: string | null; country: string | null }>(
     "/api/travel/resolve-map-link",

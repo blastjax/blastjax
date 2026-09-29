@@ -1,5 +1,3 @@
-"""Pay-period start override endpoints (record that a payslip landed earlier than the 1st/16th)."""
-
 from __future__ import annotations
 
 from datetime import date

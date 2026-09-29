@@ -5,8 +5,6 @@ import { usePopoverPosition } from "@/lib/usePopoverPosition";
 import { ICON_BUTTON_CLASSES, INPUT_CLASSES } from "@/lib/ui";
 
 export type YearPickerFieldProps = {
-  /** Year as free text — same contract as the plain `<input>` this replaces,
-   * so it can be blank or mid-typing rather than a committed number. */
   value: string;
   onChange: (year: string) => void;
   disabled?: boolean;
@@ -17,17 +15,10 @@ export type YearPickerFieldProps = {
 const POPOVER_WIDTH = 260;
 const GRID_YEARS = 12;
 
-/** Page anchor for a fresh open: puts `year` 6th of 12 cells, the same way a
- * month calendar puts "today" mid-grid instead of first. */
 function pageStartFor(year: number): number {
   return year - 5;
 }
 
-/** A text input that also opens a year-grid popover (12 years, paged a dozen
- * at a time) to pick a year without typing digit-by-digit — in place of a
- * bare `<input type="text" inputMode="numeric">`. Typing still works; the
- * grid is just a faster way in, the same relationship a date field has to
- * its calendar. */
 export function YearPickerField({
   value,
   onChange,
@@ -54,8 +45,6 @@ export function YearPickerField({
         close();
       }
     };
-    // Capture phase + stopPropagation so Escape closes only this popover,
-    // not a surrounding Modal (which listens for Escape on `window` too).
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.stopPropagation();

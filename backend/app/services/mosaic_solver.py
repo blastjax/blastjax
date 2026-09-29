@@ -1,21 +1,3 @@
-"""Mosaic / Flood-It solver — mirrors web/src/app/games/mosaic/solver.ts.
-
-Rules: there is a fixed start tile ("seed"). A move picks a color c. The
-connected blob of tiles reachable from the seed (all same current color) is
-repainted to c, which makes it contiguous with any neighboring tiles that
-already happen to be color c, so the blob grows. Goal: repaint the whole
-board to one color in as few moves as possible.
-
-Solving runs on a reduced "region graph" (connected same-color blobs become
-single nodes), which is much smaller than the pixel grid. Adjacent region
-nodes always differ in color (otherwise they'd already be merged), so a
-single move can only ever absorb nodes exactly one hop away from the
-current blob — it can never leapfrog two hops in one move. That makes the
-region graph's hop-eccentricity from the seed an admissible lower bound on
-moves remaining, which drives an IDA* search for a provably optimal
-solution, with a greedy 2-ply lookahead as a time-budget fallback.
-"""
-
 from __future__ import annotations
 
 import random
@@ -138,7 +120,6 @@ def active_count(nodes: Nodes) -> int:
 
 
 def eccentricity(nodes: Nodes, seed_id: int) -> int:
-    """BFS hop-eccentricity of the seed node — admissible lower bound on moves left."""
     max_d = 0
     dist = {seed_id: 0}
     frontier = [seed_id]
@@ -170,7 +151,6 @@ def candidate_colors(nodes: Nodes, seed_id: int) -> list[int]:
 
 
 def greedy_solve(nodes: Nodes, seed_id: int, max_moves: int = 1000) -> list[int]:
-    """Fast, decent (not necessarily optimal) solution via 2-ply greedy lookahead."""
     cur = nodes
     moves: list[int] = []
     while active_count(cur) > 1 and len(moves) < max_moves:
@@ -197,9 +177,6 @@ def greedy_solve(nodes: Nodes, seed_id: int, max_moves: int = 1000) -> list[int]
 class SolveResult:
     moves: list[int]
     optimal: bool
-    # False only when a time budget cut the search short before it could
-    # either find a solution or exhaust the search ceiling — i.e. the result
-    # is inconclusive rather than a proven answer.
     proven: bool = True
 
 
@@ -210,22 +187,6 @@ def solve_from_nodes(
     greedy_moves: list[int] | None = None,
     max_moves: int | None = None,
 ) -> SolveResult:
-    """IDA* for a provably-optimal solution from a fixed seed node, bounded by a
-    time budget.
-
-    Without `max_moves`, this always finds the true optimum (falling back to
-    the greedy solution, marked non-optimal, only if the time budget runs
-    out first).
-
-    With `max_moves`, the search ceiling is the cap itself rather than a
-    greedy upper bound: IDA* still explores bounds in increasing order from
-    the admissible eccentricity heuristic, but gives up as soon as the
-    required bound would exceed the cap, instead of continuing on to find
-    the (possibly much larger) true optimum. Any solution found this way is
-    still provably optimal — the cap only ever causes an early, proven
-    "no solution within `max_moves`" (`moves=[]`, `optimal=False`), which is
-    cheaper than a full search when the caller only cares about the cap.
-    """
     if active_count(nodes) == 1:
         return SolveResult(moves=[], optimal=True)
 
@@ -280,9 +241,6 @@ def solve_from_nodes(
             return SolveResult(moves=best.moves, optimal=best.optimal, proven=False)
         bound = int(t)
 
-    # Ceiling exhausted without success: with no cap this can't happen (the
-    # greedy solution is itself a valid bound), so this only fires for a
-    # capped search — a proven "no solution within max_moves".
     return SolveResult(moves=best.moves, optimal=best.optimal, proven=True)
 
 
@@ -313,33 +271,10 @@ def solve(
     )
 
 
-# ---- free-cell variant ----------------------------------------------------
-#
-# The solver above assumes the classic Flood-It rule: every move repaints the
-# one blob containing a fixed start tile. Many "mosaic" puzzles instead let
-# you tap *any* tile and repaint that tile's blob, which is a strictly more
-# powerful move and yields much shorter solutions.
-#
-# Search: plain iterative-deepening DFS over (region, colour) pairs. Two
-# things keep it fast enough to be exhaustive:
-#
-#   1. Admissible heuristic - a move repaints one region R to colour c. Only
-#      R's own previous colour can disappear from the board (the absorbed
-#      neighbours were colour c, which R now carries), so the number of
-#      distinct colours still present drops by at most one per move. Hence
-#      `distinct_colours - 1` is a valid lower bound on the moves remaining.
-#   2. The final move must merge every remaining region at once, so at depth
-#      1 only moves that leave exactly one region are worth trying.
-#
-# No dominance assumptions: every recolour of every live region across the
-# whole palette is generated, including non-merging "setup" moves, so a
-# reported optimum is a true optimum.
 
 
 @dataclass
 class FreeMove:
-    """Repaint the blob containing cell (r, c) to `color`."""
-
     r: int
     c: int
     color: int
@@ -363,13 +298,6 @@ def solve_free_cell(
     time_budget_ms: int = 5000,
     max_moves: int | None = None,
 ) -> FreeSolveResult:
-    """Optimal solver for the "tap any tile" rule.
-
-    Returns the shortest sequence of taps that makes the whole board one
-    colour. `max_moves` caps the search: if no solution of that length or
-    shorter exists the result is an empty move list with `optimal=False`
-    (and `proven=True`, since the cap was fully explored).
-    """
     graph = build_region_graph(grid)
     n = len(graph.nodes)
     total_regions = n
@@ -410,7 +338,6 @@ def solve_free_cell(
     def candidates(
         colors: tuple[int | None, ...], adj: tuple[frozenset[int], ...]
     ) -> list[tuple[int, int, int]]:
-        """(merge_count, region, colour), best-merging first."""
         out: list[tuple[int, int, int]] = []
         for rid in range(n):
             if colors[rid] is None:
@@ -465,8 +392,6 @@ def solve_free_cell(
                 return None
         return None
 
-    # Free-cell moves are a superset of fixed-seed moves, so a greedy
-    # fixed-seed solution is a valid ceiling when the caller gave no cap.
     if max_moves is not None:
         ceiling = max_moves
     else:
@@ -501,17 +426,6 @@ class BestStartResult:
 
 
 def solve_best_start(grid: Grid, time_budget_ms: int = 5000) -> BestStartResult:
-    """Search over every candidate start tile (one representative per region -
-    any cell within the same region gives an identical result) to find the
-    start tile that minimizes moves.
-
-    Pruning: eccentricity(region) is an admissible lower bound on the moves
-    needed from that region, so once we have an achieved solution of length
-    `best`, any region whose eccentricity is already >= `best` can never
-    beat it and is skipped without solving it. Trying regions in ascending
-    eccentricity order means that once we hit one that gets pruned, every
-    remaining region (all with >= eccentricity) is pruned too, so we can
-    stop entirely."""
     overall_start = time.monotonic()
     graph = build_region_graph(grid)
     nodes = graph.nodes
@@ -541,7 +455,7 @@ def solve_best_start(grid: Grid, time_budget_ms: int = 5000) -> BestStartResult:
 
     for node_id, ecc in ranked:
         if best is not None and ecc >= len(best["moves"]):
-            break  # proven: nothing left can beat `best`
+            break
         remaining = time_budget_ms - (time.monotonic() - overall_start) * 1000
         if remaining <= 0:
             ran_out_of_time = True
@@ -587,10 +501,6 @@ def generate_puzzle(
     max_attempts: int = 200,
     time_budget_ms: int = 8000,
 ) -> GenerateResult:
-    """Repeatedly deal a random board and run solve_best_start on it, keeping
-    whichever attempt lands closest to `target_moves`, until an exact match
-    is found or the attempt/time budget runs out. Always tries at least once,
-    even if `time_budget_ms` is tiny."""
     overall_start = time.monotonic()
     best: tuple[Grid, BestStartResult] | None = None
     attempts = 0

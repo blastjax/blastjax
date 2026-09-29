@@ -6,12 +6,6 @@ import { useCallback, useRef, useState, type ReactNode } from "react";
 import { ChevronLeftIcon, ChevronRightIcon } from "@/components/Icons";
 import { MONTH_NAMES_SHORT as MN } from "@/lib/dateFormat";
 
-/**
- * Shared chrome for the Salary Stats and Commission pages, ported 1:1 from the
- * Claude Design "Sophos Payslip" file. Colors are the `st-*` tokens scoped to
- * `.stats-page` in globals.css; charts are hand-rolled SVG like the design.
- */
-
 const sans = Geist({ subsets: ["latin"], variable: "--st-sans" });
 const mono = Geist_Mono({ subsets: ["latin"], variable: "--st-mono" });
 
@@ -26,7 +20,6 @@ export const STATS_XLABEL_CLASSES = "fill-st-4 text-[11px]";
 export const STATS_TIP_CLASSES =
   "pointer-events-none absolute top-1 flex flex-col rounded-[10px] border border-st-line-strong bg-st-well px-3.5 py-3 text-[12.5px] shadow-[0_12px_32px_rgba(0,0,0,.15)] dark:shadow-[0_12px_32px_rgba(0,0,0,.5)]";
 
-/** `12.5k`, `1.25M`, `−3k` — compact axis / heatmap amounts. */
 export function fk(n: number): string {
   const a = Math.abs(n);
   const s = n < 0 ? "−" : "";
@@ -36,7 +29,6 @@ export function fk(n: number): string {
   return `${s}${Math.round(a)}`;
 }
 
-/** Smallest 1/2/2.5/5/10 × 10ⁿ step ≥ `raw`, for round axis ticks. */
 export function niceStep(raw: number): number {
   const p = 10 ** Math.floor(Math.log10(raw || 1));
   return [1, 2, 2.5, 5, 10].find((x) => x * p >= raw)! * p;
@@ -44,8 +36,6 @@ export function niceStep(raw: number): number {
 
 export const pctOf = (a: number, b: number) => (b ? (a / b) * 100 : 0);
 
-/** X-axis month labels, thinned as the range grows: every month up to 14,
- * quarters up to 30, then Januaries only. `m` is 0-based. */
 export function xLabels(
   list: readonly { y: number; m: number }[],
   xf: (i: number) => number,
@@ -60,7 +50,6 @@ export function xLabels(
   });
 }
 
-/** Live content width of an element, via a callback ref (0 until measured). */
 export function useWidth(): [(el: HTMLElement | null) => void, number] {
   const [w, setW] = useState(0);
   const ro = useRef<ResizeObserver | null>(null);
@@ -135,7 +124,6 @@ export function Segmented<T extends string | number>({
   );
 }
 
-/** ‹ year › control. `lg` is the page-header version with a sub-label. */
 export function YearStepper({
   year,
   sub,
@@ -181,7 +169,6 @@ export function YearStepper({
   );
 }
 
-/** Toggleable legend pill; the swatch empties when the series is hidden. */
 export function Chip({
   label,
   color,

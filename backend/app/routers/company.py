@@ -1,14 +1,9 @@
-"""Company management (Settings → Companies). Each payslip is tagged with a
-company name (see app/routers/payslip.py), and this is the managed list those
-tags are drawn from. Like every other protected router this still gates on a
-valid session via require_session."""
-
 from __future__ import annotations
 
-import psycopg2
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.exc import IntegrityError
 
 from app.deps import require_db
 from app.schemas.company import CompanyCreate, CompanyReorder, CompanyUpdate
@@ -40,16 +35,13 @@ def companies_list() -> dict[str, Any]:
 def companies_create(body: CompanyCreate) -> dict[str, Any]:
     try:
         row = insert_company(body.name.strip(), body.flags_dict())
-    except psycopg2.IntegrityError:
+    except IntegrityError:
         raise HTTPException(status_code=409, detail="That company already exists.")
     return {"company": _serialize(row)}
 
 
 @router.put("/reorder")
 def companies_reorder(body: CompanyReorder) -> dict[str, Any]:
-    """Registered ahead of PUT /{company_id} -- Starlette matches routes by
-    path pattern before FastAPI tries to coerce {company_id} to int, so
-    "reorder" would otherwise 422 there instead of reaching this handler."""
     rows = reorder_companies(body.ids)
     if rows is None:
         raise HTTPException(
@@ -63,7 +55,7 @@ def companies_reorder(body: CompanyReorder) -> dict[str, Any]:
 def companies_update(company_id: int, body: CompanyUpdate) -> dict[str, Any]:
     try:
         row = update_company(company_id, body.name.strip(), body.flags_dict())
-    except psycopg2.IntegrityError:
+    except IntegrityError:
         raise HTTPException(status_code=409, detail="That company already exists.")
     if row is None:
         raise HTTPException(status_code=404, detail="Company not found.")

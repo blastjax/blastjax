@@ -7,12 +7,8 @@ import LottoClient from "../LottoClient";
 import { getLottoGames, lottoGameSlug, type LottoGame } from "@/lib/api";
 import { ERROR_ALERT_CLASSES, LOADING_TEXT_CLASSES, PAGE_CONTAINER_CLASSES } from "@/lib/ui";
 
-/** Resolves the URL's slug (e.g. "megalotto") to a game id by matching it
- * against every known game's own slug, then hands off to `LottoClient` —
- * which still works in terms of the numeric id it always has. */
 export default function LottoGameSlugPage() {
   const { gameSlug } = useParams<{ gameSlug: string }>();
-  // undefined: still loading; null: no game matches this slug.
   const [game, setGame] = useState<LottoGame | null | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
 

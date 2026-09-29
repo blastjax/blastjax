@@ -51,13 +51,9 @@ export function PayslipYearStatsSection({
   maxYear,
 }: {
   index: PayslipIndex;
-  /** Settings → Companies decides which of these show up per company (some
-   * companies just don't have commission), so the stat cards follow suit. */
   flags?: CompanyColumnFlags;
-  /** Owned by the parent so the calendar below follows the same year. */
   statsYear: number;
   setStatsYear: (year: number) => void;
-  /** Step range (parent decides; see PayslipClient). */
   minYear: number;
   maxYear: number;
 }) {
@@ -91,7 +87,6 @@ export function PayslipYearStatsSection({
   const yearSlots = yearSlotsFromIndex(index, statsYear);
   const sums = yearSlots.fieldSums;
 
-  /** Policy year aligned with selected calendar stats year (July → Apr–Mar window containing mid-year). */
   const medicalAprilStart = medicalYearStartFromPeriod(statsYear, 7);
   const medicalUsed = index.medicalByPolicyYear.get(medicalAprilStart) ?? 0;
   const medicalRemaining = MEDICAL_REIMBURSEMENT_ANNUAL_CAP - medicalUsed;
@@ -112,7 +107,6 @@ export function PayslipYearStatsSection({
     sums.mp2 +
     sums.bereavement_asst;
   const totalPlusDeductions = sums.total + deductionsSumYtd;
-  /** Breakdown cards: compare line items to gross (net + deductions), falling back to net if gross is unset. */
   const pctDenominator =
     totalPlusDeductions > 0 ? totalPlusDeductions : sums.total;
 
@@ -266,7 +260,6 @@ export function PayslipYearStatsSection({
         )}
       </div>
 
-      {/* Hero row: net income + months remaining / medical reimbursement */}
       <div className="mb-5 grid grid-cols-1 gap-4 lg:grid-cols-[1.4fr_1fr]">
         {flags.show_total && (
           <div
@@ -359,12 +352,10 @@ export function PayslipYearStatsSection({
         </div>
       </div>
 
-      {/* Category breakdown, largest gross first */}
       <div className="mb-5 grid grid-cols-2 gap-3.5 sm:grid-cols-3 lg:grid-cols-4">
         {orderedCategoryCardOrder.map((id) => renderCategoryCard(id))}
       </div>
 
-      {/* Deductions, largest first */}
       {(() => {
         const deductionRows = (
           [

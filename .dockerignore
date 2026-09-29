@@ -1,4 +1,3 @@
-# Used when build context is the repo root. Compose uses `backend/` and `web/` contexts instead.
 .git
 .github
 **/.git

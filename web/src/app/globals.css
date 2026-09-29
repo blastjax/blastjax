@@ -1,47 +1,25 @@
 @import "tailwindcss";
 
-/* Class-based dark mode (see ThemeProvider + ThemeInitScript). */
 @custom-variant dark (&:where(.dark, .dark *));
 
-/* ==========================================================================
- * Design tokens — NextAdmin (demo.nextadmin.co) palette.
- *
- * The whole visual language lives here as semantic CSS variables. Components
- * reference the Tailwind utilities generated from them in `@theme inline`
- * below (`bg-surface`, `border-line`, `text-ink-2`, `text-brand`, …) rather
- * than naming raw palette steps, so a retheme is a change to this block and
- * nothing else.
- *
- * Neutrals are Tailwind `zinc` by construction — NextAdmin's greys are the
- * zinc ramp — which is why the pre-existing `zinc-*` usage across pages lands
- * on the right colors without a rewrite.
- * ======================================================================== */
-
 :root {
-  /* Tells the browser which way to render native controls — date pickers,
-   * select popups, spinners — so they follow the theme instead of staying
-   * light on a dark page. */
   color-scheme: light;
 
-  /* Surfaces — page floor sits *below* cards, so cards read as raised. */
   --page: #fafafa;
   --surface: #ffffff;
   --surface-2: #f4f4f5;
   --surface-3: #fafafa;
   --surface-inset: #fcfcfd;
 
-  /* Lines */
   --line: #e8e8e8;
   --line-soft: #f4f4f5;
   --line-strong: #d4d4d8;
 
-  /* Ink — four steps of hierarchy, brightest first. */
   --ink: #18181b;
   --ink-2: #52525b;
   --ink-3: #71717a;
   --ink-4: #a1a1aa;
 
-  /* Brand — teal, matching the Payslip page redesign. */
   --brand: oklch(0.511 0.096 186.391);
   --brand-hover: oklch(0.437 0.078 188.216);
   --brand-text: oklch(0.511 0.096 186.391);
@@ -50,7 +28,6 @@
   --brand-ring: oklch(0.511 0.096 186.391 / 0.2);
   --brand-on: #ffffff;
 
-  /* Status */
   --success: #16a34a;
   --success-text: #15803d;
   --success-soft: #f0fdf4;
@@ -68,7 +45,6 @@
   --info-soft: #f0f9ff;
   --info-line: #bae6fd;
 
-  /* Chrome */
   --shell: #ffffff;
   --shell-line: #e8e8e8;
   --nav-hover: rgba(0, 0, 0, 0.05);
@@ -76,12 +52,10 @@
   --nav-active-text: oklch(0.511 0.096 186.391);
   --nav-icon: #71717a;
 
-  /* Controls */
   --input-bg: #ffffff;
   --input-line: #d4d4d8;
   --placeholder: #a1a1aa;
 
-  /* Elevation — deliberately shallow; NextAdmin leans on borders, not shadow. */
   --shadow-xs: 0 1px 2px 0 rgba(16, 24, 40, 0.05);
   --shadow-sm: 0 1px 3px 0 rgba(16, 24, 40, 0.1);
   --shadow-md:
@@ -90,7 +64,6 @@
     0 12px 16px -4px rgba(16, 24, 40, 0.08), 0 4px 6px -2px rgba(16, 24, 40, 0.03);
   --shadow-pop: 0 32px 64px -12px rgba(16, 24, 40, 0.14);
 
-  /* Legacy aliases — some components still read these directly. */
   --background: var(--page);
   --foreground: var(--ink);
 }
@@ -98,9 +71,6 @@
 .dark {
   color-scheme: dark;
 
-  /* Surfaces, borders and ink match the Payslip page redesign exactly
-   * (see the former payslipTheme.ts) — that page now sets the sitewide
-   * dark theme instead of a one-off override. */
   --page: oklch(0.15 0.004 260);
   --surface: oklch(0.18 0.005 260);
   --surface-2: oklch(0.19 0.005 260);
@@ -162,18 +132,6 @@
   --foreground: var(--ink);
 }
 
-/* --------------------------------------------------------------------------
- * Palette overrides.
- *
- * `indigo` is re-anchored on the Payslip page's teal accent (oklch hue 195)
- * so accent colors already spelled `indigo-600`/`indigo-400`/etc. across the
- * app move with the theme, without touching every call site. `indigo-600`
- * stays a single accessible value in both themes (it's used directly with
- * hardcoded `text-white`, e.g. the calendar's "today" marker); `indigo-400`
- * is the exact bright teal the Payslip page uses for dark-mode text.
- * Dark-mode `zinc` mirrors the semantic surface/line tokens below, so the
- * app's raw `zinc-*` usage lands on the redesigned dark palette too.
- * ----------------------------------------------------------------------- */
 @theme {
   --color-indigo-50: oklch(0.984 0.014 180.72);
   --color-indigo-100: oklch(0.953 0.051 180.801);
@@ -188,13 +146,6 @@
   --color-indigo-950: oklch(0.24 0.04 192);
 }
 
-/* --------------------------------------------------------------------------
- * Salary Stats + Commission pages (Claude Design "Sophos Payslip").
- *
- * Dark values are the design's exact colors; light values mirror them on a
- * white floor. Scoped to `.stats-page` (see components/StatsPage.tsx) so the
- * rest of the app keeps its own tokens.
- * ----------------------------------------------------------------------- */
 .stats-page {
   font-family: var(--st-sans), system-ui, sans-serif;
   line-height: normal;
@@ -287,14 +238,6 @@
   --color-st-ded: var(--st-ded);
 }
 
-/* --------------------------------------------------------------------------
- * Travels page (Claude Design "Travel Itinerary v2").
- *
- * Dark values are the design's exact colors; light values mirror them on a
- * white floor. The `--tv-type*` / `--tv-place*` tokens are oklch "L C" pairs:
- * the page supplies each type's or place's hue, e.g.
- * `oklch(var(--tv-type-bg) 250)`, so one hue reads right in both themes.
- * ----------------------------------------------------------------------- */
 .travels-page {
   font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
   font-size: 14px;
@@ -416,7 +359,6 @@
 }
 
 @theme inline {
-  /* Surfaces */
   --color-page: var(--page);
   --color-surface: var(--surface);
   --color-surface-2: var(--surface-2);
@@ -424,19 +366,16 @@
   --color-surface-inset: var(--surface-inset);
   --color-shell: var(--shell);
 
-  /* Lines */
   --color-line: var(--line);
   --color-line-soft: var(--line-soft);
   --color-line-strong: var(--line-strong);
   --color-shell-line: var(--shell-line);
 
-  /* Ink */
   --color-ink: var(--ink);
   --color-ink-2: var(--ink-2);
   --color-ink-3: var(--ink-3);
   --color-ink-4: var(--ink-4);
 
-  /* Brand + status */
   --color-brand: var(--brand);
   --color-brand-hover: var(--brand-hover);
   --color-brand-text: var(--brand-text);
@@ -460,17 +399,14 @@
   --color-info-soft: var(--info-soft);
   --color-info-line: var(--info-line);
 
-  /* Nav */
   --color-nav-hover: var(--nav-hover);
   --color-nav-active-bg: var(--nav-active-bg);
   --color-nav-active-text: var(--nav-active-text);
   --color-nav-icon: var(--nav-icon);
 
-  /* Controls */
   --color-input-bg: var(--input-bg);
   --color-input-line: var(--input-line);
 
-  /* Legacy aliases */
   --color-background: var(--background);
   --color-foreground: var(--foreground);
 
@@ -491,8 +427,6 @@ body {
   color: var(--placeholder);
 }
 
-/* Native checkboxes, radios and range thumbs pick up the brand without each
- * one needing a hand-built replacement. */
 input,
 textarea,
 select {
@@ -503,8 +437,6 @@ select {
   background: var(--brand-soft-hover);
 }
 
-/* Thin, self-effacing scrollbars — the reference design's chrome never
- * competes with the data sitting next to it. */
 * {
   scrollbar-width: thin;
   scrollbar-color: var(--line-strong) transparent;
@@ -528,15 +460,11 @@ select {
   background-color: var(--ink-4);
 }
 
-/* One focus treatment for every interactive element: a 4px brand halo,
- * matching NextAdmin's `focus:ring-4`. */
 :where(a, button, input, select, textarea, [tabindex]):focus-visible {
   outline: 2px solid var(--brand);
   outline-offset: 1px;
 }
 
-/* One place to honor prefers-reduced-motion for every transition/animation
- * in the app, instead of a reduced-motion variant on each component. */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

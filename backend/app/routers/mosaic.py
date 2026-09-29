@@ -1,9 +1,3 @@
-"""Mosaic solver endpoints.
-
-Runs the IDA* region-graph search server-side so the browser's main thread
-never blocks on it — see app/services/mosaic_solver.py for the algorithm.
-"""
-
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
@@ -61,7 +55,6 @@ def mosaic_solve(body: MosaicSolveRequest) -> MosaicSolveResponse:
 
 @router.post("/api/mosaic/solve-free")
 def mosaic_solve_free(body: MosaicFreeSolveRequest) -> MosaicFreeSolveResponse:
-    """Optimal solve under the "tap any tile" rule (not a fixed start blob)."""
     _validate_grid(body.grid)
     result = solve_free_cell(
         body.grid,

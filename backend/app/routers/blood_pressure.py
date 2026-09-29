@@ -1,5 +1,3 @@
-"""Blood-pressure reading endpoints (systolic / diastolic / pulse, timestamped)."""
-
 from __future__ import annotations
 
 from typing import Any

@@ -27,7 +27,6 @@ type Area = {
   title: string;
   description: string;
   icon: (p: IconProps) => React.ReactElement;
-  /** Tint for the icon chip — the one place each area gets its own hue. */
   tone: string;
   shortcuts: readonly Shortcut[];
 };

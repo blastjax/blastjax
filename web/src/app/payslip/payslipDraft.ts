@@ -2,7 +2,6 @@ import type { PayslipCreateBody, PayslipRow } from "@/lib/api";
 import { formatAmountNumber, parseFormNumber } from "@/lib/parseFormNumber";
 import type { FormState } from "./payslipModalForm";
 
-/** Formats a stored amount as ``n,nnn.nn`` for display, or "" when absent. */
 function fmtOptAmount(n: number | null | undefined): string {
   return n != null ? formatAmountNumber(n) : "";
 }
@@ -41,7 +40,6 @@ export function stashPayslipModalDraft(
       );
     }
   } catch {
-    /* quota / private mode */
   }
 }
 
@@ -59,7 +57,6 @@ export function clearPayslipModalDraft(
       );
     }
   } catch {
-    /* ignore */
   }
 }
 

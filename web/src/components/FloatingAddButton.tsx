@@ -2,18 +2,11 @@
 
 type FloatingAddButtonProps = {
   onClick: () => void;
-  /** Hide while a modal/dialog is open so the FAB stays behind overlays. */
   hidden?: boolean;
   label?: string;
   ariaLabel?: string;
 };
 
-/**
- * Fixed bottom-right FAB: a brand-filled circle with “+” (accessible name via
- * `ariaLabel`). Carries the same fill as every other primary action, so the
- * page's one affirmative control reads the same whether it's docked in a form
- * footer or floating over a list.
- */
 export function FloatingAddButton({
   onClick,
   hidden,

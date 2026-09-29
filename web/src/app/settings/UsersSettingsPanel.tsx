@@ -32,9 +32,6 @@ function emptyEdit(username: string): EditState {
   return { username, password: "", confirm: "" };
 }
 
-/** Settings → Users → per-user page visibility. `allowed_pages: null` means
- * unrestricted (every page) — the default for a freshly-added user; a
- * superuser bypasses the list entirely. */
 function AccessControls({
   user,
   onSaved,

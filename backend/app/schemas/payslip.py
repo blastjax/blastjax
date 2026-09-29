@@ -1,5 +1,3 @@
-"""Payslip API models."""
-
 from __future__ import annotations
 
 from pydantic import AliasChoices, BaseModel, Field, model_validator

@@ -21,11 +21,6 @@ type Status = "checking" | "unreachable" | "unauthenticated" | "authenticated";
 
 type StatusUser = { username: string; is_superuser: boolean; allowed_pages: string[] | null } | null;
 
-/** The logged-in user's page-visibility state (see Settings → Users), for
- * SidebarNav/Home to filter nav by and AppShell to route-guard with. `null`
- * while unauthenticated, or once logged in when login isn't restricted to
- * named users at all (`/api/auth/status` didn't return a `user`) — both
- * cases mean "show everything". */
 const CurrentUserContext = createContext<PageAccess | null>(null);
 
 export function useCurrentUser(): PageAccess | null {
@@ -36,7 +31,6 @@ const CARD_CLASS = `w-full max-w-sm ${CARD_CLASSES}`;
 
 const FIELD_CLASS = `mb-4 w-full ${INPUT_CLASSES}`;
 
-/** Full-bleed, centered stage for the pre-shell screens (login, unreachable). */
 function Screen({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex min-h-screen min-h-[100dvh] w-full flex-col items-center justify-center gap-6 bg-page px-4">
@@ -84,9 +78,6 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       clearSessionToken();
       setStatus("unauthenticated");
     } catch {
-      // Every screen in this app is API-backed, so rendering the shell here
-      // would just fill it with failed requests. Say so and offer a retry
-      // instead of guessing whether a session would have been valid.
       setStatus("unreachable");
     }
   }, []);
@@ -121,9 +112,6 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       }
       setSessionToken(data.token);
       setPassword("");
-      // Not just setStatus("authenticated") -- that skipped fetching /status,
-      // so currentUser (and with it, page restrictions) stayed null/unset
-      // until the next reload.
       await checkStatus();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Invalid username or password.");
