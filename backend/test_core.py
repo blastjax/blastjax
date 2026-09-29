@@ -121,75 +121,6 @@ def check_serialize_detail_shape() -> None:
     assert acc["id"] == 9 and acc["name"] == "Hotel"
 
 
-<<<<<<< HEAD
-def _schema_columns() -> dict[str, set[str]]:
-    """Table -> column names, as schema.py's DDL declares them."""
-    tables: dict[str, set[str]] = {}
-    for name, ddl in schema.SCHEMA:
-        cols = set()
-        for line in ddl.strip().splitlines():
-            word = re.match(r"[A-Za-z_][A-Za-z0-9_]*", line.strip())
-            if word is None:
-                continue
-            # Match the leading word exactly: a prefix test would read the
-            # column `checkin_date` as a CHECK constraint and drop it.
-            if word.group(0).upper() in ("CHECK", "UNIQUE", "PRIMARY", "FOREIGN"):
-                continue
-            cols.add(word.group(0))
-        tables[name] = cols
-    return tables
-
-
-def _plain_columns(cols_sql: str) -> set[str]:
-    """The bare column names in a SELECT list, skipping computed expressions
-    such as ``(pdf_data IS NOT NULL) AS has_pdf``."""
-    return {
-        part for part in (c.strip() for c in cols_sql.split(","))
-        if part.replace("_", "").isalnum()
-    }
-
-
-def check_schema_covers_what_the_app_queries() -> None:
-    """The DDL must define every column the query layer selects.
-
-    schema.py is called the single owner of the schema, but that only holds if
-    something checks it. It had already drifted while the DDL lived inside the
-    migration script: the whole ``company`` table was live and queried while
-    absent from it, so rebuilding would have produced a database the app
-    errors against on first use.
-
-    Startup needs no separate check here -- ``init_schema`` derives the tables
-    it requires from this same DDL.
-    """
-    columns = _schema_columns()
-
-    selected = {
-        "calendar_day_override": db._CALENDAR_DAY_OVERRIDE_COLS,
-        "company": db._COMPANY_PUBLIC_COLS,
-        "payslip": db._PAYSLIP_RETURN_COLS,
-        "travel_trip": db._TRAVEL_TRIP_COLS,
-        "travel_city": db._TRAVEL_CITY_COLS,
-        "travel_flight": db._TRAVEL_FLIGHT_COLS,
-        "travel_transport": db._TRAVEL_TRANSPORT_COLS,
-        "travel_itinerary": db._TRAVEL_ITINERARY_COLS,
-        "travel_accommodation": db._TRAVEL_ACCOMMODATION_COLS,
-    }
-    for table, cols_sql in selected.items():
-        missing = _plain_columns(cols_sql) - columns[table]
-        assert not missing, f"{table}: selected but not in the DDL: {sorted(missing)}"
-
-    # Written by save_payslip_defaults, which builds its INSERT from this
-    # tuple rather than from a SELECT list -- exactly what drifted before.
-    missing_defaults = set(db._PAYSLIP_DEFAULT_FORM_COLS) - columns["payslip_default"]
-    assert not missing_defaults, f"payslip_default: written but not in the DDL: {sorted(missing_defaults)}"
-
-    # Every company visibility flag must exist as a column.
-    missing_flags = set(db._COMPANY_FLAG_COLUMNS) - columns["company"]
-    assert not missing_flags, f"company flags not in the DDL: {sorted(missing_flags)}"
-
-
-=======
->>>>>>> 2652d2a4a3f77782f3a580c2949e51d6a6348998
 def check_clean_city() -> None:
     c = travel._clean_city
     assert c("Makati City Municipality") == "Makati"
@@ -271,20 +202,15 @@ def check_db_idle_reaper() -> None:
             os.environ["BUDGET_DB_IDLE_CLOSE_SECONDS"] = prior
 
 
-<<<<<<< HEAD
 def check_calendar_override_bulk_bounds() -> None:
     from pydantic import ValidationError
 
     from app.schemas.calendar_day_override import CalendarDayOverrideBulkUpsert as Bulk
 
     one = {"day": "2026-10-13", "amount": 2199.02}
-    # "Even out" on a pay period's last open day sends exactly one day.
     assert len(Bulk(overrides=[one]).overrides) == 1
-    # Omitted `saved` must stay None (the upsert keeps what the day banked);
-    # an overspent last day banks a negative amount.
     assert Bulk(overrides=[one]).overrides[0].saved is None
     assert Bulk(overrides=[{**one, "saved": -250.5}]).overrides[0].saved == -250.5
-    # A month's grid can touch three pay periods -- well past 31 days.
     assert len(Bulk(overrides=[one] * 60).overrides) == 60
     for bad in ([], [one] * 101, [{"day": "2026-10-13", "amount": -1}]):
         try:
@@ -292,7 +218,8 @@ def check_calendar_override_bulk_bounds() -> None:
         except ValidationError:
             continue
         raise AssertionError(f"accepted {len(bad)} override(s) it should reject")
-=======
+
+
 def check_db_against_postgres() -> None:
     url = os.environ.get("TEST_DATABASE_URL", "")
     if not url:
@@ -348,6 +275,14 @@ def check_db_against_postgres() -> None:
         assert db.set_payslip_pdf(payslip["id"], b"%PDF")
         assert db.get_payslip(payslip["id"])["has_pdf"] and db.get_payslip_pdf(payslip["id"]) == b"%PDF"
 
+        db.upsert_calendar_day_overrides([("2026-10-13", 1000.0, 1199.02)])
+        rows = db.upsert_calendar_day_overrides([("2026-10-13", 900.0, None), ("2026-10-12", 50.0, None)])
+        assert [(r["day"], r["amount"], r["saved"]) for r in rows] == [
+            ("2026-10-12", 50.0, None),
+            ("2026-10-13", 900.0, 1199.02),
+        ], rows
+        assert db.upsert_calendar_day_overrides([("2026-10-13", 500.0, -3.5)])[1]["saved"] == -3.5
+
         db.list_payslips()
         with engine.connect() as c:
             assert c.connection.dbapi_connection.autocommit is False, "read session leaked autocommit"
@@ -357,7 +292,6 @@ def check_db_against_postgres() -> None:
         with admin.begin() as c:
             c.execute(text("DROP SCHEMA blastjax_test CASCADE"))
         admin.dispose()
->>>>>>> 2652d2a4a3f77782f3a580c2949e51d6a6348998
 
 
 def main() -> int:

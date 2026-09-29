@@ -1105,12 +1105,8 @@ def delete_credit_card_payment(payment_id: int) -> bool:
         return True
 
 
-<<<<<<< HEAD
-_CALENDAR_DAY_OVERRIDE_COLS = "id, day, amount, saved, created_at"
-=======
 def _calendar_day_overrides(s: Session) -> list[dict[str, Any]]:
     return [_row(o) for o in s.scalars(select(CalendarDayOverride).order_by(CalendarDayOverride.day))]
->>>>>>> 2652d2a4a3f77782f3a580c2949e51d6a6348998
 
 
 def list_calendar_day_overrides() -> list[dict[str, Any]]:
@@ -1118,41 +1114,20 @@ def list_calendar_day_overrides() -> list[dict[str, Any]]:
         return _calendar_day_overrides(s)
 
 
-<<<<<<< HEAD
-def upsert_calendar_day_overrides(
-    overrides: list[tuple[str, float, float | None]],
-) -> list[dict[str, Any]]:
-    """Upsert one or more (day, amount, saved) rows in a single transaction and return the full list.
-
-    ``saved`` is what logging a pay period's last day banked to Savings
-    (negative when that day was overspent). ``None`` keeps a day's existing
-    value, so evening out or moving budget never wipes what was banked.
-    """
-    with get_connection() as conn:
-        with db_cursor(conn) as cur:
-            for day, amount, saved in overrides:
-                cur.execute(
-                    """
-                    INSERT INTO calendar_day_override (day, amount, saved)
-                    VALUES (%s, %s, %s)
-                    ON CONFLICT (day) DO UPDATE SET
-                        amount = excluded.amount,
-                        saved = COALESCE(excluded.saved, calendar_day_override.saved)
-                    """,
-                    (day, amount, saved),
-                )
-            cur.execute(
-                f"SELECT {_CALENDAR_DAY_OVERRIDE_COLS} FROM calendar_day_override ORDER BY day"
-            )
-            return [_row_to_dict(cur, r) for r in cur.fetchall()]
-=======
-def upsert_calendar_day_overrides(overrides: list[tuple[str, float]]) -> list[dict[str, Any]]:
+def upsert_calendar_day_overrides(overrides: list[tuple[str, float, float | None]]) -> list[dict[str, Any]]:
     with _session(write=True) as s:
-        for day, amount in overrides:
-            stmt = insert(CalendarDayOverride).values(day=day, amount=amount)
-            s.execute(stmt.on_conflict_do_update(index_elements=["day"], set_={"amount": stmt.excluded.amount}))
+        for day, amount, saved in overrides:
+            stmt = insert(CalendarDayOverride).values(day=day, amount=amount, saved=saved)
+            s.execute(
+                stmt.on_conflict_do_update(
+                    index_elements=["day"],
+                    set_={
+                        "amount": stmt.excluded.amount,
+                        "saved": func.coalesce(stmt.excluded.saved, CalendarDayOverride.saved),
+                    },
+                )
+            )
         return _calendar_day_overrides(s)
->>>>>>> 2652d2a4a3f77782f3a580c2949e51d6a6348998
 
 
 def _pay_period(period_year: int, period_month: int, period_half: int) -> Any:
