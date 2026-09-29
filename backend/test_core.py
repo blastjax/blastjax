@@ -479,6 +479,7 @@ def check_schema_covers_what_the_app_queries() -> None:
     columns = _schema_columns()
 
     selected = {
+        "calendar_day_override": db._CALENDAR_DAY_OVERRIDE_COLS,
         "company": db._COMPANY_PUBLIC_COLS,
         "payslip": db._PAYSLIP_RETURN_COLS,
         "travel_trip": db._TRAVEL_TRIP_COLS,
@@ -595,6 +596,28 @@ def check_db_idle_reaper() -> None:
             os.environ.pop("BUDGET_DB_IDLE_CLOSE_SECONDS", None)
         else:
             os.environ["BUDGET_DB_IDLE_CLOSE_SECONDS"] = prior
+
+
+def check_calendar_override_bulk_bounds() -> None:
+    from pydantic import ValidationError
+
+    from app.schemas.calendar_day_override import CalendarDayOverrideBulkUpsert as Bulk
+
+    one = {"day": "2026-10-13", "amount": 2199.02}
+    # "Even out" on a pay period's last open day sends exactly one day.
+    assert len(Bulk(overrides=[one]).overrides) == 1
+    # Omitted `saved` must stay None (the upsert keeps what the day banked);
+    # an overspent last day banks a negative amount.
+    assert Bulk(overrides=[one]).overrides[0].saved is None
+    assert Bulk(overrides=[{**one, "saved": -250.5}]).overrides[0].saved == -250.5
+    # A month's grid can touch three pay periods -- well past 31 days.
+    assert len(Bulk(overrides=[one] * 60).overrides) == 60
+    for bad in ([], [one] * 101, [{"day": "2026-10-13", "amount": -1}]):
+        try:
+            Bulk(overrides=bad)
+        except ValidationError:
+            continue
+        raise AssertionError(f"accepted {len(bad)} override(s) it should reject")
 
 
 def main() -> int:

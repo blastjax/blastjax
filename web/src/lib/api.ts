@@ -813,6 +813,9 @@ export type CalendarDayOverrideRow = {
   id: number;
   day: string;
   amount: number;
+  /** Banked to Savings when this day was logged as its pay period's last day
+   *  (negative when overspent); null if it never was. */
+  saved: number | null;
   created_at: string;
 };
 
@@ -820,8 +823,9 @@ export async function getCalendarDayOverrides() {
   return getJson<{ overrides: CalendarDayOverrideRow[] }>("/api/calendar-day-override");
 }
 
+/** `saved` omitted keeps whatever the day already banked to Savings. */
 export async function bulkUpsertCalendarDayOverrides(
-  overrides: { day: string; amount: number }[],
+  overrides: { day: string; amount: number; saved?: number }[],
 ) {
   return sendJson<{ overrides: CalendarDayOverrideRow[] }>(
     "PUT",

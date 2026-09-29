@@ -44,6 +44,7 @@ import {
   getPayPeriodStartOverrides,
   getPayslips,
   upsertPayPeriodStartOverride,
+  type CalendarDayOverrideRow,
   type FixedExpenseRow,
   type MonthlyExpenseRow,
   type PayslipRow,
@@ -68,6 +69,9 @@ const WEEKDAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as cons
 
 /** Custom drag-and-drop payload type carrying the source day-of-month. */
 const DAY_DND_MIME = "text/x-calendar-day";
+
+const NOTHING_TO_EVEN_OUT =
+  "Nothing to even out: these pay periods have no days left, or no payslip yet";
 
 type PeriodHalf = 1 | 2;
 
@@ -460,6 +464,14 @@ export default function CalendarClient() {
   const [payDateError, setPayDateError] = useState<string | null>(null);
 
   const [dayOverrides, setDayOverrides] = useState<Map<string, number>>(new Map());
+  /** Day → what logging it as its pay period's last day banked to Savings
+   *  (negative when overspent, 0 when right on budget); ordered by day. */
+  const [daySavings, setDaySavings] = useState<Map<string, number>>(new Map());
+  /** Every override write returns the full list; both maps come from it. */
+  const applyOverrideRows = useCallback((rows: CalendarDayOverrideRow[]) => {
+    setDayOverrides(new Map(rows.map((o) => [o.day, o.amount])));
+    setDaySavings(new Map(rows.flatMap((o) => (o.saved != null ? [[o.day, o.saved] as const] : []))));
+  }, []);
   const [dragSourceIso, setDragSourceIso] = useState<string | null>(null);
   const [dragOverIso, setDragOverIso] = useState<string | null>(null);
   const [transfer, setTransfer] = useState<TransferState | null>(null);
@@ -546,8 +558,8 @@ export default function CalendarClient() {
 
   const loadOverrides = useCallback(async () => {
     const r = await getCalendarDayOverrides();
-    setDayOverrides(new Map(r.overrides.map((o) => [o.day, o.amount])));
-  }, []);
+    applyOverrideRows(r.overrides);
+  }, [applyOverrideRows]);
 
   const loadPayPeriodOverrides = useCallback(async () => {
     const r = await getPayPeriodStartOverrides();
@@ -581,7 +593,7 @@ export default function CalendarClient() {
     if (overridesResult.status === "rejected") {
       const e = overridesResult.reason;
       firstError ??= e instanceof Error ? e.message : "Failed to load day overrides";
-      setDayOverrides(new Map());
+      applyOverrideRows([]);
     }
     if (payPeriodResult.status === "rejected") {
       const e = payPeriodResult.reason;
@@ -589,7 +601,7 @@ export default function CalendarClient() {
       setPayPeriodOverrides(new Map());
     }
     return firstError;
-  }, [loadOverrides, loadPayPeriodOverrides]);
+  }, [loadOverrides, loadPayPeriodOverrides, applyOverrideRows]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1110,7 +1122,7 @@ export default function CalendarClient() {
           { day: transfer.fromIso, amount: Math.max(0, roundCents(transfer.fromAmount - amount)) },
           { day: transfer.toIso, amount: roundCents(transfer.toAmount + amount) },
         ]);
-        setDayOverrides(new Map(r.overrides.map((o) => [o.day, o.amount])));
+        applyOverrideRows(r.overrides);
         setTransfer(null);
       } catch (err) {
         setTransferError(err instanceof Error ? err.message : "Failed to move budget");
@@ -1118,7 +1130,7 @@ export default function CalendarClient() {
         setSavingTransfer(false);
       }
     },
-    [transfer, transferAmount],
+    [transfer, transferAmount, applyOverrideRows],
   );
 
   const openSpendModal = useCallback((cell: DayCell) => {
@@ -1130,6 +1142,19 @@ export default function CalendarClient() {
   const closeSpendModal = useCallback(() => {
     setSpendDay(null);
   }, []);
+
+  /** The last day of the pay period `d` belongs to (periods can end in another month). */
+  const isPeriodLastDay = useCallback(
+    (d: DayCell) => d.iso === periodEndIso(payPeriodOverrides, d.periodYear, d.periodMonth, d.periodHalf),
+    [payPeriodOverrides],
+  );
+
+  /** A last day already logged (its leftover banked) is closed: later
+   *  spreads and Even out leave it alone instead of rewriting what was spent. */
+  const isClosedLastDay = useCallback(
+    (d: DayCell) => daySavings.has(d.iso) && isPeriodLastDay(d),
+    [daySavings, isPeriodLastDay],
+  );
 
   const submitSpend = useCallback(
     async (e: FormEvent) => {
@@ -1143,40 +1168,59 @@ export default function CalendarClient() {
       }
       const spent = roundCents(rawSpent);
       /**
-       * The remainder (or overspend) spreads across this period's other
-       * *active* days — today or later, never a day that's already past —
-       * regardless of whether they fall before or after the day being
-       * logged. This lets logging a future day (e.g. the last day of the
-       * period) redistribute to the still-open days leading up to it, not
-       * just days after it (there may be none). Pulled from the full period
-       * (via periodDayCells), not just the viewed month's dayCells, since a
-       * period can spill into an adjacent month.
+       * What this day really holds: its budget plus anything it already
+       * banked, so re-logging a last day re-derives its savings instead of
+       * stacking a second deposit on top of the first.
+       */
+      const pot = spendDay.dailyBudget + (daySavings.get(spendDay.iso) ?? 0);
+      /**
+       * Otherwise the remainder (or overspend) spreads across this period's
+       * other *active* days — today or later, never a day that's already
+       * past — whether they fall before or after the day being logged.
+       * Pulled from the full period (via periodDayCells), not just the viewed
+       * month's dayCells, since a period can spill into an adjacent month.
        */
       const otherDays = periodDayCells(
         spendDay.periodYear,
         spendDay.periodMonth,
         spendDay.periodHalf,
-      ).filter((d) => d.iso !== spendDay.iso && !d.isPast && d.dailyBudget != null);
-      if (otherDays.length === 0) {
-        setSpendError("No active days in this pay period to spread the remainder to.");
-        return;
-      }
+      ).filter(
+        (d) => d.iso !== spendDay.iso && !d.isPast && d.dailyBudget != null && !isClosedLastDay(d),
+      );
+      /**
+       * A pay period's last day banks its difference to Savings instead:
+       * leftover is added, overspend is taken back out (saved goes negative).
+       * So does any day with no open day left to absorb it (logging a day
+       * after its period ended), which used to be a dead-end error.
+       */
+      const banks = isPeriodLastDay(spendDay) || otherDays.length === 0;
       setSpendError(null);
       setSavingSpend(true);
       try {
-        const remainderCents = Math.round((spendDay.dailyBudget - spent) * 100);
-        const order = otherDays.map((d) => d.iso);
-        const balances = new Map(
-          otherDays.map((d) => [d.iso, Math.round((d.dailyBudget ?? 0) * 100)]),
-        );
-        const updated = spreadCentsEvenly(order, balances, remainderCents);
-        const overrides = otherDays.map((d) => ({
-          day: d.iso,
-          amount: (updated.get(d.iso) ?? 0) / 100,
-        }));
-        overrides.push({ day: spendDay.iso, amount: spent });
+        let overrides: { day: string; amount: number; saved?: number }[];
+        if (banks) {
+          overrides = [{ day: spendDay.iso, amount: spent, saved: roundCents(pot - spent) }];
+        } else {
+          const remainderCents = Math.round((pot - spent) * 100);
+          const order = otherDays.map((d) => d.iso);
+          const balances = new Map(
+            otherDays.map((d) => [d.iso, Math.round((d.dailyBudget ?? 0) * 100)]),
+          );
+          const updated = spreadCentsEvenly(order, balances, remainderCents);
+          overrides = otherDays.map((d) => ({
+            day: d.iso,
+            amount: (updated.get(d.iso) ?? 0) / 100,
+          }));
+          // A day that banked back when it was a last day (a pay date moved
+          // since) hands that back — it's part of `pot` above.
+          overrides.push({
+            day: spendDay.iso,
+            amount: spent,
+            ...(daySavings.has(spendDay.iso) && { saved: 0 }),
+          });
+        }
         const r = await bulkUpsertCalendarDayOverrides(overrides);
-        setDayOverrides(new Map(r.overrides.map((o) => [o.day, o.amount])));
+        applyOverrideRows(r.overrides);
         setSpendDay(null);
       } catch (err) {
         setSpendError(err instanceof Error ? err.message : "Failed to record spend");
@@ -1184,40 +1228,74 @@ export default function CalendarClient() {
         setSavingSpend(false);
       }
     },
-    [spendDay, spendAmount, periodDayCells],
+    [
+      spendDay,
+      spendAmount,
+      daySavings,
+      periodDayCells,
+      isPeriodLastDay,
+      isClosedLastDay,
+      applyOverrideRows,
+    ],
   );
 
   /**
-   * Resets every still-active day in the viewed month back to its pay
-   * period's even split — the fix for overrides (from a manual
-   * drag/transfer, or a "log spend" redistribution) going stale once a
-   * monthly expense is added, edited, moved between halves, or deleted.
-   * Past days are left untouched so already-logged history doesn't move.
-   * `scope: "future"` also excludes today, for resetting only the days
-   * still ahead without touching what's already been logged today.
+   * "Even out", worked per pay period rather than per month — the fix for
+   * overrides (a drag/transfer, a "log spend" redistribution) going stale or
+   * lopsided. Every period with a day in the viewed grid is evened across its
+   * *whole* date range, even the part outside this month (a period can start
+   * in the previous month after an early payday, or run into the next), so
+   * no period is left half-reset. What's still unspent in the period — its
+   * net after expenses, minus the budgets of days that stay put and minus
+   * whatever it already banked to Savings — is split evenly over the days
+   * being reset, so evening out never adds or removes money (nor re-spends
+   * savings): past days are kept (already-logged history), and `future` keeps
+   * today too. An overspent period evens out to zero, never negative (the
+   * API rejects that). Periods with no funding payslip yet are skipped.
+   * Rounded per day like the default split, so a clean period shows no
+   * "changed" dots; the total can drift by a few cents at most.
    */
+  const evenOutPlan = useMemo(() => {
+    const periods = new Map<string, DayCell>();
+    for (const d of [...leadingOverflowDays, ...dayCells]) {
+      periods.set(periodKey(d.periodYear, d.periodMonth, d.periodHalf), d);
+    }
+    const plan = (scope: "activeToday" | "future") => {
+      const resets = (d: DayCell) =>
+        !d.isPast && (scope === "activeToday" || !d.isToday) && !isClosedLastDay(d);
+      const overrides: { day: string; amount: number }[] = [];
+      for (const { periodYear, periodMonth, periodHalf } of periods.values()) {
+        const net = netAfterExpensesForPeriod(periodYear, periodMonth, periodHalf);
+        if (net == null) continue;
+        const days = periodDayCells(periodYear, periodMonth, periodHalf);
+        const targets = days.filter(resets);
+        if (targets.length === 0) continue;
+        const kept = days.filter((d) => !resets(d)).reduce((s, d) => s + (d.dailyBudget ?? 0), 0);
+        const banked = days.reduce((s, d) => s + (daySavings.get(d.iso) ?? 0), 0);
+        const amount = roundCents(Math.max(0, net - kept - banked) / targets.length);
+        for (const d of targets) overrides.push({ day: d.iso, amount });
+      }
+      return overrides;
+    };
+    return { activeToday: plan("activeToday"), future: plan("future") };
+  }, [leadingOverflowDays, dayCells, daySavings, netAfterExpensesForPeriod, periodDayCells, isClosedLastDay]);
+
   const autoDivideActiveDays = useCallback(
-    async (scope: "activeToday" | "future" = "activeToday") => {
-      const targets = dayCells.filter(
-        (d) => !d.isPast && (scope === "activeToday" || !d.isToday) && d.defaultAmount != null,
-      );
-      if (targets.length === 0) return;
+    async (scope: "activeToday" | "future") => {
+      const overrides = evenOutPlan[scope];
+      if (overrides.length === 0) return;
       setError(null);
       setAutoDividing(true);
       try {
-        const overrides = targets.map((d) => ({
-          day: d.iso,
-          amount: roundCents(d.defaultAmount as number),
-        }));
         const r = await bulkUpsertCalendarDayOverrides(overrides);
-        setDayOverrides(new Map(r.overrides.map((o) => [o.day, o.amount])));
+        applyOverrideRows(r.overrides);
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to auto-divide budget");
+        setError(err instanceof Error ? err.message : "Failed to even out budget");
       } finally {
         setAutoDividing(false);
       }
     },
-    [dayCells],
+    [evenOutPlan, applyOverrideRows],
   );
 
   const openExpenseModal = useCallback((half: PeriodHalf) => {
@@ -1421,17 +1499,25 @@ export default function CalendarClient() {
         d.dailyBudget != null,
     ).length;
 
-  /** Live "what happens to the rest" line under the Log spending input. */
+  /** The Log spending modal's numbers, mirroring submitSpend: the day's `pot`
+   *  (budget + anything it already banked), whether its difference `banks` to
+   *  Savings, and the live `delta` (null until a valid amount is typed). */
   const spendPreview = useMemo(() => {
     if (!spendDay || spendDay.dailyBudget == null) return null;
+    const days = periodDayCells(spendDay.periodYear, spendDay.periodMonth, spendDay.periodHalf).filter(
+      (d) => d.iso !== spendDay.iso && !d.isPast && d.dailyBudget != null && !isClosedLastDay(d),
+    ).length;
+    const lastDay = isPeriodLastDay(spendDay);
+    const pot = roundCents(spendDay.dailyBudget + (daySavings.get(spendDay.iso) ?? 0));
     const evaluated = evaluateAmountExpression(spendAmount);
     const spent = evaluated != null ? parseFormNumber(evaluated) : null;
-    if (spent == null || spent < 0) return null;
-    const days = periodDayCells(spendDay.periodYear, spendDay.periodMonth, spendDay.periodHalf).filter(
-      (d) => d.iso !== spendDay.iso && !d.isPast && d.dailyBudget != null,
-    ).length;
-    return { delta: roundCents(spendDay.dailyBudget - roundCents(spent)), days };
-  }, [spendDay, spendAmount, periodDayCells]);
+    const delta = spent == null || spent < 0 ? null : roundCents(pot - roundCents(spent));
+    return { pot, days, lastDay, banks: lastDay || days === 0, delta };
+  }, [spendDay, spendAmount, daySavings, periodDayCells, isPeriodLastDay, isClosedLastDay]);
+
+  const savingsTotal = roundCents([...daySavings.values()].reduce((s, v) => s + v, 0));
+  /** Latest deposit (or withdrawal) — the map follows the API's ORDER BY day. */
+  const lastBanked = [...daySavings].pop();
 
   const transferMove = transfer ? parseFormNumber(transferAmount) : null;
   const payDateRange =
@@ -1473,6 +1559,30 @@ export default function CalendarClient() {
         <LoadingBlocks label="Loading your budget…" />
       ) : (
         <>
+          <StatStrip className="sm:grid-cols-2">
+            <Metric
+              size="lg"
+              label="Savings"
+              value={savingsTotal < 0 ? `−${fmtMoney(-savingsTotal)}` : fmtMoney(savingsTotal)}
+              tone={savingsTotal > 0 ? "success" : savingsTotal < 0 ? "danger" : "neutral"}
+              hint="What's left on the last day of each pay period"
+            />
+            <Metric
+              label="Last added"
+              value={
+                lastBanked
+                  ? `${lastBanked[1] < 0 ? "−" : "+"}${fmtMoney(Math.abs(lastBanked[1]))}`
+                  : "–"
+              }
+              tone={lastBanked ? (lastBanked[1] < 0 ? "danger" : "success") : "neutral"}
+              hint={
+                lastBanked
+                  ? fmtDay(lastBanked[0], true)
+                  : "Log what you spent on a pay period's last day to start saving"
+              }
+            />
+          </StatStrip>
+
           <div className="grid gap-5 lg:grid-cols-2">
             {([1, 2] as const).map((half) => {
               const style = HALF_STYLE[half];
@@ -1584,8 +1694,12 @@ export default function CalendarClient() {
                 <span className="px-2 text-xs font-medium text-ink-3">{autoDividing ? "Evening out…" : "Even out"}</span>
                 <button
                   type="button"
-                  disabled={autoDividing}
-                  title="Reset today and every later day this month to an even split of its pay period"
+                  disabled={autoDividing || evenOutPlan.activeToday.length === 0}
+                  title={
+                    evenOutPlan.activeToday.length === 0
+                      ? NOTHING_TO_EVEN_OUT
+                      : "Split what's left of each pay period evenly across today and every later day in it"
+                  }
                   onClick={() => void autoDivideActiveDays("activeToday")}
                   className={evenOutButton}
                 >
@@ -1593,8 +1707,12 @@ export default function CalendarClient() {
                 </button>
                 <button
                   type="button"
-                  disabled={autoDividing}
-                  title="Reset the days after today to an even split, leaving today as it is"
+                  disabled={autoDividing || evenOutPlan.future.length === 0}
+                  title={
+                    evenOutPlan.future.length === 0
+                      ? NOTHING_TO_EVEN_OUT
+                      : "Split what's left of each pay period evenly across the days after today, leaving today as it is"
+                  }
                   onClick={() => void autoDivideActiveDays("future")}
                   className={evenOutButton}
                 >
@@ -1873,7 +1991,7 @@ export default function CalendarClient() {
         ariaLabelledBy="spend-title"
         dialogClassName={`${DIALOG_CLASSES} max-w-sm`}
       >
-        {spendDay && spendDay.dailyBudget != null && (
+        {spendDay && spendPreview && (
           <>
             <ModalHeader
               id="spend-title"
@@ -1886,8 +2004,15 @@ export default function CalendarClient() {
                 <div className="rounded-xl bg-surface-2/70 px-4 py-3">
                   <p className="text-xs font-medium text-ink-3">Budget for this day</p>
                   <p className="mt-0.5 text-2xl font-semibold tabular-nums tracking-tight text-ink">
-                    {fmtMoney(spendDay.dailyBudget)}
+                    {fmtMoney(spendPreview.pot)}
                   </p>
+                  {spendPreview.banks && (
+                    <p className="mt-1 text-xs text-ink-3">
+                      {spendPreview.lastDay
+                        ? "Last day of this pay period: whatever you don't spend goes to Savings."
+                        : "No open days left in this pay period: whatever you don't spend goes to Savings."}
+                    </p>
+                  )}
                 </div>
                 <Field label="Amount spent" hint="Math works too, e.g. 120+45.50">
                   <AmountInput
@@ -1900,19 +2025,21 @@ export default function CalendarClient() {
                     disabled={savingSpend}
                   />
                 </Field>
-                {spendPreview && (
+                {spendPreview.delta != null && (
                   <p
                     aria-live="polite"
                     className={`rounded-lg px-3 py-2 text-sm ${
-                      spendPreview.days === 0
-                        ? "bg-danger-soft text-danger-text"
-                        : spendPreview.delta >= 0
-                          ? "bg-success-soft text-success-text"
-                          : "bg-warning-soft text-warning-text"
+                      spendPreview.delta >= 0
+                        ? "bg-success-soft text-success-text"
+                        : "bg-warning-soft text-warning-text"
                     }`}
                   >
-                    {spendPreview.days === 0
-                      ? "No other open days in this pay period to spread the difference to."
+                    {spendPreview.banks
+                      ? spendPreview.delta === 0
+                        ? "Right on budget. Nothing goes to Savings."
+                        : spendPreview.delta > 0
+                          ? `${fmtMoney(spendPreview.delta)} left over goes to Savings.`
+                          : `${fmtMoney(-spendPreview.delta)} over, taken out of Savings.`
                       : spendPreview.delta === 0
                         ? "Right on budget. Other days stay as they are."
                         : spendPreview.delta > 0

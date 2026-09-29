@@ -1962,7 +1962,7 @@ def delete_credit_card_payment(payment_id: int) -> bool:
             return True
 
 
-_CALENDAR_DAY_OVERRIDE_COLS = "id, day, amount, created_at"
+_CALENDAR_DAY_OVERRIDE_COLS = "id, day, amount, saved, created_at"
 
 
 def list_calendar_day_overrides() -> list[dict[str, Any]]:
@@ -1975,19 +1975,26 @@ def list_calendar_day_overrides() -> list[dict[str, Any]]:
 
 
 def upsert_calendar_day_overrides(
-    overrides: list[tuple[str, float]],
+    overrides: list[tuple[str, float, float | None]],
 ) -> list[dict[str, Any]]:
-    """Upsert one or more (day, amount) pairs in a single transaction and return the full list."""
+    """Upsert one or more (day, amount, saved) rows in a single transaction and return the full list.
+
+    ``saved`` is what logging a pay period's last day banked to Savings
+    (negative when that day was overspent). ``None`` keeps a day's existing
+    value, so evening out or moving budget never wipes what was banked.
+    """
     with get_connection() as conn:
         with db_cursor(conn) as cur:
-            for day, amount in overrides:
+            for day, amount, saved in overrides:
                 cur.execute(
                     """
-                    INSERT INTO calendar_day_override (day, amount)
-                    VALUES (%s, %s)
-                    ON CONFLICT (day) DO UPDATE SET amount = excluded.amount
+                    INSERT INTO calendar_day_override (day, amount, saved)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (day) DO UPDATE SET
+                        amount = excluded.amount,
+                        saved = COALESCE(excluded.saved, calendar_day_override.saved)
                     """,
-                    (day, amount),
+                    (day, amount, saved),
                 )
             cur.execute(
                 f"SELECT {_CALENDAR_DAY_OVERRIDE_COLS} FROM calendar_day_override ORDER BY day"
