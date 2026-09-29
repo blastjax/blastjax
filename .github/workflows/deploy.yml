@@ -4,70 +4,41 @@ run-name: Deploy to Lightsail (${{ github.event_name == 'workflow_dispatch' && '
 on:
   push:
     branches: [main]
-  workflow_dispatch: {}
-
-env:
-  REGISTRY: ghcr.io
-  API_IMAGE: ghcr.io/${{ github.repository }}-api
-  WEB_IMAGE: ghcr.io/${{ github.repository }}-web
+  workflow_dispatch:
 
 jobs:
+  # Images are built here, not on the 1GB host, which can't fit `next build`.
   build:
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
-    # api and web don't depend on each other, so build them on separate
-    # runners in parallel instead of as two sequential steps on one runner.
     strategy:
       matrix:
         include:
-          - name: api
-            context: ./backend
-            file: ./docker/Dockerfile.backend
-            image: ghcr.io/${{ github.repository }}-api
-          - name: web
-            context: ./web
-            file: ./docker/Dockerfile.web
-            image: ghcr.io/${{ github.repository }}-web
+          - { name: api, context: ./backend, file: ./docker/Dockerfile.backend }
+          - { name: web, context: ./web, file: ./docker/Dockerfile.web }
+    env:
+      IMAGE: ghcr.io/${{ github.repository }}-${{ matrix.name }}
     steps:
       - uses: actions/checkout@v7
-
       - uses: docker/setup-buildx-action@v4
-
-      - name: Log in to GHCR
-        uses: docker/login-action@v4
+      - uses: docker/login-action@v4
         with:
-          registry: ${{ env.REGISTRY }}
+          registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
-      # Built here instead of on the EC2 host: the runner has far more RAM/CPU
-      # than the instance, so `next build` and the two images no longer
-      # compete with each other (or the box's own memory limit) at deploy time.
-      - name: Build and push ${{ matrix.name }}
-        uses: docker/build-push-action@v7
+      - uses: docker/build-push-action@v7
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.file }}
           push: true
-          build-args: ${{ matrix.name == 'web' && format('NEXT_PUBLIC_API_URL={0}', secrets.NEXT_PUBLIC_API_URL || '') || '' }}
-          tags: |
-            ${{ matrix.image }}:latest
-            ${{ matrix.image }}:${{ github.sha }}
-          # Build cache lives in GHCR next to the image rather than in the
-          # Actions cache. The gha backend served node_modules back at ~17MB/s
-          # (10.2s for one 178MB layer) and is subject to the repo's 10GB
-          # eviction budget, so entries also go stale on their own; the registry
-          # sits on the same connection the image push already uses and doesn't
-          # evict. image-manifest/oci-mediatypes are what GHCR needs to accept a
-          # cache manifest. NOTE: the first run after this change is a cold
-          # build - the :buildcache tag doesn't exist yet.
-          cache-from: type=registry,ref=${{ matrix.image }}:buildcache
-          cache-to: type=registry,ref=${{ matrix.image }}:buildcache,mode=max,image-manifest=true,oci-mediatypes=true
-          # Nothing here consumes provenance/SBOM attestations, and emitting
-          # them turns each push into a manifest list with an extra attestation
-          # manifest to build and push.
+          # Only Dockerfile.web declares this ARG; the api build ignores it.
+          build-args: NEXT_PUBLIC_API_URL=${{ secrets.NEXT_PUBLIC_API_URL }}
+          tags: ${{ env.IMAGE }}:latest,${{ env.IMAGE }}:${{ github.sha }}
+          # Registry cache, not gha: gha was slow to restore and evicts.
+          cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache
+          cache-to: type=registry,ref=${{ env.IMAGE }}:buildcache,mode=max,image-manifest=true,oci-mediatypes=true
           provenance: false
           sbom: false
 
@@ -76,20 +47,9 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       packages: read
-    # One deploy at a time; queue rather than cancel so a run that already
-    # started updating the host is never interrupted half-way. Scoped to this
-    # job (not the whole workflow) so concurrent pushes can still build in
-    # parallel — only the host step is serialized.
-    concurrency:
-      group: deploy-lightsail
-      cancel-in-progress: false
+    # One deploy at a time, queued (never cancelled) so the host is never left half-updated.
+    concurrency: deploy-lightsail
     steps:
-      # Moved off EC2+SSM onto a Lightsail instance (see git history for the
-      # migration). SSM was originally chosen here because direct SSH from
-      # GitHub-hosted runners to the old EC2 host mysteriously timed out at
-      # the TCP level; that was re-tested against this Lightsail host as part
-      # of the migration and reaches it fine, so plain SSH is back — it also
-      # means no AWS IAM role/OIDC is needed for deploys at all any more.
       - name: Configure SSH
         run: |
           install -m 700 -d ~/.ssh
@@ -102,128 +62,54 @@ jobs:
           cat > /tmp/deploy.sh <<'SCRIPT'
           set -e
           cd ${{ secrets.APP_DIR }}
-
-          # --ff-only: fail loudly on divergence instead of creating a merge
-          # commit on the server or leaving a half-applied tree. Pulls the
-          # ref that triggered this run (main on push, or whatever branch
-          # was picked on a manual dispatch).
+          # --ff-only: fail on divergence rather than merge on the server.
           git pull --ff-only origin ${{ github.ref_name }}
 
-          # The api container runs as uid 1000 (see docker/Dockerfile.backend),
-          # so the bind-mounted DB directory has to be writable by it. Also
-          # fixes ownership left behind by older root-run containers.
+          # The api container runs as uid 1000 and writes to the bind-mounted ./data.
           mkdir -p data
           sudo chown -R 1000:1000 data
 
-          # The shared edge proxy (docker/edge/) that fronts every site on
-          # this host - blastjax, portfolio-film and icrc. This repo owns it:
-          # this deploy installs its helper and base config under /srv/edge,
-          # the other repos' deploys only add their own site block through
+          # This repo owns the shared edge proxy (docker/edge/) that fronts every
+          # site on this host; the other repos only add their site block through
           # /srv/edge/bin/edge-install.
-          EDGE_DIR=/srv/edge
-          sudo install -d -o "$(id -u)" -g "$(id -g)" "$EDGE_DIR" "$EDGE_DIR/bin" "$EDGE_DIR/caddy" "$EDGE_DIR/caddy/sites"
-          install -m 755 docker/edge/edge-install "$EDGE_DIR/bin/edge-install"
+          sudo install -d -o "$(id -u)" -g "$(id -g)" /srv/edge /srv/edge/bin /srv/edge/caddy /srv/edge/caddy/sites
+          install -m 755 docker/edge/edge-install /srv/edge/bin/
           docker network inspect edge >/dev/null 2>&1 || docker network create edge
 
-          # A private docker config for this run's GHCR login: the other
-          # repos' deploys log in and out on this same host, and with a shared
-          # ~/.docker/config.json one of them logging out (or in with its own
-          # token) mid-pull would break this run's pull. cli-plugins is linked
-          # in so a compose plugin installed per-user is still found.
+          # Private docker config, deleted on exit (which also drops the login):
+          # the other repos' deploys log in and out of GHCR on this host too.
           export DOCKER_CONFIG="$(mktemp -d)"
           trap 'rm -rf "$DOCKER_CONFIG"' EXIT
-          if [ -d "$HOME/.docker/cli-plugins" ]; then
-            ln -s "$HOME/.docker/cli-plugins" "$DOCKER_CONFIG/cli-plugins"
-          fi
-
-          # This run's GITHUB_TOKEN only, not a durable secret on the box:
-          # it expires with the workflow run, so nothing long-lived to
-          # revoke or rotate here. Images already pulled keep running fine
-          # after it expires.
+          if [ -d ~/.docker/cli-plugins ]; then ln -s ~/.docker/cli-plugins "$DOCKER_CONFIG/"; fi
           echo '${{ secrets.GITHUB_TOKEN }}' | docker login ghcr.io -u '${{ github.actor }}' --password-stdin
 
-          export API_IMAGE='${{ env.API_IMAGE }}'
-          export WEB_IMAGE='${{ env.WEB_IMAGE }}'
-          # Neon Postgres connection string. Required: docker-compose.yml
-          # refuses to start the api container without it.
+          export API_IMAGE='ghcr.io/${{ github.repository }}-api'
+          export WEB_IMAGE='ghcr.io/${{ github.repository }}-web'
           export DATABASE_URL='${{ secrets.DATABASE_URL }}'
-          export WEB_PORT='${{ secrets.WEB_PORT || 3000 }}'
           export BUDGET_CORS_ORIGINS='${{ secrets.BUDGET_CORS_ORIGINS }}'
-          # --policy always: api/web define both `image:` and `build:` (the
-          # build: block is for local `docker compose build` only, per
-          # docker/README.md), so a plain `pull` skips them as "buildable"
-          # and `up` then falls back to building web's `next build` on this
-          # box - slow enough to blow a tight command budget (and risks OOM
-          # on a 1GB instance - see git history).
-          # This flag forces the actual GHCR image to be pulled instead.
-          # docker-compose.edge.yml puts api/web on the edge network and keeps
-          # this stack's own caddy from starting (see that file).
+          # The edge overlay puts api/web on the edge network and keeps this stack's caddy off.
           compose() { docker compose -f docker-compose.yml -f docker-compose.edge.yml "$@"; }
+          # --policy always: api/web also have a build: block, so a plain pull
+          # skips them and `up` would run `next build` on this box instead.
           compose pull --policy always api web
-          compose up -d --remove-orphans
-          # Frees ports 80/443 for the edge proxy: removes the caddy container
-          # a pre-edge deploy of this stack left running (a no-op after that).
-          compose rm -sf caddy
-          # Base config and this site's block, each hot-reloaded (and rolled
-          # back if Caddy rejects it) when the proxy is already running. Then
-          # start the proxy if it isn't - a no-op when it's up to date.
-          "$EDGE_DIR/bin/edge-install" Caddyfile docker/edge/Caddyfile
-          "$EDGE_DIR/bin/edge-install" sites/blastjax.caddy docker/Caddyfile
-          EDGE_DIR="$EDGE_DIR" docker compose -f docker/edge/docker-compose.yml up -d
+          # --wait gates on the compose healthchecks: red means "not deployed".
+          compose up --remove-orphans --wait --wait-timeout 200 || { compose logs --tail 50 >&2; exit 1; }
           docker image prune -f
-          docker logout ghcr.io
 
-          # Fail the job if the stack doesn't come up, so a red check means
-          # "not deployed" rather than "deployed and broken". Reuses the
-          # healthchecks already defined in docker-compose.yml, which keeps
-          # this free of any host-side curl/wget dependency.
-          for service in api web; do
-            cid=$(compose ps -q "$service")
-            if [ -z "$cid" ]; then
-              echo "$service container is not running" >&2
-              compose logs --tail 50 "$service" >&2 || true
-              exit 1
-            fi
-            healthy=""
-            # 100 x 2s keeps the same 200s ceiling as before: the compose
-            # healthchecks use start_interval so containers report healthy
-            # within a few seconds once actually up.
-            for _ in $(seq 1 100); do
-              status=$(docker inspect -f '{{.State.Health.Status}}' "$cid" 2>/dev/null || echo unknown)
-              if [ "$status" = "healthy" ]; then
-                healthy=1
-                break
-              fi
-              sleep 2
-            done
-            if [ -z "$healthy" ]; then
-              echo "$service did not become healthy (last status: ${status:-unknown})" >&2
-              compose logs --tail 50 "$service" >&2 || true
-              exit 1
-            fi
-            echo "$service is healthy"
-          done
+          # Hot-reload the base config and this site's block (rolled back if
+          # Caddy rejects it), then start the proxy if it isn't running.
+          /srv/edge/bin/edge-install Caddyfile docker/edge/Caddyfile
+          /srv/edge/bin/edge-install sites/blastjax.caddy docker/Caddyfile
+          docker compose -f docker/edge/docker-compose.yml up -d --wait
 
-          # Healthy containers aren't enough on their own: also confirm the
-          # proxy is up and reaches both through the edge network by the
-          # aliases docker/Caddyfile proxies to.
-          if [ "$(docker inspect -f '{{.State.Running}}' edge-caddy 2>/dev/null || true)" != "true" ]; then
-            echo "edge-caddy is not running" >&2
-            docker logs --tail 50 edge-caddy >&2 || true
-            exit 1
-          fi
+          # The proxy must also reach both apps by the aliases docker/Caddyfile uses.
           for url in http://blastjax-api:8000/api/health http://blastjax-web:3000/; do
-            if ! docker exec edge-caddy wget -q -T 10 -O /dev/null "$url"; then
-              echo "edge-caddy cannot reach $url" >&2
-              exit 1
-            fi
+            docker exec edge-caddy wget -q -T 10 -O /dev/null "$url" || { echo "edge-caddy cannot reach $url" >&2; exit 1; }
           done
-          echo "edge-caddy is running and reaches blastjax-api / blastjax-web"
           SCRIPT
 
-          # Unique per repo and run: all three repos deploy to the same host, and
-          # a shared /tmp/deploy.sh let one repo's script overwrite another's
-          # mid-run. Removed afterwards since it embeds this run's secrets.
+          # Unique per repo and run (all three repos deploy to this host); removed
+          # afterwards since it embeds this run's secrets.
           remote="/tmp/deploy-${{ github.event.repository.name }}-${{ github.run_id }}.sh"
           scp -i ~/.ssh/deploy_key /tmp/deploy.sh "ubuntu@${{ secrets.DEPLOY_HOST }}:$remote"
           ssh -i ~/.ssh/deploy_key "ubuntu@${{ secrets.DEPLOY_HOST }}" "bash $remote; rc=\$?; rm -f $remote; exit \$rc"

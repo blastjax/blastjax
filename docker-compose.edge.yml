@@ -16,9 +16,7 @@ services:
       edge:
         aliases: [blastjax-web]
   # The edge proxy owns ports 80/443 on the host, so this stack's own Caddy
-  # must not start there. A profile nothing enables keeps it defined (so the
-  # deploy can still `rm -sf caddy` the container an older deploy left behind)
-  # without ever starting it.
+  # must not start there. A profile nothing enables keeps it from ever starting.
   caddy:
     profiles: [standalone]
 
