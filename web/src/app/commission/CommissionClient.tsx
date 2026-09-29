@@ -116,6 +116,9 @@ function CommissionView({ company, hist }: { company: string; hist: MonthValue[]
   const byIndex = useMemo(() => new Map(hist.map((d) => [d.y * 12 + d.m, d.v])), [hist]);
   const cv = (y: number, m: number) => byIndex.get(y * 12 + m) ?? null;
   const fc = useMemo(() => buildForecast(hist, h), [hist, h]);
+  // Heatmap always forecasts through next December so year totals are full-year
+  // projections; each month trends independently, so overlap matches `fc`.
+  const hfc = useMemo(() => buildForecast(hist, 23 - last.m), [hist, last.m]);
   const years = [...new Set(hist.map((d) => d.y))];
 
   /* ---- KPIs ---- */
@@ -126,6 +129,7 @@ function CommissionView({ company, hist }: { company: string; hist: MonthValue[]
   const ytdSum = ytd.reduce((a, d) => a + d.v, 0);
   const lySum = ytd.reduce((a, d) => a + (cv(d.y - 1, d.m) ?? 0), 0);
   const avg = hist.reduce((a, d) => a + d.v, 0) / hist.length;
+  const growthPct = `${signedPct(f0.growth, 1)}/yr`;
   const kpis = [
     {
       label: `Next month · ${MF[f0.m]} ${f0.y}`,
@@ -247,7 +251,8 @@ function CommissionView({ company, hist }: { company: string; hist: MonthValue[]
             <h2 className={STATS_H2_CLASSES}>Trend &amp; forecast</h2>
             <p className={`${STATS_SUB_CLASSES} max-w-[600px] text-pretty`}>
               Actual commission per month (solid) and the projection (dashed). Each forecast month
-              is trended from the same calendar month in prior years, since commission is seasonal.
+              comes from the same calendar month in prior years, grown by the long-run trend, since
+              commission is seasonal.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -342,18 +347,17 @@ function CommissionView({ company, hist }: { company: string; hist: MonthValue[]
         <div>
           <h2 className={STATS_H2_CLASSES}>Forecast breakdown</h2>
           <p className={STATS_SUB_CLASSES}>
-            Each month is projected from up to 5 previous years of the same month. Open a row to see
-            the inputs.
+            Each month is the median of up to 5 previous years of the same month, each grown by the{" "}
+            {growthPct} long-run commission trend. Open a row to see the inputs.
           </p>
         </div>
         <div className="overflow-x-auto">
-          <div className="flex min-w-[720px] flex-col">
-            <div className="grid grid-cols-[minmax(140px,1.2fr)_130px_150px_150px_110px_32px] gap-4 border-b border-st-line px-3 pb-2.5 text-[11px] tracking-[.06em] text-st-4">
+          <div className="flex min-w-[600px] flex-col">
+            <div className="grid grid-cols-[minmax(140px,1.2fr)_130px_150px_150px_32px] gap-4 border-b border-st-line px-3 pb-2.5 text-[11px] tracking-[.06em] text-st-4">
               <span>MONTH</span>
               <span className="text-right">PREDICTED</span>
               <span className="text-right">VS LAST YEAR</span>
               <span>HISTORY</span>
-              <span className="text-right">TREND / YR</span>
               <span />
             </div>
             {fc.map((f, i) => {
@@ -381,7 +385,7 @@ function CommissionView({ company, hist }: { company: string; hist: MonthValue[]
                         return next;
                       })
                     }
-                    className="grid w-full grid-cols-[minmax(140px,1.2fr)_130px_150px_150px_110px_32px] items-center gap-4 rounded-lg p-3 text-left hover:bg-st-hover"
+                    className="grid w-full grid-cols-[minmax(140px,1.2fr)_130px_150px_150px_32px] items-center gap-4 rounded-lg p-3 text-left hover:bg-st-hover"
                   >
                     <span className="font-medium text-st-1">{MF[f.m]} {f.y}</span>
                     <span className="text-right font-st-mono text-sm font-semibold text-st-teal">{fmt(f.v)}</span>
@@ -414,10 +418,6 @@ function CommissionView({ company, hist }: { company: string; hist: MonthValue[]
                       ))}
                       <circle cx={mxp(n)} cy={myp(f.v)} r={3.5} strokeWidth={1.5} className="fill-st-card stroke-st-teal" />
                     </svg>
-                    <span className={`text-right font-st-mono text-[12.5px] ${f.slope >= 0 ? "text-st-pos" : "text-st-down"}`}>
-                      {f.slope >= 0 ? "+" : "−"}
-                      {fmt(Math.abs(f.slope))}
-                    </span>
                     {open ? (
                       <ChevronUpIcon className="size-4 justify-self-end text-st-4" />
                     ) : (
@@ -447,9 +447,9 @@ function CommissionView({ company, hist }: { company: string; hist: MonthValue[]
                       </div>
                       <p className="self-center text-pretty text-[13px] leading-[1.6] text-st-3">
                         {n >= 2
-                          ? `A straight-line trend was fitted to ${MF[f.m]} across ${n} years (${f.pts[0]![0]}–${f.pts[n - 1]![0]}). It moves ${f.slope >= 0 ? "up" : "down"} ${fmt(Math.abs(f.slope))} per year, which projects ${fmt(f.v)} for ${f.y}.`
+                          ? `Each ${MF[f.m]} from ${f.pts[0]![0]}–${f.pts[n - 1]![0]} was grown ${growthPct} to ${f.y} levels; the median of those ${n} projects ${fmt(f.v)}.`
                           : n === 1
-                            ? `Only ${f.pts[0]![0]} has ${MF[f.m]} data, so its value is carried forward: ${fmt(f.v)} for ${f.y}.`
+                            ? `Only ${f.pts[0]![0]} has ${MF[f.m]} data; grown ${growthPct} to ${f.y} levels it projects ${fmt(f.v)}.`
                             : `No earlier ${MF[f.m]} to trend from, so this uses the all-time monthly average: ${fmt(f.v)}.`}
                       </p>
                     </div>
@@ -481,23 +481,24 @@ function CommissionView({ company, hist }: { company: string; hist: MonthValue[]
                 <span key={m} className="pb-1 text-center">{m}</span>
               ))}
               <span className="pb-1 text-right">Total</span>
-              {[...years].reverse().map((y) => {
+              {[last.y + 1, ...[...years].reverse()].map((y) => {
                 const inYear = hist.filter((d) => d.y === y);
                 const note =
-                  inYear.length === 12
-                    ? ""
-                    : y === last.y
-                      ? "Year to date"
-                      : `${MN[inYear[0]!.m]} – ${MN[inYear[inYear.length - 1]!.m]}`;
+                  inYear.length === 0
+                    ? "Forecast"
+                    : inYear.length === 12
+                      ? ""
+                      : y === last.y
+                        ? "Year to date"
+                        : `${MN[inYear[0]!.m]} – ${MN[inYear[inYear.length - 1]!.m]}`;
                 return (
                   <HeatRow
                     key={y}
                     year={y}
                     note={note}
-                    total={inYear.reduce((a, d) => a + d.v, 0)}
                     cells={MN.map((_, m) => {
                       const v = cv(y, m);
-                      const f = v == null ? fc.find((x) => x.y === y && x.m === m) : undefined;
+                      const f = v == null ? hfc.find((x) => x.y === y && x.m === m) : undefined;
                       return { m, v, f: f?.v ?? null };
                     })}
                     max={hmx}
@@ -596,17 +597,18 @@ function CommissionView({ company, hist }: { company: string; hist: MonthValue[]
 function HeatRow({
   year,
   note,
-  total,
   cells,
   max,
 }: {
   year: number;
   note: string;
-  total: number;
   cells: { m: number; v: number | null; f: number | null }[];
   max: number;
 }) {
   const cell = "grid h-[42px] place-items-center rounded-[7px] border";
+  const total = cells.reduce((a, c) => a + (c.v ?? 0), 0);
+  const fTotal = cells.reduce((a, c) => a + (c.f ?? 0), 0);
+  const hasActual = cells.some((c) => c.v != null);
   return (
     <>
       <span>{year}</span>
@@ -642,7 +644,15 @@ function HeatRow({
         );
       })}
       <div className="flex flex-col items-end leading-[1.2]">
-        <span>{fmt(total)}</span>
+        {hasActual && <span>{fmt(total)}</span>}
+        {fTotal > 0 && (
+          <span
+            title={hasActual ? `${year} projected: actual + forecast` : `${year} forecast`}
+            className="italic text-st-teal"
+          >
+            {fmt(total + fTotal)}
+          </span>
+        )}
         <span>{note}</span>
       </div>
     </>
