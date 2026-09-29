@@ -54,11 +54,6 @@ import { useChartZoom } from "@/lib/useChartZoom";
 
 type Field = "systolic" | "diastolic" | "pulse" | "spo2" | "temperature" | "weight";
 
-/**
- * Normal resting ranges, inclusive: BP under 120/80 but not hypotensive,
- * resting pulse 60–100, SpO2 at least 95%. This one table drives the red
- * values, the Normal / Out of range verdict, and the chart's shaded band.
- */
 const NORMAL: Partial<Record<Field, readonly [number, number]>> = {
   systolic: [90, 119],
   diastolic: [60, 79],
@@ -71,7 +66,6 @@ function outOfRange(field: Field, v: number | null): boolean {
   return v != null && band != null && (v < band[0] || v > band[1]);
 }
 
-/** Judged only when BP + pulse were taken; a weight-only reading gets null. */
 function verdict(r: BloodPressureRow): boolean | null {
   if (r.systolic == null || r.diastolic == null || r.pulse == null) return null;
   return !(Object.keys(NORMAL) as Field[]).some((f) => outOfRange(f, r[f]));
@@ -85,7 +79,6 @@ type Metric = {
   lines: { key: Field; name: string; color: string }[];
 };
 
-/** One chart per metric, so each y-axis fits its own scale (36.5 °C next to 120 mmHg is a flat line). */
 const METRICS: Metric[] = [
   {
     tab: "BP",
@@ -106,7 +99,6 @@ const METRICS: Metric[] = [
 const fmt = (v: number | null, digits: number) =>
   v == null || Number.isNaN(v) ? "—" : v.toFixed(digits);
 
-/** "118/76" for BP, "36.6" for temperature; null when the reading skipped it. */
 function metricValue(m: Metric, r: BloodPressureRow): string | null {
   if (r[m.lines[0].key] == null) return null;
   return m.lines.map((l) => fmt(r[l.key], m.digits)).join("/");
@@ -126,7 +118,6 @@ type FormField = {
   placeholder: string;
 };
 
-// Native min/max/step do the range and whole-number checks; the API re-validates.
 const BP_FIELDS: FormField[] = [
   { key: "systolic", label: "Systolic", unit: "mmHg", min: 1, max: 400, placeholder: "120" },
   { key: "diastolic", label: "Diastolic", unit: "mmHg", min: 1, max: 400, placeholder: "80" },
@@ -185,7 +176,6 @@ export default function BloodPressureClient() {
     void load();
   }, [load]);
 
-  // Oldest → newest: the chart reads left to right and "latest" is the tail.
   const byDate = useMemo(
     () => [...rows].sort((a, b) => a.created_at.localeCompare(b.created_at)),
     [rows],
@@ -305,10 +295,8 @@ export default function BloodPressureClient() {
         max={f.max}
         step={f.step}
         placeholder={f.placeholder}
-        // All three BP fields become required as soon as one is started.
         required={bpStarted && BP_FIELDS.includes(f)}
         autoFocus={f.key === "systolic"}
-        // Hide the native spinner arrows (WebKit pseudo-elements + Firefox textfield).
         className={`${INPUT_CLASSES} w-full [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none`}
         value={form[f.key]}
         onChange={(e) => setForm((prev) => ({ ...prev, [f.key]: e.target.value }))}
@@ -348,7 +336,6 @@ export default function BloodPressureClient() {
         <>
           <section className="grid grid-cols-2 gap-4 sm:grid-cols-3 2xl:grid-cols-6">
             {tiles.map(({ m, latest, avg }, i) => (
-              // Wrapper is a grid so the card stretches; BP gets the full row on phones.
               <div key={m.tab} className={i === 0 ? "col-span-2 grid sm:col-span-1" : "grid"}>
                 <StatCard
                   label={m.label}

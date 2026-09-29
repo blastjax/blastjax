@@ -1,5 +1,3 @@
-"""Serializers and summary helpers for house-payment plans."""
-
 from __future__ import annotations
 
 from typing import Any
@@ -24,7 +22,6 @@ def serialize_house_payment_entry(r: dict[str, Any]) -> dict[str, Any]:
 
 
 def house_payment_summary(rows: list[dict[str, Any]]) -> dict[str, float]:
-    """Aggregate across all plans: total paid + total payment count."""
     sum_paid = 0.0
     total_entries = 0
     for r in rows:

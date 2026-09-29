@@ -1,5 +1,3 @@
-"""Credit card summary, statement, and payment tracking."""
-
 from __future__ import annotations
 
 from typing import Any
@@ -60,7 +58,6 @@ def _clean_note(note: str | None) -> str | None:
 
 
 def _monthly_dues(card: dict[str, Any], installments: list[dict[str, Any]]) -> float:
-    """Minimum due plus this month's payments on installments carried on the card."""
     total = float(card.get("minimum_due") or 0)
     for r in installments:
         if is_installment_due_this_month(r):

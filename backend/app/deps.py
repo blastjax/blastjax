@@ -1,5 +1,3 @@
-"""Shared FastAPI dependencies."""
-
 from __future__ import annotations
 
 from fastapi import HTTPException, Request
@@ -9,26 +7,11 @@ from db import database_url
 
 
 def require_db() -> None:
-    """Reject requests when no database is configured.
-
-    Used as a route dependency so each router doesn't have to repeat the
-    same precondition check::
-
-        @router.get("/api/foo", dependencies=[Depends(require_db)])
-        def foo(): ...
-    """
     if not database_url():
         raise HTTPException(status_code=503, detail="DATABASE_URL is not set.")
 
 
 def require_session(request: Request) -> None:
-    """Reject requests without a valid login session token.
-
-    Applied once, to every protected router, via ``include_router(...,
-    dependencies=[Depends(require_session)])`` in the app factory — no-op
-    until at least one user has been added (Settings → Users), so login is
-    opt-in the same way OTP used to be.
-    """
     if not login_required():
         return
     header = request.headers.get("authorization") or ""

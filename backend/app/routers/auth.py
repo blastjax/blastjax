@@ -1,5 +1,3 @@
-"""Username/password login/logout endpoints, backed by the app_user table."""
-
 from __future__ import annotations
 
 from typing import Any

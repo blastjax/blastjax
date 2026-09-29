@@ -1,18 +1,3 @@
-/**
- * Sets solving assistant.
- *
- * Sets (the pattern-matching card game) deals cards with 4 features —
- * symbol, color, texture, count — each with 3 possible variants. Three cards
- * form a valid Set when, independently for every feature, the three cards
- * are either all the same or all different; any feature where exactly two
- * cards agree breaks it.
- *
- * This isn't a puzzle the app poses — it's a helper for playing the real
- * game: you enter the cards you see on the table and it finds every valid
- * Set among them, or — given just two cards — the exact third card that
- * would complete one.
- */
-
 export const DEFAULT_BOARD_SIZE = 12;
 
 export const SYMBOL_NAMES = ["Hourglass", "Star", "Cross"] as const;
@@ -25,8 +10,6 @@ export const COLOR_PALETTE = [
   { name: "Purple", hex: "#a855f7" },
 ] as const;
 
-/** Every field is an index 0-2 into its feature's variant list (count's
- * actual value is `count + 1`, i.e. index 0 means one symbol). */
 export interface Card {
   symbol: number;
   color: number;
@@ -76,9 +59,6 @@ export function isSet(a: Card, b: Card, c: Card): boolean {
   return breakdownSet(a, b, c).isSet;
 }
 
-/** The value that would make a feature all-same-or-all-different with `x`
- * and `y`: itself if they already match, otherwise the one variant missing
- * from {x, y} (0+1+2 = 3, so the third index falls out directly). */
 function thirdValue(x: number, y: number): number {
   return x === y ? x : 3 - x - y;
 }
@@ -92,7 +72,6 @@ export function thirdCard(a: Card, b: Card): Card {
   };
 }
 
-/** Every triple of board indices `[i, j, k]` (i<j<k) that forms a valid Set. */
 export function findAllSets(cards: readonly Card[]): [number, number, number][] {
   const sets: [number, number, number][] = [];
   for (let i = 0; i < cards.length; i++) {
@@ -105,8 +84,6 @@ export function findAllSets(cards: readonly Card[]): [number, number, number][] 
   return sets;
 }
 
-/** The real deck has exactly one card per feature combination (3^4 = 81),
- * so no card ever repeats on the table. */
 export function fullDeck(): Card[] {
   const deck: Card[] = [];
   for (let symbol = 0; symbol < 3; symbol++) {

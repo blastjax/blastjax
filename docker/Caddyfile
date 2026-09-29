@@ -1,9 +1,3 @@
-# blastjax's site block. On the Lightsail host it runs inside the shared edge
-# proxy (installed as /srv/edge/caddy/sites/blastjax.caddy - see
-# docker/edge/README.md); a plain `docker compose up` still runs it as the
-# whole config of this repo's own caddy service. The upstreams are the
-# blastjax-* aliases rather than the bare service names because the edge
-# network is shared: every app there has a service called `web`.
 blastjax.maiacruz.com, http://18.138.5.2 {
 	encode gzip
 

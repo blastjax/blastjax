@@ -7,7 +7,6 @@ on:
   workflow_dispatch:
 
 jobs:
-  # Images are built here, not on the 1GB host, which can't fit `next build`.
   build:
     runs-on: ubuntu-latest
     permissions:
@@ -33,10 +32,8 @@ jobs:
           context: ${{ matrix.context }}
           file: ${{ matrix.file }}
           push: true
-          # Only Dockerfile.web declares this ARG; the api build ignores it.
           build-args: NEXT_PUBLIC_API_URL=${{ secrets.NEXT_PUBLIC_API_URL }}
           tags: ${{ env.IMAGE }}:latest,${{ env.IMAGE }}:${{ github.sha }}
-          # Registry cache, not gha: gha was slow to restore and evicts.
           cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache
           cache-to: type=registry,ref=${{ env.IMAGE }}:buildcache,mode=max,image-manifest=true,oci-mediatypes=true
           provenance: false
@@ -47,7 +44,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       packages: read
-    # One deploy at a time, queued (never cancelled) so the host is never left half-updated.
     concurrency: deploy-lightsail
     steps:
       - name: Configure SSH
@@ -62,22 +58,15 @@ jobs:
           cat > /tmp/deploy.sh <<'SCRIPT'
           set -e
           cd ${{ secrets.APP_DIR }}
-          # --ff-only: fail on divergence rather than merge on the server.
           git pull --ff-only origin ${{ github.ref_name }}
 
-          # The api container runs as uid 1000 and writes to the bind-mounted ./data.
           mkdir -p data
           sudo chown -R 1000:1000 data
 
-          # This repo owns the shared edge proxy (docker/edge/) that fronts every
-          # site on this host; the other repos only add their site block through
-          # /srv/edge/bin/edge-install.
           sudo install -d -o "$(id -u)" -g "$(id -g)" /srv/edge /srv/edge/bin /srv/edge/caddy /srv/edge/caddy/sites
           install -m 755 docker/edge/edge-install /srv/edge/bin/
           docker network inspect edge >/dev/null 2>&1 || docker network create edge
 
-          # Private docker config, deleted on exit (which also drops the login):
-          # the other repos' deploys log in and out of GHCR on this host too.
           export DOCKER_CONFIG="$(mktemp -d)"
           trap 'rm -rf "$DOCKER_CONFIG"' EXIT
           if [ -d ~/.docker/cli-plugins ]; then ln -s ~/.docker/cli-plugins "$DOCKER_CONFIG/"; fi
@@ -87,29 +76,20 @@ jobs:
           export WEB_IMAGE='ghcr.io/${{ github.repository }}-web'
           export DATABASE_URL='${{ secrets.DATABASE_URL }}'
           export BUDGET_CORS_ORIGINS='${{ secrets.BUDGET_CORS_ORIGINS }}'
-          # The edge overlay puts api/web on the edge network and keeps this stack's caddy off.
           compose() { docker compose -f docker-compose.yml -f docker-compose.edge.yml "$@"; }
-          # --policy always: api/web also have a build: block, so a plain pull
-          # skips them and `up` would run `next build` on this box instead.
           compose pull --policy always api web
-          # --wait gates on the compose healthchecks: red means "not deployed".
           compose up --remove-orphans --wait --wait-timeout 200 || { compose logs --tail 50 >&2; exit 1; }
           docker image prune -f
 
-          # Hot-reload the base config and this site's block (rolled back if
-          # Caddy rejects it), then start the proxy if it isn't running.
           /srv/edge/bin/edge-install Caddyfile docker/edge/Caddyfile
           /srv/edge/bin/edge-install sites/blastjax.caddy docker/Caddyfile
           docker compose -f docker/edge/docker-compose.yml up -d --wait
 
-          # The proxy must also reach both apps by the aliases docker/Caddyfile uses.
           for url in http://blastjax-api:8000/api/health http://blastjax-web:3000/; do
             docker exec edge-caddy wget -q -T 10 -O /dev/null "$url" || { echo "edge-caddy cannot reach $url" >&2; exit 1; }
           done
           SCRIPT
 
-          # Unique per repo and run (all three repos deploy to this host); removed
-          # afterwards since it embeds this run's secrets.
           remote="/tmp/deploy-${{ github.event.repository.name }}-${{ github.run_id }}.sh"
           scp -i ~/.ssh/deploy_key /tmp/deploy.sh "ubuntu@${{ secrets.DEPLOY_HOST }}:$remote"
           ssh -i ~/.ssh/deploy_key "ubuntu@${{ secrets.DEPLOY_HOST }}" "bash $remote; rc=\$?; rm -f $remote; exit \$rc"

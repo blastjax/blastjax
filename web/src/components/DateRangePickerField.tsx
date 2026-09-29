@@ -7,30 +7,19 @@ import { usePopoverPosition } from "@/lib/usePopoverPosition";
 import { ACTION_BUTTON_CLASSES, INPUT_CLASSES } from "@/lib/ui";
 
 export type DateRangePickerFieldProps = {
-  /** "YYYY-MM-DD", or "" for unset. */
   startValue: string;
   endValue: string;
-  /** Called with the new (start, end) pair on every pick — `end` is "" right
-   * after the first click, until a second date completes the range. */
   onChange: (start: string, end: string) => void;
   disabled?: boolean;
   placeholder?: string;
 };
 
-const MAX_POPOVER_WIDTH = 680; // two months side by side
+const MAX_POPOVER_WIDTH = 680;
 
-/** How wide the popover can actually be on this screen right now — capped
- * to the viewport (with margin) so it's never wider than there's room for. */
 function responsiveWidth(): number {
   return Math.min(MAX_POPOVER_WIDTH, window.innerWidth - 16);
 }
 
-/** A button that opens a two-month calendar popover for picking a start/end
- * date pair (e.g. an accommodation's check-in/check-out) by clicking the
- * first date then the second, in place of two separate date inputs. Fixed-
- * positioned from the trigger's screen rect (see `usePopoverPosition`)
- * rather than anchored inside the form, so it can't be clipped by a
- * modal's scroll container. */
 export function DateRangePickerField({
   startValue,
   endValue,
@@ -57,8 +46,6 @@ export function DateRangePickerField({
         close();
       }
     };
-    // Capture phase + stopPropagation so Escape closes only this popover,
-    // not the surrounding Modal (which listens for Escape on `window` too).
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.stopPropagation();
@@ -84,13 +71,10 @@ export function DateRangePickerField({
   };
 
   const pickDay = (iso: string) => {
-    // No range started yet, or a full range is already picked -> start a new one.
     if (!startValue || (startValue && endValue)) {
       onChange(iso, "");
       return;
     }
-    // One endpoint already picked -> this completes the range (swapping if
-    // the new pick lands before the existing start).
     if (iso < startValue) {
       onChange(iso, startValue);
     } else {

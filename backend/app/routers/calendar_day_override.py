@@ -1,5 +1,3 @@
-"""Per-day calendar budget override endpoints (move or spread amounts across days)."""
-
 from __future__ import annotations
 
 from typing import Any

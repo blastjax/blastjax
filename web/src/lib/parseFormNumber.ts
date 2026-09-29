@@ -1,21 +1,13 @@
 import { fmtAmountEnUs } from "@/lib/formatNumber";
 
-// Hoisted regexes so `parseFormNumber` / `evaluateAmountExpression` don't
-// recompile per call, and a fast-path that skips ``replace`` when no
-// thousands separators are present in the input.
 const RE_COMMAS = /,/g;
 const RE_WHITESPACE = /\s+/g;
 const RE_AMOUNT_EXPR_CHARS = /^[-+0-9.]+$/;
 
-/** True when c is an ASCII digit or '.'. Tighter and ~2x faster than a regex test. */
 function isDigitOrDot(c: string): boolean {
   return (c >= "0" && c <= "9") || c === ".";
 }
 
-/**
- * Parse numeric form input that may include thousands separators (`1,000`, `1,000.00`).
- * Commas are removed; the rest is parsed as a US-style decimal.
- */
 export function parseFormNumber(raw: string): number | null {
   const trimmed = raw.trim();
   const t = trimmed.indexOf(",") === -1 ? trimmed : trimmed.replace(RE_COMMAS, "");
@@ -24,7 +16,6 @@ export function parseFormNumber(raw: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-/** Formats a number as ``n,nnn.nn`` (also rounds away float sum noise like ``1200.4999999999998``). */
 export function formatAmountNumber(n: number): string {
   return fmtAmountEnUs(n);
 }
@@ -35,21 +26,12 @@ function formatComputedAmount(n: number): string {
   return formatAmountNumber(Object.is(v, -0) ? 0 : v);
 }
 
-/**
- * Formats a form amount input as ``n,nnn.nn`` for display once the field
- * loses focus. Returns null (leave the raw text as-is) when it doesn't
- * parse to a number.
- */
 export function formatAmountOnBlur(raw: string): string | null {
   const n = parseFormNumber(raw);
   if (n == null) return null;
   return formatAmountNumber(n);
 }
 
-/**
- * Evaluates amount-like strings using only `+` and `-`, e.g. `100.00-10.00`, `11+1.5`.
- * Commas and spaces are ignored. Returns a display string or null if invalid/incomplete.
- */
 export function evaluateAmountExpression(raw: string): string | null {
   let s = raw.trim();
   if (s.indexOf(",") !== -1) s = s.replace(RE_COMMAS, "");

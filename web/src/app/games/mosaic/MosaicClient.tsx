@@ -17,30 +17,23 @@ import {
 import { applyMove, decodeBoard, encodeBoard, type Cell, type Grid } from "./solver";
 
 const PALETTE = [
-  "#e15b5b", // red
-  "#5b8ee1", // blue
-  "#6fd1a5", // mint
-  "#9b6fd1", // purple
-  "#3f3f52", // navy
-  "#e1c15b", // yellow
-  "#e18ab0", // pink
-  "#5be1d1", // teal
+  "#e15b5b",
+  "#5b8ee1",
+  "#6fd1a5",
+  "#9b6fd1",
+  "#3f3f52",
+  "#e1c15b",
+  "#e18ab0",
+  "#5be1d1",
 ];
 
 const BLANK = -1;
 const MAX_BOARD_PX = 560;
-/** Reserved space around the board in full-screen mode: the fixed-width
- * side panel (+ gaps/padding) horizontally, the compact header + palette
- * row vertically. */
 const ROW_LABEL_W = 26;
 const COL_LABEL_H = 20;
 const FULLSCREEN_RESERVE_W = 360 + 2 * ROW_LABEL_W;
 const FULLSCREEN_RESERVE_H = 190 + 2 * COL_LABEL_H;
-/** Below this the settings panel stacks above the board instead of beside it
- * (see layoutClasses) — matches Tailwind's `lg` breakpoint. */
 const STACKED_LAYOUT_MAX_WIDTH = 1024;
-/** Page padding + row-label column + board border, reserved when sizing the
- * board to the viewport outside full-screen mode. */
 const STACKED_RESERVE_W = 80;
 
 const LABEL_CLASSES =
@@ -49,9 +42,6 @@ const LABEL_CLASSES =
 type Mode = "paint" | "seed";
 type Solving = "solve" | "findBest" | "free" | null;
 
-/** One step of a solution: repaint the blob at (r, c) to `color`. For
- * fixed-start solves every move carries the start tile; for free-cell
- * solves each move can target a different tile. */
 type SolutionMove = { r: number; c: number; color: number };
 
 interface SolutionState {
@@ -60,11 +50,9 @@ interface SolutionState {
   ms: number;
   regionsTried?: number;
   totalRegions?: number;
-  /** True when the moves may each target a different tile. */
   freeCell?: boolean;
 }
 
-/** Lifts a fixed-start solution (a list of colors) into SolutionMove[]. */
 function movesFromColors(colors: number[], seed: Cell): SolutionMove[] {
   return colors.map((color) => ({ r: seed.r, c: seed.c, color }));
 }
@@ -93,8 +81,6 @@ function countBlank(grid: Grid): number {
   return n;
 }
 
-/** Always holds the latest value, for reading fresh state from inside a
- * setInterval callback without recreating the interval every render. */
 function useLatest<T>(value: T) {
   const ref = useRef(value);
   useEffect(() => {
@@ -276,8 +262,6 @@ export default function MosaicClient() {
     setMode("paint");
   }
 
-  /** Recolors a palette slot, cycling to the next hue in PALETTE that isn't
-   * already showing on another slot (so no two swatches end up identical). */
   function cyclePaletteColor(idx: number) {
     setColors((prev) => {
       const next = prev.slice();
@@ -310,9 +294,6 @@ export default function MosaicClient() {
     stopPlaying();
     setSolving("solve");
     setSolveError(null);
-    // With a target set, cap the backend search at that length: it then
-    // fails fast the moment no solution of that length exists, instead of
-    // continuing on to find the (possibly much larger) true optimum.
     const cap = hasValidTarget ? targetMoves : undefined;
     const t0 = performance.now();
     try {
@@ -343,8 +324,6 @@ export default function MosaicClient() {
     }
   }
 
-  /** Solve under the "tap any tile" rule — each move may repaint a different
-   * blob, which yields far shorter solutions than a fixed start tile. */
   async function solveFreeCell() {
     if (!painted) return;
     stopPlaying();
@@ -542,10 +521,6 @@ export default function MosaicClient() {
       windowSize.width > 0 &&
       windowSize.width < STACKED_LAYOUT_MAX_WIDTH
     ) {
-      // Below `lg` the board no longer sits beside the settings panel — it's
-      // full width on its own row — so size it to the viewport instead of
-      // always rendering at the desktop-sized default, which overflowed the
-      // screen on phones.
       boardPx = Math.min(MAX_BOARD_PX, Math.max(160, windowSize.width - STACKED_RESERVE_W));
     }
     return Math.max(6, Math.floor(boardPx / Math.max(rows, cols)));
@@ -556,8 +531,6 @@ export default function MosaicClient() {
       ? "Paint mode: pick a color, then click/drag tiles to draw the board."
       : "Click a tile to set the start tile.";
 
-  /** The move the solution wants next, if any — drives the palette hint and
-   * (for free-cell solutions) the target-tile marker on the board. */
   const nextMove =
     solution && stepIndex < solution.moves.length ? solution.moves[stepIndex] : null;
 
@@ -595,8 +568,6 @@ export default function MosaicClient() {
 
   const disabledSecondary = `${SECONDARY_BUTTON_CLASSES} disabled:cursor-not-allowed disabled:opacity-50`;
 
-  /** Edge labels, rendered on both sides of each axis so a row or column's
-   * number is reachable from whichever end you're reading from. */
   const colLabels = (
     <div className="flex" style={{ paddingLeft: ROW_LABEL_W }}>
       {Array.from({ length: cols }, (_, c) => (
@@ -926,18 +897,11 @@ export default function MosaicClient() {
                 {grid.map((row, r) =>
                   row.map((v, c) => {
                     const isSeed = r === seed.r && c === seed.c;
-                    // For a tap-any-tile solution, ring the tile the next
-                    // move targets — otherwise the player can't tell where
-                    // to tap.
                     const isNextTarget =
                       solution?.freeCell === true &&
                       nextMove != null &&
                       nextMove.r === r &&
                       nextMove.c === c;
-                    // Region boundaries (edges between two different colors)
-                    // get a solid black line; edges between same-colored
-                    // cells stay on the faint default grid line, so painted
-                    // blobs read as single shapes.
                     const diffAbove = r > 0 && grid[r - 1][c] !== v;
                     const diffLeft = c > 0 && grid[r][c - 1] !== v;
                     const diffBelow = r < rows - 1 && grid[r + 1][c] !== v;

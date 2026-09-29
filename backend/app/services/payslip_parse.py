@@ -1,4 +1,3 @@
-"""Payslip nested-JSON import parsing helpers (pure Python, no pandas)."""
 from __future__ import annotations
 
 import math
@@ -110,16 +109,11 @@ def _payslip_month_number(month_label: str) -> int | None:
 
 
 def _payslip_json_section_field(section_name: str) -> str | None:
-    """Map JSON category key (e.g. Total, Medical_Reimbursement) to payslip column name."""
     k = _norm_payslip_header(str(section_name))
     return _PAYSPLIP_HEADER_MAP.get(k)
 
 
 def _payslip_json_cell_half(raw: Any, half_idx: int, *, two_rows: bool) -> float | None:
-    """
-    Value for one half-row. Arrays [a,b] -> a or b by index.
-    Single scalar or one-element list splits evenly across two half-rows when two_rows.
-    """
     if raw is None:
         return None
     if isinstance(raw, list):
@@ -140,7 +134,6 @@ def _payslip_json_cell_half(raw: Any, half_idx: int, *, two_rows: bool) -> float
 
 
 def _payslip_json_cell_whole(raw: Any) -> float | None:
-    """Single DB row for the month: pair arrays sum to one value; scalars as-is."""
     if raw is None:
         return None
     if isinstance(raw, list):
@@ -161,7 +154,6 @@ def _payslip_json_cell_whole(raw: Any) -> float | None:
 
 
 def _payslip_json_month_has_pair_arrays(year_data: dict[str, Any], month: str) -> bool:
-    """True if any section has a two-element array for this month (1st / 2nd half)."""
     for _sec, sec_obj in year_data.items():
         if not isinstance(sec_obj, dict):
             continue
@@ -172,11 +164,6 @@ def _payslip_json_month_has_pair_arrays(year_data: dict[str, Any], month: str) -
 
 
 def _payslip_records_from_nested_json(data: dict[str, Any]) -> list[dict[str, Any]]:
-    """
-    Nested shape: { "2024": { "Total": { "January": [a,b], ... }, "Commission": { ... }, ... }, ... }
-    Two-element arrays are 1st half / 2nd half. Single numbers split evenly across two rows when
-    the month has any pair-array; otherwise one row (pair values summed when stored whole-month).
-    """
     out: list[dict[str, Any]] = []
     for year_str, year_obj in data.items():
         if not isinstance(year_obj, dict):

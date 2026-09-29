@@ -1,7 +1,3 @@
-# API: talks to cloud Postgres (Neon) via DATABASE_URL. The /app/data mount
-# below is no longer the datastore — it is kept only as a scratch/upload dir.
-# Build with context directory `backend/` (see docker-compose).
-# syntax=docker/dockerfile:1
 FROM python:3.12-slim-bookworm
 
 ENV PYTHONUNBUFFERED=1 \
@@ -10,14 +6,6 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-# Run unprivileged. uid/gid 1000 matches the default `ubuntu` user on EC2, so
-# the bind-mounted ./data directory stays writable for anything exported from
-# inside the container; the deploy workflow chowns it to match.
-#
-# Created before the source is copied so the layer stays cached across code
-# changes. It used to run last, after `COPY . .`, which meant every push to
-# backend/ re-ran a recursive chown and wrote a second full copy of /app into
-# a new layer instead of reusing this one.
 RUN groupadd --system --gid 1000 app \
     && useradd --system --uid 1000 --gid app app \
     && mkdir -p /app/data \
@@ -27,15 +15,9 @@ COPY requirements.txt .
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install -r requirements.txt
 
-# --chown here replaces the post-copy `chown -R`: same result, no extra layer.
 COPY --chown=app:app . .
 
 USER app
 
 EXPOSE 8000
-# Single worker on purpose: the session store falls back to per-process memory
-# when Redis is down (see app/security.py), so a second worker would hand out
-# sessions the first one cannot see. The datastore is now Postgres, which would
-# itself be fine across workers — Redis being reachable is the remaining
-# precondition for raising this.
 CMD ["python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

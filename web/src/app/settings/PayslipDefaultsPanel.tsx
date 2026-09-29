@@ -76,8 +76,6 @@ export function PayslipDefaultsPanel() {
     [activeHalf],
   );
 
-  // Load the managed companies list once, and default the selection to the
-  // first one alphabetically.
   useEffect(() => {
     getCompanies()
       .then((r) => {
@@ -90,7 +88,6 @@ export function PayslipDefaultsPanel() {
       .finally(() => setCompaniesLoaded(true));
   }, []);
 
-  // (Re)load the defaults bundle whenever the selected company changes.
   useEffect(() => {
     if (!company) return;
     let cancelled = false;

@@ -1,16 +1,3 @@
-"""Travel trip endpoints.
-
-A trip spans a real start/end date range and holds a list of cities plus
-four kinds of nested records: flights, ground transport (bus/train),
-itinerary items, and accommodations — each managed via its own sub-route and
-always returning the trip's full, refreshed detail so the frontend never has
-to re-fetch separately.
-
-An accommodation's nights/days are derived from its check-in/check-out
-dates on every read rather than stored, so they can never drift out of sync
-with the dates themselves.
-"""
-
 from __future__ import annotations
 
 import datetime as dt
@@ -47,14 +34,9 @@ from db import (
 
 router = APIRouter(tags=["travel"], dependencies=[Depends(require_db)])
 
-# Hosts a pasted "maps link" is allowed to resolve against -- restricting to
-# Google's own domains keeps this from becoming an open URL-fetching proxy.
 _ALLOWED_MAP_HOSTS = {"maps.app.goo.gl", "goo.gl", "google.com", "www.google.com", "maps.google.com"}
 
 
-# Suffixes OSM's reverse geocoder sometimes appends to an administrative
-# area's name (Thai municipal boundaries in particular) that read as noise
-# on a travel-app title -- stripped when they'd leave something behind.
 _CITY_NOISE_SUFFIXES = (" City Municipality", " Municipality", " Metropolitan Area")
 
 
@@ -66,9 +48,6 @@ def _clean_city(name: str) -> str:
 
 
 def _reverse_geocode_city_country(lat: float, lon: float) -> tuple[str | None, str | None]:
-    """City + country for a coordinate, via OpenStreetMap's free Nominatim
-    reverse-geocoder (no API key; one request per resolved link, well within
-    its public-instance usage policy for a single-user app)."""
     url = (
         "https://nominatim.openstreetmap.org/reverse"
         f"?format=json&lat={lat}&lon={lon}&zoom=12&addressdetails=1&accept-language=en"
@@ -87,12 +66,6 @@ def _reverse_geocode_city_country(lat: float, lon: float) -> tuple[str | None, s
 
 
 def _resolve_google_maps_place(url: str) -> dict[str, Any]:
-    """Best-effort name + city/country for a pasted Google Maps link:
-    follows redirects (a maps.app.goo.gl short link lands on a full
-    .../maps/place/<Name>/@lat,lng... URL), reads the name from the resolved
-    URL's path (falling back to the page's <title> tag), and reverse-geocodes
-    the URL's coordinates for city/country -- `None` for either when the
-    link doesn't resolve or carries no coordinates."""
     result: dict[str, Any] = {"name": None, "city": None, "country": None}
     parsed = urlparse(url)
     if parsed.scheme != "https" or parsed.hostname not in _ALLOWED_MAP_HOSTS:
@@ -134,8 +107,6 @@ def travel_resolve_map_link(url: str = Query(min_length=1)) -> dict[str, Any]:
 
 
 def _nights_and_days(checkin: str, checkout: str) -> tuple[int, int]:
-    """Nights = full nights between the two dates; days always counts the
-    check-in day, so a same-day stay is 0 nights / 1 day rather than 0/0."""
     ci = dt.date.fromisoformat(checkin)
     co = dt.date.fromisoformat(checkout)
     nights = max(0, (co - ci).days)
@@ -148,22 +119,12 @@ def _with_stay_length(row: dict[str, Any]) -> dict[str, Any]:
 
 
 def _serialize_detail(detail: dict[str, Any]) -> dict[str, Any]:
-    """Shape a stored trip detail into its API response.
-
-    Every SELECT already lists exactly the columns the API exposes, so the
-    rows need no field-by-field copy. The one thing not stored is an
-    accommodation's nights/days, derived on each read so they cannot drift out
-    of sync with the dates they come from.
-    """
     return {
         **detail,
         "accommodations": [_with_stay_length(a) for a in detail["accommodations"]],
     }
 
 
-# The noun each sub-resource's 404 uses. The keys are both the URL segment and
-# the key db.py stores the records under, so a route cannot drift from its
-# table.
 _CHILD_LABELS: dict[str, str] = {
     "cities": "City",
     "flights": "Flight",

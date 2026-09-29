@@ -59,7 +59,6 @@ function addMonths(d: Date, months: number): Date {
   return x;
 }
 
-/** Parse API date to first of month (day ignored for schedule math). */
 function startAsFirstOfMonth(iso: string): Date {
   const ymd = iso.slice(0, 10);
   const [y, m] = ymd.split("-").map(Number);
@@ -67,22 +66,16 @@ function startAsFirstOfMonth(iso: string): Date {
   return new Date(y, m - 1, 1);
 }
 
-/**
- * Next payment due month (credit-card style: bill is due the month after the cycle,
- * not in the same month as the plan start for payment 1).
- */
 function nextDueDate(r: InstallmentRow): Date {
   const start = startAsFirstOfMonth(r.start_date);
   return addMonths(start, r.installment_current);
 }
 
-/** Due month for payment #seq (same rule as API: credit-card style). */
 function dueMonthForSeq(startIso: string, seq: number): Date {
   const start = startAsFirstOfMonth(startIso);
   return addMonths(start, seq);
 }
 
-/** Display a stored YYYY-MM(-DD) date as its month + year, e.g. "July 2026". */
 function fmtMonthYear(iso: string): string {
   const ymd = iso.slice(0, 10);
   const parts = ymd.split("-");
@@ -98,7 +91,6 @@ function fmtMonthYearFromDate(d: Date): string {
   return formatMonthYear(d.getFullYear(), d.getMonth() + 1);
 }
 
-/** Value for <input type="month" /> (always yyyy-MM). */
 function toInputMonth(iso: string): string {
   if (!iso) return "";
   const t = iso.trim();
@@ -110,10 +102,6 @@ function toInputMonth(iso: string): string {
   return t.slice(0, 7);
 }
 
-/**
- * API expects YYYY-MM-DD; month-only is stored as first of month.
- * Accepts yyyy-MM (from <input type="month" />) or mm-yyyy if pasted.
- */
 function monthToApiDate(ym: string): string {
   const t = ym.trim();
   if (!t) return "";
@@ -129,7 +117,6 @@ function monthToApiDate(ym: string): string {
   return "";
 }
 
-/** Add ``months`` to a YYYY-MM-DD API date, returning first-of-month YYYY-MM-DD. */
 function addMonthsToApiDate(apiDate: string, months: number): string {
   const [y, m] = apiDate.slice(0, 7).split("-").map(Number);
   if (!y || !m) return "";
@@ -146,7 +133,6 @@ function isDueThisMonth(r: InstallmentRow): boolean {
   );
 }
 
-/** Bar width to align with "Installment current/total" (schedule position), not dollar % paid. */
 function installmentScheduleProgressPct(r: InstallmentRow): number {
   const tot = Number(r.installment_total);
   const cur = Number(r.installment_current);
@@ -200,7 +186,6 @@ export default function InstallmentsClient() {
   const [lineEdits, setLineEdits] = useState<
     Record<number, { principal: string; interest: string }>
   >({});
-  /** Line ids in display order (drag to reorder; saved with Save changes). */
   const [lineOrderIds, setLineOrderIds] = useState<number[]>([]);
   const [savingSchedule, setSavingSchedule] = useState(false);
   const [paymentsModalOpen, setPaymentsModalOpen] = useState(false);
@@ -212,7 +197,6 @@ export default function InstallmentsClient() {
   const [detailTab, setDetailTab] = useState<"schedule" | "details">("schedule");
   const [cardId, setCardId] = useState<number | null>(null);
   const [linkToCard, setLinkToCard] = useState(false);
-  /** Per-payment principal/interest drafts for the Add form, keyed by seq (1..n). */
   const [lineDrafts, setLineDrafts] = useState<
     Record<number, { principal: string; interest: string }>
   >({});
@@ -271,12 +255,6 @@ export default function InstallmentsClient() {
     [rows],
   );
 
-  /**
-   * Mirrors the server's ``installment_summary`` so saves can patch the
-   * in-memory ``rows`` list and skip the full ``getInstallments`` round
-   * trip. The "due this month" calculation matches ``isDueThisMonth``
-   * (CC-style: due month = ``start_date`` + ``installment_current``).
-   */
   const summary = useMemo(() => {
     let sum_original_total = 0;
     let sum_remaining = 0;
@@ -451,17 +429,11 @@ export default function InstallmentsClient() {
         if (!changed) continue;
         changedLines.push({ seq: ln.seq, principal, interest });
       }
-      // One bulk request updates every dirty row in a single round trip,
-      // instead of a PUT per changed line.
       const finalDetail =
         changedLines.length > 0
           ? await updateInstallmentLinesBulk(insId, changedLines)
           : working;
       setDetail(finalDetail);
-      // Each detail response includes the updated installment row (with
-      // recomputed aggregates), so patch the page list — and the header
-      // fields shown above the schedule table — in place rather than
-      // re-fetching every plan.
       setForm(formFromRow(finalDetail.installment));
       upsertRow(finalDetail.installment);
     } catch (e) {
@@ -484,8 +456,6 @@ export default function InstallmentsClient() {
     setPaymentsDetails([]);
     setError(null);
     try {
-      // One request returns every plan with its schedule lines — far faster than
-      // a per-plan detail call (each of which would trigger its own cloud check).
       const res = await getInstallmentSchedules(2000);
       setPaymentsDetails(res.schedules);
     } catch (e) {
@@ -501,12 +471,6 @@ export default function InstallmentsClient() {
     setPaymentsDetails([]);
   }, []);
 
-  /**
-   * Every scheduled payment across all plans, bucketed by its due month.
-   * Due month for payment #seq is start + seq (credit-card style, matching
-   * the schedule view); a payment is "done" once its seq is below the plan's
-   * current (next-to-pay) position.
-   */
   const paymentsByMonth = useMemo(() => {
     type Item = {
       planId: number;
@@ -571,8 +535,6 @@ export default function InstallmentsClient() {
         (a, b) => a.planName.localeCompare(b.planName) || a.seq - b.seq,
       );
     }
-    // Continuous year range so the calendar shows every month (incl. empty
-    // ones) from the first to the last scheduled payment.
     const keys = [...map.keys()];
     const years: number[] = [];
     if (keys.length > 0) {
@@ -589,8 +551,6 @@ export default function InstallmentsClient() {
     setDetail(null);
     setDetailLoading(true);
     setError(null);
-    // Header fields come from the already-loaded row instantly; the
-    // schedule lines below still need their own fetch.
     const row = rows.find((r) => r.id === id);
     if (row) {
       setForm(formFromRow(row));
@@ -623,16 +583,10 @@ export default function InstallmentsClient() {
       if (!Number.isFinite(total) || total < 1) {
         throw new Error("Enter a valid total installments (n).");
       }
-      // Finish defaults to start + total installments (CC-style: payment #n
-      // is due n months after start).
       let fd = monthToApiDate(form.finish_date);
       if (!fd) fd = addMonthsToApiDate(sd, total);
 
       if (scheduleModalId == null) {
-        // Add flow: every payment (1..n) has its own principal/interest,
-        // entered in the per-row table below. Create seeds every row with
-        // payment #1's amount, then one bulk call patches in the rest —
-        // still just two requests total, not one per row.
         const parsedLines: {
           seq: number;
           principal: number;
@@ -689,7 +643,6 @@ export default function InstallmentsClient() {
           form.interest.trim() === ""
             ? null
             : (parseFormNumber(form.interest) ?? NaN);
-        // Per-payment total defaults to principal + interest when left blank.
         const paymentTotal =
           form.payment_total.trim() === ""
             ? principalVal + (interestVal ?? 0)
@@ -714,9 +667,6 @@ export default function InstallmentsClient() {
               : parseFormNumber(form.original_total),
           credit_card_id: linkToCard && cardId != null ? cardId : null,
         };
-        // The replace endpoint already returns the full detail (header +
-        // lines), so one request refreshes both the schedule modal and the
-        // plans list — no follow-up GET needed.
         const fresh = await updateInstallment(scheduleModalId, body);
         setForm(formFromRow(fresh.installment));
         setLinkToCard(fresh.installment.credit_card_id != null);
@@ -769,7 +719,6 @@ export default function InstallmentsClient() {
   const currentMonthKey = now.getFullYear() * 12 + now.getMonth();
   const doneTotal = doneRows.reduce((s, r) => s + (r.original_total || 0), 0);
 
-  /** Payment #1's amounts copied onto every row of the Add form's schedule. */
   const copyFirstRowToAll = () => {
     const first = lineDrafts[1];
     if (!first) return;

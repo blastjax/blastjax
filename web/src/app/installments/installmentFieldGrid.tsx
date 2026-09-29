@@ -27,7 +27,6 @@ export function InstallmentFieldGrid({
   form: InstallmentFormState;
   setForm: Dispatch<SetStateAction<InstallmentFormState>>;
   saving: boolean;
-  /** Hide principal / interest / per-payment total / remaining / original total (set per-row instead). */
   hideAmounts?: boolean;
 }) {
   return (

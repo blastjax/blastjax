@@ -45,17 +45,12 @@ import {
   alertClasses,
 } from "@/lib/ui";
 
-/** Success-tone banner box, matching ui.ts's `ERROR_ALERT_CLASSES` pattern
- * (border + tinted background + tinted text, no shadow) for the tone it
- * doesn't cover. */
-
 const NUMBERS_HELP =
   "6 unique numbers, 1-58 — separate with commas, spaces, or dashes (e.g. 3, 17, 29, 42, 58, 1 or 03-17-29-42-58-01)";
 
 const DRAW_DATE_HELP =
   "MM/DD/YYYY, MM-DD-YYYY, or MM DD YYYY — 2- or 4-digit year (e.g. 8/28/2026, 08-28-26, 8 28 2026)";
 
-/** Turns a validated y/m/d into "YYYY-MM-DD", rejecting dates like Feb 30. */
 function toIsoDate(year: number, month: number, day: number): string {
   const date = new Date(Date.UTC(year, month - 1, day));
   if (
@@ -68,22 +63,15 @@ function toIsoDate(year: number, month: number, day: number): string {
   return date.toISOString().slice(0, 10);
 }
 
-/** The stored "YYYY-MM-DD" -> "M/D/YYYY", for pre-filling the date field
- * when editing an existing draw. */
 function isoToUsDate(iso: string): string {
   const [y, m, d] = iso.split("-").map(Number);
   return `${m}/${d}/${y}`;
 }
 
-/** Two-digit years pivot the same way POSIX strptime's %y does: 00-68 lands
- * in the 2000s, 69-99 in the 1900s. Lotto history doesn't reach back past
- * that, so the pivot never actually has to bite. */
 function twoDigitYearToFour(yy: number): number {
   return yy <= 68 ? 2000 + yy : 1900 + yy;
 }
 
-/** Accepts a typed date separated by "/", "-", or spaces, with a 2- or
- * 4-digit year — e.g. "8/28/2026", "08-28-26", "8 28 2026". */
 function parseDrawDate(text: string): string {
   const trimmed = text.trim();
   const m = /^(\d{1,2})[/\-\s]+(\d{1,2})[/\-\s]+(\d{2}|\d{4})$/.exec(trimmed);
@@ -114,23 +102,15 @@ function numbersToText(numbers: number[]): string {
   return numbers.join(", ");
 }
 
-/** "5, 17, 29" -> "05-17-29" — the zero-padded, dash-joined shape every txt
- * export (historic results and attempts alike) writes numbers in. */
 function numbersToDashString(numbers: number[]): string {
   return numbers.map((n) => String(n).padStart(2, "0")).join("-");
 }
 
-/** The stored "YYYY-MM-DD" -> "M/D/YYYY", for a txt export row. Distinct
- * from `isoToUsDate` above only in name — this one's for text going out to
- * a file, not into a form field, but the format the exports use matches
- * what `parseDrawDate` reads back in. */
 function isoToExportDate(iso: string): string {
   const [y, m, d] = iso.split("-").map(Number);
   return `${m}/${d}/${y}`;
 }
 
-/** Triggers a browser download of `text` as a UTF-8 .txt file named
- * `filename`, without navigating away from the page. */
 function downloadTextFile(filename: string, text: string): void {
   const blob = new Blob([text], { type: "text/plain" });
   const url = URL.createObjectURL(blob);
@@ -143,11 +123,6 @@ function downloadTextFile(filename: string, text: string): void {
   URL.revokeObjectURL(url);
 }
 
-/** A logged attempt whose numbers exactly match some *other* draw's result
- * somewhere else in the history — "if only you'd played this combo on that
- * date instead." Excludes an attempt matching the very draw it was logged
- * against — that's just a 6/6 winner, already highlighted in the draw card
- * itself, not a coincidence worth calling out here. */
 type WhatIfMatch = {
   key: string;
   attempt: LottoAttemptRow;
@@ -157,10 +132,6 @@ type WhatIfMatch = {
   matchedDrawDate: string;
 };
 
-/** Scans every attempt against every draw result in `draws` for an exact
- * 6-number match to a different draw than the one the attempt was logged
- * under. `draws` order doesn't matter — the result is sorted newest-match
- * first before it's returned. */
 function findWhatIfMatches(draws: LottoDrawDetail[]): WhatIfMatch[] {
   const resultsByKey = new Map<string, { id: number; date: string }[]>();
   for (const detail of draws) {
@@ -192,9 +163,6 @@ function findWhatIfMatches(draws: LottoDrawDetail[]): WhatIfMatch[] {
   return matches.sort((a, b) => b.matchedDrawDate.localeCompare(a.matchedDrawDate));
 }
 
-/** One draw's raw fields for a historic-results export row — still
- * unpadded, since padding needs every row's widths known first. Draws with
- * no result yet have no numbers to put in a row, so they're left out. */
 type ExportFields = { numbers: string; date: string; jackpot: string; winners: string };
 
 function drawToExportFields(detail: LottoDrawDetail): ExportFields | null {
@@ -211,11 +179,6 @@ function drawToExportFields(detail: LottoDrawDetail): ExportFields | null {
   };
 }
 
-/** `draws` newest-first -> oldest-first for the export, matching how a
- * historic results file naturally reads top to bottom. Every column is
- * padded to its widest value so the `|` separators line up down the file —
- * purely cosmetic, since "Import historic results" already tolerates
- * arbitrary whitespace around each field. */
 function buildLottoExportText(draws: LottoDrawDetail[]): string {
   const rows = [...draws]
     .reverse()
@@ -240,15 +203,6 @@ function buildLottoExportText(draws: LottoDrawDetail[]): string {
     .join("\n");
 }
 
-/** Renders a draw's attempts in the same blank-line-separated "ticket
- * blocks" shape "Paste attempts" reads: attempts sharing a ticket number
- * are grouped under a "Ticket N" header, one 6-number line per attempt;
- * attempts with no ticket each stand alone as their own headerless block.
- * Pasting this text back in recreates every attempt — though since pasting
- * turns every block into a ticket (see `submitPasteAttempts`), a previously
- * ungrouped attempt comes back with a new ticket number of its own rather
- * than staying ungrouped. That's a limitation of the paste format, not
- * something this exporter can route around. */
 function attemptsToTicketBlocksText(attempts: LottoAttemptRow[]): string {
   const byTicket = new Map<number, LottoAttemptRow[]>();
   const loose: LottoAttemptRow[] = [];
@@ -273,11 +227,6 @@ function attemptsToTicketBlocksText(attempts: LottoAttemptRow[]): string {
   return blocks.join("\n\n");
 }
 
-/** `draws` newest-first -> oldest-first, matching `buildLottoExportText`.
- * Draws with no attempts logged are skipped — nothing to export for them.
- * Each draw's section opens with a date + result header (not part of the
- * "Paste attempts" grammar, so this file is for reading, not pasting back
- * in whole) followed by its attempts in the usual ticket-block shape. */
 function buildAllAttemptsExportText(draws: LottoDrawDetail[]): string {
   const withAttempts = [...draws].reverse().filter((d) => d.attempts.length > 0);
   return withAttempts
@@ -293,15 +242,11 @@ function buildAllAttemptsExportText(draws: LottoDrawDetail[]): string {
     .join("\n\n");
 }
 
-/** Like `parseNumbers`, but blank input means "no result yet" rather than an
- * error — a draw can be logged by date alone before its numbers are known. */
 function parseOptionalNumbers(text: string): number[] | null {
   if (text.trim() === "") return null;
   return parseNumbers(text);
 }
 
-/** Blank means "not set yet" (kept as `null`, same as before a jackpot's
- * announced). Accepts comma thousands separators, e.g. "50,000,000". */
 function parseOptionalJackpot(text: string): number | null {
   const trimmed = text.trim();
   if (trimmed === "") return null;
@@ -312,7 +257,6 @@ function parseOptionalJackpot(text: string): number | null {
   return n;
 }
 
-/** Blank means zero winners. */
 function parseWinners(text: string): number {
   const trimmed = text.trim();
   if (trimmed === "") return 0;
@@ -323,8 +267,6 @@ function parseWinners(text: string): number {
   return n;
 }
 
-/** A blank line's worth of numbers-lines grouped together — one physical
- * ticket, holding each of its board plays (attempts). */
 type TicketBlock = { ticket: number | null; attempts: number[][] };
 
 const TICKET_HEADER_RE = /^ticket\s*#?\s*(\d+)\s*:?$/i;
@@ -351,10 +293,6 @@ function parseTicketBlock(lines: string[], blockIndex: number): TicketBlock {
   return { ticket, attempts };
 }
 
-/** Pasted attempt text is one or more tickets, each a blank-line-separated
- * group of lines — every line under a ticket is one attempt's 6 numbers. A
- * ticket's first line may optionally read "ticket N" to pin its number
- * explicitly; otherwise tickets are numbered in the order they're pasted. */
 function parseTicketsText(text: string): TicketBlock[] {
   const rawLines = text.split(/\r?\n/);
   const blocks: TicketBlock[] = [];
@@ -379,7 +317,6 @@ function parseTicketsText(text: string): TicketBlock[] {
   return blocks;
 }
 
-/** Blank means "not part of a ticket group". */
 function parseOptionalTicket(text: string): number | null {
   const trimmed = text.trim();
   if (trimmed === "") return null;
@@ -390,8 +327,6 @@ function parseOptionalTicket(text: string): number | null {
   return n;
 }
 
-/** The body of the attempts modal: one 6-number attempt per non-blank line,
- * whether adding fresh attempts or replacing an edited set. */
 function parseAttemptsLines(text: string): number[][] {
   const lines = text
     .split(/\r?\n/)
@@ -417,8 +352,6 @@ function NumberBall({
 }: {
   n: number;
   variant?: "neutral" | "result" | "match" | "miss";
-  /** "lg" is ~2x the "md" ball — used for a draw card's own result, where
-   * it's the single most important thing on the page. */
   size?: "md" | "lg";
 }) {
   const styles: Record<string, string> = {
@@ -443,9 +376,6 @@ function NumberBall({
   );
 }
 
-/** The attempt that matched the most of a draw's result: how many it hit
- * (-1 when the draw has no result or no attempts) and which result numbers
- * those were, so History can light them up on the draw's own balls. */
 function bestAttempt(detail: LottoDrawDetail): { count: number; hits: Set<number> } {
   let best = { count: -1, hits: new Set<number>() };
   if (detail.draw.numbers.length !== 6) return best;
@@ -465,8 +395,6 @@ const LONG_DATE_FORMAT = new Intl.DateTimeFormat("en-US", {
   year: "numeric",
 });
 
-/** One attempt line's own score, at the end of its row — tinted once it
- * reaches a prize tier, the same threshold `MatchPill` uses. */
 function ScoreCell({ count }: { count: number }) {
   return (
     <span
@@ -481,8 +409,6 @@ function ScoreCell({ count }: { count: number }) {
   );
 }
 
-/** "Best 4/6" pill, tinted by prize tier — 3+ is where PCSO starts paying,
- * 6 is the jackpot. */
 function MatchPill({ count }: { count: number }) {
   const tone =
     count === 6
@@ -497,10 +423,6 @@ function MatchPill({ count }: { count: number }) {
   );
 }
 
-/** An attempt row's own number, inside a ticket card — an equal-width grid
- * cell rather than `NumberBall`'s fixed-size circle, so a row of six lines
- * up edge-to-edge with the score cell beside it (this is what changes,
- * ball-shaped numbers elsewhere — draw results, ranked list — are unaffected). */
 function NumberChip({ n, variant = "neutral" }: { n: number; variant?: "neutral" | "match" | "miss" }) {
   const styles: Record<string, string> = {
     neutral: "border-transparent bg-surface-2 text-ink-2",
@@ -517,10 +439,6 @@ function NumberChip({ n, variant = "neutral" }: { n: number; variant?: "neutral"
   );
 }
 
-/** The same tinted-card stat-tile language SalaryStatsClient uses for its
- * All-time Summary — label in tracked-out caps, value large and bold, both
- * in one tone. Reused here so the page's own "at a glance" strip looks like
- * it belongs to the same app instead of inventing a new visual idiom. */
 const STAT_TILE_TONES = {
   indigo: {
     card: "border-indigo-200 bg-indigo-50/60 dark:border-indigo-800 dark:bg-indigo-950/30",
@@ -553,7 +471,6 @@ function StatTile({
   label: string;
   value: string;
   tone: keyof typeof STAT_TILE_TONES;
-  /** One plain-language line saying what the number means. */
   hint?: string;
 }) {
   const t = STAT_TILE_TONES[tone];
@@ -566,9 +483,6 @@ function StatTile({
   );
 }
 
-/** Moves the items matching `shouldBump` to the front, otherwise leaving the
- * list exactly as it was — a stable partition, not a sort, so items never
- * get reordered relative to their own kind. */
 function bumpMatches<T>(items: T[], shouldBump: (item: T) => boolean): T[] {
   const bumped: T[] = [];
   const rest: T[] = [];
@@ -578,14 +492,6 @@ function bumpMatches<T>(items: T[], shouldBump: (item: T) => boolean): T[] {
   return [...bumped, ...rest];
 }
 
-/** Derived analytics for the Insights tab — every number's play/draw
- * frequency, the match-count histogram, and the roll-up stats built from
- * them. Computed fresh from `draws` each time the tab is viewed rather than
- * memoized: the corpus is a personal lotto history (thousands of attempts at
- * most), so a plain pass over it is cheap enough not to bother caching. */
-/** Board-coverage banding, least-played to most-played. `never` is the only
- * one that's an absolute (zero attempts ever); the other four are quartiles
- * of the numbers that *have* been played — see `buildInsights`. */
 type BoardTier = "never" | "least" | "secondLeast" | "sometimes" | "most";
 
 type InsightsData = {
@@ -599,21 +505,8 @@ type InsightsData = {
   latestDrawSet: Set<number>;
 };
 
-/** A legend entry: a frequency band, or `latest` — a ring drawn *on top of*
- * a cell's band when the number came up in the most recent result, so
- * spotting "this just got drawn" doesn't hide how often you play it. */
 type BoardSwatch = BoardTier | "latest";
 
-/** One place for each swatch, so the board cells and the legend under them
- * can't drift apart.
- *
- * Steps are two full zinc stops apart and run in opposite directions per
- * theme — brighter means more-played against dark mode's near-black card,
- * darker means more-played against light mode's white one. Earlier passes
- * tried to do this with opacities off one grey (`/10`, `/90`) and the
- * middle bands were impossible to tell apart; at the ends, a fill close to
- * the card color read as an empty cell. Each band also carries its own text
- * color, flipping once the fill gets lighter than the text would be. */
 const BOARD_SWATCH_CLASSES: Record<BoardSwatch, string> = {
   never: "border border-dashed border-line-strong text-ink-4",
   least: "bg-zinc-200 text-zinc-900 dark:bg-zinc-800 dark:text-zinc-300",
@@ -632,7 +525,6 @@ const BOARD_SWATCH_LABELS: Record<BoardSwatch, string> = {
   latest: "In latest result",
 };
 
-/** Legend order: the frequency ramp least-to-most, then the overlay. */
 const BOARD_LEGEND: BoardSwatch[] = [
   "never",
   "least",
@@ -642,9 +534,6 @@ const BOARD_LEGEND: BoardSwatch[] = [
   "latest",
 ];
 
-/** Linear-interpolated quantile over an ascending list — the same method
- * `numpy`/`statistics.quantiles(..., method="inclusive")` use, so the
- * boundaries match what you'd get checking this against the database. */
 function quantile(ascending: number[], q: number): number {
   if (ascending.length === 0) return 0;
   const pos = (ascending.length - 1) * q;
@@ -653,8 +542,6 @@ function quantile(ascending: number[], q: number): number {
   return lo === hi ? ascending[lo] : ascending[lo] + (ascending[hi] - ascending[lo]) * (pos - lo);
 }
 
-/** `maxNumber` is the game's field size (45 for 6/45), so the board only
- * shows numbers the game can actually draw. */
 function buildInsights(draws: LottoDrawDetail[], maxNumber: number): InsightsData {
   const played = new Map<number, number>();
   const drawn = new Map<number, number>();
@@ -692,13 +579,6 @@ function buildInsights(draws: LottoDrawDetail[], maxNumber: number): InsightsDat
     .slice(0, 8)
     .map(([n, p]) => ({ n, played: p, drawn: drawn.get(n) ?? 0 }));
 
-  // Band by quartile of the *observed* play counts, not by a fraction of
-  // the single most-played number. Play counts bunch up (every number gets
-  // picked sooner or later — a real history runs something like 30-63 plays
-  // each), so slicing 0..max into quarters puts every number in the top two
-  // bands and leaves the bottom two permanently empty. Quartiles of the
-  // numbers actually played put ~a quarter of the board in each band, which
-  // is what "least played" vs "most played" is supposed to mean.
   const counts = Array.from({ length: maxNumber }, (_, i) => played.get(i + 1) ?? 0);
   const playedAscending = counts.filter((v) => v > 0).sort((a, b) => a - b);
   const q1 = quantile(playedAscending, 0.25);
@@ -740,13 +620,6 @@ type DrawModalState = {
   winnersText: string;
   isEdit: boolean;
 };
-/** Adds or replaces a *set* of attempts on one draw — one textarea line per
- * attempt, all sharing one ticket. `editingIds` is empty for a plain add;
- * non-empty means "replace these attempts with whatever's parsed from the
- * text" (see `submitAttemptsModal`), which is how both "edit a ticket" (many
- * ids) and "edit a single ungrouped attempt" (one id) are the same code
- * path — a ticket is just a set of attempts sharing a number, and an
- * ungrouped attempt is a set of size one sharing nothing. */
 type AttemptsModalState = {
   open: boolean;
   drawId: number | null;
@@ -796,9 +669,6 @@ const SORT_LABELS: Record<AttemptSort, string> = {
   best: "Best first",
 };
 
-/** Which card's Edit/Delete icons are currently revealed — a draw, one
- * ticket on a draw, or a single ungrouped attempt. `null` means none. Only
- * one card at a time (double-clicking a new one swaps in for the old). */
 type RevealedActions =
   | { type: "draw"; drawId: number }
   | { type: "ticket"; drawId: number; ticket: number }
@@ -812,38 +682,20 @@ export default function LottoClient({ gameId }: { gameId: number }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Import/export/paste are bulk data-management actions, not the thing
-  // most visits to this page are for — tucked behind one toggle instead of
-  // four buttons competing with the page's actual content for attention.
   const [showDataTools, setShowDataTools] = useState(false);
 
   const [activeTab, setActiveTab] = useState<LottoTab>("draw");
 
-  // Refine a draw card's attempt list: `attemptFilter` is an exact match
-  // count picked from the card's tally strip (null = every attempt).
   const [attemptFilter, setAttemptFilter] = useState<number | null>(null);
   const [attemptSort, setAttemptSort] = useState<AttemptSort>("ticket");
-  // A draw/ticket/attempt card's Edit/Delete icons live behind a
-  // double-click instead of sitting on the card face all the time — this
-  // tracks which card currently has them revealed.
   const [revealedActions, setRevealedActions] = useState<RevealedActions>(null);
-  // Toggle: double-clicking the already-revealed card hides its icons
-  // again; double-clicking a different one swaps the reveal over to it.
   const toggleRevealed = (target: NonNullable<RevealedActions>) => {
     setRevealedActions((cur) => (cur && JSON.stringify(cur) === JSON.stringify(target) ? null : target));
   };
 
-  // History tab shows one compact row per draw; clicking one opens it in a
-  // modal using the same card as "This draw" (result balls, tally strip,
-  // ticket grid) rather than navigating away.
   const [historyModalDrawId, setHistoryModalDrawId] = useState<number | null>(null);
 
-  // Draws are grouped into one card per year so a history spanning many
-  // years doesn't render as one endless flat list; the newest year opens on
-  // load (see `load`), the rest expand on click.
   const [expandedYears, setExpandedYears] = useState<Set<string>>(new Set());
-  // Most of a game's ~1,500 draws were never played — "Played" cuts History
-  // down to the ones with attempts logged.
   const [historyFilter, setHistoryFilter] = useState<"all" | "played">("all");
 
   const toggleYearExpanded = (year: string) => {
@@ -855,17 +707,10 @@ export default function LottoClient({ gameId }: { gameId: number }) {
     });
   };
 
-  // The field size is the name's "6/NN" suffix, so the board and copy say
-  // 1–45 on Megalotto rather than the 1–58 of the biggest game.
   const maxNumber = Number(gameName?.match(/\/(\d+)$/)?.[1]) || 58;
 
   const whatIfMatches = useMemo(() => findWhatIfMatches(draws), [draws]);
 
-  // A one-glance orientation strip — the record to beat, and what's at
-  // stake next. `bestMatch` is -1 (rendered as "—") until at least one
-  // attempt has actually been checked against a real result. `draws` is
-  // newest-first, so the first jackpot found scanning from the top is the
-  // most recent draw that has one set.
   const overviewStats = useMemo(() => {
     let bestMatch = -1;
     let bestMatchDate: string | null = null;
@@ -884,20 +729,12 @@ export default function LottoClient({ gameId }: { gameId: number }) {
     return { bestMatch, bestMatchDate, currentJackpotDraw };
   }, [draws]);
 
-  // Normally "This draw" is just the newest draw. But a draw you're still
-  // waiting on results for — one with attempts already logged — is more
-  // useful there than an older draw's result, even if it isn't the newest
-  // by date. `draws` is sorted newest-first, so `find` picks the most
-  // recent such pending draw.
   const pinnedDraw =
     draws.find((d) => d.attempts.length > 0 && d.draw.numbers.length !== 6) ?? draws[0];
 
   const playedDraws = draws.filter((d) => d.attempts.length > 0);
   const historyDraws = historyFilter === "played" ? playedDraws : draws;
 
-  // `draws` is already sorted newest-first, so same-year and same-month draws
-  // are always contiguous — one pass buckets them into ordered year → month
-  // groups for the History tab, tallying each year's summary on the way.
   const yearGroups: {
     year: string;
     months: { month: number; items: LottoDrawDetail[] }[];
@@ -940,13 +777,8 @@ export default function LottoClient({ gameId }: { gameId: number }) {
   const load = useCallback(async () => {
     setError(null);
     try {
-      // 2000 is the API's own hard cap (see `lotto_list`/`list_lotto_draws` in
-      // the backend) — comfortably above the 1500+ historic draws currently
-      // loaded, so nothing gets silently cut off further back than that.
       const r = await getLottoDraws(gameId, 2000);
       setDraws(r.draws);
-      // Open the newest year the first time there's anything to show; later
-      // reloads (after a save) leave whatever the user has open alone.
       setExpandedYears((s) =>
         s.size > 0 || r.draws.length === 0 ? s : new Set([r.draws[0].draw.draw_date.slice(0, 4)]),
       );
@@ -1070,11 +902,6 @@ export default function LottoClient({ gameId }: { gameId: number }) {
     });
   };
 
-  /** Opens the same modal pre-filled with every attempt on `items`, one per
-   * line — submitting replaces the whole ticket's attempts with whatever's
-   * parsed back out (see `submitAttemptsModal`). This is "edit a ticket":
-   * add, remove, or change any of its board plays in one pass instead of
-   * one attempt at a time. */
   const openEditTicket = (
     drawId: number,
     ticket: number,
@@ -1091,8 +918,6 @@ export default function LottoClient({ gameId }: { gameId: number }) {
     });
   };
 
-  /** Opens the same modal for a single ungrouped attempt — the one case
-   * where an attempt has no ticket to fold its edit into. */
   const openEditLooseAttempt = (drawId: number, attempt: LottoAttemptRow) => {
     setAttemptsFormError(null);
     setAttemptsModal({
@@ -1110,14 +935,6 @@ export default function LottoClient({ gameId }: { gameId: number }) {
     setAttemptsFormError(null);
   };
 
-  /** Creates every attempt in `blocks` against `drawId` in one request. A
-   * block with no explicit "Ticket N" header is numbered after whatever's
-   * already on the draw, so a second add (or paste) doesn't collide with
-   * tickets from the first. Returns null if the blocks were empty. Shared by
-   * "Add attempt" and "Paste attempts" so both number tickets identically —
-   * and, since a paste can carry a few dozen board plays, both save in one
-   * round trip instead of one ``POST .../attempts`` per line (same fix as
-   * "Import historic results"' bulk upsert). */
   const createTicketBlocks = async (
     drawId: number,
     blocks: TicketBlock[],
@@ -1140,19 +957,6 @@ export default function LottoClient({ gameId }: { gameId: number }) {
     return createLottoAttemptsBulk(drawId, attempts);
   };
 
-  /** Adds new attempts, or replaces an edited set — see `AttemptsModalState`.
-   *
-   * Adding reads the same ticket-block grammar "Paste attempts" does — a
-   * blank line starts a new ticket — so several tickets can go onto a draw
-   * in one pass, numbered automatically. (The parser still honors an
-   * explicit "Ticket N" header, which is what makes pasted export text
-   * round-trip, but the add form doesn't ask anyone to write one.)
-   *
-   * Editing stays single-ticket: it's replacing *this* ticket's board plays
-   * (or one ungrouped attempt), so it deletes every attempt in `editingIds`
-   * and recreates the parsed lines fresh rather than diffing line-by-line —
-   * there's no way to know which surviving line "was" which old attempt
-   * once the line count changes. */
   const submitAttemptsModal = async (e: React.FormEvent) => {
     e.preventDefault();
     setAttemptsFormError(null);
@@ -1224,8 +1028,6 @@ export default function LottoClient({ gameId }: { gameId: number }) {
     }
   };
 
-  /** Deletes every attempt on a ticket in one go — the ticket-level
-   * counterpart to `onDeleteAttempt`. */
   const onDeleteTicket = async (drawId: number, items: { attempt: LottoAttemptRow }[]) => {
     if (
       !confirm(`Delete this ticket and its ${items.length} attempt${items.length === 1 ? "" : "s"}?`)
@@ -1298,10 +1100,6 @@ export default function LottoClient({ gameId }: { gameId: number }) {
     }
   };
 
-  /** Downloads every draw that has a result as a pipe-delimited .txt file —
-   * the same shape "Import historic results" reads, so this doubles as a
-   * backup that can be re-imported later. Draws with no result yet aren't
-   * included (see `drawToExportFields`). */
   const onExportHistoric = () => {
     const text = buildLottoExportText(draws);
     downloadTextFile(
@@ -1310,9 +1108,6 @@ export default function LottoClient({ gameId }: { gameId: number }) {
     );
   };
 
-  /** Downloads every attempt logged across every draw, grouped by date. See
-   * `buildAllAttemptsExportText` — this is a full backup/review file, not
-   * something meant to be pasted back in as a whole. */
   const onExportAllAttempts = () => {
     const text = buildAllAttemptsExportText(draws);
     downloadTextFile(
@@ -1333,10 +1128,6 @@ export default function LottoClient({ gameId }: { gameId: number }) {
     setImportSummary(null);
   };
 
-  /** Bulk-loads historic results (date, numbers, jackpot, winners) from
-   * pasted text via `POST /api/lotto/import-text` — each row is upserted by
-   * date, so re-pasting backfills jackpot/winners onto draws that already
-   * exist instead of duplicating them. */
   const submitImport = async (e: React.FormEvent) => {
     e.preventDefault();
     setImportFormError(null);
@@ -1364,15 +1155,6 @@ export default function LottoClient({ gameId }: { gameId: number }) {
     }
   };
 
-  /** Renders one draw's full card: result balls, jackpot/winners, and its
-   * attempts (grouped by ticket). Edit/Delete for the draw, a ticket, or an
-   * ungrouped attempt aren't on the card face by default — double-click
-   * that thing (see `revealedActions`) to reveal a pencil/trash icon pair
-   * for it.
-   *
-   * Used for "This draw" and for a History row's modal alike, with the
-   * tally strip (`attemptFilter`) and sort (`attemptSort`) applied to its
-   * attempts. */
   const renderDrawCard = (detail: LottoDrawDetail) => {
     const hasResult = detail.draw.numbers.length === 6;
     const drawSet = new Set(detail.draw.numbers);
@@ -1384,28 +1166,17 @@ export default function LottoClient({ gameId }: { gameId: number }) {
     const hasAttempts = totalAttempts > 0;
     const showDrawActions =
       revealedActions?.type === "draw" && revealedActions.drawId === detail.draw.id;
-    // Without a result yet, there's nothing to match attempts against —
-    // matchCount is a placeholder (-1) rather than a false "0/6 matched".
-    // Order follows detail.attempts as logged (the sequence on the
-    // physical tickets) — see bumpMatches below for how strong matches
-    // surface without disturbing that order.
     const scoredAttempts = hasResult
       ? detail.attempts.map((attempt) => ({
           attempt,
           matchCount: attempt.numbers.filter((n) => drawSet.has(n)).length,
         }))
       : detail.attempts.map((attempt) => ({ attempt, matchCount: -1 }));
-    // The tally strip doubles as the filter: picking a tier shows only the
-    // lines that hit exactly that many. Without a result there's nothing to
-    // filter by, so a leftover pick from another draw is ignored.
     const activeFilter = hasResult ? attemptFilter : null;
     const attemptsByMatch =
       activeFilter != null
         ? scoredAttempts.filter(({ matchCount }) => matchCount === activeFilter)
         : scoredAttempts;
-    // All seven tiers, zero counts included, so the strip keeps the same
-    // shape on every draw — a summary of the whole draw, not of whatever
-    // the filter currently shows.
     const matchBreakdown =
       hasResult && hasAttempts
         ? [0, 1, 2, 3, 4, 5, 6].map((tier) => ({
@@ -1414,13 +1185,6 @@ export default function LottoClient({ gameId }: { gameId: number }) {
           }))
         : [];
 
-    // Cluster attempts by ticket — up to a handful of board plays on
-    // one physical ticket share a ticket number, so they're grouped
-    // together instead of scattered across a flat list. Clusters keep
-    // the order the tickets were logged in (that sequence is already
-    // right) — bumpMatches only lifts a 3/6-or-better ticket to the top,
-    // without otherwise reshuffling anything. Ungrouped attempts sit in
-    // their own section underneath (edit one to give it a ticket number).
     type AttemptCluster = {
       ticket: number;
       items: typeof attemptsByMatch;
@@ -1447,16 +1211,11 @@ export default function LottoClient({ gameId }: { gameId: number }) {
       })),
       (c) => c.bestMatch >= 3,
     );
-    // "Best first" is a read-only leaderboard — every attempt across every
-    // ticket, ranked by match count, no per-row actions (switch back to
-    // "By ticket" for those). Meaningless before the result is in.
     const rankedAttempts =
       hasResult && attemptSort === "best"
         ? [...attemptsByMatch].sort((a, b) => b.matchCount - a.matchCount)
         : null;
 
-    // Six dashed placeholders stand in for a result that isn't in yet, so
-    // the card keeps its shape either way.
     const drawNumbersDisplay = (
       <div className="mt-4 flex flex-wrap gap-2 sm:gap-3">
         {hasResult
@@ -1469,9 +1228,6 @@ export default function LottoClient({ gameId }: { gameId: number }) {
             ))}
       </div>
     );
-    // A ticketed attempt is edited/deleted as part of its ticket
-    // (double-click the ticket card) — only an ungrouped attempt gets its
-    // own double-click, since there's no ticket to fold it into.
     const renderAttemptRow = (attempt: LottoAttemptRow) => {
       const showActions =
         attempt.ticket == null &&
@@ -1672,8 +1428,6 @@ export default function LottoClient({ gameId }: { gameId: number }) {
             )}
           </div>
 
-          {/* The tally doubles as the filter: one tap narrows the list to
-              that match count, a second tap (or "Show all") clears it. */}
           {matchBreakdown.length > 0 && (
             <div className="mb-2 mt-3 grid grid-cols-7 gap-1.5 sm:gap-2">
               {matchBreakdown.map(({ tier, count }) => {
@@ -1848,11 +1602,6 @@ export default function LottoClient({ gameId }: { gameId: number }) {
     );
   };
 
-  /** History tab's compact one-line-per-draw row. Clicking it opens that
-   * draw in a modal using the same hero treatment `renderDrawCard` gives
-   * "This draw" (result balls, filter/sort, ticket grid) — nothing about
-   * managing a historic draw is lost, it's just reached through a modal
-   * instead of always open on the page. */
   const renderHistoryRow = (detail: LottoDrawDetail) => {
     const { draw, attempts } = detail;
     const hasResult = draw.numbers.length === 6;
@@ -1867,7 +1616,6 @@ export default function LottoClient({ gameId }: { gameId: number }) {
           className="group flex w-full flex-wrap items-center gap-x-3 gap-y-2 rounded-lg px-2 py-2 text-left transition-colors duration-150 hover:bg-surface-2 sm:flex-nowrap sm:gap-x-5 sm:px-3"
           onClick={() => setHistoryModalDrawId(draw.id)}
         >
-          {/* Calendar-style date: the month is already in the group header. */}
           <div className="w-9 shrink-0 text-center">
             <div className="text-[11px] font-medium uppercase tracking-wide text-ink-4">
               {date ? WEEKDAY_FORMAT.format(date) : ""}
@@ -1877,7 +1625,6 @@ export default function LottoClient({ gameId }: { gameId: number }) {
             </div>
           </div>
 
-          {/* The result, with the numbers your best line hit filled in green. */}
           <div className="flex gap-1 sm:gap-1.5">
             {hasResult
               ? draw.numbers.map((n) => (
@@ -1891,8 +1638,6 @@ export default function LottoClient({ gameId }: { gameId: number }) {
                 ))}
           </div>
 
-          {/* Fixed width right after the balls, so it lines up on every row
-              whatever the play summary beside it says. */}
           <div className="hidden w-28 shrink-0 md:block">
             <div className="text-sm font-medium tabular-nums text-ink-2">
               {draw.jackpot_prize != null ? fmtJackpotCompact(draw.jackpot_prize) : "—"}
@@ -2063,8 +1808,6 @@ export default function LottoClient({ gameId }: { gameId: number }) {
             </div>
           </div>
 
-          {/* Only worth a card when there's actually something to say — an
-           * empty "no coincidences" box on every visit is noise, not insight. */}
           {whatIfMatches.length > 0 && (
             <section className={CARD_CLASSES}>
               <h2 className="text-lg font-medium text-ink">What if?</h2>
@@ -2259,8 +2002,6 @@ export default function LottoClient({ gameId }: { gameId: number }) {
                               >
                                 {tier}/6
                               </span>
-                              {/* Scaled to the tallest tier, not the total, so the
-                                  shape reads at a glance; the % carries the share. */}
                               <div className="h-2.5 min-w-0 flex-1 rounded bg-surface-2">
                                 <div
                                   className={`h-full rounded ${tier >= 3 ? "bg-emerald-500" : "bg-ink-4"}`}
@@ -2289,10 +2030,6 @@ export default function LottoClient({ gameId }: { gameId: number }) {
                         Log some attempts to see this.
                       </p>
                     ) : (
-                      // Two side-by-side columns, each on its own scale with its
-                      // own heading — play counts (tens) and draw counts
-                      // (hundreds) never share a bar, so neither gets misread
-                      // against the other.
                       <div className="mt-4 grid grid-cols-[auto_minmax(0,1fr)_minmax(0,1fr)] items-center gap-x-3 gap-y-2.5 sm:gap-x-6">
                         <span />
                         <span className="text-xs font-medium text-ink-3">You played it</span>
@@ -2355,7 +2092,7 @@ export default function LottoClient({ gameId }: { gameId: number }) {
                         <span key={swatch} className="flex items-center gap-1.5">
                           <span
                             className={`h-4 w-4 shrink-0 rounded ${BOARD_SWATCH_CLASSES[swatch]} ${
-                              swatch === "latest" ? "mx-1" : "" /* room for the ring's offset */
+                              swatch === "latest" ? "mx-1" : ""
                             }`}
                             aria-hidden
                           />
@@ -2693,8 +2430,6 @@ export default function LottoClient({ gameId }: { gameId: number }) {
         </form>
       </Modal>
 
-      {/* History tab: a draw's compact row opens here, in the same hero
-       * treatment "This draw" gives its pinned draw. */}
       {historyModalDrawId != null &&
         (() => {
           const detail = draws.find((d) => d.draw.id === historyModalDrawId);

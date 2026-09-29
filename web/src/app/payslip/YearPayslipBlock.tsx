@@ -159,9 +159,4 @@ function YearPayslipBlockInner({
   );
 }
 
-/**
- * Memoized so toggling unrelated state (e.g. the modal in `PayslipClient`)
- * doesn't force every year card to re-render. ``yearSlots`` is stable across
- * renders thanks to the ``useMemo`` index in the parent.
- */
 export const YearPayslipBlock = memo(YearPayslipBlockInner);

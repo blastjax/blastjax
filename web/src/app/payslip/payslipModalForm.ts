@@ -75,9 +75,6 @@ export function tryParseFormStateJson(raw: string): FormState | null {
   }
 }
 
-/** Pre-database storage location (browser-local, per-device). Read once, on
- * the first successful fetch from the database, to migrate any values a
- * user had already customized there — then left alone. */
 const LS_PAYSLIP_MODAL_DEFAULTS_LEGACY = "blastjax:payslip:modalDefaults";
 
 const BUILTIN_MODAL_DEFAULTS: Pick<FormState, "mp2" | "allowances"> = {
@@ -85,7 +82,6 @@ const BUILTIN_MODAL_DEFAULTS: Pick<FormState, "mp2" | "allowances"> = {
   allowances: "1,108.30",
 };
 
-/** Settings toggle / last-selected half (first vs second template). */
 export type PayslipPrefillHalfMode = "first" | "second";
 
 export type PayslipDefaultsBundle = {
@@ -109,7 +105,6 @@ function formSecondFallback(): FormState {
   return { ...defaultFormWithBuiltin(), period_half: "2" };
 }
 
-/** Same values `loadPayslipDefaultsBundle(company)` returns before the database fetch resolves (SSR-safe). */
 export function getPayslipDefaultsBundleFallback(): PayslipDefaultsBundle {
   return {
     formFirst: formFirstFallback(),
@@ -147,7 +142,6 @@ function parseFormField(rec: Record<string, unknown>, key: string): FormState | 
   return tryParseFormStateJson(JSON.stringify(v));
 }
 
-/** Defaults used when opening the add modal for a calendar half (1 vs 2). */
 export function payslipDefaultsFormForSlotHalf(
   bundle: PayslipDefaultsBundle,
   half: 1 | 2,
@@ -155,8 +149,6 @@ export function payslipDefaultsFormForSlotHalf(
   return half === 1 ? bundle.formFirst : bundle.formSecond;
 }
 
-/** Reads the legacy browser-local bundle (pre-database storage). Used once,
- * to migrate a user's already-customized values into the database. */
 function tryLoadLegacyLocalBundle(): PayslipDefaultsBundle | null {
   if (typeof window === "undefined") return null;
   try {
@@ -196,7 +188,6 @@ function tryLoadLegacyLocalBundle(): PayslipDefaultsBundle | null {
       };
     }
   } catch {
-    /* ignore */
   }
   return null;
 }
@@ -224,10 +215,6 @@ function bundleFromApiResponse(resp: {
   };
 }
 
-/** Fields that are per-payslip choices, not part of a reusable default
- * template: `period_half` is fixed by which slot the template is for, and
- * `company` isn't something a saved template should carry (the backend's
- * PayslipDefaultForm doesn't even have the column). */
 function stripHalf(f: FormState): Omit<FormState, "period_half" | "company"> {
   const rest = { ...f };
   delete (rest as Partial<FormState>).period_half;
@@ -235,29 +222,12 @@ function stripHalf(f: FormState): Omit<FormState, "period_half" | "company"> {
   return rest;
 }
 
-/** One in-memory cache entry per company — each company has its own pair of
- * half templates and its own active-half toggle. */
 const cachedDefaultsBundleByCompany = new Map<string, PayslipDefaultsBundle>();
 
-/**
- * Best-known form defaults for `company`, read synchronously from an
- * in-memory cache populated by `refreshPayslipDefaultsBundle()`. Falls back
- * to the builtin defaults (SSR-safe) until that company's first fetch from
- * the database resolves.
- */
 export function loadPayslipDefaultsBundle(company: string): PayslipDefaultsBundle {
   return cachedDefaultsBundleByCompany.get(company) ?? getPayslipDefaultsBundleFallback();
 }
 
-/**
- * Fetches `company`'s saved defaults bundle from the database and refreshes
- * the in-memory cache `loadPayslipDefaultsBundle()` reads from. The first
- * time this resolves to an unsaved (still-fallback) database bundle, it
- * migrates any pre-database browser-local values found so they aren't
- * silently lost — that legacy key predates companies entirely, so this only
- * ever matters for whichever company happens to load first with nothing
- * saved yet.
- */
 export async function refreshPayslipDefaultsBundle(
   company: string,
 ): Promise<PayslipDefaultsBundle> {
@@ -273,21 +243,18 @@ export async function refreshPayslipDefaultsBundle(
     if (legacy && !bundlesEqual(legacy, getPayslipDefaultsBundleFallback())) {
       bundle = legacy;
       void savePayslipDefaultsBundle(company, legacy).catch(() => {
-        /* migration best-effort; keep using the legacy values locally either way */
       });
     }
   }
   try {
     localStorage.removeItem(LS_PAYSLIP_MODAL_DEFAULTS_LEGACY);
   } catch {
-    /* ignore */
   }
 
   cachedDefaultsBundleByCompany.set(company, bundle);
   return bundle;
 }
 
-/** Saves both half templates and the active-half toggle for `company` to the database. */
 export async function savePayslipDefaultsBundle(
   company: string,
   bundle: PayslipDefaultsBundle,

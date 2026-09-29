@@ -1,5 +1,3 @@
-"""Installment / loan schedule API models."""
-
 from __future__ import annotations
 
 import datetime as dt

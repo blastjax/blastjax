@@ -1,5 +1,3 @@
-"""Redis cache: read-through helpers with graceful fallback when Redis is unavailable."""
-
 from __future__ import annotations
 
 import json
@@ -10,19 +8,10 @@ from urllib.parse import urlparse, urlunparse
 from pathlib import Path
 
 _log = logging.getLogger(__name__)
-_client: Any = None  # redis.Redis[str] | None
+_client: Any = None
 
 
 def _default_ttl() -> int:
-    """Fallback expiry for a cached response.
-
-    Correctness does not rest on this: every write busts its namespace through
-    the middleware in ``app/factory.py``, so a cached entry is dropped the
-    moment the data behind it changes. The TTL is only a backstop for an entry
-    nothing ever invalidates — which makes a short one pure cost, five minutes
-    of freshness nobody needed in exchange for sending every screen back to
-    Neon a dozen times an hour.
-    """
     return int(os.environ.get("REDIS_CACHE_TTL", "86400"))
 
 
@@ -102,7 +91,6 @@ def delete(key: str) -> None:
 
 
 def invalidate(prefix: str) -> None:
-    """Delete all keys matching ``prefix:*`` using SCAN (non-blocking)."""
     if _client is None:
         return
     try:

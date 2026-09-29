@@ -1,4 +1,3 @@
-"""Installment schedule helpers (due-this-month, serialization)."""
 from __future__ import annotations
 
 import datetime as dt
@@ -6,7 +5,6 @@ from typing import Any
 
 
 def _coerce_date(v: Any) -> dt.date | None:
-    """Coerce DATE/TIMESTAMP/text from the DB into ``date``."""
     if v is None:
         return None
     if isinstance(v, dt.datetime):
@@ -24,7 +22,6 @@ def _coerce_date(v: Any) -> dt.date | None:
 
 
 def _installment_month_start(d: dt.date) -> dt.date:
-    """Schedules use month granularity only; ignore day-of-month."""
     return dt.date(d.year, d.month, 1)
 
 
@@ -42,7 +39,6 @@ def _installment_due_this_month(
     total: int,
     today: dt.date | None = None,
 ) -> bool:
-    """Whether the next unpaid installment falls in today's month (CC: due month = start + current)."""
     if current < 1 or current > total:
         return False
     today = today or dt.date.today()
@@ -52,7 +48,6 @@ def _installment_due_this_month(
 
 
 def is_installment_due_this_month(r: dict[str, Any]) -> bool:
-    """Whether ``r``'s next unpaid payment is due this month and still owed."""
     start = _coerce_date(r.get("start_date"))
     cur = int(r.get("installment_current") or 0)
     total = int(r.get("installment_total") or 0)

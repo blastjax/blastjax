@@ -49,7 +49,6 @@ const DED = [
 
 type Series = (typeof INC)[number] | (typeof DED)[number];
 type Key = Series["k"];
-/** One calendar month's totals; `m` is 0-based. */
 type Month = { y: number; m: number } & Record<Key, number>;
 
 const ALL: readonly Series[] = [...INC, ...DED];
@@ -60,7 +59,6 @@ function blankMonth(t: number): Month {
   return d;
 }
 
-/** Totals per calendar month from the first payslip to the last, gaps zero-filled. */
 function buildMonths(rows: PayslipRow[]): Month[] {
   const byT = new Map<number, Month>();
   for (const r of rows) {
@@ -156,13 +154,11 @@ function SalaryStatsView({ company, data }: { company: string; data: Month[] }) 
     setRange("Year");
     setHover(null);
   };
-  // Wheel over Month by month pages the year (up = previous, down = next).
   const monthWheelRef = useWheelStep((dir) => {
     const y = year + dir;
     if (y >= firstYear && y <= lastYear) pickYear(y);
   });
 
-  /* ---- Selected year vs the same months of the year before ---- */
   const yearRows = data.filter((d) => d.y === year);
   const ms = yearRows.map((d) => d.m);
   const prev = data.filter((d) => d.y === year - 1 && ms.includes(d.m));
@@ -197,7 +193,6 @@ function SalaryStatsView({ company, data }: { company: string; data: Month[] }) 
   const incRows = breakdown(INC, g);
   const dedRows = breakdown(DED, dd);
 
-  /* ---- Month-by-month diverging chart ---- */
   const isYearMode = range === "Year";
   const rr = isYearMode
     ? data.filter((d) => d.y === tYear)
@@ -256,7 +251,6 @@ function SalaryStatsView({ company, data }: { company: string; data: Month[] }) 
   const rg = gross(rr);
   const rd = deds(rr);
 
-  /* ---- All-time ---- */
   const ag = gross(data);
   const ad = deds(data);
   const allTime = (defs: readonly Series[]) => {

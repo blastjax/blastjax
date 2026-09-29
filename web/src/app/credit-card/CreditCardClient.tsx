@@ -51,20 +51,12 @@ import {
 
 const fmtMoney = fmtAmountOrDash;
 
-/**
- * `statement_date` / `due_date` are date-only columns, so this is exactly the
- * shared date-only formatter — it was the last call site still building its own
- * `Intl` options per call (and the last one varying with the reader's locale
- * instead of the pinned `en-US` the rest of the app uses).
- */
 const fmtDate = formatDate;
 
-/** Today in *local* time — `toISOString()` is UTC and gives yesterday before 8am in UTC+8. */
 function todayInputDate(): string {
   return toIsoDateLocal(new Date());
 }
 
-/** "In 3 days" / "Due today" / "5 days ago" for a date-only value. */
 function dueCountdown(iso: string | null): { text: string; tone: "neutral" | "warning" | "danger" } | null {
   const d = iso ? parseDateOnlyLocal(iso) : null;
   if (!d) return null;
@@ -83,11 +75,6 @@ type PayoffByPayment = {
   reachable: boolean;
 };
 
-/**
- * Simulate month-by-month compounding (interest, then payment) until the
- * balance is cleared, capped so a payment that never covers interest can't
- * loop forever.
- */
 function payoffMonthsForPayment(
   balance: number,
   monthlyRate: number,
@@ -113,7 +100,6 @@ function payoffMonthsForPayment(
 
 type PayoffByMonths = { payment: number; totalPaid: number; totalInterest: number };
 
-/** Standard amortization formula: the level payment that clears ``balance`` in exactly ``months``. */
 function paymentForMonths(balance: number, monthlyRate: number, months: number): PayoffByMonths {
   if (balance <= 0 || months <= 0) return { payment: 0, totalPaid: 0, totalInterest: 0 };
   const payment =
@@ -152,7 +138,6 @@ const emptyPaymentForm = (): PaymentForm => ({
   note: "",
 });
 
-/** One label/value line in a definition list. */
 function Row({ label, children }: { label: ReactNode; children: ReactNode }) {
   return (
     <div className="flex items-center justify-between gap-3 py-2.5">
@@ -391,7 +376,6 @@ export default function CreditCardClient() {
     [card, balanceForm, load],
   );
 
-  /** Pay-in-full / half / minimum, as rows of one comparison table. */
   const scenarios = useMemo(() => {
     if (!card) return [];
     const rate = card.interest_rate / 100;
@@ -430,7 +414,6 @@ export default function CreditCardClient() {
   const used = card && card.credit_limit > 0 ? card.current_balance / card.credit_limit : 0;
   const due = card ? dueCountdown(card.due_date) : null;
 
-  /** The calculator's answer as [label, value] cells, or an error line. */
   const calcInput = calcMode === "payment" ? calcPaymentInput : calcMonthsInput;
   let calcResult: { error: string } | { cells: [string, string][] } | null = null;
   if (calcInput.trim() !== "") {
@@ -517,7 +500,6 @@ export default function CreditCardClient() {
       ) : (
         <>
           <div className="grid gap-5 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
-            {/* The card itself: balance front and center, limit usage beneath. */}
             <div className="relative flex min-h-[15rem] flex-col justify-between overflow-hidden rounded-2xl bg-linear-to-br from-indigo-600 via-indigo-700 to-indigo-950 p-6 text-white shadow-md sm:p-7">
               <span aria-hidden className="pointer-events-none absolute -right-20 -top-24 size-72 rounded-full bg-white/10" />
               <span aria-hidden className="pointer-events-none absolute -bottom-28 right-16 size-60 rounded-full bg-white/5" />

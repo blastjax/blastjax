@@ -41,10 +41,6 @@ interface ParsedFile {
   error?: string;
 }
 
-/**
- * Parses filenames like "Dec 14, 2024.pdf" → { year: 2024, month: 12, half: 1 }
- * Day 1–15 → half 1, day 16–31 → half 2.
- */
 function parsePdfFilename(
   filename: string,
 ): { year: number; month: number; half: 1 | 2 } | null {
@@ -104,7 +100,6 @@ export function PdfBulkUploadClient() {
       );
   }, []);
 
-  // Re-resolve matches when rows finish loading.
   useEffect(() => {
     if (rows.length > 0) {
       setItems((prev) =>
@@ -210,7 +205,6 @@ export function PdfBulkUploadClient() {
         </ErrorAlert>
       )}
 
-      {/* Drop zone */}
       <div
         onDragOver={onDragOver}
         onDragLeave={onDragLeave}
@@ -245,10 +239,8 @@ export function PdfBulkUploadClient() {
         />
       </div>
 
-      {/* File list */}
       {items.length > 0 && (
         <section className="rounded-lg border border-line bg-surface">
-          {/* Toolbar */}
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-5 py-3">
             <p className="text-sm text-ink-2">
               {items.length} file{items.length !== 1 ? "s" : ""}

@@ -1,21 +1,13 @@
 import { COLOR_PALETTE, type Card } from "./logic";
 
-/** Stylised outlines for the three symbols, drawn on a 0-100 viewBox. */
 const SYMBOL_PATHS: readonly string[] = [
-  // Hourglass: two triangles joined at a point.
   "M20,15 L80,15 L50,50 L80,85 L20,85 L50,50 Z",
-  // Star: a four-pointed sparkle with concave sides.
   "M50,4 C59,30 70,41 96,50 C70,59 59,70 50,96 C41,70 30,59 4,50 C30,41 41,30 50,4 Z",
-  // Cross: a plus shape, rotated 45deg at render time into a diagonal X.
   "M35,5 L65,5 L65,35 L95,35 L95,65 L65,65 L65,95 L35,95 L35,65 L5,65 L5,35 L35,35 Z",
 ];
 
-/** The cross symbol is drawn as an upright plus and rotated into an X so its
- * arms stay grid-aligned (easier to keep symmetric) until render time. */
 const SYMBOL_TRANSFORMS: readonly (string | undefined)[] = [undefined, undefined, "rotate(45 50 50)"];
 
-/** Renders one card symbol: outline for "blank", a diagonal-line pattern
- * fill for "stripes", and a solid fill for "full". */
 export function SetSymbol({
   symbol,
   color,
@@ -49,7 +41,6 @@ export function SetSymbol({
   );
 }
 
-/** A card as it'd look on the table: 1-3 copies of its symbol side by side. */
 export function CardTile({
   card,
   selected = false,

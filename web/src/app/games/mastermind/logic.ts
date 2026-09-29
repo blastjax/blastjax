@@ -1,21 +1,3 @@
-/**
- * Mastermind solving assistant.
- *
- * This isn't a puzzle the app poses and checks — it's a helper for playing
- * the real (or another) game as the codebreaker. You build each guess with
- * the peg colours you actually played, mark the feedback you actually got,
- * and the app narrows down which codes still fit and suggests what to try
- * next.
- *
- * A code is always CODE_LENGTH pegs. Feedback is the classic two counts —
- * `exact` (right colour, right position) and `colorOnly` (right colour,
- * wrong position) — never which positions, since the real game doesn't
- * reveal that either.
- *
- * Even at the largest setting (10 colours) there are only 10⁴ = 10,000
- * possible codes, so brute-force search runs comfortably on the main thread.
- */
-
 export const CODE_LENGTH = 4;
 export const MIN_COLORS = 2;
 export const MAX_COLORS = 10;
@@ -117,8 +99,6 @@ export function allCodes(numColors: number): CodeArr[] {
   return codes;
 }
 
-/** A colour-agnostic opener: two of one colour, two of another (Knuth's
- * classic pattern) — or one colour repeated when there's only one to pick. */
 export function openingGuess(numColors: number): CodeArr {
   const second = numColors > 1 ? 1 : 0;
   return [0, 0, second, second];
@@ -132,17 +112,8 @@ export function filterCandidates(
   return candidates.filter((code) => feedbackEqual(scoreGuess(guess, code), feedback));
 }
 
-/** Caps how many guesses the minimax search tries when the remaining pool is
- * large, so it never takes more than a beat even at 10 colours. */
 const MAX_GUESS_POOL = 1500;
 
-/**
- * Picks the next guess to try: the one that, across every feedback it could
- * possibly get, leaves the smallest largest remaining group (Knuth's minimax
- * strategy) — ties broken in favour of guesses that are themselves still
- * possible answers, so a lucky guess can win outright instead of only
- * eliminating options.
- */
 export function pickNextGuess(candidates: readonly CodeArr[]): CodeArr | null {
   if (candidates.length === 0) return null;
   if (candidates.length <= 2) return candidates[0];

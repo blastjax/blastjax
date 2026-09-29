@@ -1,9 +1,3 @@
-"""House payment plan API models.
-
-A plan is just a name + free-form notes. Individual payments are stored as
-``house_payment_entry`` rows (date + amount). Nothing else is tracked here.
-"""
-
 from __future__ import annotations
 
 import datetime as dt

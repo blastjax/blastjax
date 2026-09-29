@@ -29,13 +29,6 @@ import {
 import { toIsoDateLocal } from "@/lib/dateFormat";
 import { mapsUrlFor } from "@/lib/maps";
 
-/**
- * Travels, ported 1:1 from the Claude Design "Travel Itinerary v2" file: trip
- * cards → one trip's week-by-week calendar (or day-by-day agenda) → a detail
- * drawer per item, plus the add/edit modals. Colors are the `tv-*` tokens
- * scoped to `.travels-page` in globals.css.
- */
-
 const serif = Source_Serif_4({ subsets: ["latin"], weight: ["600", "700"], variable: "--tv-serif" });
 
 type Kind = "flight" | "train" | "bus" | "ferry" | "activity" | "stay";
@@ -78,7 +71,6 @@ const rangeOf = (a: string, b: string) => `${fmtD(a)} – ${fmtD(b)}, ${pd(b).ge
 const placeRange = (a: string, b: string) => (a === b ? fmtD(a) : `${fmtD(a)} – ${fmtD(b)}`);
 const short = (s: string) => s.split(",")[0].trim();
 
-/** One flight / transit leg / activity / stay, flattened to the design's shape. */
 type Entry = {
   key: string;
   table: Table;
@@ -87,13 +79,11 @@ type Entry = {
   title: string;
   from: string;
   to: string;
-  /** Calendar labels: the resolved city when a maps link gave one, else the text before the first comma. */
   fromShort: string;
   toShort: string;
   location: string;
   startDate: string;
   startTime: string;
-  /** Only set when later than `startDate` — multi-day items span the calendar. */
   endDate: string;
   endTime: string;
   ref: string;
@@ -109,7 +99,6 @@ type Entry = {
   bookedVia: string;
   price: string;
   phone: string;
-  // Stored but not edited here — carried through an edit untouched.
   fromMapUrl: string;
   fromCity: string;
   fromCountry: string;
@@ -199,21 +188,12 @@ const endOf = (e: Entry) => e.endDate || e.startDate;
 const titleOf = (e: Entry, sh: boolean) =>
   e.title || (e.from || e.to ? `${sh ? e.fromShort : e.from} → ${sh ? e.toShort : e.to}` : TYPES[e.type].label);
 
-/** Places keep their insertion-order color; undated ones have `startDate` "" and stay off the calendar. */
 type Place = { id: number; name: string; startDate: string; endDate: string; c: ReturnType<typeof pcol> };
 const placesOf = (d: TravelTripDetail): Place[] =>
   d.cities.map((c, i) => ({ id: c.id, name: c.name, startDate: s(c.start_date), endDate: s(c.end_date) || s(c.start_date), c: pcol(i) }));
 
 const itemCount = (d: TravelTripDetail) =>
   d.flights.length + d.transport.length + d.itinerary.length + d.accommodations.length;
-
-// --- Calendar layout ---------------------------------------------------------
-//
-// Each week is a 14-column grid (two half-day columns per day) so a stay that
-// checks in at 14:00 starts mid-cell. Rows, top to bottom: day numbers, place
-// bands, single-day items that start before the day's first multi-day span,
-// the multi-day spans, then the remaining single-day items. Every week gets
-// the tallest week's height so rows line up down the page.
 
 type Clip = { c0: number; n: number; cl: boolean; cr: boolean; col: string; radius: string; margin: string; lane: number; row: number };
 type Band = Clip & { label: string; bg: string; fg: string };
@@ -235,7 +215,6 @@ type Week = {
 
 const hOf = (n: number) => (n ? n * 64 + (n - 1) * 5 + 2 : 0);
 
-/** Greedy lane assignment; returns the lane count. */
 function pack(segs: Clip[]): number {
   const ends: number[] = [];
   [...segs]
@@ -257,7 +236,6 @@ function buildWeeks(start: string, end: string, entries: Entry[], places: Place[
   const weeks: Week[] = [];
   for (let ws = gs; ws <= ge; ws = addD(ws, 7)) {
     const we = addD(ws, 6);
-    // hs/he: the segment starts/ends on a half-day boundary.
     const clip = (a: string, b: string, hs: boolean, he: boolean): Clip | null => {
       if (b < ws || a > we) return null;
       const cl = a < ws;
@@ -409,8 +387,6 @@ function buildAgenda(start: string, end: string, entries: Entry[], places: Place
   return days;
 }
 
-// --- Forms -------------------------------------------------------------------
-
 const FIELDS = [
   "name", "title", "from", "to", "location", "startDate", "startTime", "endDate", "endTime", "ref", "seat", "conf",
   "notes", "airline", "terminal", "gate", "baggage", "room", "guests", "bookedVia", "price", "phone",
@@ -424,9 +400,6 @@ const BLANK: Form = {
   orig: null,
 };
 
-/** A place field's saved name + maps link (+ city/country for routes). A
- * pasted Google Maps link resolves to its place name and is kept as the
- * link; a field the edit didn't touch keeps what it already had. */
 async function placeOf(text: string, prev: string, url: string, city: string, country: string) {
   const name = text.trim();
   if (name === prev) return { name, url, city, country };
@@ -484,7 +457,6 @@ export default function TravelsClient() {
       .finally(() => setLoading(false));
   }, []);
 
-  // Modal handles Escape for the drawer and dialogs; the add menu isn't one.
   useEffect(() => {
     const k = (e: KeyboardEvent) => {
       if (e.key === "Escape") setAddMenu(false);
@@ -521,7 +493,6 @@ export default function TravelsClient() {
   const upsert = (d: TravelTripDetail) =>
     setTrips((ts) => (ts.some((t) => t.trip.id === d.trip.id) ? ts.map((t) => (t.trip.id === d.trip.id ? d : t)) : [...ts, d]));
 
-  /** Stores `d`, first stretching its trip to cover [a, b] like the design does. */
   const commit = async (d: TravelTripDetail, a: string, b: string) => {
     const t = d.trip;
     if (a < t.start_date || b > t.end_date) {
@@ -620,7 +591,6 @@ export default function TravelsClient() {
         };
         d = o ? await updateTravelAccommodation(tid, o.id, body) : await createTravelAccommodation(tid, body);
       }
-      // A new row's id is the one the refreshed detail has that the old one didn't.
       const before = new Set((trip[table] as { id: number }[]).map((r) => r.id));
       const id = o?.id ?? (d[table] as { id: number }[]).find((r) => !before.has(r.id))?.id;
       await commit(d, f.startDate, endDate || f.startDate);
@@ -673,8 +643,6 @@ export default function TravelsClient() {
       {error}
     </p>
   );
-
-  // --- List ---
 
   const renderList = () => (
     <>
@@ -738,8 +706,6 @@ export default function TravelsClient() {
       </div>
     </>
   );
-
-  // --- Trip ---
 
   const itemStack = (items: Item[], col: string, row: number, h: number, pad: string, key: string) => (
     <div key={key} className={`flex flex-col gap-[5px] overflow-hidden ${pad}`} style={{ gridColumn: col, gridRow: row, height: h }}>
@@ -974,8 +940,6 @@ export default function TravelsClient() {
     </>
   );
 
-  // --- Drawer ---
-
   const renderDrawer = (e: Entry) => {
     const fl = e.type === "flight";
     const route = isRoute(e.type);
@@ -1094,8 +1058,6 @@ export default function TravelsClient() {
     );
   };
 
-  // --- Modals ---
-
   const route = f.kind === "flight" || f.kind === "transit";
   const fl = f.kind === "flight";
   const startCap = route ? "Departure" : f.kind === "stay" ? "Check-in" : "Start";
@@ -1202,7 +1164,6 @@ export default function TravelsClient() {
                 popoverClassName={POPOVER}
                 highlightDay={inTrip}
                 highlightLabel="Trip dates"
-                // An end date that no longer comes after the start is dropped.
                 onChange={(iso) => setF((x) => ({ ...x, startDate: iso, endDate: x.endDate > iso ? x.endDate : "" }))}
               />
             </FormField>

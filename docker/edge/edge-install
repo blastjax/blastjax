@@ -1,17 +1,4 @@
 #!/bin/sh
-# Install a file into the shared edge proxy's config and hot-reload it.
-#
-#   edge-install <path under /srv/edge/caddy> <source file>
-#   edge-install sites/portfolio.caddy docker/Caddyfile
-#
-# Installed to /srv/edge/bin/edge-install by the blastjax deploy; every app's
-# deploy calls it to add or update its own site block, and its presence is how
-# those deploys know the host runs the shared edge rather than a Caddy of their
-# own.
-#
-# The reload is atomic on Caddy's side: a config it rejects never replaces the
-# running one. When that happens the previous file is put back too, so a bad
-# site block can't sit on disk waiting to break every site on the next restart.
 set -eu
 
 if [ $# -ne 2 ]; then
@@ -23,8 +10,6 @@ dest="${EDGE_DIR:-/srv/edge}/caddy/$1"
 src=$2
 mkdir -p "$(dirname "$dest")"
 
-# Written beside the target and renamed into place, so Caddy never reads a
-# half-written file. The temp name doesn't match the `sites/*.caddy` import.
 put() {
   cp "$1" "$dest.tmp.$$"
   chmod 644 "$dest.tmp.$$"
@@ -40,8 +25,6 @@ fi
 put "$src"
 
 if [ "$(docker inspect -f '{{.State.Running}}' edge-caddy 2>/dev/null || true)" != "true" ]; then
-  # First install (the blastjax deploy starts the proxy right after this) -
-  # the file is loaded when it starts.
   echo "edge-install: edge-caddy is not running; $1 will load when it starts" >&2
   [ -z "$backup" ] || rm -f "$backup"
   exit 0

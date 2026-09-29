@@ -27,7 +27,6 @@ const ITEM_BASE =
 const ITEM_IDLE = "text-ink-2 hover:bg-nav-hover hover:text-ink";
 const ITEM_ACTIVE = "bg-nav-active-bg text-nav-active-text";
 
-/** One top-level entry: a link, plus a chevron when it owns sub-pages. */
 function NavRow({
   item,
   activeHref,
@@ -42,8 +41,6 @@ function NavRow({
     activeHref === item.href ||
     (item.children ?? []).some((c) => c.href === activeHref);
 
-  // Open whenever the branch you're in is active. Still free to toggle by
-  // hand, and re-opens on its own when navigation moves back into it.
   const [open, setOpen] = useState(ownsActive);
   useEffect(() => {
     if (ownsActive) setOpen(true);
@@ -113,7 +110,6 @@ function NavRow({
   );
 }
 
-/** Icon-only rail row with a hover tooltip, for the collapsed sidebar. */
 function RailRow({
   href,
   label,
@@ -150,10 +146,6 @@ function RailRow({
 export function SidebarNav() {
   const pathname = usePathname();
   const { sidebarCollapsed, mobileNavOpen, closeMobileNav } = useShellLayout();
-  // Set only when a login session is actually active — this component only
-  // ever mounts once AuthGate has already decided the app is reachable
-  // (login not required, or required and satisfied), so this value is
-  // correct for the component's whole lifetime.
   const [hasSession] = useState(() => getSessionToken() !== null);
   const [companyItems, setCompanyItems] = useState<NavItem[]>([]);
   const currentUser = useCurrentUser();
@@ -162,13 +154,10 @@ export function SidebarNav() {
     closeMobileNav();
   }, [pathname, closeMobileNav]);
 
-  // One "<Company> Payslip" entry per row from Settings → Companies —
-  // there's no build-time list of these, so the sidebar fetches it directly.
   useEffect(() => {
     getCompanies()
       .then((r) => setCompanyItems(r.companies.map((c) => payslipNavItem(c.name, c.show_commission))))
       .catch(() => {
-        /* sidebar just shows Finances without any company entries */
       });
   }, []);
 
@@ -202,7 +191,6 @@ export function SidebarNav() {
         headers: token ? { Authorization: `Bearer ${token}` } : undefined,
       });
     } catch {
-      /* best effort — clear the local token and reload regardless */
     }
     clearSessionToken();
     window.location.reload();
@@ -213,7 +201,6 @@ export function SidebarNav() {
       id="mobile-sidebar-nav"
       className={[
         "flex w-[min(17.5rem,85vw)] flex-col overflow-hidden border-r border-shell-line bg-shell",
-        // The rail is a desktop affordance; the slide-over is always full width.
         sidebarCollapsed ? "lg:w-[76px]" : "lg:w-[280px]",
         "max-lg:fixed max-lg:inset-y-0 max-lg:left-0 max-lg:z-[60] max-lg:shadow-pop",
         "max-lg:transition-transform max-lg:duration-200 max-lg:ease-out",
@@ -222,10 +209,6 @@ export function SidebarNav() {
         "lg:transition-[width] lg:duration-200 lg:ease-out",
       ].join(" ")}
     >
-      {/* Brand row — doubles as the slide-over's close affordance on mobile.
-       * Its height matches the header's so the nav below starts flush with the
-       * page content; collapsed, it keeps that height as a bare spacer, since
-       * the rail is too narrow for the wordmark. */}
       <div className="flex h-16 shrink-0 items-center gap-3 border-b border-shell-line px-4">
         <Link
           href="/"
@@ -267,8 +250,6 @@ export function SidebarNav() {
 
             {section.items.map((item) =>
               sidebarCollapsed ? (
-                // The rail has no room for a disclosure, so sub-pages are
-                // promoted to siblings instead of hiding behind their parent.
                 [
                   <RailRow
                     key={item.href}

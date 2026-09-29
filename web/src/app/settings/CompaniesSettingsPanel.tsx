@@ -23,10 +23,6 @@ import {
   SECONDARY_BUTTON_CLASSES,
 } from "@/lib/ui";
 
-/** Every per-company column toggle, grouped and ordered to match the two
- * halves of the Add/Edit Payslip form (the main grid vs. the "Deductions"
- * aside — see PayslipFormFields). Defaults (all shown except bereavement
- * asst) — see `DEFAULT_COMPANY_COLUMN_FLAGS`. */
 const INCOME_COLUMN_TOGGLES: { key: keyof CompanyColumnFlags; label: string }[] = [
   { key: "show_total", label: "Total" },
   { key: "show_basic_salary", label: "Basic salary" },
@@ -49,9 +45,6 @@ const DEDUCTION_COLUMN_TOGGLES: { key: keyof CompanyColumnFlags; label: string }
 
 const ALL_COLUMN_TOGGLES = [...INCOME_COLUMN_TOGGLES, ...DEDUCTION_COLUMN_TOGGLES];
 
-/** "All columns shown" for a company that never diverged from the defaults,
- * otherwise which default-on columns it hides (off-by-default ones like
- * bereavement asst don't count). */
 function describeFlags(flags: CompanyColumnFlags): string {
   const hidden = ALL_COLUMN_TOGGLES.filter(
     (t) => !flags[t.key] && DEFAULT_COMPANY_COLUMN_FLAGS[t.key],
@@ -59,7 +52,6 @@ function describeFlags(flags: CompanyColumnFlags): string {
   return hidden.length ? `Hides ${hidden.join(", ")}` : "All columns shown";
 }
 
-/** One group of checkboxes (Income or Deductions). */
 function ColumnToggleGroup({
   title,
   toggles,
@@ -92,8 +84,6 @@ function ColumnToggleGroup({
   );
 }
 
-/** All 14 column checkboxes, divided into Income and Deductions, shared by
- * the add and edit forms. */
 function ColumnToggleFieldset({
   flags,
   setFlags,
@@ -187,8 +177,6 @@ export function CompaniesSettingsPanel() {
   function startEdit(company: CompanyRow) {
     setEditingId(company.id);
     setEditName(company.name);
-    // `CompanyRow` carries every `CompanyColumnFlags` field (plus id/name/etc.),
-    // so it structurally satisfies the narrower type as-is.
     setEditFlags(company);
     setEditError(null);
   }
@@ -244,8 +232,6 @@ export function CompaniesSettingsPanel() {
     e.dataTransfer.dropEffect = "move";
   }
 
-  /** Reorders locally right away, then persists — reverting on failure so the
-   * list never quietly disagrees with the sidebar for long. */
   async function handleCardDrop(e: DragEvent<HTMLLIElement>, onto: CompanyRow) {
     e.preventDefault();
     const fromId = Number(e.dataTransfer.getData("text/plain"));

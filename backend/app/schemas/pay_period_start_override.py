@@ -1,5 +1,3 @@
-"""Pay-period start override API models (record that a payslip landed early)."""
-
 from __future__ import annotations
 
 from pydantic import BaseModel, Field

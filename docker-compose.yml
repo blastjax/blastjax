@@ -2,10 +2,6 @@ services:
   redis:
     image: redis:7-alpine
     restart: always
-    # Loopback-only: the api container reaches Redis over the compose network
-    # by service name, so the published port exists purely so a backend run
-    # directly on the host (`uvicorn main:app`) can share it. Binding to
-    # 0.0.0.0 would expose an unauthenticated Redis on a public instance.
     ports:
       - "127.0.0.1:6379:6379"
     volumes:
@@ -16,63 +12,26 @@ services:
       timeout: 3s
       retries: 5
       start_period: 5s
-      # Probe every second while still inside start_period rather than waiting
-      # out the full `interval`. Steady-state probe load is unchanged - this
-      # only changes how fast a freshly started container is first reported
-      # healthy. That matters because redis -> api -> web is a serial
-      # depends_on: service_healthy chain, so each one's start-up latency adds
-      # directly to the deploy job's wall clock. Needs Docker Engine 25.0+;
-      # the EC2 host is on 29.7.2.
       start_interval: 1s
   api:
     restart: always
-    # image: pulled from GHCR on the EC2 host (see deploy.yml); the build:
-    # block below is only exercised by a local `docker compose build`.
     image: ${API_IMAGE:-blastjax-api}:latest
     build:
       context: ./backend
       dockerfile: ../docker/Dockerfile.backend
-    # Matches the image's own non-root user. Bind mounts keep host ownership,
-    # so if ./data is owned by a different uid on some host, set API_UID /
-    # API_GID in .env to match instead of rebuilding the image (API_UID=0
-    # restores the old root behaviour).
     user: "${API_UID:-1000}:${API_GID:-1000}"
-    # No host port publish - only reachable through Caddy (see below) or
-    # from other containers on the compose network by service name.
-    # blastjax-api is the name docker/Caddyfile proxies to. It's unique, unlike
-    # `api`, so the same site block also works on the shared edge network
-    # (docker-compose.edge.yml).
     networks:
       default:
         aliases: [blastjax-api]
-    # Explicit allow-list instead of `env_file: .env` — the container only
-    # ever gets exactly these variables, substituted from a root `.env` if
-    # one exists (compose auto-loads it for ${...} interpolation; no file is
-    # copied into the image or container). DATABASE_URL comes from that
-    # environment and is required — see the `:?` form below.
     environment:
-      # Neon Postgres. Supplied by the deploy environment (never committed —
-      # the URL embeds the database password). The `:?` form fails the
-      # `compose up` outright when it is unset, so a misconfigured deploy stops
-      # here instead of starting an API that cannot reach its database.
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL must be set to the Neon Postgres URL}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
-      # A day, not the five minutes this used to be: every write busts its own
-      # cache namespace through the middleware in app/factory.py, so the TTL
-      # only ever expires an entry nothing invalidated. A short one just sent
-      # each screen back to Neon for data that had not changed.
       REDIS_CACHE_TTL: ${REDIS_CACHE_TTL:-86400}
       BUDGET_CORS_ORIGINS: ${BUDGET_CORS_ORIGINS:-}
       BUDGET_SESSION_TTL_SECONDS: ${BUDGET_SESSION_TTL_SECONDS:-43200}
-      # Connections kept in the pool between requests, and how long one may sit
-      # idle before it is probed on checkout. See the round-trips note at the
-      # top of backend/db.py.
       BUDGET_DB_POOL_KEEP: ${BUDGET_DB_POOL_KEEP:-6}
       BUDGET_DB_POOL_MAX: ${BUDGET_DB_POOL_MAX:-10}
       BUDGET_DB_PROBE_AFTER_SECONDS: ${BUDGET_DB_PROBE_AFTER_SECONDS:-20}
-      # Seconds the pool may sit unused before every connection is closed, so
-      # Neon's compute can scale to zero instead of being billed all night.
-      # 0 disables it and holds connections open indefinitely.
       BUDGET_DB_IDLE_CLOSE_SECONDS: ${BUDGET_DB_IDLE_CLOSE_SECONDS:-120}
     volumes:
       - ./data:/app/data
@@ -89,30 +48,21 @@ services:
       timeout: 5s
       retries: 5
       start_period: 20s
-      # See the note on redis: fast probes during start-up only, so the deploy
-      # doesn't sit through a 15s interval waiting on a process that was ready
-      # in two.
       start_interval: 2s
   web:
     restart: always
-    # image: pulled from GHCR on the EC2 host (see deploy.yml); the build:
-    # block below is only exercised by a local `docker compose build`.
     image: ${WEB_IMAGE:-blastjax-web}:latest
     build:
       context: ./web
       dockerfile: ../docker/Dockerfile.web
       args:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}
-    # No host port publish - only reachable through Caddy (see below).
-    # See the note on api's alias.
     networks:
       default:
         aliases: [blastjax-web]
     depends_on:
       api:
         condition: service_healthy
-    # Node 20 has a global fetch, so this needs nothing installed in the image.
-    # The deploy workflow gates on this reporting healthy.
     healthcheck:
       test:
         - "CMD"
@@ -123,19 +73,10 @@ services:
       timeout: 5s
       retries: 5
       start_period: 20s
-      # See the note on redis: fast probes during start-up only, so the deploy
-      # doesn't sit through a 15s interval waiting on a process that was ready
-      # in two.
       start_interval: 2s
   caddy:
     restart: always
     image: caddy:2-alpine
-    # Sole public entry point: terminates TLS (auto-provisions and renews
-    # the Let's Encrypt cert for the domain in the Caddyfile) and routes
-    # /api/* to the backend, everything else to the Next.js frontend.
-    # Only for a standalone run of this stack: the Lightsail deploy adds
-    # docker-compose.edge.yml, which switches this off in favour of the shared
-    # edge proxy (docker/edge/) that fronts every site on the host.
     ports:
       - "80:80"
       - "443:443"

@@ -67,7 +67,6 @@ import { useWheelStep } from "@/lib/useWheelStep";
 
 const WEEKDAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
 
-/** Custom drag-and-drop payload type carrying the source day-of-month. */
 const DAY_DND_MIME = "text/x-calendar-day";
 
 const NOTHING_TO_EVEN_OUT =
@@ -75,22 +74,10 @@ const NOTHING_TO_EVEN_OUT =
 
 type PeriodHalf = 1 | 2;
 
-/**
- * Payroll here is paid on a half-month lag: the payslip whose period_half is
- * 2 (16th–end) is the one that actually funds days 1–15 of the *next* month,
- * and the period_half 1 (1st–15th) payslip funds days 16–end. This maps a
- * calendar half (which days) to the payslip half (whose money) that funds it.
- */
 function payslipHalfFor(calendarHalf: PeriodHalf): PeriodHalf {
   return calendarHalf === 1 ? 2 : 1;
 }
 
-/**
- * The specific payslip period (year/month) that funds a calendar half of the
- * viewed month — days 1–15 are funded by *last* month's 16th–end payslip;
- * days 16–end are funded by *this* month's 1st–15th payslip. Used to avoid
- * showing a stale payslip from a different month as if it funded this one.
- */
 function fundingPeriodFor(
   calendarHalf: PeriodHalf,
   year: number,
@@ -100,7 +87,6 @@ function fundingPeriodFor(
   return month === 1 ? { year: year - 1, month: 12 } : { year, month: month - 1 };
 }
 
-/** Adds `delta` months to (year, month), wrapping the year as needed. */
 function addMonths(year: number, month: number, delta: number): { year: number; month: number } {
   const zeroBased = month - 1 + delta;
   const y = year + Math.floor(zeroBased / 12);
@@ -108,9 +94,6 @@ function addMonths(year: number, month: number, delta: number): { year: number; 
   return { year: y, month: m };
 }
 
-/** The period immediately following the given one — half-1 is followed by half-2 of the same
- *  month; half-2 is followed by half-1 of the next month. Periods stay contiguous, so setting
- *  a period's end date is the same as setting this adjacent period's start date to end + 1 day. */
 function adjacentPeriodFor(
   year: number,
   month: number,
@@ -121,14 +104,12 @@ function adjacentPeriodFor(
   return { year: next.year, month: next.month, half: 1 };
 }
 
-/** Adds `delta` days to a "YYYY-MM-DD" string, returning a new "YYYY-MM-DD" string. */
 function addDaysIso(iso: string, delta: number): string {
   const [y, m, d] = iso.split("-").map(Number);
   const d2 = new Date(y, m - 1, d + delta);
   return dateIso(d2.getFullYear(), d2.getMonth() + 1, d2.getDate());
 }
 
-/** Inclusive day count between two "YYYY-MM-DD" strings (start <= end). */
 function daysBetweenInclusive(startIso: string, endIso: string): number {
   const [sy, sm, sd] = startIso.split("-").map(Number);
   const [ey, em, ed] = endIso.split("-").map(Number);
@@ -137,17 +118,14 @@ function daysBetweenInclusive(startIso: string, endIso: string): number {
   return Math.round((end - start) / 86_400_000) + 1;
 }
 
-/** The normal, un-overridden start of a pay period: the 1st, or the 16th. */
 function defaultHalfStartIso(year: number, month: number, half: PeriodHalf): string {
   return half === 1 ? dateIso(year, month, 1) : dateIso(year, month, 16);
 }
 
-/** Key identifying one specific occurrence of a pay period, e.g. "2026-8-2". */
 function periodKey(year: number, month: number, half: PeriodHalf): string {
   return `${year}-${month}-${half}`;
 }
 
-/** The start of a pay period, or its override (a payslip that landed earlier than normal). */
 function effectiveHalfStartIso(
   overrides: Map<string, string>,
   year: number,
@@ -157,12 +135,6 @@ function effectiveHalfStartIso(
   return overrides.get(periodKey(year, month, half)) ?? defaultHalfStartIso(year, month, half);
 }
 
-/**
- * The end of a pay period is never stored — it's always the day before the
- * *next* period's start, so periods stay contiguous (no overlaps or gaps)
- * even as start dates move around. Half-1's end is bounded by the same
- * month's half-2 start; half-2's end is bounded by next month's half-1 start.
- */
 function periodEndIso(
   overrides: Map<string, string>,
   year: number,
@@ -186,20 +158,12 @@ function periodDayCount(
   );
 }
 
-/** Round to the nearest cent — avoids float noise (e.g. 1997.835625) mismatching displayed 2dp amounts. */
 function roundCents(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
 const fmtMoney = fmtAmount;
 
-/**
- * Spreads `deltaCents` evenly across the given day balances (in cents), returning the updated
- * balances. A positive delta adds evenly, with any leftover cent split one at a time. A negative
- * delta removes evenly without letting a balance drop below zero — if a day is exhausted before
- * absorbing its full share, the unclaimed remainder cascades to the days that still have room, so
- * an overspend is always pulled fully from the other days (short of every one of them hitting zero).
- */
 function spreadCentsEvenly(
   order: string[],
   balances: Map<string, number>,
@@ -249,29 +213,21 @@ function spreadCentsEvenly(
 type DayCell = {
   day: number;
   iso: string;
-  /** Which specific pay period funds this day — usually the viewed month's own half,
-   *  but a tail day may spill into next month's half-1 if that period's start was
-   *  pulled early enough to reach back into this month. */
   periodYear: number;
   periodMonth: number;
   periodHalf: PeriodHalf;
   isPast: boolean;
   isToday: boolean;
   dailyBudget: number | null;
-  /** The even-split default for this day's pay period, ignoring any stored override —
-   *  what "auto-divide" resets active days back to. */
   defaultAmount: number | null;
-  /** A previous-month day shown in the leading blanks (see leadingOverflowDays). */
   outside?: boolean;
 };
 
 type ExpenseForm = { amount: string; description: string };
 const emptyExpenseForm = (): ExpenseForm => ({ amount: "", description: "" });
 
-/** Both expense kinds for one calendar month, as cached per month. */
 type MonthExpenses = { fixed: FixedExpenseRow[]; monthly: MonthlyExpenseRow[] };
 
-/** Cache key for {@link MonthExpenses}; not padded — only ever compared to itself. */
 function monthCacheKey(year: number, month: number): string {
   return `${year}-${month}`;
 }
@@ -301,7 +257,6 @@ type DayGridCellProps = {
   onDragEnd: () => void;
 };
 
-/** One hue per pay period — summary cards, day cells and the legend all agree. */
 const HALF_STYLE: Record<PeriodHalf, { label: string; dot: string; bar: string; tint: string }> = {
   1: {
     label: "1st pay period",
@@ -320,26 +275,11 @@ const HALF_STYLE: Record<PeriodHalf, { label: string; dot: string; bar: string; 
 const SHORT_DAY = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" });
 const LONG_DAY = new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric" });
 
-/** "Sep 14" (or "Mon, Sep 14" with `long`) for a "YYYY-MM-DD" string, parsed as a local date. */
 function fmtDay(iso: string, long = false): string {
   const d = parseDateOnlyLocal(iso);
   return d ? (long ? LONG_DAY : SHORT_DAY).format(d) : iso;
 }
 
-/**
- * One day in the month grid, memoized.
- *
- * Dragging a day fires `dragover`/`dragleave` continuously, and each one is a
- * state update on the parent. Rendering the cells inline meant every such
- * event rebuilt all ~42 of them — six template-string class computations each —
- * even though at most two cells actually change appearance. With this split,
- * the parent still re-renders but React skips every cell whose props are
- * unchanged, which is all of them but the drag source and the hovered target.
- *
- * All the callbacks are `useCallback`-stable in the parent, so the memo
- * comparison is meaningful; `cell` is a fresh object only when `dayCells`
- * genuinely recomputes.
- */
 const DayGridCell = memo(function DayGridCell({
   cell,
   isDragSource,
@@ -354,7 +294,6 @@ const DayGridCell = memo(function DayGridCell({
   const { day, iso, periodHalf, isPast, isToday, dailyBudget, defaultAmount, outside } = cell;
   const draggable = dailyBudget != null;
   const half = HALF_STYLE[periodHalf];
-  /** The day no longer holds its even share — spend was logged or budget moved. */
   const adjusted =
     dailyBudget != null && defaultAmount != null && Math.abs(dailyBudget - defaultAmount) >= 0.005;
   return (
@@ -422,8 +361,6 @@ const DayGridCell = memo(function DayGridCell({
       >
         {dailyBudget != null ? (
           <>
-            {/* Narrow cells only fit the rounded form; from `sm` up there is room
-                for the exact amount, which is what the day is actually worth. */}
             <span className="sm:hidden">{fmtCompactMoney(dailyBudget)}</span>
             <span className="hidden sm:inline">{fmtMoney(dailyBudget)}</span>
           </>
@@ -442,11 +379,6 @@ export default function CalendarClient() {
   const [monthlyExpenses, setMonthlyExpenses] = useState<MonthlyExpenseRow[]>([]);
   const [nextMonthlyExpenses, setNextMonthlyExpenses] = useState<MonthlyExpenseRow[]>([]);
   const [payPeriodOverrides, setPayPeriodOverrides] = useState<Map<string, string>>(new Map());
-  /**
-   * Two independent first-load flags rather than one `loading` toggle: the
-   * shared (all-month) data and the viewed month's expenses arrive separately,
-   * and neither should ever flip back to "loading" when the user pages months.
-   */
   const [sharedLoaded, setSharedLoaded] = useState(false);
   const [monthLoaded, setMonthLoaded] = useState(false);
   const loading = !sharedLoaded || !monthLoaded;
@@ -464,10 +396,7 @@ export default function CalendarClient() {
   const [payDateError, setPayDateError] = useState<string | null>(null);
 
   const [dayOverrides, setDayOverrides] = useState<Map<string, number>>(new Map());
-  /** Day → what logging it as its pay period's last day banked to Savings
-   *  (negative when overspent, 0 when right on budget); ordered by day. */
   const [daySavings, setDaySavings] = useState<Map<string, number>>(new Map());
-  /** Every override write returns the full list; both maps come from it. */
   const applyOverrideRows = useCallback((rows: CalendarDayOverrideRow[]) => {
     setDayOverrides(new Map(rows.map((o) => [o.day, o.amount])));
     setDaySavings(new Map(rows.flatMap((o) => (o.saved != null ? [[o.day, o.saved] as const] : []))));
@@ -498,13 +427,6 @@ export default function CalendarClient() {
   const year = viewedYear;
   const month = viewedMonth;
 
-  /**
-   * Per-month expense lists already fetched this session, keyed "YYYY-M".
-   * Paging months paints from here on the same tick and then revalidates in
-   * the background, so a month that's already been seen never blanks out
-   * waiting on the network. A ref (not state) because writing to it must not
-   * itself trigger a render — the setState calls fed from it already do.
-   */
   const monthExpenseCache = useRef<Map<string, MonthExpenses>>(new Map());
 
   const readMonthCache = useCallback(
@@ -513,7 +435,6 @@ export default function CalendarClient() {
     [],
   );
 
-  /** Both expense lists for one month in one round trip pair; result is cached. */
   const fetchMonthExpenses = useCallback(
     async (y: number, m: number): Promise<MonthExpenses> => {
       const [fixed, monthly] = await Promise.all([
@@ -527,17 +448,10 @@ export default function CalendarClient() {
     [],
   );
 
-  /**
-   * Drop cached months after a write. Recurring monthly expenses show up in
-   * every month's response, so a single edit can invalidate any cached month,
-   * not just the one it was filed under — clearing everything is the only
-   * correct scope.
-   */
   const clearMonthCache = useCallback(() => {
     monthExpenseCache.current.clear();
   }, []);
 
-  /** Viewed month + the next one (the grid can spill into next month's half-1). */
   const loadViewedMonths = useCallback(async () => {
     const next = addMonths(viewedYear, viewedMonth, 1);
     const [cur, nxt] = await Promise.all([
@@ -550,7 +464,6 @@ export default function CalendarClient() {
     setNextMonthlyExpenses(nxt.monthly);
   }, [fetchMonthExpenses, viewedYear, viewedMonth]);
 
-  /** Re-read the viewed month only (after adding/deleting one of its expenses). */
   const reloadViewedMonth = useCallback(async () => {
     clearMonthCache();
     await loadViewedMonths();
@@ -570,12 +483,6 @@ export default function CalendarClient() {
     );
   }, []);
 
-  /**
-   * Payslips and both override lists cover every month at once, so they load
-   * exactly once per mount — they used to be bundled into the same callback as
-   * the month-scoped expense lists, which meant every month change refetched all
-   * seven endpoints and flipped `loading` back on, blanking the whole grid.
-   */
   const loadSharedData = useCallback(async () => {
     const [payslipResult, overridesResult, payPeriodResult] = await Promise.allSettled([
       getPayslips(12),
@@ -615,12 +522,6 @@ export default function CalendarClient() {
     };
   }, [loadSharedData]);
 
-  /**
-   * Month-scoped refresh, including the first one. Already-visited months paint
-   * from `monthExpenseCache` on this same tick and then revalidate in the
-   * background, so paging months stays responsive instead of dropping to a
-   * spinner — `monthLoaded` latches after the first fetch and never clears.
-   */
   useEffect(() => {
     const next = addMonths(viewedYear, viewedMonth, 1);
     const cachedCur = readMonthCache(viewedYear, viewedMonth);
@@ -674,24 +575,14 @@ export default function CalendarClient() {
     setViewedMonth(today.getMonth() + 1);
   }, [today]);
 
-  // Wheel over the Daily budget card pages months (up = previous, down = next).
   const calendarWheelRef = useWheelStep((dir) => (dir < 0 ? goToPrevMonth() : goToNextMonth()));
 
   const isViewingCurrentMonth =
     viewedYear === today.getFullYear() && viewedMonth === today.getMonth() + 1;
 
   const daysInMonth = new Date(year, month, 0).getDate();
-  /** Weekday (0=Sun) of this month's 1st — also the number of blank leading
-   *  grid slots available to show spillover days from the previous month. */
   const firstWeekday = new Date(year, month - 1, 1).getDay();
 
-  /**
-   * Effective start/end of this month's two pay periods, plus next month's
-   * half-1 start — needed because a tail day of this month can spill into
-   * next month's half-1 if that period's start was pulled back far enough
-   * (see periodEndIso). Ends are always derived, never stored, so periods
-   * stay contiguous as start dates move.
-   */
   const periodInfo = useMemo(() => {
     const next = addMonths(year, month, 1);
     const p1Start = effectiveHalfStartIso(payPeriodOverrides, year, month, 1);
@@ -712,12 +603,6 @@ export default function CalendarClient() {
     };
   }, [payPeriodOverrides, year, month]);
 
-  /**
-   * Fixed expenses are scoped to the single (period_year, period_month) they
-   * were added for — no recurring flag, unlike monthly expenses — keyed by
-   * the payslip half (see payslipHalfFor) that actually funds a calendar
-   * half, since that's the half a fixed expense is recorded against.
-   */
   const expensesByPeriod = useMemo(() => {
     const map = new Map<string, FixedExpenseRow[]>();
     const addRows = (rows: FixedExpenseRow[]) => {
@@ -751,14 +636,6 @@ export default function CalendarClient() {
     [expensesTotalForPeriod, viewedYear, viewedMonth],
   );
 
-  /**
-   * Unlike fixed expenses (scoped to the payslip half that funds a calendar
-   * half, see payslipHalfFor), monthly expenses are entered directly against
-   * the calendar half they should reduce — no pay-lag conversion. Keyed by
-   * the *queried* month, not each row's own stored period_month, since a
-   * recurring row's stored period matches whichever month it was created in,
-   * not every month it shows up in.
-   */
   const monthlyExpensesByPeriod = useMemo(() => {
     const map = new Map<string, MonthlyExpenseRow[]>();
     const addRows = (y: number, m: number, rows: MonthlyExpenseRow[]) => {
@@ -888,10 +765,6 @@ export default function CalendarClient() {
         periodHalf,
         isPast: iso < todayIso,
         isToday: iso === todayIso,
-        // No payslip recorded for the funding period yet means there's no
-        // confirmed money for this day at all — never show a per-day amount
-        // (even a stored override, which may be stale from before this day's
-        // period assignment or funding payslip changed) until there is one.
         dailyBudget: defaultAmount != null ? overrideAmount ?? defaultAmount : null,
         defaultAmount,
       });
@@ -909,15 +782,6 @@ export default function CalendarClient() {
     dayOverrides,
   ]);
 
-  /**
-   * When this month's 1st-half pay period start was pulled back by an
-   * override into the previous month (e.g. payday landing on the 29th
-   * instead of the 1st), those trailing previous-month days belong to this
-   * month's period 1 but live outside `dayCells` (which only covers this
-   * month's own 1..daysInMonth). Surface them so they're visible and
-   * clickable — capped to the number of blank leading slots the grid
-   * already has before day 1, so weekday columns stay aligned.
-   */
   const leadingOverflowDays = useMemo(() => {
     const [py, pm] = periodInfo.p1Start.split("-").map(Number);
     if (py === year && pm === month) return [];
@@ -943,8 +807,6 @@ export default function CalendarClient() {
     return result.slice(Math.max(0, result.length - firstWeekday));
   }, [periodInfo.p1Start, year, month, dayOverrides, firstHalfBudget, todayIso, firstWeekday]);
 
-  /** Sum of a half's still-active (today or later) days' current daily budget —
-   *  what's left to spend for the rest of that pay period this month. */
   const remainingForHalf = useCallback(
     (half: PeriodHalf) =>
       roundCents(
@@ -989,15 +851,6 @@ export default function CalendarClient() {
     return result;
   }, [firstWeekday, daysInMonth, dayCells, leadingOverflowDays]);
 
-  /**
-   * The full set of days belonging to one specific pay period, independent
-   * of which month is currently being viewed — a period can span a month
-   * boundary (see periodEndIso), so a day near the end of the viewed month
-   * may need siblings that live in the *next* month's grid, which `dayCells`
-   * never contains since it's scoped to the viewed month only. Used to let
-   * "log spend" redistribute correctly even when logging a day whose period
-   * spills into another month.
-   */
   const periodDayCells = useCallback(
     (periodYear: number, periodMonth: number, periodHalf: PeriodHalf): DayCell[] => {
       const start = effectiveHalfStartIso(payPeriodOverrides, periodYear, periodMonth, periodHalf);
@@ -1143,14 +996,11 @@ export default function CalendarClient() {
     setSpendDay(null);
   }, []);
 
-  /** The last day of the pay period `d` belongs to (periods can end in another month). */
   const isPeriodLastDay = useCallback(
     (d: DayCell) => d.iso === periodEndIso(payPeriodOverrides, d.periodYear, d.periodMonth, d.periodHalf),
     [payPeriodOverrides],
   );
 
-  /** A last day already logged (its leftover banked) is closed: later
-   *  spreads and Even out leave it alone instead of rewriting what was spent. */
   const isClosedLastDay = useCallback(
     (d: DayCell) => daySavings.has(d.iso) && isPeriodLastDay(d),
     [daySavings, isPeriodLastDay],
@@ -1167,19 +1017,7 @@ export default function CalendarClient() {
         return;
       }
       const spent = roundCents(rawSpent);
-      /**
-       * What this day really holds: its budget plus anything it already
-       * banked, so re-logging a last day re-derives its savings instead of
-       * stacking a second deposit on top of the first.
-       */
       const pot = spendDay.dailyBudget + (daySavings.get(spendDay.iso) ?? 0);
-      /**
-       * Otherwise the remainder (or overspend) spreads across this period's
-       * other *active* days — today or later, never a day that's already
-       * past — whether they fall before or after the day being logged.
-       * Pulled from the full period (via periodDayCells), not just the viewed
-       * month's dayCells, since a period can spill into an adjacent month.
-       */
       const otherDays = periodDayCells(
         spendDay.periodYear,
         spendDay.periodMonth,
@@ -1187,13 +1025,7 @@ export default function CalendarClient() {
       ).filter(
         (d) => d.iso !== spendDay.iso && !d.isPast && d.dailyBudget != null && !isClosedLastDay(d),
       );
-      /**
-       * A pay period's last day banks its difference to Savings instead:
-       * leftover is added, overspend is taken back out (saved goes negative).
-       * So does any day with no open day left to absorb it (logging a day
-       * after its period ended), which used to be a dead-end error.
-       */
-      const banks = isPeriodLastDay(spendDay) || otherDays.length === 0;
+      const banks =isPeriodLastDay(spendDay) || otherDays.length === 0;
       setSpendError(null);
       setSavingSpend(true);
       try {
@@ -1211,8 +1043,6 @@ export default function CalendarClient() {
             day: d.iso,
             amount: (updated.get(d.iso) ?? 0) / 100,
           }));
-          // A day that banked back when it was a last day (a pay date moved
-          // since) hands that back — it's part of `pot` above.
           overrides.push({
             day: spendDay.iso,
             amount: spent,
@@ -1239,22 +1069,6 @@ export default function CalendarClient() {
     ],
   );
 
-  /**
-   * "Even out", worked per pay period rather than per month — the fix for
-   * overrides (a drag/transfer, a "log spend" redistribution) going stale or
-   * lopsided. Every period with a day in the viewed grid is evened across its
-   * *whole* date range, even the part outside this month (a period can start
-   * in the previous month after an early payday, or run into the next), so
-   * no period is left half-reset. What's still unspent in the period — its
-   * net after expenses, minus the budgets of days that stay put and minus
-   * whatever it already banked to Savings — is split evenly over the days
-   * being reset, so evening out never adds or removes money (nor re-spends
-   * savings): past days are kept (already-logged history), and `future` keeps
-   * today too. An overspent period evens out to zero, never negative (the
-   * API rejects that). Periods with no funding payslip yet are skipped.
-   * Rounded per day like the default split, so a clean period shows no
-   * "changed" dots; the total can drift by a few cents at most.
-   */
   const evenOutPlan = useMemo(() => {
     const periods = new Map<string, DayCell>();
     for (const d of [...leadingOverflowDays, ...dayCells]) {
@@ -1378,7 +1192,6 @@ export default function CalendarClient() {
     expenseModalHalf != null ? monthlyExpensesTotal(expenseModalHalf) : 0;
   const modalNetAfter = expenseModalHalf != null ? netAfterExpenses(expenseModalHalf) : null;
 
-  /** Bounds mirroring the backend's validation, so the date picker rejects obviously-invalid picks. */
   const payDateBounds = useMemo(() => {
     const prev = addMonths(year, month, -1);
     const prevHalf2Start = effectiveHalfStartIso(payPeriodOverrides, prev.year, prev.month, 2);
@@ -1388,8 +1201,6 @@ export default function CalendarClient() {
     } as Record<PeriodHalf, { min: string; max: string }>;
   }, [payPeriodOverrides, year, month]);
 
-  /** Bounds for the optional end date — one day before whatever the adjacent period's own
-   *  start bound is, since setting an end date pushes that adjacent period's start forward. */
   const payDateEndBounds = useMemo(() => {
     const next = addMonths(year, month, 1);
     return {
@@ -1487,8 +1298,6 @@ export default function CalendarClient() {
     [],
   );
 
-  /** Still-open days (today or later) of a half in the viewed month — the days
-   * `remainingForHalf` sums, so "left to spend ÷ this" is the real pace. */
   const activeDaysForHalf = (half: PeriodHalf) =>
     [...leadingOverflowDays, ...dayCells].filter(
       (d) =>
@@ -1499,9 +1308,6 @@ export default function CalendarClient() {
         d.dailyBudget != null,
     ).length;
 
-  /** The Log spending modal's numbers, mirroring submitSpend: the day's `pot`
-   *  (budget + anything it already banked), whether its difference `banks` to
-   *  Savings, and the live `delta` (null until a valid amount is typed). */
   const spendPreview = useMemo(() => {
     if (!spendDay || spendDay.dailyBudget == null) return null;
     const days = periodDayCells(spendDay.periodYear, spendDay.periodMonth, spendDay.periodHalf).filter(
@@ -1516,7 +1322,6 @@ export default function CalendarClient() {
   }, [spendDay, spendAmount, daySavings, periodDayCells, isPeriodLastDay, isClosedLastDay]);
 
   const savingsTotal = roundCents([...daySavings.values()].reduce((s, v) => s + v, 0));
-  /** Latest deposit (or withdrawal) — the map follows the API's ORDER BY day. */
   const lastBanked = [...daySavings].pop();
 
   const transferMove = transfer ? parseFormNumber(transferAmount) : null;

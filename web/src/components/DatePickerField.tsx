@@ -8,32 +8,19 @@ import { usePopoverPosition } from "@/lib/usePopoverPosition";
 import { INPUT_CLASSES } from "@/lib/ui";
 
 export type DatePickerFieldProps = {
-  /** "YYYY-MM-DD", or "" for no date picked. */
   value: string;
   onChange: (iso: string) => void;
   disabled?: boolean;
   placeholder?: string;
   id?: string;
-  /** Dates outside [minDate, maxDate] (inclusive, either end optional)
-   * render dimmed and can't be picked. */
   minDate?: string;
   maxDate?: string;
-  /** Reference date used instead of the real "today" for the month the
-   * popover opens on when `value` is blank, and for the ringed day. */
   anchorDate?: string;
-  /** Days to tint as a band, e.g. a trip's own dates. */
   highlightDay?: (iso: string) => boolean;
-  /** Legend for the tint, shown under the calendar. */
   highlightLabel?: string;
-  /** Makes this an end-date field for the given start date: days before it
-   * can't be picked, the span from it to the picked (or hovered) day is
-   * drawn as a range, and picking the start day itself clears the field. */
   rangeFrom?: string;
-  /** Adds a footer button with this label that clears the field. */
   clearLabel?: string;
-  /** Replaces the trigger's default input styling. */
   className?: string;
-  /** Replaces the popover's default surface styling. */
   popoverClassName?: string;
 };
 
@@ -41,10 +28,6 @@ const POPOVER_WIDTH = 320;
 
 const DAY_LABEL = new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" });
 
-/** A button that opens a calendar popover to pick a single date, in place of
- * a native `<input type="date">`. The popover is fixed-positioned from the
- * trigger's screen rect (see `usePopoverPosition`) so a modal's scroll
- * container can't clip it. */
 export function DatePickerField({
   value,
   onChange,
@@ -71,14 +54,10 @@ export function DatePickerField({
 
   useEffect(() => {
     if (!open) return;
-    // Capture phase: a Modal's dialog stops mousedown from bubbling, which
-    // would otherwise keep clicks elsewhere in the dialog from closing this.
     const onDocMouseDown = (e: MouseEvent) => {
       const target = e.target as Node;
       if (!triggerRef.current?.contains(target) && !popoverRef.current?.contains(target)) close();
     };
-    // Capture + stopPropagation so Escape closes only this popover, not the
-    // surrounding Modal (which listens for Escape on `window` too).
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.stopPropagation();

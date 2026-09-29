@@ -1,17 +1,3 @@
-/**
- * Mosaic / Flood-It grid mechanics.
- *
- * Rules: there is a fixed start tile ("seed"). A move picks a color c. The
- * connected blob of tiles reachable from the seed (all same current color)
- * is repainted to c, which makes it contiguous with any neighboring tiles
- * that already happen to be color c, so the blob grows. Goal: repaint the
- * whole board to one color in as few moves as possible.
- *
- * Finding the optimal sequence of moves is done server-side (IDA* search
- * over a region graph — see backend/app/services/mosaic_solver.py); this
- * module only applies moves and renders the board.
- */
-
 export type Grid = number[][];
 export type Cell = { r: number; c: number };
 
@@ -62,13 +48,9 @@ export function applyMove(
   return { grid: g, changed: true };
 }
 
-// ---- board codes (copy/paste a board + start tile without repainting) ----
-
 const CODE_CHARS = "0123456789abcdefghijklmnopqrstuvwxyz";
 const CODE_RE = /^(\d+)x(\d+)x(\d+):([0-9a-z.]+):(\d+)-(\d+)$/i;
 
-/** Serializes a board (including blank/-1 cells) and its start tile into a
- * short string the player can copy and later restore with `decodeBoard`. */
 export function encodeBoard(grid: Grid, numColors: number, seed: Cell): string {
   const rows = grid.length;
   const cols = grid[0].length;

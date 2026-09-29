@@ -1,9 +1,3 @@
-"""House payment plan endpoints.
-
-A plan only tracks a name and notes. Individual payments are managed via the
-``/entry`` sub-routes (date + amount).
-"""
-
 from __future__ import annotations
 
 from typing import Any

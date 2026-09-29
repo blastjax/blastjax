@@ -1,5 +1,3 @@
-"""Monthly expense endpoints, scoped per calendar-month half."""
-
 from __future__ import annotations
 
 from typing import Any

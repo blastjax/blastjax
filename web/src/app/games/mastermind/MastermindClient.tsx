@@ -34,18 +34,12 @@ const COLOR_COUNTS = Array.from(
   (_, i) => MIN_COLORS + i,
 );
 
-/** Tone-classed banner box, matching ui.ts's `ERROR_ALERT_CLASSES` pattern
- * (border + tinted background + tinted text, no shadow) for the two tones
- * it doesn't cover. */
 const BANNER_TONE_CLASSES: Record<"good" | "bad" | "warn", string> = {
   good: "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200",
   bad: "border-red-200 bg-red-50 text-red-800 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200",
   warn: "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200",
 };
 
-/** `colorMap[slot]` is the palette index displayed for legend slot `slot` —
- * identity by default, but a slot's colour can be reassigned so the legend
- * matches whatever physical pegs the player has on hand. */
 function colorHex(v: number, colorMap: number[]): string {
   return v < 0 ? "transparent" : COLOR_PALETTE[colorMap[v]].hex;
 }
@@ -60,10 +54,7 @@ export default function MastermindClient() {
     Array.from({ length: MAX_ATTEMPTS }, emptyAttempt),
   );
   const [submittedCount, setSubmittedCount] = useState(0);
-  /** Which peg of the active row the next legend click will fill. */
   const [pointer, setPointer] = useState(0);
-  /** Which palette colour each legend slot currently displays — double-click
-   * a legend pin to cycle it, independent of the game state. */
   const [colorMap, setColorMap] = useState<number[]>(() =>
     COLOR_PALETTE.map((_, i) => i),
   );
@@ -109,15 +100,11 @@ export default function MastermindClient() {
     resetGame();
   }
 
-  /** Clicking a peg targets it — the next legend click lands there. */
   function selectPeg(pos: number) {
     if (gameOver) return;
     setPointer(pos);
   }
 
-  /** Clicking a colour in the legend places it at the targeted peg and moves
-   * the target on to the next one, wrapping back to the start once the row
-   * is full so re-clicking colours redoes the guess from the left. */
   function placeColorAtPointer(colorIdx: number) {
     if (gameOver) return;
     setAttempts((prev) => {
@@ -134,9 +121,6 @@ export default function MastermindClient() {
     setPointer((p) => (p + 1) % CODE_LENGTH);
   }
 
-  /** Cycles which palette colour a legend slot displays, without touching
-   * the guess value that clicking it places (the slot index stays the
-   * identity of that colour throughout the game). */
   function cycleLegendColor(slot: number) {
     setColorMap((prev) => {
       const next = prev.slice();
@@ -145,10 +129,6 @@ export default function MastermindClient() {
     });
   }
 
-  /** A double-click's second `click` event arrives with `detail >= 2` in
-   * evergreen browsers, so it can be told apart from a plain click without
-   * an artificial delay: the first click still places the colour as usual,
-   * and the second re-colours the pin instead of placing it again. */
   function handleLegendClick(slot: number, e: React.MouseEvent) {
     if (e.detail >= 2) {
       cycleLegendColor(slot);
@@ -157,8 +137,6 @@ export default function MastermindClient() {
     }
   }
 
-  /** Grading only applies to a guess that's actually been played, so only
-   * submitted rows are gradable — never the one still being built. */
   function cycleFeedbackAt(rowIdx: number, pos: number) {
     if (rowIdx >= submittedCount) return;
     setAttempts((prev) => {
@@ -320,8 +298,6 @@ export default function MastermindClient() {
         </section>
 
         <section className="flex w-full min-w-0 flex-col items-center gap-4 lg:flex-1">
-          {/* Fixed so it floats over the page instead of shoving the board
-              down when it appears or its text wraps. */}
           {banner && (
             <div className="pointer-events-none fixed inset-x-0 top-4 z-50 flex justify-center px-4">
               <div
@@ -332,10 +308,6 @@ export default function MastermindClient() {
             </div>
           )}
 
-          {/* Always a white panel, in both themes, so the grade circles (a
-              white fill vs. a black fill) stay legible against it — framed in
-              a dark bezel so it reads as an intentional inset on AMOLED
-              instead of an unstyled white rectangle floating on black. */}
           <div className="w-full max-w-md rounded-lg border border-line bg-surface-2 p-2">
             <div className="flex flex-col-reverse gap-2 overflow-x-auto rounded-md bg-surface p-3 ring-1 ring-black/10">
               {Array.from({ length: MAX_ATTEMPTS }, (_, idx) => {

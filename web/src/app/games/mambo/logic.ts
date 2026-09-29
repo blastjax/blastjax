@@ -1,23 +1,3 @@
-/**
- * Mambo (a.k.a. Takuzu / Binairo) grid mechanics.
- *
- * Rules:
- *   - Every cell holds one of two symbols: a circle or a square.
- *   - No three identical symbols consecutively in any row or column.
- *   - Each row and column holds equally many of each symbol, so both sides
- *     must be even.
- *   - An "=" between two neighbouring cells means they match; an "✕" means
- *     they differ.
- *
- * There is no "every row must be distinct" rule — that belongs to other
- * Binairo variants, not to Mambo.
- *
- * This module only holds the rules a keystroke needs: editing cells, spotting
- * broken rules, and serialising a board. Solving, hinting and generating run
- * server-side (see backend/app/services/mambo_solver.py) so a big board never
- * blocks the main thread.
- */
-
 export const EMPTY = -1;
 export const CIRCLE = 0;
 export const SQUARE = 1;
@@ -27,7 +7,6 @@ export const SIGN_EQUAL = 1;
 export const SIGN_OPPOSITE = 2;
 
 export type Grid = number[][];
-/** Signs between horizontal neighbours: rows x (cols - 1). Vertical: (rows - 1) x cols. */
 export type SignGrid = number[][];
 
 export const MIN_SIDE = 4;
@@ -56,17 +35,14 @@ export function cloneGrid(g: Grid): Grid {
   return g.map((row) => row.slice());
 }
 
-/** Cell cycle used by clicking: empty → circle → square → empty. */
 export function nextValue(v: number): number {
   return v === EMPTY ? CIRCLE : v === CIRCLE ? SQUARE : EMPTY;
 }
 
-/** The same cycle backwards, for right-click. */
 export function prevValue(v: number): number {
   return v === EMPTY ? SQUARE : v === SQUARE ? CIRCLE : EMPTY;
 }
 
-/** Sign cycle used by clicking a gap: none → = → ✕ → none. */
 export function nextSign(s: number): number {
   return s === SIGN_NONE ? SIGN_EQUAL : s === SIGN_EQUAL ? SIGN_OPPOSITE : SIGN_NONE;
 }
@@ -82,12 +58,10 @@ export function isComplete(grid: Grid): boolean {
   return true;
 }
 
-/** Cells and signs currently breaking a rule, keyed `${r}-${c}`. */
 export interface Conflicts {
   cells: Set<string>;
   hSigns: Set<string>;
   vSigns: Set<string>;
-  /** One line per distinct problem, for showing the player what's wrong. */
   messages: string[];
 }
 
@@ -95,10 +69,6 @@ function lineLabel(kind: "row" | "col", index: number): string {
   return `${kind === "row" ? "Row" : "Column"} ${index + 1}`;
 }
 
-/**
- * Every rule violation among the *filled* cells. Deliberately says nothing
- * about whether the board can still be finished — that's the solver's job.
- */
 export function findConflicts(grid: Grid, hSigns: SignGrid, vSigns: SignGrid): Conflicts {
   const rows = grid.length;
   const cols = rows > 0 ? grid[0].length : 0;
@@ -200,7 +170,6 @@ export function findConflicts(grid: Grid, hSigns: SignGrid, vSigns: SignGrid): C
   return { cells, hSigns: hSet, vSigns: vSet, messages };
 }
 
-/** Circles and squares placed so far in a row, for the on-board tallies. */
 export function rowCounts(grid: Grid, r: number): [number, number] {
   let circles = 0;
   let squares = 0;
@@ -221,17 +190,10 @@ export function colCounts(grid: Grid, c: number): [number, number] {
   return [circles, squares];
 }
 
-// ---- puzzle codes (copy/paste a puzzle, signs included) ----
-
 const CELL_CHARS = ".os";
 const SIGN_CHARS = ".=x";
 const CODE_RE = /^(\d+)x(\d+):([.os]+):([.=x]*):([.=x]*)$/i;
 
-/**
- * Serialises a puzzle — the given clues plus every sign — into a short string
- * the player can copy and later restore with `decodePuzzle`. Only the clues
- * are stored, so pasting a code always yields a fresh, unsolved puzzle.
- */
 export function encodePuzzle(grid: Grid, hSigns: SignGrid, vSigns: SignGrid): string {
   const rows = grid.length;
   const cols = grid[0].length;

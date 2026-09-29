@@ -1,9 +1,7 @@
-"""FastAPI application factory."""
-
 from __future__ import annotations
 
 import os
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, Request
@@ -44,27 +42,12 @@ _CACHE_PREFIXES: dict[str, str] = {
     "/api/travel": "travel",
 }
 
-
-"""
-Namespaces a write must bust *in addition to* its own. An installment write
-changes the credit-card response too (the card's monthly dues are derived from
-its installments), so the two caches can't be invalidated independently.
-"""
 _CACHE_ALSO_INVALIDATES: dict[str, tuple[str, ...]] = {
     "installment": ("credit_card",),
 }
 
 
 def _cache_prefixes_for(path: str) -> tuple[str, ...]:
-    """Every cache namespace a write to ``path`` invalidates, own namespace first.
-
-    A route matches only on a path-segment boundary, and longer routes are
-    tried first. Both matter: ``/api/payslip`` is a *string* prefix of
-    ``/api/payslip-defaults`` without being a *path* prefix of it, so a plain
-    ``startswith`` scan in table order sent every defaults save to the
-    ``payslip`` namespace and left ``payslip_default:bundle`` stale for a full
-    TTL — Settings kept serving the values from before the save.
-    """
     for route in sorted(_CACHE_PREFIXES, key=len, reverse=True):
         if path == route or path.startswith(route + "/"):
             prefix = _CACHE_PREFIXES[route]
@@ -76,12 +59,6 @@ def _invalidate_namespaces(names: tuple[str, ...]) -> None:
     for name in names:
         cache.invalidate(name)
 
-
-"""
-Paths whose writes invalidate something that isn't a response cache namespace.
-Adding or removing a user is what switches login on and off, and
-``require_session`` answers that from a cache on every request.
-"""
 _EXTRA_INVALIDATORS: tuple[tuple[str, Any], ...] = (
     ("/api/users", forget_login_required),
 )
@@ -94,13 +71,9 @@ def _run_extra_invalidators(path: str) -> None:
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     init_schema()
     cache.init_cache()
-    # Startup may have just added a lotto_game row (schema.sync_lotto_games),
-    # and the games list is cached for a day with nothing to invalidate it --
-    # no request wrote to /api/lotto. Without this the new game stays hidden
-    # until the TTL lapses.
     cache.invalidate("lotto")
     try:
         yield
@@ -126,16 +99,6 @@ def create_app() -> FastAPI:
 
     @app.middleware("http")
     async def invalidate_cache_on_write(request: Request, call_next):
-        """
-        Invalidate the affected cache namespaces after a successful write.
-
-        This is the *only* place writes bust the cache. Every write endpoint used
-        to also call ``cache.invalidate`` itself for the same namespace this
-        middleware derives from the path, so each write ran the SCAN + DELETE
-        loop twice (three times for installment writes, which busted two
-        namespaces). Centralizing it here also means cache-invalidation policy
-        lives in one readable table instead of being restated in 28 handlers.
-        """
         path = request.url.path
         is_write = request.method in _WRITE_METHODS
         response = await call_next(request)
@@ -167,8 +130,6 @@ def create_app() -> FastAPI:
         user,
     )
 
-    # health and auth stay open — everything else requires a login session
-    # (see require_session; it's a no-op until a user exists — Settings → Users).
     app.include_router(health.router)
     app.include_router(auth.router)
 

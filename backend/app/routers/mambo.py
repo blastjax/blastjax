@@ -1,10 +1,3 @@
-"""Mambo (Takuzu / Binairo) solver endpoints.
-
-The propagation search, the step-by-step deduction engine and the generator all
-run server-side so the browser's main thread never blocks on them — see
-app/services/mambo_solver.py for the rules and the algorithms.
-"""
-
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -29,7 +22,6 @@ T = TypeVar("T")
 
 
 def _checked(fn: Callable[[], T]) -> T:
-    """Turn the solver's own rejections into 400s instead of 500s."""
     try:
         return fn()
     except ValueError as exc:
@@ -57,7 +49,6 @@ def mambo_solve(body: MamboSolveRequest) -> MamboSolveResponse:
 
 @router.post("/api/mambo/steps")
 def mambo_steps(body: MamboStepsRequest) -> MamboStepsResponse:
-    """Every cell the current board forces, in the order a player would find them."""
     result = _checked(
         lambda: solve_steps(
             body.grid,

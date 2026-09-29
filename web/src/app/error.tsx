@@ -3,10 +3,6 @@
 import { useEffect } from "react";
 import { CARD_CLASSES, SECONDARY_BUTTON_CLASSES } from "@/lib/ui";
 
-/**
- * Root error boundary — surfaces recoverable UI when a route segment throws.
- * In development, check the browser console for the full error and `digest`.
- */
 export default function AppError({
   error,
   reset,

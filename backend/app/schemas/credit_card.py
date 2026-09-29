@@ -1,5 +1,3 @@
-"""Credit card summary, statement, and payment API models."""
-
 from __future__ import annotations
 
 import datetime as dt
@@ -26,7 +24,4 @@ class CreditCardPaymentCreate(BaseModel):
 
 
 class CreditCardBalanceAdjust(BaseModel):
-    """Directly correct the available credit shown, e.g. to account for
-    purchases or other transactions this app never recorded."""
-
     available_limit: float
