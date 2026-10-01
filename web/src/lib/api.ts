@@ -968,6 +968,12 @@ export type LottoGame = {
   name: string;
   jackpot_prize: number | null;
   last_attempt_draw_date: string | null;
+  latest_result: {
+    draw_date: string;
+    numbers: number[];
+    winners: number;
+    best_hits: number[] | null;
+  } | null;
 };
 
 export async function getLottoGames() {

@@ -14,7 +14,7 @@ from typing import Any
 import psycopg2
 from dotenv import load_dotenv
 from sqlalchemy import Engine, Integer, and_, create_engine, delete, event, func, inspect, or_, select, update
-from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.dialects.postgresql import distinct_on, insert
 from sqlalchemy.engine import Row
 from sqlalchemy.exc import DisconnectionError
 from sqlalchemy.orm import Session, aliased, selectinload
@@ -1299,8 +1299,28 @@ def list_lotto_games() -> list[dict[str, Any]]:
         jackpot.label("jackpot_prize"),
         last_attempted.label("last_attempt_draw_date"),
     ).order_by(func.substring(LottoGame.name, r"/(\d+)$").cast(Integer))
+    latest = (
+        select(LottoDraw)
+        .where(LottoDraw.n1.is_not(None))
+        .ext(distinct_on(LottoDraw.game_id))
+        .order_by(LottoDraw.game_id, LottoDraw.draw_date.desc())
+        .options(selectinload(LottoDraw.attempts))
+    )
     with _session() as s:
-        return [_plain(row) for row in s.execute(stmt)]
+        games = [_plain(row) for row in s.execute(stmt)]
+        results = {d.game_id: _latest_result(d) for d in s.scalars(latest)}
+    return [{**g, "latest_result": results.get(g["id"])} for g in games]
+
+
+def _latest_result(draw: LottoDraw) -> dict[str, Any]:
+    drawn = [getattr(draw, c) for c in _LOTTO_NUMBER_COLS]
+    hits = [sorted(set(drawn) & {getattr(a, c) for c in _LOTTO_NUMBER_COLS}) for a in draw.attempts]
+    return {
+        "draw_date": _normalize(draw.draw_date),
+        "numbers": drawn,
+        "winners": draw.winners,
+        "best_hits": max(hits, key=len, default=None),
+    }
 
 
 def _lotto_draw(draw: LottoDraw) -> dict[str, Any]:

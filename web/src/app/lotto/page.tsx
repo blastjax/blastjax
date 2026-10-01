@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { ChevronRightIcon, TicketIcon } from "@/components/Icons";
+import { ChevronRightIcon } from "@/components/Icons";
 import { Modal } from "@/components/Modal";
 import { PageHeader } from "@/components/PageHeader";
 import {
@@ -47,6 +47,7 @@ import {
   PAGE_CONTAINER_CLASSES,
   PRIMARY_BUTTON_CLASSES,
   SECONDARY_BUTTON_CLASSES,
+  SECTION_LABEL_CLASSES,
 } from "@/lib/ui";
 
 type RoutedRows = { game: LottoGame; lines: string[] };
@@ -235,47 +236,118 @@ export default function LottoGamesPage() {
       {!error && games === null && <p className={LOADING_TEXT_CLASSES}>Loading…</p>}
 
       {games && (
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          {games.map((game) => {
-            const nextDraw = nextDrawLabel(game.name);
-            return (
-              <Link
-                key={game.id}
-                href={`/lotto/${lottoGameSlug(game.name)}`}
-                className={`${CARD_CLASSES} group flex items-start gap-4`}
-              >
-                <span
-                  className="inline-flex size-11 shrink-0 items-center justify-center rounded-full bg-success-soft text-success-text"
-                  aria-hidden
+        <div className="@container">
+          <div className="grid gap-4 @xl:grid-cols-2 @4xl:grid-cols-3 @[88rem]:grid-cols-5">
+            {games.map((game) => {
+              const nextDraw = nextDrawLabel(game.name);
+              const latest = game.latest_result;
+              const played = game.last_attempt_draw_date;
+              const inPlay = played != null && (!latest || played > latest.draw_date);
+              const hits = new Set(latest?.best_hits);
+              return (
+                <Link
+                  key={game.id}
+                  href={`/lotto/${lottoGameSlug(game.name)}`}
+                  className={`${CARD_CLASSES} group flex flex-col transition-colors duration-150 hover:border-line-strong`}
                 >
-                  <TicketIcon className="size-5" />
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="flex items-center gap-1.5">
+                  <span className="flex items-center justify-between gap-2">
                     <span className="text-base font-semibold tracking-[-0.2px] text-ink">
                       {game.name}
                     </span>
-                    <ChevronRightIcon className="size-4 text-ink-4 transition-transform duration-150 group-hover:translate-x-0.5 group-hover:text-brand-text" />
+                    <ChevronRightIcon className="size-4 shrink-0 text-ink-4 transition-transform duration-150 group-hover:translate-x-0.5 group-hover:text-brand-text" />
                   </span>
-                  <span className="mt-1 block text-sm text-ink-3">
-                    {game.jackpot_prize != null
-                      ? `Jackpot ${fmtJackpotCompact(game.jackpot_prize)}`
-                      : "No jackpot logged yet"}
-                  </span>
-                  {game.last_attempt_draw_date && (
-                    <span className="mt-0.5 block text-sm text-ink-3">
-                      Last draw played: {formatDate(game.last_attempt_draw_date)}
-                    </span>
-                  )}
                   {nextDraw && (
-                    <span className="mt-0.5 block text-sm text-ink-3">
-                      Next draw: {nextDraw}
+                    <span className="mt-0.5 text-sm text-ink-3">
+                      Next draw{" "}
+                      <span
+                        className={
+                          nextDraw === "Today" ? "font-medium text-brand-text" : "text-ink-2"
+                        }
+                      >
+                        {nextDraw}
+                      </span>
                     </span>
                   )}
-                </span>
-              </Link>
-            );
-          })}
+
+                  <span className={`${SECTION_LABEL_CLASSES} mt-5`}>Jackpot</span>
+                  <span className="mt-1 text-3xl font-bold tabular-nums tracking-tight text-ink">
+                    {game.jackpot_prize != null ? fmtJackpotCompact(game.jackpot_prize) : "—"}
+                  </span>
+
+                  {latest ? (
+                    <span className="mt-5 flex flex-col gap-3 border-t border-line pt-4">
+                      <span className="flex items-baseline justify-between gap-2">
+                        <span className={SECTION_LABEL_CLASSES}>Latest result</span>
+                        <span className="text-xs text-ink-3">{formatDate(latest.draw_date)}</span>
+                      </span>
+                      <span className="grid max-w-64 grid-cols-6 gap-1.5">
+                        {latest.numbers.map((n) => (
+                          <span
+                            key={n}
+                            className={`flex aspect-square items-center justify-center rounded-full border text-sm font-semibold tabular-nums ${
+                              hits.has(n)
+                                ? "border-emerald-500 bg-emerald-500 text-white dark:bg-emerald-600"
+                                : "border-line-strong bg-surface-2 text-ink"
+                            }`}
+                          >
+                            {String(n).padStart(2, "0")}
+                          </span>
+                        ))}
+                      </span>
+                      <span className="flex flex-col gap-1.5 text-sm">
+                        <span className="flex justify-between gap-3">
+                          <span className="text-ink-3">Jackpot winners</span>
+                          <span
+                            className={`font-semibold tabular-nums ${
+                              latest.winners > 0 ? "text-amber-700 dark:text-amber-300" : "text-ink"
+                            }`}
+                          >
+                            {latest.winners > 0 ? fmtCount(latest.winners) : "None"}
+                          </span>
+                        </span>
+                        <span className="flex justify-between gap-3">
+                          <span className="text-ink-3">Your best attempt</span>
+                          <span
+                            className={`font-semibold tabular-nums ${
+                              !latest.best_hits
+                                ? "text-ink-4"
+                                : hits.size === 6
+                                  ? "text-amber-700 dark:text-amber-300"
+                                  : hits.size >= 3
+                                    ? "text-emerald-700 dark:text-emerald-300"
+                                    : "text-ink"
+                            }`}
+                          >
+                            {!latest.best_hits
+                              ? "Not played"
+                              : hits.size === 6
+                                ? "Jackpot!"
+                                : `${hits.size} of 6`}
+                          </span>
+                        </span>
+                      </span>
+                    </span>
+                  ) : (
+                    <span className="mt-5 border-t border-line pt-4 text-sm text-ink-3">
+                      No results logged yet.
+                    </span>
+                  )}
+
+                  {played && played !== latest?.draw_date && (
+                    <span className="mt-auto flex items-center gap-2 pt-4 text-xs text-ink-3">
+                      {inPlay && (
+                        <span
+                          className="size-1.5 rounded-full bg-amber-500 motion-safe:animate-pulse"
+                          aria-hidden
+                        />
+                      )}
+                      {inPlay ? "In play for" : "Last played"} {formatDate(played)}
+                    </span>
+                  )}
+                </Link>
+              );
+            })}
+          </div>
         </div>
       )}
 

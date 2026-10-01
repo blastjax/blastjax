@@ -270,6 +270,17 @@ def check_db_against_postgres() -> None:
         assert db.insert_lotto_results([{**result, "draw_date": dt.date(2026, 1, 8)}, fresh, fresh]) == 1
         assert db.list_lotto_draws(3)[1]["draw"]["n1"] == 13, "results overwrote a draw that had numbers"
 
+        jan15 = db.list_lotto_draws(3)[0]["draw"]["id"]
+        db.insert_lotto_attempts_bulk(jan15, [([1, 2, 3, 4, 8, 9], None), ([2, 3, 4, 5, 6, 8], None)])
+        db.upsert_lotto_draw(3, dt.date(2026, 1, 22), None)
+        game = next(g for g in db.list_lotto_games() if g["id"] == 3)
+        assert game["latest_result"] == {
+            "draw_date": "2026-01-15",
+            "numbers": [2, 3, 4, 5, 6, 7],
+            "winners": 0,
+            "best_hits": [2, 3, 4, 5, 6],
+        }, game
+
         payslip = db.insert_payslip(1000, *([None] * 12), company="Acme")
         assert payslip["has_pdf"] is False
         assert db.set_payslip_pdf(payslip["id"], b"%PDF")
