@@ -220,6 +220,21 @@ def check_calendar_override_bulk_bounds() -> None:
         raise AssertionError(f"accepted {len(bad)} override(s) it should reject")
 
 
+def check_fixed_expense_amount_sign() -> None:
+    from pydantic import ValidationError
+
+    from app.schemas.fixed_expense import FixedExpenseCreate
+
+    base = {"period_half": 1, "period_year": 2026, "period_month": 10}
+    assert FixedExpenseCreate(**base, amount=250).amount == 250
+    assert FixedExpenseCreate(**base, amount=-1500).amount == -1500
+    try:
+        FixedExpenseCreate(**base, amount=0)
+    except ValidationError:
+        return
+    raise AssertionError("accepted a zero amount")
+
+
 def check_db_against_postgres() -> None:
     url = os.environ.get("TEST_DATABASE_URL", "")
     if not url:

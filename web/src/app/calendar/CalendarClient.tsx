@@ -210,6 +210,42 @@ function spreadCentsEvenly(
   return result;
 }
 
+function spreadOverDays(days: DayCell[], deltaCents: number) {
+  const before = new Map(days.map((d) => [d.iso, Math.round((d.dailyBudget ?? 0) * 100)]));
+  const after = spreadCentsEvenly(days.map((d) => d.iso), before, deltaCents);
+  const total = (m: Map<string, number>) => [...m.values()].reduce((s, v) => s + v, 0);
+  return { after, shortfallCents: total(after) - total(before) - deltaCents };
+}
+
+function splitEntries(rows: FixedExpenseRow[]) {
+  const income = rows.filter((e) => e.amount < 0);
+  const expenses = rows.filter((e) => e.amount > 0);
+  const total = (list: FixedExpenseRow[]) => list.reduce((s, e) => s + Math.abs(e.amount), 0);
+  return { income, expenses, incomeTotal: total(income), expenseTotal: total(expenses) };
+}
+
+type EntryKind = "income" | "expense";
+
+const ENTRY_COPY: Record<
+  EntryKind,
+  { title: string; note: string; placeholder: string; empty: string; remove: string }
+> = {
+  income: {
+    title: "Extra income",
+    note: "Adds to this period's budget",
+    placeholder: "Where's it from?",
+    empty: "No extra income for this period.",
+    remove: "Delete this income?",
+  },
+  expense: {
+    title: "Fixed expenses",
+    note: "This pay period only",
+    placeholder: "What's it for?",
+    empty: "No fixed expenses for this period.",
+    remove: "Delete this expense?",
+  },
+};
+
 type DayCell = {
   day: number;
   iso: string;
@@ -385,8 +421,11 @@ export default function CalendarClient() {
   const [error, setError] = useState<string | null>(null);
 
   const [expenseModalHalf, setExpenseModalHalf] = useState<PeriodHalf | null>(null);
-  const [expenseForm, setExpenseForm] = useState<ExpenseForm>(emptyExpenseForm());
-  const [savingExpense, setSavingExpense] = useState(false);
+  const [entryForms, setEntryForms] = useState<Record<EntryKind, ExpenseForm>>({
+    income: emptyExpenseForm(),
+    expense: emptyExpenseForm(),
+  });
+  const [savingEntry, setSavingEntry] = useState<EntryKind | null>(null);
   const [expenseError, setExpenseError] = useState<string | null>(null);
 
   const [payDateModalHalf, setPayDateModalHalf] = useState<PeriodHalf | null>(null);
@@ -629,11 +668,6 @@ export default function CalendarClient() {
     (periodYear: number, periodMonth: number, calendarHalf: PeriodHalf) =>
       expensesForPeriod(periodYear, periodMonth, calendarHalf).reduce((s, e) => s + e.amount, 0),
     [expensesForPeriod],
-  );
-
-  const expensesTotal = useCallback(
-    (calendarHalf: PeriodHalf) => expensesTotalForPeriod(viewedYear, viewedMonth, calendarHalf),
-    [expensesTotalForPeriod, viewedYear, viewedMonth],
   );
 
   const monthlyExpensesByPeriod = useMemo(() => {
@@ -1033,20 +1067,12 @@ export default function CalendarClient() {
         if (banks) {
           overrides = [{ day: spendDay.iso, amount: spent, saved: roundCents(pot - spent) }];
         } else {
-          const remainderCents = Math.round((pot - spent) * 100);
-          const order = otherDays.map((d) => d.iso);
-          const balances = new Map(
-            otherDays.map((d) => [d.iso, Math.round((d.dailyBudget ?? 0) * 100)]),
-          );
-          const updated = spreadCentsEvenly(order, balances, remainderCents);
-          overrides = otherDays.map((d) => ({
-            day: d.iso,
-            amount: (updated.get(d.iso) ?? 0) / 100,
-          }));
+          const { after, shortfallCents } = spreadOverDays(otherDays, Math.round((pot - spent) * 100));
+          overrides = otherDays.map((d) => ({ day: d.iso, amount: (after.get(d.iso) ?? 0) / 100 }));
           overrides.push({
             day: spendDay.iso,
             amount: spent,
-            ...(daySavings.has(spendDay.iso) && { saved: 0 }),
+            ...((shortfallCents > 0 || daySavings.has(spendDay.iso)) && { saved: -shortfallCents / 100 }),
           });
         }
         const r = await bulkUpsertCalendarDayOverrides(overrides);
@@ -1114,7 +1140,7 @@ export default function CalendarClient() {
 
   const openExpenseModal = useCallback((half: PeriodHalf) => {
     setExpenseError(null);
-    setExpenseForm(emptyExpenseForm());
+    setEntryForms({ income: emptyExpenseForm(), expense: emptyExpenseForm() });
     setExpenseModalHalf(half);
   }, []);
 
@@ -1122,72 +1148,105 @@ export default function CalendarClient() {
     setExpenseModalHalf(null);
   }, []);
 
-  const submitExpense = useCallback(
-    async (e: FormEvent) => {
+  const changeBudget = useCallback(
+    async (deltaNet: number, write: () => Promise<unknown>) => {
+      if (expenseModalHalf == null) return;
+      const net = netAfterExpenses(expenseModalHalf);
+      const overrides = new Map<string, { day: string; amount: number; saved?: number }>();
+      if (net != null && net >= 0) {
+        const days = periodDayCells(viewedYear, viewedMonth, expenseModalHalf);
+        const open = days.filter((d) => !d.isPast && !isClosedLastDay(d));
+        const { after, shortfallCents } = spreadOverDays(open, Math.round(deltaNet * 100));
+        for (const d of days) {
+          if (!dayOverrides.has(d.iso)) overrides.set(d.iso, { day: d.iso, amount: d.dailyBudget ?? 0 });
+        }
+        for (const d of open) overrides.set(d.iso, { day: d.iso, amount: (after.get(d.iso) ?? 0) / 100 });
+        const bank = open[0] ?? days[days.length - 1];
+        if (shortfallCents !== 0 && bank) {
+          overrides.set(bank.iso, {
+            day: bank.iso,
+            amount: overrides.get(bank.iso)?.amount ?? bank.dailyBudget ?? 0,
+            saved: roundCents((daySavings.get(bank.iso) ?? 0) - shortfallCents / 100),
+          });
+        }
+      }
+      await write();
+      try {
+        if (overrides.size > 0) {
+          applyOverrideRows((await bulkUpsertCalendarDayOverrides([...overrides.values()])).overrides);
+        }
+      } finally {
+        await reloadViewedMonth();
+      }
+    },
+    [
+      expenseModalHalf,
+      netAfterExpenses,
+      periodDayCells,
+      viewedYear,
+      viewedMonth,
+      isClosedLastDay,
+      dayOverrides,
+      daySavings,
+      applyOverrideRows,
+      reloadViewedMonth,
+    ],
+  );
+
+  const submitEntry = useCallback(
+    async (e: FormEvent, kind: EntryKind) => {
       e.preventDefault();
       if (expenseModalHalf == null) return;
-      const amount = parseFormNumber(expenseForm.amount);
+      const form = entryForms[kind];
+      const amount = parseFormNumber(form.amount);
       if (amount == null || amount <= 0) {
         setExpenseError("Enter a valid amount greater than zero.");
         return;
       }
+      const signed = kind === "income" ? -amount : amount;
       setExpenseError(null);
-      setSavingExpense(true);
+      setSavingEntry(kind);
       try {
-        await createFixedExpense({
-          period_half: payslipHalfFor(expenseModalHalf),
-          amount,
-          description: expenseForm.description.trim() || null,
-          period_year: viewedYear,
-          period_month: viewedMonth,
-        });
-        setExpenseForm(emptyExpenseForm());
-        await reloadViewedMonth();
+        await changeBudget(-signed, () =>
+          createFixedExpense({
+            period_half: payslipHalfFor(expenseModalHalf),
+            amount: signed,
+            description: form.description.trim() || null,
+            period_year: viewedYear,
+            period_month: viewedMonth,
+          }),
+        );
+        setEntryForms((f) => ({ ...f, [kind]: emptyExpenseForm() }));
       } catch (err) {
-        setExpenseError(err instanceof Error ? err.message : "Failed to add expense");
+        setExpenseError(err instanceof Error ? err.message : `Failed to add ${kind}`);
       } finally {
-        setSavingExpense(false);
+        setSavingEntry(null);
       }
     },
-    [expenseModalHalf, expenseForm, reloadViewedMonth, viewedYear, viewedMonth],
+    [expenseModalHalf, entryForms, changeBudget, viewedYear, viewedMonth],
   );
 
-  const onDeleteExpense = useCallback(
-    async (id: number) => {
-      if (!window.confirm("Delete this expense?")) return;
+  const onDeleteEntry = useCallback(
+    async (amount: number, confirmText: string, remove: () => Promise<unknown>) => {
+      if (!window.confirm(confirmText)) return;
       setExpenseError(null);
       try {
-        await deleteFixedExpense(id);
-        await reloadViewedMonth();
+        await changeBudget(amount, remove);
       } catch (err) {
-        setExpenseError(err instanceof Error ? err.message : "Failed to delete expense");
+        setExpenseError(err instanceof Error ? err.message : "Failed to delete");
       }
     },
-    [reloadViewedMonth],
+    [changeBudget],
   );
 
-  const onDeleteMonthlyExpense = useCallback(
-    async (id: number) => {
-      if (!window.confirm("Delete this monthly expense?")) return;
-      setExpenseError(null);
-      try {
-        await deleteMonthlyExpense(id);
-        await reloadViewedMonth();
-      } catch (err) {
-        setExpenseError(err instanceof Error ? err.message : "Failed to delete expense");
-      }
-    },
-    [reloadViewedMonth],
+  const modalEntries = splitEntries(
+    expenseModalHalf != null ? expensesForPeriod(viewedYear, viewedMonth, expenseModalHalf) : [],
   );
-
-  const modalExpenses =
-    expenseModalHalf != null ? expensesForPeriod(viewedYear, viewedMonth, expenseModalHalf) : [];
   const modalMonthlyExpenses =
     expenseModalHalf != null
       ? monthlyExpensesForPeriod(viewedYear, viewedMonth, expenseModalHalf)
       : [];
   const modalNetPay = expenseModalHalf != null ? netPayFor(expenseModalHalf) : null;
-  const modalExpensesTotal = expenseModalHalf != null ? expensesTotal(expenseModalHalf) : 0;
   const modalMonthlyExpensesTotal =
     expenseModalHalf != null ? monthlyExpensesTotal(expenseModalHalf) : 0;
   const modalNetAfter = expenseModalHalf != null ? netAfterExpenses(expenseModalHalf) : null;
@@ -1310,15 +1369,19 @@ export default function CalendarClient() {
 
   const spendPreview = useMemo(() => {
     if (!spendDay || spendDay.dailyBudget == null) return null;
-    const days = periodDayCells(spendDay.periodYear, spendDay.periodMonth, spendDay.periodHalf).filter(
+    const others = periodDayCells(spendDay.periodYear, spendDay.periodMonth, spendDay.periodHalf).filter(
       (d) => d.iso !== spendDay.iso && !d.isPast && d.dailyBudget != null && !isClosedLastDay(d),
-    ).length;
+    );
+    const days = others.length;
     const lastDay = isPeriodLastDay(spendDay);
+    const banks = lastDay || days === 0;
     const pot = roundCents(spendDay.dailyBudget + (daySavings.get(spendDay.iso) ?? 0));
     const evaluated = evaluateAmountExpression(spendAmount);
     const spent = evaluated != null ? parseFormNumber(evaluated) : null;
     const delta = spent == null || spent < 0 ? null : roundCents(pot - roundCents(spent));
-    return { pot, days, lastDay, banks: lastDay || days === 0, delta };
+    const fromSavings =
+      delta == null || banks ? 0 : spreadOverDays(others, Math.round(delta * 100)).shortfallCents / 100;
+    return { pot, days, lastDay, banks, delta, fromSavings };
   }, [spendDay, spendAmount, daySavings, periodDayCells, isPeriodLastDay, isClosedLastDay]);
 
   const savingsTotal = roundCents([...daySavings.values()].reduce((s, v) => s + v, 0));
@@ -1370,7 +1433,7 @@ export default function CalendarClient() {
               label="Savings"
               value={savingsTotal < 0 ? `−${fmtMoney(-savingsTotal)}` : fmtMoney(savingsTotal)}
               tone={savingsTotal > 0 ? "success" : savingsTotal < 0 ? "danger" : "neutral"}
-              hint="What's left on the last day of each pay period"
+              hint="Last-day leftovers, minus overspending once a period runs dry"
             />
             <Metric
               label="Last added"
@@ -1395,7 +1458,8 @@ export default function CalendarClient() {
               const netAfter = half === 1 ? firstHalfNetAfter : secondHalfNetAfter;
               const perDay = half === 1 ? firstHalfBudget : secondHalfBudget;
               const remaining = (half === 1 ? remainingFirstHalf : remainingSecondHalf) ?? 0;
-              const deductions = expensesTotal(half) + monthlyExpensesTotal(half);
+              const entries = splitEntries(expensesForPeriod(year, month, half));
+              const deductions = entries.expenseTotal + monthlyExpensesTotal(half);
               const funding = fundingPeriodFor(half, year, month);
               const daysLeft = activeDaysForHalf(half);
               const ratio = netAfter != null && netAfter > 0 ? remaining / netAfter : 0;
@@ -1468,7 +1532,12 @@ export default function CalendarClient() {
                   )}
                   {netAfter != null && (
                     <div className="mt-5 grid grid-cols-3 gap-3 border-t border-line-soft pt-4">
-                      <Metric size="sm" label="Net pay" value={netPay != null ? fmtMoney(netPay) : "–"} />
+                      <Metric
+                        size="sm"
+                        label="Net pay"
+                        value={netPay != null ? fmtMoney(netPay) : "–"}
+                        hint={entries.incomeTotal > 0 ? `+${fmtMoney(entries.incomeTotal)} income` : undefined}
+                      />
                       <Metric
                         size="sm"
                         label="Expenses"
@@ -1483,7 +1552,7 @@ export default function CalendarClient() {
                     onClick={() => openExpenseModal(half)}
                     className={`-ml-2 mt-4 self-start ${TEXT_BUTTON_CLASSES}`}
                   >
-                    Expenses for this period →
+                    Income &amp; expenses →
                   </button>
                 </section>
               );
@@ -1582,16 +1651,22 @@ export default function CalendarClient() {
       >
         <ModalHeader
           id="fixed-expense-title"
-          title={`Expenses · ${modalRange}`}
-          subtitle="Taken out of this period's net pay before it's split into daily budgets."
+          title={`Income & expenses · ${modalRange}`}
+          subtitle="Extra income adds to this period's net pay, expenses come out of it, before it's split into daily budgets."
           onClose={closeExpenseModal}
         />
         <div className={`${DIALOG_BODY_CLASSES} space-y-6`}>
-          <StatStrip className="grid-cols-2 sm:grid-cols-4">
+          <StatStrip className="grid-cols-2 sm:grid-cols-5">
             <Metric size="sm" label="Net pay" value={modalNetPay != null ? fmtMoney(modalNetPay) : "–"} />
+            <Metric
+              size="sm"
+              label="Income"
+              value={modalEntries.incomeTotal > 0 ? `+${fmtMoney(modalEntries.incomeTotal)}` : fmtMoney(0)}
+              tone={modalEntries.incomeTotal > 0 ? "success" : "neutral"}
+            />
             {(
               [
-                ["Fixed", modalExpensesTotal],
+                ["Fixed", modalEntries.expenseTotal],
                 ["Monthly", modalMonthlyExpensesTotal],
               ] as const
             ).map(([label, total]) => (
@@ -1603,61 +1678,85 @@ export default function CalendarClient() {
                 tone={total > 0 ? "danger" : "neutral"}
               />
             ))}
-            <Metric
-              size="sm"
-              label="Left to budget"
-              value={modalNetAfter != null ? fmtMoney(modalNetAfter) : "–"}
-              tone="success"
-            />
+            <div className="col-span-2 sm:col-span-1">
+              <Metric
+                size="sm"
+                label="Left to budget"
+                value={modalNetAfter != null ? fmtMoney(modalNetAfter) : "–"}
+                tone="success"
+              />
+            </div>
           </StatStrip>
 
-          <section>
-            <div className="mb-2 flex items-baseline justify-between gap-2">
-              <h3 className="text-sm font-semibold text-ink">Fixed expenses</h3>
-              <span className="text-xs text-ink-3">This pay period only</span>
-            </div>
-            <form onSubmit={submitExpense} className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_10rem_auto]">
-              <input
-                type="text"
-                aria-label="Description"
-                placeholder="What's it for?"
-                className={INPUT_CLASSES}
-                value={expenseForm.description}
-                onChange={(e) => setExpenseForm((f) => ({ ...f, description: e.target.value }))}
-                disabled={savingExpense}
-              />
-              <AmountInput
-                required
-                aria-label="Amount"
-                placeholder="0.00"
-                value={expenseForm.amount}
-                onChange={(v) => setExpenseForm((f) => ({ ...f, amount: v }))}
-                disabled={savingExpense}
-              />
-              <button type="submit" disabled={savingExpense} className={PRIMARY_BUTTON_CLASSES}>
-                <PlusIcon className="size-4" />
-                {savingExpense ? "Adding…" : "Add"}
-              </button>
-            </form>
-            {expenseError && (
-              <ErrorAlert className="mt-3">
-                {expenseError}
-              </ErrorAlert>
-            )}
-            {modalExpenses.length === 0 ? (
-              <p className="mt-3 text-sm text-ink-3">No fixed expenses for this period.</p>
-            ) : (
-              <ul className="mt-3 divide-y divide-line-soft rounded-xl border border-line">
-                {modalExpenses.map((exp) => (
-                  <li key={exp.id} className="flex items-center gap-3 py-1.5 pl-4 pr-2">
-                    <span className="min-w-0 flex-1 truncate text-sm text-ink">{exp.description || "Untitled"}</span>
-                    <span className="text-sm font-semibold tabular-nums text-ink">{fmtMoney(exp.amount)}</span>
-                    <IconAction kind="delete" label="Delete expense" onClick={() => void onDeleteExpense(exp.id)} />
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
+          {expenseError && <ErrorAlert>{expenseError}</ErrorAlert>}
+
+          {(
+            [
+              ["income", modalEntries.income],
+              ["expense", modalEntries.expenses],
+            ] as const
+          ).map(([kind, rows]) => {
+            const copy = ENTRY_COPY[kind];
+            const form = entryForms[kind];
+            const setForm = (patch: Partial<ExpenseForm>) =>
+              setEntryForms((f) => ({ ...f, [kind]: { ...f[kind], ...patch } }));
+            return (
+              <section key={kind}>
+                <div className="mb-2 flex items-baseline justify-between gap-2">
+                  <h3 className="text-sm font-semibold text-ink">{copy.title}</h3>
+                  <span className="text-xs text-ink-3">{copy.note}</span>
+                </div>
+                <form
+                  onSubmit={(e) => void submitEntry(e, kind)}
+                  className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_10rem_auto]"
+                >
+                  <input
+                    type="text"
+                    aria-label={`${copy.title} description`}
+                    placeholder={copy.placeholder}
+                    className={INPUT_CLASSES}
+                    value={form.description}
+                    onChange={(e) => setForm({ description: e.target.value })}
+                    disabled={savingEntry != null}
+                  />
+                  <AmountInput
+                    required
+                    aria-label={`${copy.title} amount`}
+                    placeholder="0.00"
+                    value={form.amount}
+                    onChange={(v) => setForm({ amount: v })}
+                    disabled={savingEntry != null}
+                  />
+                  <button type="submit" disabled={savingEntry != null} className={PRIMARY_BUTTON_CLASSES}>
+                    <PlusIcon className="size-4" />
+                    {savingEntry === kind ? "Adding…" : "Add"}
+                  </button>
+                </form>
+                {rows.length === 0 ? (
+                  <p className="mt-3 text-sm text-ink-3">{copy.empty}</p>
+                ) : (
+                  <ul className="mt-3 divide-y divide-line-soft rounded-xl border border-line">
+                    {rows.map((exp) => (
+                      <li key={exp.id} className="flex items-center gap-3 py-1.5 pl-4 pr-2">
+                        <span className="min-w-0 flex-1 truncate text-sm text-ink">{exp.description || "Untitled"}</span>
+                        <span
+                          className={`text-sm font-semibold tabular-nums ${kind === "income" ? "text-success-text" : "text-ink"}`}
+                        >
+                          {kind === "income" ? "+" : ""}
+                          {fmtMoney(Math.abs(exp.amount))}
+                        </span>
+                        <IconAction
+                          kind="delete"
+                          label={kind === "income" ? "Delete income" : "Delete expense"}
+                          onClick={() => void onDeleteEntry(exp.amount, copy.remove, () => deleteFixedExpense(exp.id))}
+                        />
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+            );
+          })}
 
           <section>
             <div className="mb-2 flex items-center justify-between gap-2">
@@ -1683,7 +1782,11 @@ export default function CalendarClient() {
                     <IconAction
                       kind="delete"
                       label={`Delete ${exp.name}`}
-                      onClick={() => void onDeleteMonthlyExpense(exp.id)}
+                      onClick={() =>
+                        void onDeleteEntry(exp.amount, "Delete this monthly expense?", () =>
+                          deleteMonthlyExpense(exp.id),
+                        )
+                      }
                     />
                   </li>
                 ))}
@@ -1849,7 +1952,11 @@ export default function CalendarClient() {
                         ? "Right on budget. Other days stay as they are."
                         : spendPreview.delta > 0
                           ? `${fmtMoney(spendPreview.delta)} left over, adding about ${fmtMoney(spendPreview.delta / spendPreview.days)} to each of the other ${spendPreview.days} days.`
-                          : `${fmtMoney(-spendPreview.delta)} over, taking about ${fmtMoney(-spendPreview.delta / spendPreview.days)} from each of the other ${spendPreview.days} days.`}
+                          : spendPreview.fromSavings >= -spendPreview.delta
+                            ? `${fmtMoney(-spendPreview.delta)} over. This pay period's budget has run dry, so it comes out of Savings.`
+                            : spendPreview.fromSavings > 0
+                              ? `${fmtMoney(-spendPreview.delta)} over: ${fmtMoney(-spendPreview.delta - spendPreview.fromSavings)} from the other ${spendPreview.days} days, ${fmtMoney(spendPreview.fromSavings)} from Savings.`
+                              : `${fmtMoney(-spendPreview.delta)} over, taking about ${fmtMoney(-spendPreview.delta / spendPreview.days)} from each of the other ${spendPreview.days} days.`}
                   </p>
                 )}
                 {spendError && (
