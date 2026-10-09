@@ -919,6 +919,17 @@ def insert_fixed_expense(
         return _row(s.scalar(insert(FixedExpense).values(values).returning(FixedExpense)))
 
 
+def update_fixed_expense(expense_id: int, amount: float, description: str | None) -> dict[str, Any] | None:
+    with _session(write=True) as s:
+        row = s.scalar(
+            update(FixedExpense)
+            .where(FixedExpense.id == expense_id)
+            .values(amount=amount, description=description)
+            .returning(FixedExpense)
+        )
+        return _row(row) if row else None
+
+
 def delete_fixed_expense(expense_id: int) -> bool:
     with _session(write=True) as s:
         return s.execute(delete(FixedExpense).where(FixedExpense.id == expense_id)).rowcount > 0

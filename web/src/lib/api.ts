@@ -725,6 +725,10 @@ export async function createFixedExpense(body: FixedExpenseCreateBody) {
   return sendJson<{ expense: FixedExpenseRow }>("POST", "/api/fixed-expense", body);
 }
 
+export async function updateFixedExpense(id: number, body: { amount: number; description?: string | null }) {
+  return sendJson<{ expense: FixedExpenseRow }>("PUT", `/api/fixed-expense/${id}`, body);
+}
+
 export async function deleteFixedExpense(id: number) {
   return sendJson<{ ok: boolean }>("DELETE", `/api/fixed-expense/${id}`);
 }

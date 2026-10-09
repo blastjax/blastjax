@@ -6,8 +6,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 import cache
 from app.deps import require_db
-from app.schemas.fixed_expense import FixedExpenseCreate
-from db import delete_fixed_expense, insert_fixed_expense, list_fixed_expenses
+from app.schemas.fixed_expense import FixedExpenseCreate, FixedExpenseUpdate
+from db import delete_fixed_expense, insert_fixed_expense, list_fixed_expenses, update_fixed_expense
 
 router = APIRouter(tags=["fixed_expense"], dependencies=[Depends(require_db)])
 
@@ -54,6 +54,14 @@ def fixed_expense_create(body: FixedExpenseCreate) -> dict[str, Any]:
         body.period_year,
         body.period_month,
     )
+    return {"expense": _serialize(row)}
+
+
+@router.put("/api/fixed-expense/{expense_id}")
+def fixed_expense_update(expense_id: int, body: FixedExpenseUpdate) -> dict[str, Any]:
+    row = update_fixed_expense(expense_id, body.amount, _clean_description(body.description))
+    if row is None:
+        raise HTTPException(status_code=404, detail="Expense not found.")
     return {"expense": _serialize(row)}
 
 

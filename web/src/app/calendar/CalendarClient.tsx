@@ -36,6 +36,7 @@ import {
   bulkUpsertCalendarDayOverrides,
   createFixedExpense,
   deleteFixedExpense,
+  updateFixedExpense,
   deleteMonthlyExpense,
   deletePayPeriodStartOverride,
   getCalendarDayOverrides,
@@ -426,6 +427,7 @@ export default function CalendarClient() {
     expense: emptyExpenseForm(),
   });
   const [savingEntry, setSavingEntry] = useState<EntryKind | null>(null);
+  const [editingEntry, setEditingEntry] = useState<{ id: number; form: ExpenseForm } | null>(null);
   const [expenseError, setExpenseError] = useState<string | null>(null);
 
   const [payDateModalHalf, setPayDateModalHalf] = useState<PeriodHalf | null>(null);
@@ -1141,6 +1143,7 @@ export default function CalendarClient() {
   const openExpenseModal = useCallback((half: PeriodHalf) => {
     setExpenseError(null);
     setEntryForms({ income: emptyExpenseForm(), expense: emptyExpenseForm() });
+    setEditingEntry(null);
     setExpenseModalHalf(half);
   }, []);
 
@@ -1224,6 +1227,32 @@ export default function CalendarClient() {
       }
     },
     [expenseModalHalf, entryForms, changeBudget, viewedYear, viewedMonth],
+  );
+
+  const saveEditedEntry = useCallback(
+    async (e: FormEvent, row: FixedExpenseRow) => {
+      e.preventDefault();
+      if (!editingEntry) return;
+      const amount = parseFormNumber(editingEntry.form.amount);
+      if (amount == null || amount <= 0) {
+        setExpenseError("Enter a valid amount greater than zero.");
+        return;
+      }
+      const signed = row.amount < 0 ? -amount : amount;
+      setExpenseError(null);
+      setSavingEntry(row.amount < 0 ? "income" : "expense");
+      try {
+        await changeBudget(row.amount - signed, () =>
+          updateFixedExpense(row.id, { amount: signed, description: editingEntry.form.description.trim() || null }),
+        );
+        setEditingEntry(null);
+      } catch (err) {
+        setExpenseError(err instanceof Error ? err.message : "Failed to save");
+      } finally {
+        setSavingEntry(null);
+      }
+    },
+    [editingEntry, changeBudget],
   );
 
   const onDeleteEntry = useCallback(
@@ -1736,7 +1765,45 @@ export default function CalendarClient() {
                   <p className="mt-3 text-sm text-ink-3">{copy.empty}</p>
                 ) : (
                   <ul className="mt-3 divide-y divide-line-soft rounded-xl border border-line">
-                    {rows.map((exp) => (
+                    {rows.map((exp) =>
+                      editingEntry?.id === exp.id ? (
+                        <li key={exp.id} className="p-2">
+                          <form
+                            onSubmit={(e) => void saveEditedEntry(e, exp)}
+                            className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_8rem_auto_auto]"
+                          >
+                            <input
+                              type="text"
+                              aria-label={`${copy.title} description`}
+                              className={INPUT_CLASSES}
+                              value={editingEntry.form.description}
+                              onChange={(e) =>
+                                setEditingEntry({ id: exp.id, form: { ...editingEntry.form, description: e.target.value } })
+                              }
+                              disabled={savingEntry != null}
+                            />
+                            <AmountInput
+                              autoFocus
+                              required
+                              aria-label={`${copy.title} amount`}
+                              value={editingEntry.form.amount}
+                              onChange={(v) => setEditingEntry({ id: exp.id, form: { ...editingEntry.form, amount: v } })}
+                              disabled={savingEntry != null}
+                            />
+                            <button type="submit" disabled={savingEntry != null} className={PRIMARY_BUTTON_CLASSES}>
+                              {savingEntry === kind ? "Saving…" : "Save"}
+                            </button>
+                            <button
+                              type="button"
+                              disabled={savingEntry != null}
+                              onClick={() => setEditingEntry(null)}
+                              className={SECONDARY_BUTTON_CLASSES}
+                            >
+                              Cancel
+                            </button>
+                          </form>
+                        </li>
+                      ) : (
                       <li key={exp.id} className="flex items-center gap-3 py-1.5 pl-4 pr-2">
                         <span className="min-w-0 flex-1 truncate text-sm text-ink">{exp.description || "Untitled"}</span>
                         <span
@@ -1746,12 +1813,23 @@ export default function CalendarClient() {
                           {fmtMoney(Math.abs(exp.amount))}
                         </span>
                         <IconAction
+                          kind="edit"
+                          label={kind === "income" ? "Edit income" : "Edit expense"}
+                          onClick={() =>
+                            setEditingEntry({
+                              id: exp.id,
+                              form: { description: exp.description ?? "", amount: String(Math.abs(exp.amount)) },
+                            })
+                          }
+                        />
+                        <IconAction
                           kind="delete"
                           label={kind === "income" ? "Delete income" : "Delete expense"}
                           onClick={() => void onDeleteEntry(exp.amount, copy.remove, () => deleteFixedExpense(exp.id))}
                         />
                       </li>
-                    ))}
+                      ),
+                    )}
                   </ul>
                 )}
               </section>
