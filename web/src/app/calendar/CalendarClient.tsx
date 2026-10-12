@@ -1121,7 +1121,7 @@ export default function CalendarClient() {
         const targets = days.filter(resets);
         if (targets.length === 0) continue;
         const kept = days.filter((d) => !resets(d)).reduce((s, d) => s + (d.dailyBudget ?? 0), 0);
-        const banked = days.reduce((s, d) => s + (daySavings.get(d.iso) ?? 0), 0);
+        const banked = days.reduce((s, d) => s + Math.max(0, daySavings.get(d.iso) ?? 0), 0);
         const amount = roundCents(Math.max(0, net - kept - banked) / targets.length);
         for (const d of targets) overrides.push({ day: d.iso, amount });
       }
@@ -1416,14 +1416,15 @@ export default function CalendarClient() {
     const evaluated = evaluateAmountExpression(spendAmount);
     const spent = evaluated != null ? parseFormNumber(evaluated) : null;
     const delta = spent == null || spent < 0 ? null : roundCents(pot - roundCents(spent));
-    const fromSavings =
+    const uncovered =
       delta == null || banks ? 0 : spreadOverDays(others, Math.round(delta * 100)).shortfallCents / 100;
-    return { pot, days, lastDay, banks, delta, fromSavings };
+    return { pot, days, lastDay, banks, delta, uncovered };
   }, [spendDay, spendAmount, daySavings, periodDayCells, isPeriodLastDay, isClosedLastDay]);
 
   const spendBills = spendDay ? monthlyExpenseIndex.byDay.get(spendDay.iso) : undefined;
-  const savingsTotal = roundCents([...daySavings.values()].reduce((s, v) => s + v, 0));
-  const lastBanked = [...daySavings].pop();
+  // A negative `saved` marks overspending past a pay period's budget; it never comes out of Savings.
+  const savingsTotal = roundCents([...daySavings.values()].reduce((s, v) => s + Math.max(0, v), 0));
+  const lastBanked = [...daySavings].filter(([, v]) => v > 0).pop();
 
   const transferMove = transfer ? parseFormNumber(transferAmount) : null;
   const payDateRange =
@@ -1471,7 +1472,7 @@ export default function CalendarClient() {
               label="Savings"
               value={savingsTotal < 0 ? `−${fmtMoney(-savingsTotal)}` : fmtMoney(savingsTotal)}
               tone={savingsTotal > 0 ? "success" : savingsTotal < 0 ? "danger" : "neutral"}
-              hint="Last-day leftovers, minus overspending once a period runs dry"
+              hint="What's left over on each pay period's last day"
             />
             <Metric
               label="Last added"
@@ -2083,15 +2084,15 @@ export default function CalendarClient() {
                         ? "Right on budget. Nothing goes to Savings."
                         : spendPreview.delta > 0
                           ? `${fmtMoney(spendPreview.delta)} left over goes to Savings.`
-                          : `${fmtMoney(-spendPreview.delta)} over, taken out of Savings.`
+                          : `${fmtMoney(-spendPreview.delta)} over budget. Savings stay as they are.`
                       : spendPreview.delta === 0
                         ? "Right on budget. Other days stay as they are."
                         : spendPreview.delta > 0
                           ? `${fmtMoney(spendPreview.delta)} left over, adding about ${fmtMoney(spendPreview.delta / spendPreview.days)} to each of the other ${spendPreview.days} days.`
-                          : spendPreview.fromSavings >= -spendPreview.delta
-                            ? `${fmtMoney(-spendPreview.delta)} over. This pay period's budget has run dry, so it comes out of Savings.`
-                            : spendPreview.fromSavings > 0
-                              ? `${fmtMoney(-spendPreview.delta)} over: ${fmtMoney(-spendPreview.delta - spendPreview.fromSavings)} from the other ${spendPreview.days} days, ${fmtMoney(spendPreview.fromSavings)} from Savings.`
+                          : spendPreview.uncovered >= -spendPreview.delta
+                            ? `${fmtMoney(-spendPreview.delta)} over. This pay period's budget has run dry; Savings stay as they are.`
+                            : spendPreview.uncovered > 0
+                              ? `${fmtMoney(-spendPreview.delta)} over: ${fmtMoney(-spendPreview.delta - spendPreview.uncovered)} from the other ${spendPreview.days} days, ${fmtMoney(spendPreview.uncovered)} past this pay period's budget.`
                               : `${fmtMoney(-spendPreview.delta)} over, taking about ${fmtMoney(-spendPreview.delta / spendPreview.days)} from each of the other ${spendPreview.days} days.`}
                   </p>
                 )}
