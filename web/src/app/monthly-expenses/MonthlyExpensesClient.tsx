@@ -33,7 +33,14 @@ import {
 import { addMonths, formatDate, formatMonthYear, formatMonthYearShort, monthKey, parseMonthKey } from "@/lib/dateFormat";
 import { fmtAmount } from "@/lib/formatNumber";
 import { formatAmountNumber, parseFormNumber } from "@/lib/parseFormNumber";
-import { billDayIso, periodForDate, periodKey, periodRangeLabel, type PeriodHalf } from "@/lib/payPeriods";
+import {
+  billDayIso,
+  compareDue,
+  periodForDate,
+  periodKey,
+  periodRangeLabel,
+  type PeriodHalf,
+} from "@/lib/payPeriods";
 import { ErrorAlert } from "@/components/ErrorAlert";
 import {
   INPUT_CLASSES,
@@ -49,8 +56,8 @@ import {
 } from "@/lib/ui";
 
 const HALF: Record<PeriodHalf, { label: string; days: string }> = {
-  1: { label: "1st half", days: "Days 1–15" },
-  2: { label: "2nd half", days: "Days 16–end" },
+  1: { label: "1st half", days: "Paid end of month" },
+  2: { label: "2nd half", days: "Paid mid-month" },
 };
 
 const fmtMoney = fmtAmount;
@@ -123,7 +130,7 @@ export default function MonthlyExpensesClient() {
   }, [load]);
 
   const byHalf = useMemo(() => {
-    const map: Record<PeriodHalf, MonthlyExpenseRow[]> = { 1: [], 2: [] };
+    const dated: Record<PeriodHalf, [string | null, MonthlyExpenseRow][]> = { 1: [], 2: [] };
     const prev = addMonths(month.y, month.m, -1);
     for (const e of expenses) {
       if (e.expense_date && !showAll) {
@@ -131,16 +138,17 @@ export default function MonthlyExpensesClient() {
         const days = e.is_recurring ? [billDayIso(e, prev.y, prev.m), billDayIso(e, month.y, month.m)] : [e.expense_date];
         for (const iso of days) {
           const p = iso ? periodForDate(payPeriodStarts, iso) : null;
-          if (p && p.year === month.y && p.month === month.m) map[p.half].push(e);
+          if (p && p.year === month.y && p.month === month.m) dated[p.half].push([iso, e]);
         }
       } else if (
         (showAll || e.is_recurring || (e.period_year === month.y && e.period_month === month.m)) &&
         (e.period_half === 1 || e.period_half === 2)
       ) {
-        map[e.period_half].push(e);
+        dated[e.period_half].push([e.expense_date, e]);
       }
     }
-    return map;
+    const byDate = (half: PeriodHalf) => dated[half].sort(([a], [b]) => compareDue(a, b)).map(([, e]) => e);
+    return { 1: byDate(1), 2: byDate(2) };
   }, [expenses, month, showAll, payPeriodStarts]);
 
   const visible = useMemo(() => [...new Set([...byHalf[1], ...byHalf[2]])], [byHalf]);

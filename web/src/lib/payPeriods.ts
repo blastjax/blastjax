@@ -13,8 +13,18 @@ export function addDaysIso(iso: string, delta: number): string {
   return dateIso(d2.getFullYear(), d2.getMonth() + 1, d2.getDate());
 }
 
-export function defaultHalfStartIso(year: number, month: number, half: PeriodHalf): string {
+export function latestHalfStartIso(year: number, month: number, half: PeriodHalf): string {
   return half === 1 ? dateIso(year, month, 1) : dateIso(year, month, 16);
+}
+
+// Payday: the 1st half the day before the previous month's last day (30th, 31st, 28th/29th),
+// the 2nd half the day before the 15th. When that day is a Sat/Sun/Mon, the Thursday before.
+const DAYS_BACK_BY_WEEKDAY = [3, 4, 1, 1, 1, 1, 2];
+
+export function defaultHalfStartIso(year: number, month: number, half: PeriodHalf): string {
+  const ref = half === 1 ? new Date(year, month - 1, 0) : new Date(year, month - 1, 15);
+  ref.setDate(ref.getDate() - DAYS_BACK_BY_WEEKDAY[ref.getDay()]);
+  return dateIso(ref.getFullYear(), ref.getMonth() + 1, ref.getDate());
 }
 
 export function periodKey(year: number, month: number, half: PeriodHalf): string {
@@ -58,6 +68,11 @@ export function billDayIso(e: MonthlyExpenseRow, year: number, month: number): s
   if (!e.is_recurring) return e.expense_date;
   const day = Number(e.expense_date.slice(8, 10));
   return dateIso(year, month, Math.min(day, new Date(year, month, 0).getDate()));
+}
+
+// Earliest date first, undated bills last.
+export function compareDue(a: string | null, b: string | null): number {
+  return (a ?? "9999").localeCompare(b ?? "9999");
 }
 
 const SHORT_DAY = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" });

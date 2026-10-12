@@ -68,9 +68,10 @@ import { useWheelStep } from "@/lib/useWheelStep";
 import {
   addDaysIso,
   billDayIso,
+  compareDue,
   dateIso,
-  defaultHalfStartIso,
   effectiveHalfStartIso,
+  latestHalfStartIso,
   periodEndIso,
   periodForDate,
   periodKey,
@@ -692,6 +693,7 @@ export default function CalendarClient() {
     addRows(prev.year, prev.month, prevMonthlyExpenses);
     addRows(viewedYear, viewedMonth, monthlyExpenses);
     addRows(next.year, next.month, nextMonthlyExpenses);
+    for (const rows of byPeriod.values()) rows.sort((a, b) => compareDue(a.due, b.due));
     return { byPeriod, byDay };
   }, [prevMonthlyExpenses, monthlyExpenses, nextMonthlyExpenses, viewedYear, viewedMonth, payPeriodOverrides]);
 
@@ -1290,16 +1292,16 @@ export default function CalendarClient() {
     const prev = addMonths(year, month, -1);
     const prevHalf2Start = effectiveHalfStartIso(payPeriodOverrides, prev.year, prev.month, 2);
     return {
-      1: { min: addDaysIso(prevHalf2Start, 1), max: defaultHalfStartIso(year, month, 1) },
-      2: { min: dateIso(year, month, 2), max: defaultHalfStartIso(year, month, 2) },
+      1: { min: addDaysIso(prevHalf2Start, 1), max: latestHalfStartIso(year, month, 1) },
+      2: { min: dateIso(year, month, 2), max: latestHalfStartIso(year, month, 2) },
     } as Record<PeriodHalf, { min: string; max: string }>;
   }, [payPeriodOverrides, year, month]);
 
   const payDateEndBounds = useMemo(() => {
     const next = addMonths(year, month, 1);
     return {
-      1: { min: payDateForm, max: addDaysIso(defaultHalfStartIso(year, month, 2), -1) },
-      2: { min: payDateForm, max: addDaysIso(defaultHalfStartIso(next.year, next.month, 1), -1) },
+      1: { min: payDateForm, max: addDaysIso(latestHalfStartIso(year, month, 2), -1) },
+      2: { min: payDateForm, max: addDaysIso(latestHalfStartIso(next.year, next.month, 1), -1) },
     } as Record<PeriodHalf, { min: string; max: string }>;
   }, [year, month, payDateForm]);
 
@@ -1521,7 +1523,7 @@ export default function CalendarClient() {
                     <button
                       type="button"
                       onClick={() => openPayDateModal(half)}
-                      title="Paid early? Set the real pay date"
+                      title="Paid on a different day? Set the real pay date"
                       className="-mr-1.5 inline-flex shrink-0 items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-medium text-ink-3 transition-colors duration-150 hover:bg-surface-2 hover:text-ink"
                     >
                       <CalendarIcon className="size-4" />
@@ -2099,8 +2101,8 @@ export default function CalendarClient() {
             <form onSubmit={submitPayDate} className="flex min-h-0 flex-1 flex-col">
               <div className={`${DIALOG_BODY_CLASSES} space-y-4`}>
                 <p className="text-sm text-ink-3">
-                  Paid before the {payDateModalHalf === 1 ? "1st" : "16th"}? Set the real date. This period
-                  then starts that day and the one before it gets shorter, so the calendar has no gaps.
+                  Paid on a different day than usual, like around a holiday? Set the real date. This period
+                  then starts that day and the one before it adjusts, so the calendar has no gaps.
                 </p>
                 <Field label="Paid on">
                   <DatePickerField
