@@ -1498,6 +1498,20 @@ export default function CalendarClient() {
               const remaining = (half === 1 ? remainingFirstHalf : remainingSecondHalf) ?? 0;
               const entries = splitEntries(expensesForPeriod(year, month, half));
               const deductions = entries.expenseTotal + monthlyExpensesTotal(half);
+              const expenseRows = [
+                ...monthlyExpensesForPeriod(year, month, half).map((e) => ({
+                  key: `monthly-${e.id}:${e.due}`,
+                  name: e.name,
+                  due: e.due,
+                  amount: e.amount,
+                })),
+                ...entries.expenses.map((e) => ({
+                  key: `fixed-${e.id}`,
+                  name: e.description || "Untitled",
+                  due: null,
+                  amount: e.amount,
+                })),
+              ];
               const funding = fundingPeriodFor(half, year, month);
               const daysLeft = activeDaysForHalf(half);
               const ratio = netAfter != null && netAfter > 0 ? remaining / netAfter : 0;
@@ -1585,6 +1599,22 @@ export default function CalendarClient() {
                       <Metric size="sm" label="Even split" value={perDay != null ? `${fmtMoney(perDay)}/day` : "–"} />
                     </div>
                   )}
+                  <div className="mt-4 border-t border-line-soft pt-4">
+                    <p className="text-xs font-medium text-ink-3">Expenses</p>
+                    {expenseRows.length === 0 ? (
+                      <p className="mt-2 text-sm text-ink-3">No expenses for this period.</p>
+                    ) : (
+                      <ul className="mt-2 space-y-1.5">
+                        {expenseRows.map((row) => (
+                          <li key={row.key} className="flex items-center gap-2 text-sm">
+                            <span className="min-w-0 truncate text-ink">{row.name}</span>
+                            {row.due && <Pill>{fmtDay(row.due)}</Pill>}
+                            <span className="ml-auto shrink-0 tabular-nums text-ink-2">{fmtMoney(row.amount)}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
                   <button
                     type="button"
                     onClick={() => openExpenseModal(half)}
