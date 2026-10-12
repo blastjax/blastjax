@@ -967,6 +967,7 @@ def insert_monthly_expense(
     period_year: int,
     period_month: int,
     is_recurring: bool = False,
+    expense_date: date | None = None,
 ) -> dict[str, Any]:
     values = dict(locals())
     with _session(write=True) as s:
@@ -982,6 +983,7 @@ def update_monthly_expense(
     period_year: int,
     period_month: int,
     is_recurring: bool = False,
+    expense_date: date | None = None,
 ) -> dict[str, Any] | None:
     values = dict(locals())
     del values["expense_id"]

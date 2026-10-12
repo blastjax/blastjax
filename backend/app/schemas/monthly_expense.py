@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import datetime as dt
+
 from pydantic import BaseModel, Field
 
 
@@ -12,4 +14,7 @@ class MonthlyExpenseCreate(BaseModel):
     period_month: int = Field(..., ge=1, le=12, description="Calendar month this expense applies to")
     is_recurring: bool = Field(
         default=False, description="If true, show in every month's calendar deductions"
+    )
+    expense_date: dt.date | None = Field(
+        default=None, description="Day it shows on the calendar (that day of every month if recurring)"
     )

@@ -245,6 +245,7 @@ class MonthlyExpense(Base):
     period_month: Mapped[int | None]
     is_recurring: Mapped[bool | None] = mapped_column(server_default=text("false"))
     created_at: Mapped[Stamp]
+    expense_date: Mapped[dt.date | None]
 
 
 class PayPeriodStartOverride(Base):

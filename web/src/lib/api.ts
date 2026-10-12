@@ -742,6 +742,7 @@ export type MonthlyExpenseRow = {
   period_year: number;
   period_month: number;
   is_recurring: boolean;
+  expense_date: string | null;
   created_at: string;
 };
 
@@ -753,6 +754,7 @@ export type MonthlyExpenseCreateBody = {
   period_year: number;
   period_month: number;
   is_recurring?: boolean;
+  expense_date?: string | null;
 };
 
 export async function getMonthlyExpenses(

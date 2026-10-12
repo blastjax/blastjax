@@ -65,6 +65,17 @@ import {
   SECONDARY_BUTTON_CLASSES,
 } from "@/lib/ui";
 import { useWheelStep } from "@/lib/useWheelStep";
+import {
+  addDaysIso,
+  billDayIso,
+  dateIso,
+  defaultHalfStartIso,
+  effectiveHalfStartIso,
+  periodEndIso,
+  periodForDate,
+  periodKey,
+  type PeriodHalf,
+} from "@/lib/payPeriods";
 
 const WEEKDAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
 
@@ -72,8 +83,6 @@ const DAY_DND_MIME = "text/x-calendar-day";
 
 const NOTHING_TO_EVEN_OUT =
   "Nothing to even out: these pay periods have no days left, or no payslip yet";
-
-type PeriodHalf = 1 | 2;
 
 function payslipHalfFor(calendarHalf: PeriodHalf): PeriodHalf {
   return calendarHalf === 1 ? 2 : 1;
@@ -105,46 +114,12 @@ function adjacentPeriodFor(
   return { year: next.year, month: next.month, half: 1 };
 }
 
-function addDaysIso(iso: string, delta: number): string {
-  const [y, m, d] = iso.split("-").map(Number);
-  const d2 = new Date(y, m - 1, d + delta);
-  return dateIso(d2.getFullYear(), d2.getMonth() + 1, d2.getDate());
-}
-
 function daysBetweenInclusive(startIso: string, endIso: string): number {
   const [sy, sm, sd] = startIso.split("-").map(Number);
   const [ey, em, ed] = endIso.split("-").map(Number);
   const start = new Date(sy, sm - 1, sd).getTime();
   const end = new Date(ey, em - 1, ed).getTime();
   return Math.round((end - start) / 86_400_000) + 1;
-}
-
-function defaultHalfStartIso(year: number, month: number, half: PeriodHalf): string {
-  return half === 1 ? dateIso(year, month, 1) : dateIso(year, month, 16);
-}
-
-function periodKey(year: number, month: number, half: PeriodHalf): string {
-  return `${year}-${month}-${half}`;
-}
-
-function effectiveHalfStartIso(
-  overrides: Map<string, string>,
-  year: number,
-  month: number,
-  half: PeriodHalf,
-): string {
-  return overrides.get(periodKey(year, month, half)) ?? defaultHalfStartIso(year, month, half);
-}
-
-function periodEndIso(
-  overrides: Map<string, string>,
-  year: number,
-  month: number,
-  half: PeriodHalf,
-): string {
-  if (half === 1) return addDaysIso(effectiveHalfStartIso(overrides, year, month, 2), -1);
-  const next = addMonths(year, month, 1);
-  return addDaysIso(effectiveHalfStartIso(overrides, next.year, next.month, 1), -1);
 }
 
 function periodDayCount(
@@ -264,13 +239,10 @@ type ExpenseForm = { amount: string; description: string };
 const emptyExpenseForm = (): ExpenseForm => ({ amount: "", description: "" });
 
 type MonthExpenses = { fixed: FixedExpenseRow[]; monthly: MonthlyExpenseRow[] };
+type BillRow = MonthlyExpenseRow & { due: string | null };
 
 function monthCacheKey(year: number, month: number): string {
   return `${year}-${month}`;
-}
-
-function dateIso(year: number, month: number, day: number): string {
-  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 
 type TransferState = {
@@ -284,6 +256,7 @@ type TransferState = {
 
 type DayGridCellProps = {
   cell: DayCell;
+  bills?: MonthlyExpenseRow[];
   isDragSource: boolean;
   isDragOverTarget: boolean;
   onOpenSpend: (cell: DayCell) => void;
@@ -319,6 +292,7 @@ function fmtDay(iso: string, long = false): string {
 
 const DayGridCell = memo(function DayGridCell({
   cell,
+  bills,
   isDragSource,
   isDragOverTarget,
   onOpenSpend,
@@ -338,7 +312,11 @@ const DayGridCell = memo(function DayGridCell({
       role={draggable ? "button" : undefined}
       tabIndex={draggable ? 0 : undefined}
       aria-label={
-        draggable ? `${fmtDay(iso, true)}, ${fmtMoney(dailyBudget)}${isToday ? ", today" : ""}` : undefined
+        draggable
+          ? `${fmtDay(iso, true)}, ${fmtMoney(dailyBudget)}${
+              bills ? `, ${bills.map((b) => `${b.name} ${fmtMoney(b.amount)}`).join(", ")} due` : ""
+            }${isToday ? ", today" : ""}`
+          : undefined
       }
       draggable={draggable}
       onClick={draggable ? () => onOpenSpend(cell) : undefined}
@@ -390,6 +368,16 @@ const DayGridCell = memo(function DayGridCell({
           />
         )}
       </div>
+      {bills && (
+        <span
+          title={bills.map((b) => `${b.name} · ${fmtMoney(b.amount)}`).join("\n")}
+          className={`max-w-full self-start truncate rounded bg-danger-soft px-1 text-[10px] font-medium leading-4 text-danger-text ring-1 ring-inset ring-danger/20 sm:text-[11px] ${
+            isPast ? "opacity-50" : ""
+          }`}
+        >
+          {bills.length === 1 ? bills[0].name : `${bills.length} bills`}
+        </span>
+      )}
       <span
         title={dailyBudget != null ? fmtMoney(dailyBudget) : undefined}
         className={`block w-full min-w-0 truncate text-right text-[11px] tabular-nums leading-tight sm:text-sm ${
@@ -413,6 +401,7 @@ export default function CalendarClient() {
   const [payslips, setPayslips] = useState<PayslipRow[]>([]);
   const [fixedExpenses, setFixedExpenses] = useState<FixedExpenseRow[]>([]);
   const [nextFixedExpenses, setNextFixedExpenses] = useState<FixedExpenseRow[]>([]);
+  const [prevMonthlyExpenses, setPrevMonthlyExpenses] = useState<MonthlyExpenseRow[]>([]);
   const [monthlyExpenses, setMonthlyExpenses] = useState<MonthlyExpenseRow[]>([]);
   const [nextMonthlyExpenses, setNextMonthlyExpenses] = useState<MonthlyExpenseRow[]>([]);
   const [payPeriodOverrides, setPayPeriodOverrides] = useState<Map<string, string>>(new Map());
@@ -494,11 +483,14 @@ export default function CalendarClient() {
   }, []);
 
   const loadViewedMonths = useCallback(async () => {
+    const prev = addMonths(viewedYear, viewedMonth, -1);
     const next = addMonths(viewedYear, viewedMonth, 1);
-    const [cur, nxt] = await Promise.all([
+    const [prv, cur, nxt] = await Promise.all([
+      fetchMonthExpenses(prev.year, prev.month),
       fetchMonthExpenses(viewedYear, viewedMonth),
       fetchMonthExpenses(next.year, next.month),
     ]);
+    setPrevMonthlyExpenses(prv.monthly);
     setFixedExpenses(cur.fixed);
     setMonthlyExpenses(cur.monthly);
     setNextFixedExpenses(nxt.fixed);
@@ -564,9 +556,11 @@ export default function CalendarClient() {
   }, [loadSharedData]);
 
   useEffect(() => {
+    const prev = addMonths(viewedYear, viewedMonth, -1);
     const next = addMonths(viewedYear, viewedMonth, 1);
     const cachedCur = readMonthCache(viewedYear, viewedMonth);
     const cachedNext = readMonthCache(next.year, next.month);
+    setPrevMonthlyExpenses(readMonthCache(prev.year, prev.month)?.monthly ?? []);
     if (cachedCur) {
       setFixedExpenses(cachedCur.fixed);
       setMonthlyExpenses(cachedCur.monthly);
@@ -672,27 +666,39 @@ export default function CalendarClient() {
     [expensesForPeriod],
   );
 
-  const monthlyExpensesByPeriod = useMemo(() => {
-    const map = new Map<string, MonthlyExpenseRow[]>();
+  // Dated bills count in the pay period their date lands in; undated ones in the half they were filed under.
+  const monthlyExpenseIndex = useMemo(() => {
+    const byPeriod = new Map<string, BillRow[]>();
+    const byDay = new Map<string, BillRow[]>();
+    const add = (map: Map<string, BillRow[]>, key: string, row: BillRow) =>
+      map.set(key, [...(map.get(key) ?? []), row]);
+    const seen = new Set<string>();
     const addRows = (y: number, m: number, rows: MonthlyExpenseRow[]) => {
       for (const e of rows) {
-        if (e.period_half !== 1 && e.period_half !== 2) continue;
-        const key = periodKey(y, m, e.period_half as PeriodHalf);
-        const arr = map.get(key);
-        if (arr) arr.push(e);
-        else map.set(key, [e]);
+        const due = billDayIso(e, y, m);
+        if (due == null) {
+          if (e.period_half === 1 || e.period_half === 2) add(byPeriod, periodKey(y, m, e.period_half), { ...e, due });
+          continue;
+        }
+        if (seen.has(`${e.id}:${due}`)) continue;
+        seen.add(`${e.id}:${due}`);
+        const p = periodForDate(payPeriodOverrides, due);
+        add(byPeriod, periodKey(p.year, p.month, p.half), { ...e, due });
+        add(byDay, due, { ...e, due });
       }
     };
-    addRows(viewedYear, viewedMonth, monthlyExpenses);
+    const prev = addMonths(viewedYear, viewedMonth, -1);
     const next = addMonths(viewedYear, viewedMonth, 1);
+    addRows(prev.year, prev.month, prevMonthlyExpenses);
+    addRows(viewedYear, viewedMonth, monthlyExpenses);
     addRows(next.year, next.month, nextMonthlyExpenses);
-    return map;
-  }, [monthlyExpenses, nextMonthlyExpenses, viewedYear, viewedMonth]);
+    return { byPeriod, byDay };
+  }, [prevMonthlyExpenses, monthlyExpenses, nextMonthlyExpenses, viewedYear, viewedMonth, payPeriodOverrides]);
 
   const monthlyExpensesForPeriod = useCallback(
     (periodYear: number, periodMonth: number, periodHalf: PeriodHalf) =>
-      monthlyExpensesByPeriod.get(periodKey(periodYear, periodMonth, periodHalf)) ?? [],
-    [monthlyExpensesByPeriod],
+      monthlyExpenseIndex.byPeriod.get(periodKey(periodYear, periodMonth, periodHalf)) ?? [],
+    [monthlyExpenseIndex],
   );
 
   const monthlyExpensesTotalForPeriod = useCallback(
@@ -1413,6 +1419,7 @@ export default function CalendarClient() {
     return { pot, days, lastDay, banks, delta, fromSavings };
   }, [spendDay, spendAmount, daySavings, periodDayCells, isPeriodLastDay, isClosedLastDay]);
 
+  const spendBills = spendDay ? monthlyExpenseIndex.byDay.get(spendDay.iso) : undefined;
   const savingsTotal = roundCents([...daySavings.values()].reduce((s, v) => s + v, 0));
   const lastBanked = [...daySavings].pop();
 
@@ -1638,6 +1645,7 @@ export default function CalendarClient() {
                   <DayGridCell
                     key={cell.iso}
                     cell={cell}
+                    bills={monthlyExpenseIndex.byDay.get(cell.iso)}
                     isDragSource={dragSourceIso === cell.iso}
                     isDragOverTarget={dragOverIso === cell.iso && dragSourceIso !== cell.iso}
                     onOpenSpend={openSpendModal}
@@ -1666,6 +1674,10 @@ export default function CalendarClient() {
               <span className="flex items-center gap-2">
                 <span className="size-1.5 rounded-full bg-ink-4" />
                 Changed from the even split
+              </span>
+              <span className="flex items-center gap-2">
+                <span className="h-3 w-4 rounded bg-danger-soft ring-1 ring-inset ring-danger/20" />
+                Monthly expense due
               </span>
             </div>
           </Panel>
@@ -1848,10 +1860,11 @@ export default function CalendarClient() {
             ) : (
               <ul className="divide-y divide-line-soft rounded-xl border border-line">
                 {modalMonthlyExpenses.map((exp) => (
-                  <li key={exp.id} className="flex items-center gap-3 py-1.5 pl-4 pr-2">
+                  <li key={`${exp.id}:${exp.due}`} className="flex items-center gap-3 py-1.5 pl-4 pr-2">
                     <div className="min-w-0 flex-1">
                       <div className="flex min-w-0 items-center gap-2">
                         <span className="truncate text-sm text-ink">{exp.name}</span>
+                        {exp.due && <Pill>{fmtDay(exp.due)}</Pill>}
                         {exp.is_recurring && <Pill tone="brand">Recurring</Pill>}
                       </div>
                       {exp.description && <p className="truncate text-xs text-ink-3">{exp.description}</p>}
@@ -2000,6 +2013,19 @@ export default function CalendarClient() {
                     </p>
                   )}
                 </div>
+                {spendBills && (
+                  <div className="rounded-xl border border-line px-4 py-3">
+                    <p className="text-xs font-medium text-ink-3">Due this day · already counted in the pay period budget</p>
+                    <ul className="mt-1.5 space-y-1 text-sm">
+                      {spendBills.map((b) => (
+                        <li key={b.id} className="flex items-center justify-between gap-3">
+                          <span className="truncate text-ink">{b.name}</span>
+                          <span className="shrink-0 font-medium tabular-nums text-danger-text">−{fmtMoney(b.amount)}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
                 <Field label="Amount spent" hint="Math works too, e.g. 120+45.50">
                   <AmountInput
                     required

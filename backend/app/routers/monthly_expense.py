@@ -60,6 +60,7 @@ def monthly_expense_create(body: MonthlyExpenseCreate) -> dict[str, Any]:
         body.period_year,
         body.period_month,
         body.is_recurring,
+        body.expense_date,
     )
     return {"expense": _serialize(row)}
 
@@ -75,6 +76,7 @@ def monthly_expense_replace(expense_id: int, body: MonthlyExpenseCreate) -> dict
         body.period_year,
         body.period_month,
         body.is_recurring,
+        body.expense_date,
     )
     if row is None:
         raise HTTPException(status_code=404, detail="Expense not found.")

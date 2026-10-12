@@ -1,6 +1,7 @@
 "use client";
 
 import { AmountInput } from "@/components/AmountInput";
+import { DatePickerField } from "@/components/DatePickerField";
 import { PageHeader } from "@/components/PageHeader";
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { Modal } from "@/components/Modal";
@@ -25,12 +26,14 @@ import {
   createMonthlyExpense,
   deleteMonthlyExpense,
   getMonthlyExpenses,
+  getPayPeriodStartOverrides,
   updateMonthlyExpense,
   type MonthlyExpenseRow,
 } from "@/lib/api";
-import { addMonths, formatMonthYear, formatMonthYearShort, monthKey, parseMonthKey } from "@/lib/dateFormat";
+import { addMonths, formatDate, formatMonthYear, formatMonthYearShort, monthKey, parseMonthKey } from "@/lib/dateFormat";
 import { fmtAmount } from "@/lib/formatNumber";
 import { formatAmountNumber, parseFormNumber } from "@/lib/parseFormNumber";
+import { billDayIso, periodForDate, periodKey, periodRangeLabel, type PeriodHalf } from "@/lib/payPeriods";
 import { ErrorAlert } from "@/components/ErrorAlert";
 import {
   INPUT_CLASSES,
@@ -45,14 +48,16 @@ import {
   TOGGLE_INACTIVE_BUTTON_CLASSES,
 } from "@/lib/ui";
 
-type PeriodHalf = 1 | 2;
-
 const HALF: Record<PeriodHalf, { label: string; days: string }> = {
   1: { label: "1st half", days: "Days 1–15" },
   2: { label: "2nd half", days: "Days 16–end" },
 };
 
 const fmtMoney = fmtAmount;
+
+const ORDINAL = new Intl.PluralRules("en-US", { type: "ordinal" });
+const ORDINAL_SUFFIX: Record<string, string> = { one: "st", two: "nd", few: "rd", other: "th" };
+const ordinal = (n: number) => `${n}${ORDINAL_SUFFIX[ORDINAL.select(n)]}`;
 
 type ExpenseForm = {
   name: string;
@@ -61,6 +66,7 @@ type ExpenseForm = {
   period_half: PeriodHalf;
   month: string;
   is_recurring: boolean;
+  date: string;
 };
 const emptyForm = (defaultMonth: string, half: PeriodHalf = 1): ExpenseForm => ({
   name: "",
@@ -69,6 +75,7 @@ const emptyForm = (defaultMonth: string, half: PeriodHalf = 1): ExpenseForm => (
   period_half: half,
   month: defaultMonth,
   is_recurring: false,
+  date: "",
 });
 
 export default function MonthlyExpensesClient() {
@@ -79,6 +86,7 @@ export default function MonthlyExpensesClient() {
   );
 
   const [expenses, setExpenses] = useState<MonthlyExpenseRow[]>([]);
+  const [payPeriodStarts, setPayPeriodStarts] = useState<Map<string, string>>(new Map());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -94,8 +102,14 @@ export default function MonthlyExpensesClient() {
   const load = useCallback(async () => {
     setError(null);
     try {
-      const r = await getMonthlyExpenses();
+      const [r, starts] = await Promise.all([
+        getMonthlyExpenses(),
+        getPayPeriodStartOverrides().catch(() => ({ overrides: [] })),
+      ]);
       setExpenses(r.expenses);
+      setPayPeriodStarts(
+        new Map(starts.overrides.map((o) => [periodKey(o.period_year, o.period_month, o.period_half), o.start_date])),
+      );
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load monthly expenses");
       setExpenses([]);
@@ -108,23 +122,28 @@ export default function MonthlyExpensesClient() {
     void load();
   }, [load]);
 
-  const visible = useMemo(
-    () =>
-      showAll
-        ? expenses
-        : expenses.filter(
-            (e) => e.is_recurring || (e.period_year === month.y && e.period_month === month.m),
-          ),
-    [expenses, month, showAll],
-  );
-
   const byHalf = useMemo(() => {
     const map: Record<PeriodHalf, MonthlyExpenseRow[]> = { 1: [], 2: [] };
-    for (const e of visible) {
-      if (e.period_half === 1 || e.period_half === 2) map[e.period_half].push(e);
+    const prev = addMonths(month.y, month.m, -1);
+    for (const e of expenses) {
+      if (e.expense_date && !showAll) {
+        // Dated bills count in whichever of this month's pay periods their date lands in.
+        const days = e.is_recurring ? [billDayIso(e, prev.y, prev.m), billDayIso(e, month.y, month.m)] : [e.expense_date];
+        for (const iso of days) {
+          const p = iso ? periodForDate(payPeriodStarts, iso) : null;
+          if (p && p.year === month.y && p.month === month.m) map[p.half].push(e);
+        }
+      } else if (
+        (showAll || e.is_recurring || (e.period_year === month.y && e.period_month === month.m)) &&
+        (e.period_half === 1 || e.period_half === 2)
+      ) {
+        map[e.period_half].push(e);
+      }
     }
     return map;
-  }, [visible]);
+  }, [expenses, month, showAll, payPeriodStarts]);
+
+  const visible = useMemo(() => [...new Set([...byHalf[1], ...byHalf[2]])], [byHalf]);
 
   const totalFor = (half: PeriodHalf) => byHalf[half].reduce((s, e) => s + e.amount, 0);
   const recurring = visible.filter((e) => e.is_recurring);
@@ -139,19 +158,24 @@ export default function MonthlyExpensesClient() {
     [currentMonthKey, month, showAll],
   );
 
-  const openEditModal = useCallback((exp: MonthlyExpenseRow) => {
-    setFormError(null);
-    setEditingId(exp.id);
-    setForm({
-      name: exp.name,
-      description: exp.description ?? "",
-      amount: formatAmountNumber(exp.amount),
-      period_half: exp.period_half === 2 ? 2 : 1,
-      month: monthKey(exp.period_year, exp.period_month),
-      is_recurring: exp.is_recurring,
-    });
-    setModalOpen(true);
-  }, []);
+  const openEditModal = useCallback(
+    (exp: MonthlyExpenseRow) => {
+      const dated = exp.expense_date ? periodForDate(payPeriodStarts, exp.expense_date) : null;
+      setFormError(null);
+      setEditingId(exp.id);
+      setForm({
+        name: exp.name,
+        description: exp.description ?? "",
+        amount: formatAmountNumber(exp.amount),
+        period_half: dated?.half ?? (exp.period_half === 2 ? 2 : 1),
+        month: dated ? monthKey(dated.year, dated.month) : monthKey(exp.period_year, exp.period_month),
+        is_recurring: exp.is_recurring,
+        date: exp.expense_date ?? "",
+      });
+      setModalOpen(true);
+    },
+    [payPeriodStarts],
+  );
 
   const closeModal = useCallback(() => {
     setModalOpen(false);
@@ -187,6 +211,7 @@ export default function MonthlyExpensesClient() {
           period_year: period.y,
           period_month: period.m,
           is_recurring: form.is_recurring,
+          expense_date: form.date || null,
         };
         if (editingId != null) {
           await updateMonthlyExpense(editingId, body);
@@ -221,6 +246,8 @@ export default function MonthlyExpensesClient() {
   );
 
   const scopeLabel = showAll ? "All months" : formatMonthYear(month.y, month.m);
+  const halfRange = (half: PeriodHalf, at: { y: number; m: number } | null = showAll ? null : month) =>
+    at ? periodRangeLabel(payPeriodStarts, at.y, at.m, half) : HALF[half].days;
 
   return (
     <div className={PAGE_CONTAINER_CLASSES}>
@@ -270,8 +297,8 @@ export default function MonthlyExpensesClient() {
               tone="danger"
               size="lg"
             />
-            <Metric label={`1st half · ${HALF[1].days}`} value={fmtMoney(totalFor(1))} hint={`${byHalf[1].length} items`} />
-            <Metric label={`2nd half · ${HALF[2].days}`} value={fmtMoney(totalFor(2))} hint={`${byHalf[2].length} items`} />
+            <Metric label={`1st half · ${halfRange(1)}`} value={fmtMoney(totalFor(1))} hint={`${byHalf[1].length} items`} />
+            <Metric label={`2nd half · ${halfRange(2)}`} value={fmtMoney(totalFor(2))} hint={`${byHalf[2].length} items`} />
             <Metric
               label="Recurring"
               value={fmtMoney(recurring.reduce((s, e) => s + e.amount, 0))}
@@ -285,7 +312,7 @@ export default function MonthlyExpensesClient() {
                 key={half}
                 flush
                 title={HALF[half].label}
-                subtitle={`${HALF[half].days} · ${scopeLabel}`}
+                subtitle={`${halfRange(half)} · ${scopeLabel}`}
                 actions={
                   <span className="text-lg font-semibold tabular-nums text-danger-text">
                     −{fmtMoney(totalFor(half))}
@@ -324,7 +351,11 @@ export default function MonthlyExpensesClient() {
                               <div className="flex min-w-0 items-center gap-2">
                                 <p className="truncate text-sm font-medium text-ink">{exp.name}</p>
                                 {exp.is_recurring ? (
-                                  <Pill tone="brand">Recurring</Pill>
+                                  <Pill tone="brand">
+                                    {exp.expense_date ? `Every ${ordinal(Number(exp.expense_date.slice(8, 10)))}` : "Recurring"}
+                                  </Pill>
+                                ) : exp.expense_date ? (
+                                  <Pill>{formatDate(exp.expense_date)}</Pill>
                                 ) : (
                                   showAll && <Pill>{formatMonthYearShort(exp.period_year, exp.period_month)}</Pill>
                                 )}
@@ -399,9 +430,33 @@ export default function MonthlyExpensesClient() {
                 disabled={saving}
               />
             </Field>
+            <Field
+              label="Date"
+              hint={`Optional · shows on that day${form.is_recurring ? " of every month" : ""} in the calendar`}
+            >
+              <DatePickerField
+                value={form.date}
+                onChange={(iso) => {
+                  const p = iso ? periodForDate(payPeriodStarts, iso) : null;
+                  setForm((f) =>
+                    p ? { ...f, date: iso, month: monthKey(p.year, p.month), period_half: p.half } : { ...f, date: "" },
+                  );
+                }}
+                placeholder="No specific date"
+                clearLabel="Clear date"
+                disabled={saving}
+              />
+            </Field>
 
             <div className="flex flex-col gap-1.5 text-sm">
-              <span className="font-medium text-ink-2">Deduct from</span>
+              <span className="font-medium text-ink-2">
+                Deduct from
+                {form.date && (
+                  <span className="font-normal text-ink-3">
+                    {" "}· set by the date{form.is_recurring ? ", each month" : ""}
+                  </span>
+                )}
+              </span>
               <div className={`${SEGMENTED_WRAPPER_CLASSES} w-full`}>
                 {([1, 2] as const).map((half) => (
                   <button
@@ -412,10 +467,10 @@ export default function MonthlyExpensesClient() {
                       form.period_half === half ? SEGMENTED_BUTTON_ACTIVE_CLASSES : SEGMENTED_BUTTON_INACTIVE_CLASSES
                     }`}
                     onClick={() => setForm((f) => ({ ...f, period_half: half }))}
-                    disabled={saving}
+                    disabled={saving || !!form.date}
                   >
                     {HALF[half].label}
-                    <span className="ml-1.5 text-xs opacity-70">{HALF[half].days}</span>
+                    <span className="ml-1.5 text-xs opacity-70">{halfRange(half, parseMonthKey(form.month))}</span>
                   </button>
                 ))}
               </div>
@@ -435,7 +490,7 @@ export default function MonthlyExpensesClient() {
               </span>
             </label>
 
-            {!form.is_recurring && (
+            {!form.is_recurring && !form.date && (
               <Field label="Month">
                 <input
                   required

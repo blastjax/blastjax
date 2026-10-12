@@ -309,6 +309,10 @@ def check_db_against_postgres() -> None:
         ], rows
         assert db.upsert_calendar_day_overrides([("2026-10-13", 500.0, -3.5)])[1]["saved"] == -3.5
 
+        bill = db.insert_monthly_expense("Internet", None, 1500.0, 2, 2026, 10, True, dt.date(2026, 10, 20))
+        assert bill["expense_date"] == "2026-10-20", bill
+        assert db.list_monthly_expenses(period_year=2026, period_month=11)[0]["expense_date"] == "2026-10-20"
+
         db.list_payslips()
         with engine.connect() as c:
             assert c.connection.dbapi_connection.autocommit is False, "read session leaked autocommit"
