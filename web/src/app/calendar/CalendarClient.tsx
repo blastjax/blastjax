@@ -2059,10 +2059,11 @@ export default function CalendarClient() {
                     </ul>
                   </div>
                 )}
-                <Field label="Amount spent" hint="Math works too, e.g. 120+45.50">
+                <Field label="Amount spent" hint="Works like a calculator, e.g. 120+45.50 or 3×85">
                   <AmountInput
                     required
                     mode="expression"
+                    aria-label="Amount spent"
                     autoFocus
                     placeholder="0.00"
                     value={spendAmount}

@@ -2,7 +2,7 @@ import { fmtAmountEnUs } from "@/lib/formatNumber";
 
 const RE_COMMAS = /,/g;
 const RE_WHITESPACE = /\s+/g;
-const RE_AMOUNT_EXPR_CHARS = /^[-+0-9.]+$/;
+const RE_AMOUNT_EXPR_CHARS = /^[-+*/0-9.]+$/;
 
 function isDigitOrDot(c: string): boolean {
   return (c >= "0" && c <= "9") || c === ".";
@@ -36,6 +36,8 @@ export function evaluateAmountExpression(raw: string): string | null {
   let s = raw.trim();
   if (s.indexOf(",") !== -1) s = s.replace(RE_COMMAS, "");
   if (/\s/.test(s)) s = s.replace(RE_WHITESPACE, "");
+  // Calculator keys insert × and ÷; an operator at the very end is still being typed.
+  s = s.replace(/×/g, "*").replace(/÷/g, "/").replace(/[-+*/]$/, "");
   if (s === "") return null;
   if (!RE_AMOUNT_EXPR_CHARS.test(s)) return null;
 
@@ -51,13 +53,24 @@ export function evaluateAmountExpression(raw: string): string | null {
     return Number.isFinite(n) ? n : null;
   }
 
-  let total = readNumber();
+  function readTerm(): number | null {
+    let value = readNumber();
+    while (value !== null && i < s.length && (s[i] === "*" || s[i] === "/")) {
+      const op = s[i++];
+      const next = readNumber();
+      if (next === null || (op === "/" && next === 0)) return null;
+      value = op === "*" ? value * next : value / next;
+    }
+    return value;
+  }
+
+  let total = readTerm();
   if (total === null) return null;
   while (i < s.length) {
     const op = s[i];
     if (op !== "+" && op !== "-") return null;
     i++;
-    const next = readNumber();
+    const next = readTerm();
     if (next === null) return null;
     total = op === "+" ? total + next : total - next;
   }
