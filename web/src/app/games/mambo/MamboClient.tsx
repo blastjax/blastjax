@@ -53,7 +53,8 @@ const COL_LABEL_H = 18;
 const FULLSCREEN_RESERVE_W = 380 + 2 * ROW_LABEL_W;
 const FULLSCREEN_RESERVE_H = 170 + 2 * COL_LABEL_H;
 const STACKED_LAYOUT_MAX_WIDTH = 1024;
-const STACKED_RESERVE_W = 80;
+// Page padding (32) + both row-label columns (52) + board frames (42).
+const STACKED_RESERVE_W = 130;
 
 type Busy = "solve" | "steps" | "hint" | null;
 

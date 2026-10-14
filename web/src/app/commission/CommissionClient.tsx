@@ -344,12 +344,13 @@ function CommissionView({ company, hist }: { company: string; hist: MonthValue[]
           </p>
         </div>
         <div className="overflow-x-auto">
-          <div className="flex min-w-[600px] flex-col">
-            <div className="grid grid-cols-[minmax(140px,1.2fr)_130px_150px_150px_32px] gap-4 border-b border-st-line px-3 pb-2.5 text-[11px] tracking-[.06em] text-st-4">
+          {/* Phones: month | predicted | chevron, with "vs last year" on a second line. */}
+          <div className="flex flex-col sm:min-w-[600px]">
+            <div className="grid grid-cols-[minmax(0,1fr)_auto_16px] gap-x-3 border-b border-st-line px-3 pb-2.5 text-[11px] tracking-[.06em] text-st-4 sm:grid-cols-[minmax(140px,1.2fr)_130px_150px_150px_32px] sm:gap-4">
               <span>MONTH</span>
               <span className="text-right">PREDICTED</span>
-              <span className="text-right">VS LAST YEAR</span>
-              <span>HISTORY</span>
+              <span className="text-right max-sm:hidden">VS LAST YEAR</span>
+              <span className="max-sm:hidden">HISTORY</span>
               <span />
             </div>
             {fc.map((f, i) => {
@@ -377,11 +378,11 @@ function CommissionView({ company, hist }: { company: string; hist: MonthValue[]
                         return next;
                       })
                     }
-                    className="grid w-full grid-cols-[minmax(140px,1.2fr)_130px_150px_150px_32px] items-center gap-4 rounded-lg p-3 text-left hover:bg-st-hover"
+                    className="grid w-full grid-cols-[minmax(0,1fr)_auto_16px] items-center gap-x-3 gap-y-1 rounded-lg p-3 text-left hover:bg-st-hover sm:grid-cols-[minmax(140px,1.2fr)_130px_150px_150px_32px] sm:gap-4"
                   >
                     <span className="font-medium text-st-1">{MF[f.m]} {f.y}</span>
                     <span className="text-right font-st-mono text-sm font-semibold text-st-teal">{fmt(f.v)}</span>
-                    <span className="flex flex-col items-end gap-0.5">
+                    <span className="flex flex-col items-end gap-0.5 max-sm:col-span-2 max-sm:col-start-1 max-sm:row-start-2 max-sm:flex-row max-sm:items-baseline max-sm:gap-2">
                       <span className={`font-st-mono text-[12.5px] ${d == null ? "text-st-4" : d >= 0 ? "text-st-pos" : "text-st-down"}`}>
                         {d == null ? "—" : `${d >= 0 ? "+" : "−"}${Math.abs(d).toFixed(1)}%`}
                       </span>
@@ -389,7 +390,7 @@ function CommissionView({ company, hist }: { company: string; hist: MonthValue[]
                         {lyv != null ? `${MN[f.m]} ${f.y - 1}: ${fmt(lyv)}` : ""}
                       </span>
                     </span>
-                    <svg width={150} height={34} className="block overflow-visible">
+                    <svg width={150} height={34} className="block overflow-visible max-sm:hidden">
                       <path
                         d={dots.map((p, j) => `${j ? "L" : "M"}${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(" ")}
                         fill="none"
@@ -417,7 +418,7 @@ function CommissionView({ company, hist }: { company: string; hist: MonthValue[]
                     )}
                   </button>
                   {open && (
-                    <div className="grid grid-cols-[repeat(auto-fit,minmax(260px,1fr))] gap-6 px-3 pb-[18px] pt-1">
+                    <div className="grid grid-cols-[repeat(auto-fit,minmax(min(260px,100%),1fr))] gap-6 px-3 pb-[18px] pt-1">
                       <div className="flex flex-col gap-1.5">
                         {[
                           ...f.pts.map(([py, pv]) => ({ label: `${MN[f.m]} ${py}`, v: pv, forecast: false })),

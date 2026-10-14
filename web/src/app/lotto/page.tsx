@@ -355,7 +355,7 @@ export default function LottoGamesPage() {
         open={importOpen}
         onClose={closeImport}
         ariaLabelledBy="lotto-games-import-title"
-        dialogClassName="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-xl border border-line bg-surface p-5 shadow-pop sm:p-6"
+        dialogClassName="max-h-[90dvh] w-full max-w-3xl overflow-y-auto rounded-xl border border-line bg-surface p-5 shadow-pop sm:p-6"
       >
         <div className="mb-4 flex items-start justify-between gap-2">
           <h2 id="lotto-games-import-title" className="text-lg font-semibold text-ink">

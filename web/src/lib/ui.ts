@@ -11,7 +11,7 @@ export const DASHED_EMPTY_CLASSES =
   "rounded-lg border border-dashed border-line-strong px-4 py-8 text-center text-sm text-ink-3";
 
 export const MODAL_DIALOG_CLASSES =
-  "max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl border border-line bg-surface p-5 shadow-pop sm:p-6";
+  "max-h-[90dvh] w-full max-w-lg overflow-y-auto rounded-xl border border-line bg-surface p-5 shadow-pop sm:p-6";
 
 export function alertClasses(
   tone: "error" | "warning" | "success" | "info" = "error",
@@ -78,7 +78,7 @@ export const LABEL_CLASSES = "mb-1.5 block text-sm font-medium text-ink-2";
 export const SEGMENTED_WRAPPER_CLASSES =
   "inline-flex rounded-lg border border-line bg-surface-2 p-1";
 export const SEGMENTED_BUTTON_CLASSES =
-  "rounded-md px-3.5 py-1.5 text-sm font-medium transition-colors duration-150";
+  "rounded-md px-2.5 py-1.5 text-sm font-medium transition-colors duration-150 sm:px-3.5";
 export const SEGMENTED_BUTTON_ACTIVE_CLASSES =
   "bg-brand text-brand-on shadow-xs";
 export const SEGMENTED_BUTTON_INACTIVE_CLASSES =
@@ -88,7 +88,7 @@ export const CHART_ZOOM_BUTTON_CLASSES =
   "flex h-7 min-w-7 select-none items-center justify-center rounded-md border border-line-strong bg-surface text-sm font-medium text-ink-2 transition-colors duration-150 hover:bg-surface-2 hover:text-ink disabled:pointer-events-none disabled:opacity-40";
 
 export const TABLE_WRAPPER_CLASSES =
-  "overflow-hidden rounded-xl border border-line bg-surface";
+  "relative overflow-hidden rounded-xl border border-line bg-surface";
 export const TABLE_HEAD_ROW_CLASSES = "border-b border-line bg-surface-2/50";
 export const TABLE_HEAD_CELL_CLASSES =
   "px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-ink-3";

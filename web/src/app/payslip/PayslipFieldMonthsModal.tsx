@@ -75,7 +75,7 @@ export function PayslipFieldMonthsModal({
       open
       onClose={onClose}
       backdropClassName="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-5 backdrop-blur-sm sm:items-center sm:p-6"
-      dialogClassName={`${PAYSLIP_FONT_CLASS} max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-xl border ${PAYSLIP_BORDER_STRONG} ${PAYSLIP_BG_0} p-6 shadow-pop sm:p-8`}
+      dialogClassName={`${PAYSLIP_FONT_CLASS} max-h-[90dvh] w-full max-w-3xl overflow-y-auto rounded-xl border ${PAYSLIP_BORDER_STRONG} ${PAYSLIP_BG_0} p-6 shadow-pop sm:p-8`}
     >
       <div className="mb-1 flex items-start justify-between gap-2">
         <div>

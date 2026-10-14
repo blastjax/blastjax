@@ -567,7 +567,27 @@ export default function CreditCardClient() {
               title="If you don't pay in full"
               subtitle="Estimate at a flat monthly rate, no new purchases. Your bank's average-daily-balance charge may differ."
             >
-              <div className="overflow-x-auto">
+              {/* Phones: stacked rows, since 5 amount columns can't fit. */}
+              <ul className="divide-y divide-line-soft border-t border-line-soft text-sm tabular-nums sm:hidden">
+                {scenarios.map((s) => (
+                  <li key={s.label} className="px-5 py-3">
+                    <p className="font-medium text-ink">{s.label}</p>
+                    <dl className="mt-1.5 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">
+                      <dt className="text-ink-3">Pay now</dt>
+                      <dd className="text-right text-ink-2">{fmtMoney(s.pay)}</dd>
+                      <dt className="text-ink-3">Carried over</dt>
+                      <dd className="text-right text-ink-2">{fmtMoney(s.remaining)}</dd>
+                      <dt className="text-ink-3">Interest</dt>
+                      <dd className={`text-right font-medium ${s.interest > 0 ? "text-danger-text" : "text-success-text"}`}>
+                        {s.interest > 0 ? `+${fmtMoney(s.interest)}` : "None"}
+                      </dd>
+                      <dt className="text-ink-3">Next statement</dt>
+                      <dd className="text-right font-semibold text-ink">{fmtMoney(s.nextStatement)}</dd>
+                    </dl>
+                  </li>
+                ))}
+              </ul>
+              <div className="overflow-x-auto max-sm:hidden">
                 <table className="w-full min-w-[34rem] text-sm">
                   <thead>
                     <tr className="border-y border-line-soft text-xs text-ink-3">

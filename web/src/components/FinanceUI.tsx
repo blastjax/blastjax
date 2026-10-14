@@ -96,14 +96,15 @@ export function Metric({
   tone?: Tone;
   size?: "sm" | "md" | "lg";
 }) {
-  const valueSize = size === "lg" ? "text-3xl" : size === "md" ? "text-xl" : "text-base";
+  const valueSize = size === "lg" ? "text-2xl sm:text-3xl" : size === "md" ? "text-xl" : "text-base";
+  // Wrap rather than truncate: an ellipsis would hide digits of an amount.
   return (
     <div className="min-w-0">
-      <p className="truncate text-xs font-medium text-ink-3">{label}</p>
-      <p className={`mt-1 truncate font-semibold tabular-nums tracking-tight ${valueSize} ${TEXT_TONE[tone]}`}>
+      <p className="break-words text-xs font-medium text-ink-3">{label}</p>
+      <p className={`mt-1 break-words font-semibold tabular-nums tracking-tight ${valueSize} ${TEXT_TONE[tone]}`}>
         {value}
       </p>
-      {hint && <p className="mt-0.5 truncate text-xs text-ink-4">{hint}</p>}
+      {hint && <p className="mt-0.5 break-words text-xs text-ink-4">{hint}</p>}
     </div>
   );
 }
@@ -239,7 +240,7 @@ export const DANGER_TEXT_BUTTON_CLASSES =
   "mr-auto rounded-lg px-2 py-1.5 text-sm font-medium text-danger-text transition-colors duration-150 hover:bg-danger-soft disabled:opacity-50";
 
 export const DIALOG_CLASSES =
-  "flex max-h-[90vh] w-full flex-col overflow-hidden rounded-2xl border border-line bg-surface shadow-pop";
+  "flex max-h-[90dvh] w-full flex-col overflow-hidden rounded-2xl border border-line bg-surface shadow-pop";
 export const DIALOG_BODY_CLASSES = "min-h-0 flex-1 overflow-y-auto px-5 py-5 sm:px-6";
 export const DIALOG_FOOTER_CLASSES =
   "flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-line px-5 py-3.5 sm:px-6";

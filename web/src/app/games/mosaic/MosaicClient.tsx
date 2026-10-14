@@ -34,7 +34,8 @@ const COL_LABEL_H = 20;
 const FULLSCREEN_RESERVE_W = 360 + 2 * ROW_LABEL_W;
 const FULLSCREEN_RESERVE_H = 190 + 2 * COL_LABEL_H;
 const STACKED_LAYOUT_MAX_WIDTH = 1024;
-const STACKED_RESERVE_W = 80;
+// Page padding (32) + both row-label columns (52) + board border (6).
+const STACKED_RESERVE_W = 92;
 
 const LABEL_CLASSES =
   "flex items-center justify-center overflow-hidden text-[10px] font-medium text-ink-3";

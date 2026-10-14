@@ -379,7 +379,7 @@ export default function BloodPressureClient() {
                 </p>
               </div>
               <div className="flex max-w-full flex-wrap items-center gap-3">
-                <div className={`${SEGMENTED_WRAPPER_CLASSES} max-w-full overflow-x-auto`}>
+                <div className={`${SEGMENTED_WRAPPER_CLASSES} max-w-full flex-wrap`}>
                   {METRICS.map((m, i) => (
                     <button
                       key={m.tab}

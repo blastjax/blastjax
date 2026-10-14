@@ -442,7 +442,10 @@ export default function TravelsClient() {
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState<"list" | "trip">("list");
   const [activeId, setActiveId] = useState<number | null>(null);
-  const [mode, setMode] = useState<"calendar" | "agenda">("calendar");
+  // Phones open trips in Agenda: the week grid needs ~720px and would scroll sideways.
+  const [mode, setMode] = useState<"calendar" | "agenda">(() =>
+    typeof window !== "undefined" && window.matchMedia("(max-width: 639px)").matches ? "agenda" : "calendar",
+  );
   const [drawerKey, setDrawerKey] = useState<string | null>(null);
   const [modal, setModal] = useState<"entry" | "trip" | "place" | null>(null);
   const [f, setF] = useState<Form>(BLANK);
@@ -795,7 +798,7 @@ export default function TravelsClient() {
 
   const renderAgenda = (t: TravelTripDetail) =>
     buildAgenda(t.trip.start_date, t.trip.end_date, entries, places).map((d) => (
-      <div key={d.iso} className="grid grid-cols-[120px_minmax(0,1fr)] gap-6 border-t border-tv-line py-[18px]">
+      <div key={d.iso} className="grid grid-cols-1 gap-3 border-t border-tv-line py-[18px] sm:grid-cols-[120px_minmax(0,1fr)] sm:gap-6">
         <div>
           <div className="flex items-baseline gap-2">
             <span className="text-[26px] font-semibold leading-none tabular-nums">{d.num}</span>
@@ -825,8 +828,8 @@ export default function TravelsClient() {
               <span className="text-[12.5px] tabular-nums text-tv-4">{it.time}</span>
               <span className="size-2 rounded-full" style={{ background: it.color }} />
               <span className="min-w-0">
-                <span className={`block truncate text-sm font-medium ${it.mid ? "text-tv-5" : "text-tv-1"}`}>{it.title}</span>
-                {it.sub && <span className="mt-0.5 block truncate text-[12.5px] text-tv-6">{it.sub}</span>}
+                <span className={`block break-words text-sm font-medium ${it.mid ? "text-tv-5" : "text-tv-1"}`}>{it.title}</span>
+                {it.sub && <span className="mt-0.5 block break-words text-[12.5px] text-tv-6">{it.sub}</span>}
               </span>
               <span className="text-[11px] font-semibold tracking-[.04em]" style={{ color: it.color }}>
                 {it.tag}
@@ -1112,7 +1115,7 @@ export default function TravelsClient() {
         onClose={closeAll}
         ariaLabelledBy="tv-entry-title"
         backdropClassName={BACKDROP}
-        dialogClassName="max-h-[90vh] w-[480px] max-w-full overflow-y-auto rounded-[14px] border border-tv-line-2 bg-tv-card p-6"
+        dialogClassName="max-h-[90dvh] w-[480px] max-w-full overflow-y-auto rounded-[14px] border border-tv-line-2 bg-tv-card p-6"
       >
         <form
           className="flex flex-col gap-3.5"

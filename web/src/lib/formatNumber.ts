@@ -39,9 +39,11 @@ export function fmtJackpotCompact(n: number): string {
 }
 
 const COMPACT_MONEY_FORMAT = new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 });
+const COMPACT_MONEY_INT_FORMAT = new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 });
+/** ≤4 chars ("4.8k", "10k", "423") so it fits a phone calendar cell. */
 export function fmtCompactMoney(n: number): string {
   if (!Number.isFinite(n)) return "–";
-  return Math.abs(n) >= 1000
-    ? `${COMPACT_MONEY_FORMAT.format(n / 1000)}k`
-    : COMPACT_MONEY_FORMAT.format(n);
+  if (Math.abs(n) < 1000) return COMPACT_MONEY_INT_FORMAT.format(n);
+  const k = n / 1000;
+  return `${(Math.abs(k) < 10 ? COMPACT_MONEY_FORMAT : COMPACT_MONEY_INT_FORMAT).format(k)}k`;
 }

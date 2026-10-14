@@ -147,7 +147,7 @@ export function PayslipYearStatsSection({
           }
         >
           <div className="flex min-h-0 flex-1 flex-col">
-            <div className="flex items-start justify-between gap-2">
+            <div className="flex flex-wrap items-start justify-between gap-x-2 gap-y-1">
               <div className="min-w-0">
                 <h3 className={`text-xs font-semibold leading-tight ${theme.title}`}>
                   {STAT_LABEL.basic}
@@ -156,7 +156,7 @@ export function PayslipYearStatsSection({
                   {fmtPctOfTotal(amount, pctDenominator)}
                 </p>
               </div>
-              <div className={`shrink-0 ${PAYSLIP_MONO} text-base font-semibold leading-tight ${theme.value}`}>
+              <div className={`shrink-0 ${PAYSLIP_MONO} text-sm font-semibold leading-tight sm:text-base ${theme.value}`}>
                 {fmtNum(amount)}
               </div>
             </div>
@@ -194,7 +194,7 @@ export function PayslipYearStatsSection({
         }
       >
         <div className="flex min-h-0 flex-1 flex-col">
-          <div className="flex items-start justify-between gap-2">
+          <div className="flex flex-wrap items-start justify-between gap-x-2 gap-y-1">
             <div className="min-w-0">
               <h3 className={`text-xs font-semibold leading-tight ${theme.title}`}>
                 {STAT_LABEL[id]}
@@ -203,7 +203,7 @@ export function PayslipYearStatsSection({
                 {fmtPctOfTotal(amount, pctDenominator)}
               </p>
             </div>
-            <div className={`shrink-0 ${PAYSLIP_MONO} text-base font-semibold leading-tight ${theme.value}`}>
+            <div className={`shrink-0 ${PAYSLIP_MONO} text-sm font-semibold leading-tight sm:text-base ${theme.value}`}>
               {fmtNum(amount)}
             </div>
           </div>
@@ -320,7 +320,7 @@ export function PayslipYearStatsSection({
                 })
               }
             >
-              <div className="flex items-start justify-between gap-2">
+              <div className="flex flex-wrap items-start justify-between gap-x-2 gap-y-1">
                 <span className={`text-[11px] font-medium uppercase tracking-wider ${MEDICAL_REIMBURSEMENT_STAT_THEME.title}`}>
                   {MEDICAL_REIMBURSEMENT_LABEL}
                 </span>

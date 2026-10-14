@@ -336,7 +336,7 @@ const DayGridCell = memo(function DayGridCell({
       onDragLeave={draggable ? () => onDragLeave(iso) : undefined}
       onDrop={draggable ? (e) => onDrop(e, iso) : undefined}
       onDragEnd={onDragEnd}
-      className={`relative flex min-h-[4rem] min-w-0 flex-col justify-between overflow-hidden rounded-xl border p-1.5 transition duration-150 sm:min-h-[6rem] sm:p-2.5 ${
+      className={`relative flex min-h-[4rem] min-w-0 flex-col justify-between overflow-hidden rounded-xl border p-1 transition duration-150 sm:min-h-[6rem] sm:p-2.5 ${
         draggable ? "cursor-grab hover:-translate-y-px hover:shadow-md active:cursor-grabbing" : ""
       } ${
         isDragOverTarget
@@ -1664,7 +1664,7 @@ export default function CalendarClient() {
               </div>
             }
           >
-            <div className="grid grid-cols-7 gap-1.5 sm:gap-2">
+            <div className="grid grid-cols-7 gap-1 sm:gap-2">
               {WEEKDAY_LABELS.map((label) => (
                 <div
                   key={label}

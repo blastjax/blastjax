@@ -42,9 +42,12 @@ export function xLabels(
   y: number,
 ) {
   const n = list.length;
+  const gap = n > 1 ? Math.abs(xf(1) - xf(0)) : Infinity;
+  const base = n <= 14 ? 1 : n <= 30 ? 3 : 12;
+  // ~44px keeps "Jan ’26" clear of its neighbour on narrow (phone) charts.
+  const step = [1, 2, 3, 6, 12].find((s) => s >= base && s * gap >= 44) ?? 12;
   return list.flatMap((d, i) => {
-    const show = n <= 14 || (n <= 30 ? d.m % 3 === 0 : d.m === 0);
-    if (!show) return [];
+    if (d.m % step !== 0) return [];
     const withYear = d.m === 0 || (n <= 14 && i === 0);
     return [{ x: xf(i), y, label: withYear ? `${MN[d.m]} ’${String(d.y).slice(2)}` : MN[d.m] }];
   });

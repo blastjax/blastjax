@@ -530,11 +530,14 @@ function BreakdownRows({
       {items.map((r) => (
         <div
           key={r.k}
-          className="grid grid-cols-[10px_minmax(0,1fr)_56px_120px] items-center gap-3 border-b border-st-line py-[9px]"
+          className="grid grid-cols-[10px_minmax(0,1fr)_auto] items-center gap-3 border-b border-st-line py-[9px] sm:grid-cols-[10px_minmax(0,1fr)_56px_120px]"
         >
           <span className="size-2.5 rounded-[3px]" style={{ background: r.c }} />
-          <span className="text-st-2">{r.n}</span>
-          <span className="text-right font-st-mono text-[12.5px] text-st-4">{r.pct.toFixed(1)}%</span>
+          {/* Phones: % stacks under the label; sm+: it gets its own column. */}
+          <span className="flex min-w-0 flex-col sm:contents">
+            <span className="text-st-2">{r.n}</span>
+            <span className="font-st-mono text-[12.5px] text-st-4 sm:text-right">{r.pct.toFixed(1)}%</span>
+          </span>
           <span className={`text-right font-st-mono text-[13.5px] font-medium ${amountClass}`}>{fmt(r.v)}</span>
         </div>
       ))}

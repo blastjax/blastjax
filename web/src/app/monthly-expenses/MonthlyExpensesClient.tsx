@@ -356,7 +356,7 @@ export default function MonthlyExpensesClient() {
                             className="flex cursor-pointer items-center gap-3 px-5 py-3 transition-colors duration-150 hover:bg-surface-2/60 sm:px-6"
                           >
                             <div className="min-w-0 flex-1">
-                              <div className="flex min-w-0 items-center gap-2">
+                              <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
                                 <p className="truncate text-sm font-medium text-ink">{exp.name}</p>
                                 {exp.is_recurring ? (
                                   <Pill tone="brand">

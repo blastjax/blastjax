@@ -849,7 +849,7 @@ export default function InstallmentsClient() {
                     >
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
-                          <h3 className="truncate font-semibold text-ink">{r.name}</h3>
+                          <h3 className="break-words font-semibold text-ink">{r.name}</h3>
                           <p className="mt-0.5 text-xs text-ink-3">
                             Next due {fmtMonthYearFromDate(nextDueDate(r))}
                           </p>
@@ -1105,7 +1105,7 @@ export default function InstallmentsClient() {
                   <p className="text-xs text-ink-3">
                     Edit amounts in place. Drag a row to reorder; due months follow the new order once saved.
                   </p>
-                  <div className="overflow-x-auto rounded-xl border border-line">
+                  <div className="relative overflow-x-auto rounded-xl border border-line">
                     <table className="w-full min-w-[38rem]">
                       <thead className="bg-surface-2">
                         <tr>
