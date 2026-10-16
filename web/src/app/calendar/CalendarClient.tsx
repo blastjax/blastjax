@@ -82,6 +82,8 @@ const WEEKDAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as cons
 
 const DAY_DND_MIME = "text/x-calendar-day";
 
+const CARRY_OVER_LABEL = "Carry over";
+
 const NOTHING_TO_EVEN_OUT =
   "Nothing to even out: these pay periods have no days left, or no payslip yet";
 
@@ -245,6 +247,8 @@ type BillRow = MonthlyExpenseRow & { due: string | null };
 function monthCacheKey(year: number, month: number): string {
   return `${year}-${month}`;
 }
+
+type OverrideWrite = { day: string; amount: number; saved?: number };
 
 type TransferState = {
   fromDay: number;
@@ -1050,6 +1054,80 @@ export default function CalendarClient() {
     [daySavings, isPeriodLastDay],
   );
 
+  // Pins a pay period's days, then spreads a change in its budget over the days still open.
+  const rebalancePeriod = useCallback(
+    (periodYear: number, periodMonth: number, periodHalf: PeriodHalf, deltaNet: number) => {
+      const overrides = new Map<string, OverrideWrite>();
+      const net = netAfterExpensesForPeriod(periodYear, periodMonth, periodHalf);
+      if (net == null || net < 0) return overrides;
+      const days = periodDayCells(periodYear, periodMonth, periodHalf);
+      const open = days.filter((d) => !d.isPast && !isClosedLastDay(d));
+      const { after, shortfallCents } = spreadOverDays(open, Math.round(deltaNet * 100));
+      for (const d of days) {
+        if (!dayOverrides.has(d.iso)) overrides.set(d.iso, { day: d.iso, amount: d.dailyBudget ?? 0 });
+      }
+      for (const d of open) overrides.set(d.iso, { day: d.iso, amount: (after.get(d.iso) ?? 0) / 100 });
+      const bank = open[0] ?? days[days.length - 1];
+      if (shortfallCents !== 0 && bank) {
+        overrides.set(bank.iso, {
+          day: bank.iso,
+          amount: overrides.get(bank.iso)?.amount ?? bank.dailyBudget ?? 0,
+          saved: roundCents((daySavings.get(bank.iso) ?? 0) - shortfallCents / 100),
+        });
+      }
+      return overrides;
+    },
+    [netAfterExpensesForPeriod, periodDayCells, isClosedLastDay, dayOverrides, daySavings],
+  );
+
+  // All a pay period has left over (positive `saved` on its days) becomes a "Carry over"
+  // extra-income entry in the next period, with the change spread over that period's open days.
+  const planCarryOver = useCallback(
+    (writes: OverrideWrite[]) => {
+      const out = new Map(writes.map((w) => [w.day, w]));
+      const saved = new Map(daySavings);
+      const periods = new Map<string, { year: number; month: number; half: PeriodHalf }>();
+      for (const w of writes) {
+        if (w.saved === undefined) continue;
+        saved.set(w.day, w.saved);
+        const p = periodForDate(payPeriodOverrides, w.day);
+        periods.set(periodKey(p.year, p.month, p.half), p);
+      }
+      const rowWrites: (() => Promise<unknown>)[] = [];
+      for (const p of periods.values()) {
+        const start = effectiveHalfStartIso(payPeriodOverrides, p.year, p.month, p.half);
+        const end = periodEndIso(payPeriodOverrides, p.year, p.month, p.half);
+        let amount = 0;
+        for (const [iso, v] of saved) if (iso >= start && iso <= end && v > 0) amount += v;
+        amount = roundCents(amount);
+        const next = adjacentPeriodFor(p.year, p.month, p.half);
+        const row = expensesForPeriod(next.year, next.month, next.half).find(
+          (e) => e.amount < 0 && e.description === CARRY_OVER_LABEL,
+        );
+        const delta = roundCents(amount - (row ? -row.amount : 0));
+        if (delta === 0) continue;
+        rowWrites.push(() =>
+          row && amount === 0
+            ? deleteFixedExpense(row.id)
+            : row
+              ? updateFixedExpense(row.id, { amount: -amount, description: CARRY_OVER_LABEL })
+              : createFixedExpense({
+                  period_half: payslipHalfFor(next.half),
+                  amount: -amount,
+                  description: CARRY_OVER_LABEL,
+                  period_year: next.year,
+                  period_month: next.month,
+                }),
+        );
+        for (const o of rebalancePeriod(next.year, next.month, next.half, delta).values()) {
+          if (!out.has(o.day)) out.set(o.day, o);
+        }
+      }
+      return { overrides: [...out.values()], rowWrites };
+    },
+    [daySavings, payPeriodOverrides, expensesForPeriod, rebalancePeriod],
+  );
+
   const submitSpend = useCallback(
     async (e: FormEvent) => {
       e.preventDefault();
@@ -1073,7 +1151,7 @@ export default function CalendarClient() {
       setSpendError(null);
       setSavingSpend(true);
       try {
-        let overrides: { day: string; amount: number; saved?: number }[];
+        let overrides: OverrideWrite[];
         if (banks) {
           overrides = [{ day: spendDay.iso, amount: spent, saved: roundCents(pot - spent) }];
         } else {
@@ -1085,8 +1163,11 @@ export default function CalendarClient() {
             ...((shortfallCents > 0 || daySavings.has(spendDay.iso)) && { saved: -shortfallCents / 100 }),
           });
         }
-        const r = await bulkUpsertCalendarDayOverrides(overrides);
+        const carry = planCarryOver(overrides);
+        for (const write of carry.rowWrites) await write();
+        const r = await bulkUpsertCalendarDayOverrides(carry.overrides);
         applyOverrideRows(r.overrides);
+        if (carry.rowWrites.length > 0) await reloadViewedMonth();
         setSpendDay(null);
       } catch (err) {
         setSpendError(err instanceof Error ? err.message : "Failed to record spend");
@@ -1101,7 +1182,9 @@ export default function CalendarClient() {
       periodDayCells,
       isPeriodLastDay,
       isClosedLastDay,
+      planCarryOver,
       applyOverrideRows,
+      reloadViewedMonth,
     ],
   );
 
@@ -1162,46 +1245,20 @@ export default function CalendarClient() {
   const changeBudget = useCallback(
     async (deltaNet: number, write: () => Promise<unknown>) => {
       if (expenseModalHalf == null) return;
-      const net = netAfterExpenses(expenseModalHalf);
-      const overrides = new Map<string, { day: string; amount: number; saved?: number }>();
-      if (net != null && net >= 0) {
-        const days = periodDayCells(viewedYear, viewedMonth, expenseModalHalf);
-        const open = days.filter((d) => !d.isPast && !isClosedLastDay(d));
-        const { after, shortfallCents } = spreadOverDays(open, Math.round(deltaNet * 100));
-        for (const d of days) {
-          if (!dayOverrides.has(d.iso)) overrides.set(d.iso, { day: d.iso, amount: d.dailyBudget ?? 0 });
-        }
-        for (const d of open) overrides.set(d.iso, { day: d.iso, amount: (after.get(d.iso) ?? 0) / 100 });
-        const bank = open[0] ?? days[days.length - 1];
-        if (shortfallCents !== 0 && bank) {
-          overrides.set(bank.iso, {
-            day: bank.iso,
-            amount: overrides.get(bank.iso)?.amount ?? bank.dailyBudget ?? 0,
-            saved: roundCents((daySavings.get(bank.iso) ?? 0) - shortfallCents / 100),
-          });
-        }
-      }
+      const carry = planCarryOver([
+        ...rebalancePeriod(viewedYear, viewedMonth, expenseModalHalf, deltaNet).values(),
+      ]);
       await write();
       try {
-        if (overrides.size > 0) {
-          applyOverrideRows((await bulkUpsertCalendarDayOverrides([...overrides.values()])).overrides);
+        for (const w of carry.rowWrites) await w();
+        if (carry.overrides.length > 0) {
+          applyOverrideRows((await bulkUpsertCalendarDayOverrides(carry.overrides)).overrides);
         }
       } finally {
         await reloadViewedMonth();
       }
     },
-    [
-      expenseModalHalf,
-      netAfterExpenses,
-      periodDayCells,
-      viewedYear,
-      viewedMonth,
-      isClosedLastDay,
-      dayOverrides,
-      daySavings,
-      applyOverrideRows,
-      reloadViewedMonth,
-    ],
+    [expenseModalHalf, rebalancePeriod, planCarryOver, viewedYear, viewedMonth, applyOverrideRows, reloadViewedMonth],
   );
 
   const submitEntry = useCallback(
@@ -1422,9 +1479,6 @@ export default function CalendarClient() {
   }, [spendDay, spendAmount, daySavings, periodDayCells, isPeriodLastDay, isClosedLastDay]);
 
   const spendBills = spendDay ? monthlyExpenseIndex.byDay.get(spendDay.iso) : undefined;
-  // A negative `saved` marks overspending past a pay period's budget; it never comes out of Savings.
-  const savingsTotal = roundCents([...daySavings.values()].reduce((s, v) => s + Math.max(0, v), 0));
-  const lastBanked = [...daySavings].filter(([, v]) => v > 0).pop();
 
   const transferMove = transfer ? parseFormNumber(transferAmount) : null;
   const payDateRange =
@@ -1466,30 +1520,6 @@ export default function CalendarClient() {
         <LoadingBlocks label="Loading your budget…" />
       ) : (
         <>
-          <StatStrip className="sm:grid-cols-2">
-            <Metric
-              size="lg"
-              label="Savings"
-              value={savingsTotal < 0 ? `−${fmtMoney(-savingsTotal)}` : fmtMoney(savingsTotal)}
-              tone={savingsTotal > 0 ? "success" : savingsTotal < 0 ? "danger" : "neutral"}
-              hint="What's left over on each pay period's last day"
-            />
-            <Metric
-              label="Last added"
-              value={
-                lastBanked
-                  ? `${lastBanked[1] < 0 ? "−" : "+"}${fmtMoney(Math.abs(lastBanked[1]))}`
-                  : "–"
-              }
-              tone={lastBanked ? (lastBanked[1] < 0 ? "danger" : "success") : "neutral"}
-              hint={
-                lastBanked
-                  ? fmtDay(lastBanked[0], true)
-                  : "Log what you spent on a pay period's last day to start saving"
-              }
-            />
-          </StatStrip>
-
           <div className="grid gap-5 lg:grid-cols-2">
             {([1, 2] as const).map((half) => {
               const style = HALF_STYLE[half];
@@ -1514,6 +1544,9 @@ export default function CalendarClient() {
                 })),
               ];
               const funding = fundingPeriodFor(half, year, month);
+              const carryIn = entries.income
+                .filter((e) => e.description === CARRY_OVER_LABEL)
+                .reduce((s, e) => s - e.amount, 0);
               const daysLeft = activeDaysForHalf(half);
               const ratio = netAfter != null && netAfter > 0 ? remaining / netAfter : 0;
               return (
@@ -1589,7 +1622,14 @@ export default function CalendarClient() {
                         size="sm"
                         label="Net pay"
                         value={netPay != null ? fmtMoney(netPay) : "–"}
-                        hint={entries.incomeTotal > 0 ? `+${fmtMoney(entries.incomeTotal)} income` : undefined}
+                        hint={
+                          [
+                            entries.incomeTotal > carryIn && `+${fmtMoney(entries.incomeTotal - carryIn)} income`,
+                            carryIn > 0 && `+${fmtMoney(carryIn)} carry over`,
+                          ]
+                            .filter(Boolean)
+                            .join(" · ") || undefined
+                        }
                       />
                       <Metric
                         size="sm"
@@ -2041,8 +2081,8 @@ export default function CalendarClient() {
                   {spendPreview.banks && (
                     <p className="mt-1 text-xs text-ink-3">
                       {spendPreview.lastDay
-                        ? "Last day of this pay period: whatever you don't spend goes to Savings."
-                        : "No open days left in this pay period: whatever you don't spend goes to Savings."}
+                        ? "Last day of this pay period: whatever you don't spend goes to the next one as Carry over income."
+                        : "No open days left in this pay period: whatever you don't spend goes to the next one as Carry over income."}
                     </p>
                   )}
                 </div>
@@ -2082,16 +2122,16 @@ export default function CalendarClient() {
                   >
                     {spendPreview.banks
                       ? spendPreview.delta === 0
-                        ? "Right on budget. Nothing goes to Savings."
+                        ? "Right on budget. Nothing carries over."
                         : spendPreview.delta > 0
-                          ? `${fmtMoney(spendPreview.delta)} left over goes to Savings.`
-                          : `${fmtMoney(-spendPreview.delta)} over budget. Savings stay as they are.`
+                          ? `${fmtMoney(spendPreview.delta)} left over goes to the next pay period as Carry over income.`
+                          : `${fmtMoney(-spendPreview.delta)} over budget.`
                       : spendPreview.delta === 0
                         ? "Right on budget. Other days stay as they are."
                         : spendPreview.delta > 0
                           ? `${fmtMoney(spendPreview.delta)} left over, adding about ${fmtMoney(spendPreview.delta / spendPreview.days)} to each of the other ${spendPreview.days} days.`
                           : spendPreview.uncovered >= -spendPreview.delta
-                            ? `${fmtMoney(-spendPreview.delta)} over. This pay period's budget has run dry; Savings stay as they are.`
+                            ? `${fmtMoney(-spendPreview.delta)} over. This pay period's budget has run dry.`
                             : spendPreview.uncovered > 0
                               ? `${fmtMoney(-spendPreview.delta)} over: ${fmtMoney(-spendPreview.delta - spendPreview.uncovered)} from the other ${spendPreview.days} days, ${fmtMoney(spendPreview.uncovered)} past this pay period's budget.`
                               : `${fmtMoney(-spendPreview.delta)} over, taking about ${fmtMoney(-spendPreview.delta / spendPreview.days)} from each of the other ${spendPreview.days} days.`}
