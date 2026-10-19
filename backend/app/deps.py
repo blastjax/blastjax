@@ -5,7 +5,8 @@ from fastapi import HTTPException, Request, UploadFile
 from app.security import login_required, session_is_valid
 from db import database_url
 
-_MAX_PDF_BYTES = 10 * 1024 * 1024
+_MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+_IMAGE_TYPES = {b"\x89PNG\r\n\x1a\n": "image/png", b"\xff\xd8\xff": "image/jpeg"}
 
 
 def require_db() -> None:
@@ -22,13 +23,21 @@ def require_session(request: Request) -> None:
         raise HTTPException(status_code=401, detail="Login required.")
 
 
-async def read_pdf_upload(file: UploadFile) -> bytes:
+def image_type(data: bytes) -> str | None:
+    return next((kind for magic, kind in _IMAGE_TYPES.items() if data.startswith(magic)), None)
+
+
+async def read_upload(file: UploadFile, images: bool = False) -> bytes:
+    """A PDF, or with images=True also a PNG or JPEG photo, of at most 10 MB."""
     data = await file.read()
     if not data:
         raise HTTPException(status_code=400, detail="Uploaded file is empty.")
-    if len(data) > _MAX_PDF_BYTES:
-        raise HTTPException(status_code=413, detail="PDF exceeds the 10 MB limit.")
+    if len(data) > _MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="The file exceeds the 10 MB limit.")
+    if images and image_type(data):
+        return data
     content_type = (file.content_type or "").lower()
     if content_type not in ("application/pdf", "application/x-pdf") and not data.startswith(b"%PDF"):
-        raise HTTPException(status_code=400, detail="Only PDF files are accepted.")
+        accepted = "PDF, PNG or JPG files" if images else "PDF files"
+        raise HTTPException(status_code=400, detail=f"Only {accepted} are accepted.")
     return data

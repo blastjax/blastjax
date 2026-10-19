@@ -263,27 +263,32 @@ def check_bill_request_models() -> None:
         raise AssertionError(f"{model.__name__} accepted {bad}")
 
 
-def check_pdf_upload_validation() -> None:
+def check_upload_validation() -> None:
     import asyncio
     import io
 
     from fastapi import HTTPException, UploadFile
     from starlette.datastructures import Headers
 
-    from app.deps import read_pdf_upload
+    from app.deps import image_type, read_upload
 
-    def upload(data: bytes, content_type: str = "") -> bytes | int:
+    def upload(data: bytes, content_type: str = "", images: bool = False) -> bytes | int:
         f = UploadFile(io.BytesIO(data), headers=Headers({"content-type": content_type}))
         try:
-            return asyncio.run(read_pdf_upload(f))
+            return asyncio.run(read_upload(f, images))
         except HTTPException as exc:
             return exc.status_code
 
+    png, jpg = b"\x89PNG\r\n\x1a\n rest", b"\xff\xd8\xff\xe0 rest"
     assert upload(b"%PDF-1.7 body") == b"%PDF-1.7 body"
     assert upload(b"scan", "application/pdf") == b"scan"
     assert upload(b"<html>", "text/html") == 400
     assert upload(b"") == 400
     assert upload(b"%PDF" + b"0" * (10 * 1024 * 1024)) == 413
+    assert upload(png, "image/png") == 400, "payslips take PDFs only"
+    assert upload(png, "image/png", images=True) == png and upload(jpg, "image/jpeg", images=True) == jpg
+    assert upload(b"GIF89a", "image/gif", images=True) == 400
+    assert (image_type(png), image_type(jpg), image_type(b"%PDF")) == ("image/png", "image/jpeg", None)
 
 
 def check_bill_extraction() -> None:
@@ -291,7 +296,7 @@ def check_bill_extraction() -> None:
 
     from pypdf import PdfWriter
 
-    from app.services.bill_extract import UnreadablePdf, extract_bill_fields, fields_from_text
+    from app.services.bill_extract import UnreadablePdf, fields_from_text, learn, pdf_text
 
     def pdf(lines: list[str]) -> bytes:
         stream = ("BT /F1 10 Tf 12 TL 40 760 Td " + " ".join(f"({line}) '" for line in lines) + " ET").encode()
@@ -332,15 +337,55 @@ def check_bill_extraction() -> None:
         "Please pay on or before 23-Jan-2027",
         "Amount Due    1,699.00",
     ]
+    def row(*cells: str) -> str:
+        return "".join(cell.ljust(28) for cell in cells).rstrip()
+
+    # Meralco: labels and values on alternating rows; "Bill Date" shares its row with the account number.
+    meralco = [
+        row("Your electric bill", "", "Account Number", "Due Date"),
+        row("Billing Period", "Bill Date", "0618080363", "01 Sep 2026"),
+        row("22 Jul 2026 to 21 Aug 2026", "21 Aug 2026"),
+        row("Total Amount Due", "PHP 2,611.28"),
+    ]
     for lines, want in (
         (utility, ("2026-10-05", "2026-10-25", "2026-09-01", "2026-09-30", 2345.5)),
         (card, ("2026-10-05", "2026-10-25", "2026-09-06", "2026-10-05", 12345.67)),
         (telco, ("2027-01-03", "2027-01-23", "2026-12-15", "2027-01-14", 1699.0)),
+        (meralco, ("2026-08-21", "2026-09-01", "2026-07-22", "2026-08-21", 2611.28)),
     ):
-        for got in (fields_from_text("\n".join(lines)), extract_bill_fields(pdf(lines))):
+        for got in (fields_from_text("\n".join(lines)), fields_from_text(pdf_text(pdf(lines)))):
             assert tuple(got.values()) == want, (lines[0], got)
     assert fields_from_text("Due Date: 25/10/2026")["due_date"] == "2026-10-25"
     assert set(fields_from_text("Thank you for your payment.").values()) == {None}
+
+    # A biller whose wording the generic rules don't know, writing dates day-first: one saved bill teaches it.
+    def acme(bill: str, due: str, start: str, end: str, amount: str) -> list[str]:
+        return [
+            f"Statement generated {bill}",
+            f"Kindly settle on or before {due}",
+            f"Usage window {start} - {end}",
+            f"Pay this amount {amount}",
+        ]
+
+    october = acme("01/10/2026", "15/10/2026", "01/09/2026", "30/09/2026", "1,250.00")
+    november = acme("01/11/2026", "15/11/2026", "01/10/2026", "31/10/2026", "1,310.40")
+    saved = {
+        "bill_date": "2026-10-01",
+        "due_date": "2026-10-15",
+        "period_start": "2026-09-01",
+        "period_end": "2026-09-30",
+        "amount": 1250.0,
+    }
+    assert set(fields_from_text("\n".join(november)).values()) == {None}
+    hints = learn([("\n".join(october), saved)])
+    assert hints.day_first and hints.gaps == {"due_date": 14, "period_start": -30, "period_end": -1}, hints
+    november_read = ("2026-11-01", "2026-11-15", "2026-10-01", "2026-10-31", 1310.4)
+    assert tuple(fields_from_text("\n".join(november), hints).values()) == november_read
+    # The usual gaps fill a date no label points at, and overrule one picked from the wrong place.
+    unlabeled = [*november[:1], *november[2:], "Reminder: 15/11/2026"]
+    assert fields_from_text("\n".join(unlabeled), hints)["due_date"] == "2026-11-15"
+    stray = ["Your next bill date: 01/12/2026", "Printed 01/11/2026", *november[1:]]
+    assert fields_from_text("\n".join(stray), hints)["bill_date"] == "2026-11-01"
 
     def written(writer: PdfWriter) -> bytes:
         buf = io.BytesIO()
@@ -353,7 +398,7 @@ def check_bill_extraction() -> None:
     locked.encrypt("secret", algorithm="RC4-128")
     for data in (written(blank), written(locked), b"%PDF-1.7 not really a pdf"):
         try:
-            extract_bill_fields(data)
+            pdf_text(data)
         except UnreadablePdf:
             continue
         raise AssertionError("read a PDF it should have refused")

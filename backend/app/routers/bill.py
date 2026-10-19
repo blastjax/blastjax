@@ -1,16 +1,18 @@
 from __future__ import annotations
 
+from contextlib import suppress
 from typing import Any
 
-from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile
 from sqlalchemy.exc import IntegrityError
 from starlette.concurrency import run_in_threadpool
 
 import cache
-from app.deps import read_pdf_upload, require_db
+from app.deps import image_type, read_upload, require_db
 from app.schemas.bill import BillCategoryCreate, BillCreate
-from app.services.bill_extract import UnreadablePdf, extract_bill_fields
+from app.services.bill_extract import UnreadablePdf, fields_from_text, learn, pdf_text
 from db import (
+    bill_examples,
     delete_bill,
     delete_bill_category,
     get_bill_pdf,
@@ -90,17 +92,30 @@ def bill_remove(bill_id: int) -> dict[str, Any]:
 
 
 @router.post("/api/bill/extract")
-async def bill_extract(file: UploadFile = File(...)) -> dict[str, Any]:
-    data = await read_pdf_upload(file)
+async def bill_extract(
+    file: UploadFile = File(...), category_id: int | None = Query(default=None)
+) -> dict[str, Any]:
+    data = await read_upload(file)
     try:
-        return await run_in_threadpool(extract_bill_fields, data)
+        return await run_in_threadpool(_read_bill, data, category_id)
     except UnreadablePdf as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
+def _read_bill(data: bytes, category_id: int | None) -> dict[str, Any]:
+    """Reads a bill's PDF using what the biller's saved bills teach about its layout."""
+    text = pdf_text(data)
+    examples = []
+    for saved, pdf in bill_examples(category_id) if category_id is not None else []:
+        if pdf.startswith(b"%PDF"):  # a photo of a bill teaches nothing
+            with suppress(UnreadablePdf):
+                examples.append((pdf_text(pdf), saved))
+    return fields_from_text(text, learn(examples))
+
+
 @router.post("/api/bill/{bill_id}/pdf")
 async def bill_upload_pdf(bill_id: int, file: UploadFile = File(...)) -> dict[str, Any]:
-    if not set_bill_pdf(bill_id, await read_pdf_upload(file)):
+    if not set_bill_pdf(bill_id, await read_upload(file, images=True)):
         raise HTTPException(status_code=404, detail="Bill not found.")
     return {"ok": True, "has_pdf": True}
 
@@ -109,9 +124,11 @@ async def bill_upload_pdf(bill_id: int, file: UploadFile = File(...)) -> dict[st
 def bill_get_pdf(bill_id: int) -> Response:
     data = get_bill_pdf(bill_id)
     if data is None:
-        raise HTTPException(status_code=404, detail="No PDF attached to this bill.")
+        raise HTTPException(status_code=404, detail="No file attached to this bill.")
+    media_type = image_type(data) or "application/pdf"
+    extension = media_type.split("/")[1].replace("jpeg", "jpg")
     return Response(
         content=data,
-        media_type="application/pdf",
-        headers={"Content-Disposition": f'inline; filename="bill-{bill_id}.pdf"'},
+        media_type=media_type,
+        headers={"Content-Disposition": f'inline; filename="bill-{bill_id}.{extension}"'},
     )

@@ -17,7 +17,7 @@ from sqlalchemy import Engine, Integer, and_, create_engine, delete, event, func
 from sqlalchemy.dialects.postgresql import distinct_on, insert
 from sqlalchemy.engine import Row
 from sqlalchemy.exc import DisconnectionError
-from sqlalchemy.orm import Session, aliased, selectinload
+from sqlalchemy.orm import Session, aliased, selectinload, undefer
 
 import schema
 from schema import (
@@ -1056,6 +1056,19 @@ def get_bill_pdf(bill_id: int) -> bytes | None:
     with _session() as s:
         data = s.scalar(select(Bill.pdf_data).where(Bill.id == bill_id))
         return bytes(data) if data is not None else None
+
+
+def bill_examples(category_id: int, limit: int = 6) -> list[tuple[dict[str, Any], bytes]]:
+    """A biller's latest bills that have a file, with the file: what PDF reading learns the layout from."""
+    stmt = (
+        select(Bill)
+        .options(undefer(Bill.pdf_data))
+        .where(Bill.category_id == category_id, Bill.pdf_data.is_not(None))
+        .order_by(Bill.bill_date.desc(), Bill.id.desc())
+        .limit(limit)
+    )
+    with _session() as s:
+        return [(_bill(b, True), bytes(b.pdf_data)) for b in s.scalars(stmt)]
 
 
 def _first_credit_card(s: Session) -> CreditCard | None:

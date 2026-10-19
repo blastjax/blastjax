@@ -1657,6 +1657,6 @@ export type BillPdfFields = {
   amount: number | null;
 };
 
-export async function readBillPdf(file: File) {
-  return uploadPdf<BillPdfFields>("/api/bill/extract", file);
+export async function readBillPdf(file: File, categoryId: number) {
+  return uploadPdf<BillPdfFields>(`/api/bill/extract?category_id=${categoryId}`, file);
 }

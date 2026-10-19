@@ -37,7 +37,7 @@ import {
   type BillPdfFields,
   type BillRow,
 } from "@/lib/api";
-import { formatDate } from "@/lib/dateFormat";
+import { formatDate, formatMonthYear } from "@/lib/dateFormat";
 import { fmtAmountOrDash, fmtCount } from "@/lib/formatNumber";
 import { formatAmountNumber, parseFormNumber } from "@/lib/parseFormNumber";
 import {
@@ -65,6 +65,10 @@ const FILE_INPUT_CLASSES =
 const plural = (n: number, word: string) => `${fmtCount(n)} ${word}${n === 1 ? "" : "s"}`;
 
 const errorText = (e: unknown, fallback: string) => (e instanceof Error ? e.message : fallback);
+
+const billMonth = (b: BillRow) => formatMonthYear(Number(b.bill_date.slice(0, 4)), Number(b.bill_date.slice(5, 7)));
+
+const isPdf = (file: File) => file.type === "application/pdf" || /\.pdf$/i.test(file.name);
 
 function newBillDraft(categoryId: number): BillDraft {
   return {
@@ -155,6 +159,7 @@ function fillFromPdf(d: BillDraft, found: BillPdfFields): BillDraft {
 
 function BillPdfModal({ bill, title, onClose }: { bill: BillRow; title: string; onClose: () => void }) {
   const [url, setUrl] = useState<string | null>(null);
+  const [isImage, setIsImage] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -163,13 +168,14 @@ function BillPdfModal({ bill, title, onClose }: { bill: BillRow; title: string; 
     (async () => {
       try {
         const res = await apiFetch(billPdfUrl(bill.id), { cache: "no-store" });
-        if (!res.ok) throw new Error("Failed to load the PDF");
+        if (!res.ok) throw new Error("Failed to load the file");
         const blob = await res.blob();
         if (cancelled) return;
         objectUrl = URL.createObjectURL(blob);
+        setIsImage(blob.type.startsWith("image/"));
         setUrl(objectUrl);
       } catch (e) {
-        if (!cancelled) setError(errorText(e, "Failed to load the PDF"));
+        if (!cancelled) setError(errorText(e, "Failed to load the file"));
       }
     })();
     return () => {
@@ -180,10 +186,13 @@ function BillPdfModal({ bill, title, onClose }: { bill: BillRow; title: string; 
 
   return (
     <Modal open onClose={onClose} ariaLabelledBy="bill-pdf-title" dialogClassName={`${DIALOG_CLASSES} h-[90dvh] max-w-4xl`}>
-      <ModalHeader id="bill-pdf-title" title={title} subtitle={`Due ${formatDate(bill.due_date)}`} onClose={onClose} />
+      <ModalHeader id="bill-pdf-title" title={title} subtitle={billMonth(bill)} onClose={onClose} />
       <div className={`${DIALOG_BODY_CLASSES} flex flex-col`}>
         {error ? (
           <ErrorAlert>{error}</ErrorAlert>
+        ) : url && isImage ? (
+          // eslint-disable-next-line @next/next/no-img-element -- a local blob URL, nothing for next/image to optimise
+          <img src={url} alt={`${title}, ${billMonth(bill)}`} className="mx-auto min-h-0 max-w-full flex-1 rounded-lg object-contain" />
         ) : url ? (
           <iframe src={url} title={`${title} PDF`} className="min-h-0 w-full flex-1 rounded-lg border border-line bg-surface-2" />
         ) : (
@@ -304,18 +313,18 @@ export default function BillsClient() {
 
   const removeBill = () => {
     const id = billDraft?.id;
-    if (id == null || !confirm("Delete this bill and its PDF?")) return;
+    if (id == null || !confirm("Delete this bill and its file?")) return;
     void submit(() => deleteBill(id), closeBill);
   };
 
   const setForm = (patch: Partial<BillForm>) =>
     setBillDraft((d) => d && { ...d, form: { ...d.form, ...patch } });
 
-  const readPdf = async (file: File) => {
+  const readPdf = async (file: File, categoryId: number) => {
     setBillDraft((d) => d && { ...d, note: "Reading the PDF…" });
     let apply: (d: BillDraft) => BillDraft;
     try {
-      const found = await readBillPdf(file);
+      const found = await readBillPdf(file, categoryId);
       apply = (d) => fillFromPdf(d, found);
     } catch (e) {
       const note = errorText(e, "Couldn't read this PDF.");
@@ -329,7 +338,7 @@ export default function BillsClient() {
     <div className={PAGE_CONTAINER_CLASSES}>
       <PageHeader
         title="Bills"
-        description="Every bill's PDF, with its bill date, billing period and due date."
+        description="Every bill's PDF or photo, with its bill date, billing period and due date."
         actions={
           <>
             <button
@@ -401,13 +410,13 @@ export default function BillsClient() {
                       <li key={b.id} className="flex items-start gap-2 py-3 pl-5 pr-3 sm:pl-6">
                         <div className="min-w-0 flex-1">
                           <p className="flex flex-wrap items-baseline justify-between gap-x-3 text-sm">
-                            <span className="font-medium text-ink">Due {formatDate(b.due_date)}</span>
+                            <span className="font-medium text-ink">{billMonth(b)}</span>
                             {b.amount != null && (
                               <span className="font-semibold tabular-nums text-ink">{fmtAmountOrDash(b.amount)}</span>
                             )}
                           </p>
                           <p className="mt-0.5 text-xs text-ink-3">
-                            Billed {formatDate(b.bill_date)} · Period {formatDate(b.period_start)} –{" "}
+                            Due {formatDate(b.due_date)} · Period {formatDate(b.period_start)} –{" "}
                             {formatDate(b.period_end)}
                           </p>
                         </div>
@@ -416,16 +425,16 @@ export default function BillsClient() {
                             <button
                               type="button"
                               className={TEXT_BUTTON_CLASSES}
-                              aria-label={`View PDF of the bill due ${formatDate(b.due_date)}`}
+                              aria-label={`View the ${billMonth(b)} bill`}
                               onClick={() => setPdfBill(b)}
                             >
                               <DocumentIcon className="size-4" />
-                              PDF
+                              View
                             </button>
                           )}
                           <IconAction
                             kind="edit"
-                            label={`Edit the bill due ${formatDate(b.due_date)}`}
+                            label={`Edit the ${billMonth(b)} bill`}
                             onClick={() => openBill(editBillDraft(b))}
                           />
                         </div>
@@ -517,22 +526,22 @@ export default function BillsClient() {
                   </select>
                 </Field>
                 <Field
-                  label="PDF"
+                  label="PDF or photo"
                   hint={
                     billDraft.note ??
                     (billDraft.hasPdf
-                      ? "A PDF is attached. Choose a file only to replace it."
-                      : "Optional. The dates and amount fill in from it when they can be read.")
+                      ? "A file is attached. Choose another only to replace it."
+                      : "Optional. A PDF fills in the dates and amount it can read; a PNG or JPG is just attached.")
                   }
                 >
                   <input
                     type="file"
-                    accept="application/pdf,.pdf"
+                    accept="application/pdf,.pdf,image/png,.png,image/jpeg,.jpg,.jpeg"
                     className={FILE_INPUT_CLASSES}
                     onChange={(e) => {
                       const file = e.target.files?.[0] ?? null;
                       setBillDraft((d) => d && { ...d, file, note: null });
-                      if (file) void readPdf(file);
+                      if (file && isPdf(file)) void readPdf(file, Number(billDraft.form.category_id));
                     }}
                     disabled={saving}
                   />

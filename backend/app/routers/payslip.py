@@ -15,7 +15,7 @@ from fastapi import (
 )
 
 import cache
-from app.deps import read_pdf_upload, require_db
+from app.deps import read_upload, require_db
 from app.schemas.payslip import PayslipCreate
 from app.services.payslip_parse import _payslip_records_from_nested_json
 from db import (
@@ -154,7 +154,7 @@ async def payslip_upload_pdf(
 ) -> dict[str, Any]:
     if get_payslip(payslip_id) is None:
         raise HTTPException(status_code=404, detail="Payslip not found.")
-    data = await read_pdf_upload(file)
+    data = await read_upload(file)
     if not set_payslip_pdf(payslip_id, data):
         raise HTTPException(status_code=404, detail="Payslip not found.")
     return {"ok": True, "has_pdf": True}
