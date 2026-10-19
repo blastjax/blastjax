@@ -65,6 +65,32 @@ class AppUser(Base):
     created_at: Mapped[StampNN]
 
 
+class BillCategory(Base):
+    __tablename__ = "bill_category"
+    __table_args__ = (CheckConstraint("length(trim(name)) > 0"),)
+
+    id: Mapped[IntPK]
+    name: Mapped[str]
+    created_at: Mapped[StampNN]
+
+
+class Bill(Base):
+    __tablename__ = "bill"
+    __table_args__ = (CheckConstraint("period_end >= period_start"),)
+
+    id: Mapped[IntPK]
+    category_id: Mapped[int] = mapped_column(ForeignKey("bill_category.id", ondelete="CASCADE"))
+    bill_date: Mapped[dt.date]
+    due_date: Mapped[dt.date]
+    period_start: Mapped[dt.date]
+    period_end: Mapped[dt.date]
+    amount: Mapped[float | None]
+    pdf_data: Mapped[bytes | None] = mapped_column(deferred=True)
+    created_at: Mapped[StampNN]
+
+    has_pdf: Mapped[bool] = column_property(pdf_data.is_not(None), expire_on_flush=False)
+
+
 class BloodPressure(Base):
     __tablename__ = "blood_pressure"
 
@@ -506,6 +532,8 @@ class TravelTransport(Base):
 
 
 Index("idx_app_user_username_lower", func.lower(AppUser.username), unique=True)
+Index("idx_bill_category_name_lower", func.lower(BillCategory.name), unique=True)
+Index("idx_bill_parent", Bill.category_id, Bill.due_date.desc())
 Index("idx_blood_pressure_created", BloodPressure.created_at.desc())
 Index("idx_company_name_lower", func.lower(Company.name), unique=True)
 Index("idx_company_sort_order", Company.sort_order, unique=True)

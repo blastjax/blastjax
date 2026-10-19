@@ -8,3 +8,4 @@ psycopg2-binary~=2.9
 sqlalchemy~=2.1.1
 curl_cffi~=0.16.3
 beautifulsoup4~=4.15
+pypdf~=6.21

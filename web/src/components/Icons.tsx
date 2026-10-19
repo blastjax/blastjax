@@ -79,6 +79,15 @@ export function DocumentIcon(p: IconProps) {
   );
 }
 
+export function ReceiptIcon(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M7 3h10a2 2 0 0 1 2 2v16l-2.33-1.5-2.34 1.5-2.33-1.5-2.33 1.5-2.34-1.5L5 21V5a2 2 0 0 1 2-2Z" />
+      <path d="M9 8h6M9 12h6M9 16h3" />
+    </Svg>
+  );
+}
+
 export function TrendingUpIcon(p: IconProps) {
   return (
     <Svg {...p}>

@@ -15,7 +15,7 @@ from fastapi import (
 )
 
 import cache
-from app.deps import require_db
+from app.deps import read_pdf_upload, require_db
 from app.schemas.payslip import PayslipCreate
 from app.services.payslip_parse import _payslip_records_from_nested_json
 from db import (
@@ -31,8 +31,6 @@ from db import (
 )
 
 router = APIRouter(tags=["payslip"], dependencies=[Depends(require_db)])
-
-_MAX_PDF_BYTES = 10 * 1024 * 1024
 
 
 def _serialize_payslip(row: dict[str, Any]) -> dict[str, Any]:
@@ -156,17 +154,7 @@ async def payslip_upload_pdf(
 ) -> dict[str, Any]:
     if get_payslip(payslip_id) is None:
         raise HTTPException(status_code=404, detail="Payslip not found.")
-    data = await file.read()
-    if not data:
-        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
-    if len(data) > _MAX_PDF_BYTES:
-        raise HTTPException(status_code=413, detail="PDF exceeds the 10 MB limit.")
-    content_type = (file.content_type or "").lower()
-    is_pdf = content_type in ("application/pdf", "application/x-pdf") or data.startswith(
-        b"%PDF"
-    )
-    if not is_pdf:
-        raise HTTPException(status_code=400, detail="Only PDF files are accepted.")
+    data = await read_pdf_upload(file)
     if not set_payslip_pdf(payslip_id, data):
         raise HTTPException(status_code=404, detail="Payslip not found.")
     return {"ok": True, "has_pdf": True}

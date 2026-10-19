@@ -40,6 +40,8 @@ _CACHE_PREFIXES: dict[str, str] = {
     "/api/pay-period-start-override": "pay_period_start_override",
     "/api/payslip-defaults": "payslip_default",
     "/api/travel": "travel",
+    "/api/bill": "bill",
+    "/api/bill-category": "bill",
 }
 
 _CACHE_ALSO_INVALIDATES: dict[str, tuple[str, ...]] = {
@@ -111,6 +113,7 @@ def create_app() -> FastAPI:
 
     from app.routers import (
         auth,
+        bill,
         blood_pressure,
         calendar_day_override,
         company,
@@ -149,6 +152,7 @@ def create_app() -> FastAPI:
         mosaic.router,
         mambo.router,
         travel.router,
+        bill.router,
         user.router,
     ):
         app.include_router(router, dependencies=[Depends(require_session)])

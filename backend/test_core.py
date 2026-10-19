@@ -235,12 +235,137 @@ def check_fixed_expense_amount_sign() -> None:
     raise AssertionError("accepted a zero amount")
 
 
+def check_bill_request_models() -> None:
+    from pydantic import ValidationError
+
+    from app.schemas.bill import BillCategoryCreate, BillCreate
+
+    assert BillCategoryCreate(name="  Internet ").name == "Internet"
+    bill = {
+        "category_id": 1,
+        "bill_date": "2026-10-05",
+        "due_date": "2026-10-25",
+        "period_start": "2026-09-01",
+        "period_end": "2026-09-30",
+    }
+    assert BillCreate(**bill).amount is None
+    assert BillCreate(**{**bill, "period_end": "2026-09-01"}).period_end == dt.date(2026, 9, 1)
+    for model, bad in (
+        (BillCategoryCreate, {"name": "   "}),
+        (BillCreate, {**bill, "period_end": "2026-08-31"}),
+        (BillCreate, {**bill, "amount": -1}),
+        (BillCreate, {**bill, "due_date": None}),
+    ):
+        try:
+            model(**bad)
+        except ValidationError:
+            continue
+        raise AssertionError(f"{model.__name__} accepted {bad}")
+
+
+def check_pdf_upload_validation() -> None:
+    import asyncio
+    import io
+
+    from fastapi import HTTPException, UploadFile
+    from starlette.datastructures import Headers
+
+    from app.deps import read_pdf_upload
+
+    def upload(data: bytes, content_type: str = "") -> bytes | int:
+        f = UploadFile(io.BytesIO(data), headers=Headers({"content-type": content_type}))
+        try:
+            return asyncio.run(read_pdf_upload(f))
+        except HTTPException as exc:
+            return exc.status_code
+
+    assert upload(b"%PDF-1.7 body") == b"%PDF-1.7 body"
+    assert upload(b"scan", "application/pdf") == b"scan"
+    assert upload(b"<html>", "text/html") == 400
+    assert upload(b"") == 400
+    assert upload(b"%PDF" + b"0" * (10 * 1024 * 1024)) == 413
+
+
+def check_bill_extraction() -> None:
+    import io
+
+    from pypdf import PdfWriter
+
+    from app.services.bill_extract import UnreadablePdf, extract_bill_fields, fields_from_text
+
+    def pdf(lines: list[str]) -> bytes:
+        stream = ("BT /F1 10 Tf 12 TL 40 760 Td " + " ".join(f"({line}) '" for line in lines) + " ET").encode()
+        objs = [
+            b"<< /Type /Catalog /Pages 2 0 R >>",
+            b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R"
+            b" /Resources << /Font << /F1 5 0 R >> >> >>",
+            b"<< /Length %d >>\nstream\n%s\nendstream" % (len(stream), stream),
+            b"<< /Type /Font /Subtype /Type1 /BaseFont /Courier >>",
+        ]
+        out, offsets = bytearray(b"%PDF-1.4\n"), []
+        for n, body in enumerate(objs, 1):
+            offsets.append(len(out))
+            out += b"%d 0 obj\n%s\nendobj\n" % (n, body)
+        xref = len(out)
+        out += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objs) + 1)
+        out += b"".join(b"%010d 00000 n \n" % o for o in offsets)
+        out += b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (len(objs) + 1, xref)
+        return bytes(out)
+
+    utility = [
+        "ACME ELECTRIC COMPANY",
+        "Bill Date: October 5, 2026        Previous Due Date: 09/25/2026",
+        "Billing Period: Sep 1 - Sep 30, 2026",
+        "Due Date: Oct 25, 2026",
+        "Previous Balance                    1,000.00",
+        "Total Amount Due                PHP 2,345.50",
+    ]
+    card = [
+        "Statement Date    Payment Due Date    Total Amount Due    Minimum Amount Due",
+        "10/05/2026        10/25/2026          12,345.67           1,234.56",
+        "Statement Period: 09/06/2026 to 10/05/2026",
+    ]
+    telco = [
+        "Date Issued: 03 January 2027",
+        "Service Period    Dec 15 - Jan 14, 2027",
+        "Please pay on or before 23-Jan-2027",
+        "Amount Due    1,699.00",
+    ]
+    for lines, want in (
+        (utility, ("2026-10-05", "2026-10-25", "2026-09-01", "2026-09-30", 2345.5)),
+        (card, ("2026-10-05", "2026-10-25", "2026-09-06", "2026-10-05", 12345.67)),
+        (telco, ("2027-01-03", "2027-01-23", "2026-12-15", "2027-01-14", 1699.0)),
+    ):
+        for got in (fields_from_text("\n".join(lines)), extract_bill_fields(pdf(lines))):
+            assert tuple(got.values()) == want, (lines[0], got)
+    assert fields_from_text("Due Date: 25/10/2026")["due_date"] == "2026-10-25"
+    assert set(fields_from_text("Thank you for your payment.").values()) == {None}
+
+    def written(writer: PdfWriter) -> bytes:
+        buf = io.BytesIO()
+        writer.write(buf)
+        return buf.getvalue()
+
+    blank, locked = PdfWriter(), PdfWriter()
+    blank.add_blank_page(612, 792)
+    locked.add_blank_page(612, 792)
+    locked.encrypt("secret", algorithm="RC4-128")
+    for data in (written(blank), written(locked), b"%PDF-1.7 not really a pdf"):
+        try:
+            extract_bill_fields(data)
+        except UnreadablePdf:
+            continue
+        raise AssertionError("read a PDF it should have refused")
+
+
 def check_db_against_postgres() -> None:
     url = os.environ.get("TEST_DATABASE_URL", "")
     if not url:
         print("  --  check_db_against_postgres skipped (set TEST_DATABASE_URL)")
         return
     from sqlalchemy import create_engine, text
+    from sqlalchemy.exc import IntegrityError
 
     url = "postgresql+psycopg2://" + url.split("://", 1)[1]
     admin = create_engine(url)
@@ -312,6 +437,38 @@ def check_db_against_postgres() -> None:
         bill = db.insert_monthly_expense("Internet", None, 1500.0, 2, 2026, 10, True, dt.date(2026, 10, 20))
         assert bill["expense_date"] == "2026-10-20", bill
         assert db.list_monthly_expenses(period_year=2026, period_month=11)[0]["expense_date"] == "2026-10-20"
+
+        power = db.insert_bill_category("Electricity")
+        db.insert_bill_category("Internet")
+        try:
+            db.insert_bill_category("electricity")
+        except IntegrityError:
+            pass
+        else:
+            raise AssertionError("accepted a duplicate bill category")
+        statement = {
+            "bill_date": dt.date(2026, 10, 5),
+            "due_date": dt.date(2026, 10, 25),
+            "period_start": dt.date(2026, 9, 1),
+            "period_end": dt.date(2026, 9, 30),
+            "amount": None,
+        }
+        bill = db.insert_bill({**statement, "category_id": power["id"]})
+        assert (bill["due_date"], bill["has_pdf"]) == ("2026-10-25", False), bill
+        assert db.set_bill_pdf(bill["id"], b"%PDF-1.7") and db.get_bill_pdf(bill["id"]) == b"%PDF-1.7"
+        updated = db.update_bill(bill["id"], {**statement, "category_id": power["id"], "amount": 2345.5})
+        assert updated is not None and (updated["amount"], updated["has_pdf"]) == (2345.5, True), updated
+        listed = db.list_bills()
+        assert [c["name"] for c in listed["categories"]] == ["Electricity", "Internet"], listed
+        assert listed["bills"][0]["has_pdf"] is True and "pdf_data" not in listed["bills"][0]
+        try:
+            db.insert_bill({**statement, "category_id": 404})
+        except IntegrityError:
+            pass
+        else:
+            raise AssertionError("accepted a bill for a missing category")
+        assert db.delete_bill_category(power["id"])
+        assert db.list_bills()["bills"] == [], "a deleted category left its bills behind"
 
         db.list_payslips()
         with engine.connect() as c:

@@ -22,6 +22,8 @@ from sqlalchemy.orm import Session, aliased, selectinload
 import schema
 from schema import (
     AppUser,
+    Bill,
+    BillCategory,
     BloodPressure,
     CalendarDayOverride,
     Company,
@@ -997,6 +999,63 @@ def update_monthly_expense(
 def delete_monthly_expense(expense_id: int) -> bool:
     with _session(write=True) as s:
         return s.execute(delete(MonthlyExpense).where(MonthlyExpense.id == expense_id)).rowcount > 0
+
+
+def _bill(b: Bill, has_pdf: bool) -> dict[str, Any]:
+    return _row(b, "pdf_data", has_pdf=has_pdf)
+
+
+def list_bills() -> dict[str, Any]:
+    with _session() as s:
+        return {
+            "categories": [_row(c) for c in s.scalars(select(BillCategory).order_by(func.lower(BillCategory.name)))],
+            "bills": [_bill(b, b.has_pdf) for b in s.scalars(select(Bill).order_by(Bill.due_date.desc(), Bill.id.desc()))],
+        }
+
+
+def insert_bill_category(name: str) -> dict[str, Any]:
+    with _session(write=True) as s:
+        return _row(s.scalar(insert(BillCategory).values(name=name).returning(BillCategory)))
+
+
+def update_bill_category(category_id: int, name: str) -> dict[str, Any] | None:
+    with _session(write=True) as s:
+        c = s.scalar(
+            update(BillCategory).where(BillCategory.id == category_id).values(name=name).returning(BillCategory)
+        )
+        return _row(c) if c else None
+
+
+def delete_bill_category(category_id: int) -> bool:
+    with _session(write=True) as s:
+        return s.execute(delete(BillCategory).where(BillCategory.id == category_id)).rowcount > 0
+
+
+def insert_bill(values: dict[str, Any]) -> dict[str, Any]:
+    with _session(write=True) as s:
+        return _bill(s.scalar(insert(Bill).values(values).returning(Bill)), False)
+
+
+def update_bill(bill_id: int, values: dict[str, Any]) -> dict[str, Any] | None:
+    with _session(write=True) as s:
+        row = s.execute(update(Bill).where(Bill.id == bill_id).values(values).returning(Bill, Bill.has_pdf)).first()
+        return _bill(*row) if row else None
+
+
+def delete_bill(bill_id: int) -> bool:
+    with _session(write=True) as s:
+        return s.execute(delete(Bill).where(Bill.id == bill_id)).rowcount > 0
+
+
+def set_bill_pdf(bill_id: int, data: bytes) -> bool:
+    with _session(write=True) as s:
+        return s.execute(update(Bill).where(Bill.id == bill_id).values(pdf_data=data)).rowcount > 0
+
+
+def get_bill_pdf(bill_id: int) -> bytes | None:
+    with _session() as s:
+        data = s.scalar(select(Bill.pdf_data).where(Bill.id == bill_id))
+        return bytes(data) if data is not None else None
 
 
 def _first_credit_card(s: Session) -> CreditCard | None:

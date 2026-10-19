@@ -155,15 +155,19 @@ export function payslipPdfUrl(id: number): string {
   return `${dataApiBase()}/api/payslip/${id}/pdf`;
 }
 
-export async function uploadPayslipPdf(id: number, file: File) {
+async function uploadPdf<T = { ok: boolean; has_pdf: boolean }>(path: string, file: File) {
   const body = new FormData();
   body.append("file", file);
-  return j<{ ok: boolean; has_pdf: boolean }>(
-    await apiFetch(`${dataApiBase()}/api/payslip/${id}/pdf`, {
+  return j<T>(
+    await apiFetch(`${dataApiBase()}${path}`, {
       method: "POST",
       body,
     }),
   );
+}
+
+export async function uploadPayslipPdf(id: number, file: File) {
+  return uploadPdf(`/api/payslip/${id}/pdf`, file);
 }
 
 export async function deletePayslipPdf(id: number) {
@@ -1587,4 +1591,72 @@ export async function updateTravelCity(tripId: number, cityId: number, body: Tra
 
 export async function deleteTravelCity(tripId: number, cityId: number) {
   return sendJson<TravelTripDetail>("DELETE", `/api/travel/${tripId}/cities/${cityId}`);
+}
+
+export type BillCategoryRow = {
+  id: number;
+  name: string;
+  created_at: string;
+};
+
+export type BillRow = {
+  id: number;
+  category_id: number;
+  bill_date: string;
+  due_date: string;
+  period_start: string;
+  period_end: string;
+  amount: number | null;
+  has_pdf: boolean;
+  created_at: string;
+};
+
+export type BillBody = Omit<BillRow, "id" | "has_pdf" | "created_at">;
+
+export async function getBills() {
+  return getJson<{ categories: BillCategoryRow[]; bills: BillRow[] }>("/api/bill");
+}
+
+export async function createBillCategory(name: string) {
+  return sendJson<{ category: BillCategoryRow }>("POST", "/api/bill-category", { name });
+}
+
+export async function updateBillCategory(id: number, name: string) {
+  return sendJson<{ category: BillCategoryRow }>("PUT", `/api/bill-category/${id}`, { name });
+}
+
+export async function deleteBillCategory(id: number) {
+  return sendJson<{ ok: boolean }>("DELETE", `/api/bill-category/${id}`);
+}
+
+export async function createBill(body: BillBody) {
+  return sendJson<{ bill: BillRow }>("POST", "/api/bill", body);
+}
+
+export async function updateBill(id: number, body: BillBody) {
+  return sendJson<{ bill: BillRow }>("PUT", `/api/bill/${id}`, body);
+}
+
+export async function deleteBill(id: number) {
+  return sendJson<{ ok: boolean }>("DELETE", `/api/bill/${id}`);
+}
+
+export function billPdfUrl(id: number): string {
+  return `${dataApiBase()}/api/bill/${id}/pdf`;
+}
+
+export async function uploadBillPdf(id: number, file: File) {
+  return uploadPdf(`/api/bill/${id}/pdf`, file);
+}
+
+export type BillPdfFields = {
+  bill_date: string | null;
+  due_date: string | null;
+  period_start: string | null;
+  period_end: string | null;
+  amount: number | null;
+};
+
+export async function readBillPdf(file: File) {
+  return uploadPdf<BillPdfFields>("/api/bill/extract", file);
 }
