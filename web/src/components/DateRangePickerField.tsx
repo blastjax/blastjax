@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { CalendarMonth, type DayState } from "@/components/CalendarMonth";
+import { PickerField } from "@/components/PickerField";
 import { addMonths, formatDate, toIsoDateLocal } from "@/lib/dateFormat";
-import { usePopoverPosition } from "@/lib/usePopoverPosition";
-import { ACTION_BUTTON_CLASSES, INPUT_CLASSES } from "@/lib/ui";
+import { ACTION_BUTTON_CLASSES } from "@/lib/ui";
 
 export type DateRangePickerFieldProps = {
   startValue: string;
@@ -15,11 +15,7 @@ export type DateRangePickerFieldProps = {
   clearLabel?: string;
 };
 
-const MAX_POPOVER_WIDTH = 680;
-
-function responsiveWidth(): number {
-  return Math.min(MAX_POPOVER_WIDTH, window.innerWidth - 16);
-}
+const monthOf = (iso: string) => ({ y: Number(iso.slice(0, 4)), m: Number(iso.slice(5, 7)) });
 
 export function DateRangePickerField({
   startValue,
@@ -31,48 +27,9 @@ export function DateRangePickerField({
 }: DateRangePickerFieldProps) {
   const today = toIsoDateLocal(new Date());
   const base = startValue || endValue || today;
-  const [anchorYear, setAnchorYear] = useState(() => Number(base.slice(0, 4)));
-  const [anchorMonth, setAnchorMonth] = useState(() => Number(base.slice(5, 7)));
-  const { triggerRef, open, position, openAt, close } = usePopoverPosition<HTMLButtonElement>(420);
-  const popoverRef = useRef<HTMLDivElement>(null);
-  const [popoverWidth, setPopoverWidth] = useState(MAX_POPOVER_WIDTH);
+  const [anchor, setAnchor] = useState(() => monthOf(base));
 
-  useEffect(() => {
-    if (!open) return;
-    const onDocMouseDown = (e: MouseEvent) => {
-      const target = e.target as Node;
-      if (
-        !triggerRef.current?.contains(target) &&
-        !popoverRef.current?.contains(target)
-      ) {
-        close();
-      }
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.stopPropagation();
-        close();
-      }
-    };
-    document.addEventListener("mousedown", onDocMouseDown);
-    window.addEventListener("keydown", onKey, true);
-    return () => {
-      document.removeEventListener("mousedown", onDocMouseDown);
-      window.removeEventListener("keydown", onKey, true);
-    };
-  }, [open, close, triggerRef]);
-
-  const openPicker = () => {
-    if (disabled) return;
-    const b = startValue || endValue || today;
-    setAnchorYear(Number(b.slice(0, 4)));
-    setAnchorMonth(Number(b.slice(5, 7)));
-    const width = responsiveWidth();
-    setPopoverWidth(width);
-    openAt(width);
-  };
-
-  const pickDay = (iso: string) => {
+  const pickDay = (iso: string, close: () => void) => {
     if (!startValue || (startValue && endValue)) {
       onChange(iso, "");
       return;
@@ -94,56 +51,45 @@ export function DateRangePickerField({
     return "none";
   };
 
-  const next = addMonths(anchorYear, anchorMonth, 1);
+  const next = addMonths(anchor.y, anchor.m, 1);
   const label =
     startValue && endValue
       ? `${formatDate(startValue)} – ${formatDate(endValue)}`
       : startValue
         ? `${formatDate(startValue)} – …`
-        : "";
+        : null;
 
   return (
-    <div className="relative">
-      <button
-        ref={triggerRef}
-        type="button"
-        disabled={disabled}
-        onClick={openPicker}
-        aria-haspopup="dialog"
-        aria-expanded={open}
-        className={`${INPUT_CLASSES} w-full text-left disabled:opacity-50`}
-      >
-        {label || <span className="text-ink-4">{placeholder}</span>}
-      </button>
-      {open && position && (
-        <div
-          ref={popoverRef}
-          style={{ position: "fixed", top: position.top, left: position.left, width: popoverWidth }}
-          className="z-50 rounded-xl border border-line bg-surface p-4 shadow-pop"
-        >
+    <PickerField
+      label={label}
+      placeholder={placeholder}
+      popoverLabel="Choose a date range"
+      width={680}
+      estimatedHeight={420}
+      disabled={disabled}
+      clearLabel={clearLabel}
+      onClear={() => onChange("", "")}
+      onOpen={() => setAnchor(monthOf(base))}
+    >
+      {(close) => (
+        <>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <CalendarMonth
-              year={anchorYear}
-              month={anchorMonth}
-              onSelectDay={pickDay}
+              year={anchor.y}
+              month={anchor.m}
+              onSelectDay={(iso) => pickDay(iso, close)}
               dayState={stateFor}
-              onPrev={() => {
-                const p = addMonths(anchorYear, anchorMonth, -1);
-                setAnchorYear(p.y);
-                setAnchorMonth(p.m);
-              }}
+              arrows="prev"
+              onNavigate={(y, m) => setAnchor({ y, m })}
             />
             <div className="hidden sm:block">
               <CalendarMonth
                 year={next.y}
                 month={next.m}
-                onSelectDay={pickDay}
+                onSelectDay={(iso) => pickDay(iso, close)}
                 dayState={stateFor}
-                onNext={() => {
-                  const n = addMonths(anchorYear, anchorMonth, 1);
-                  setAnchorYear(n.y);
-                  setAnchorMonth(n.m);
-                }}
+                arrows="next"
+                onNavigate={(y, m) => setAnchor(addMonths(y, m, -1))}
               />
             </div>
           </div>
@@ -151,31 +97,13 @@ export function DateRangePickerField({
             <button
               type="button"
               className={`${ACTION_BUTTON_CLASSES} px-3.5 py-1.5 text-xs`}
-              onClick={() => {
-                const n = addMonths(anchorYear, anchorMonth, 1);
-                setAnchorYear(n.y);
-                setAnchorMonth(n.m);
-              }}
+              onClick={() => setAnchor(next)}
             >
               Next month ›
             </button>
           </div>
-          {clearLabel && (startValue || endValue) && (
-            <div className="mt-3 flex justify-end border-t border-line pt-3 text-xs">
-              <button
-                type="button"
-                onClick={() => {
-                  onChange("", "");
-                  close();
-                }}
-                className="rounded-md px-2 py-1 font-semibold text-indigo-600 transition-colors hover:bg-indigo-500/10 dark:text-indigo-400"
-              >
-                {clearLabel}
-              </button>
-            </div>
-          )}
-        </div>
+        </>
       )}
-    </div>
+    </PickerField>
   );
 }

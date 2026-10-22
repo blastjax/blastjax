@@ -153,6 +153,7 @@ export function PayslipFormFields({
                   setForm((f) => ({ ...f, period_year }))
                 }
                 disabled={disabled || lockPeriod}
+                clearLabel="Clear"
               />
             </label>
             <label className="flex flex-col gap-1 text-sm">

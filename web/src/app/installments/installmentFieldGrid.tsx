@@ -3,6 +3,7 @@
 import type { Dispatch, SetStateAction } from "react";
 import { AmountInput } from "@/components/AmountInput";
 import { Field } from "@/components/FinanceUI";
+import { MonthPickerField } from "@/components/MonthPickerField";
 import { INPUT_CLASSES } from "@/lib/ui";
 
 export type InstallmentFormState = {
@@ -90,22 +91,18 @@ export function InstallmentFieldGrid({
         </>
       )}
       <Field label="Start month" hint="Payment 1 is due the month after">
-        <input
-          required
-          type="month"
-          className={INPUT_CLASSES}
+        <MonthPickerField
           value={form.start_date}
-          onChange={(e) => setForm((f) => ({ ...f, start_date: e.target.value }))}
+          onChange={(v) => setForm((f) => ({ ...f, start_date: v }))}
           disabled={saving}
         />
       </Field>
       <Field label="End month" hint="Optional · start + number of payments">
-        <input
-          type="month"
-          className={INPUT_CLASSES}
+        <MonthPickerField
           value={form.finish_date}
-          onChange={(e) => setForm((f) => ({ ...f, finish_date: e.target.value }))}
+          onChange={(v) => setForm((f) => ({ ...f, finish_date: v }))}
           disabled={saving}
+          clearLabel="Clear"
         />
       </Field>
       {!hideAmounts && (

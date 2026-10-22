@@ -3,6 +3,7 @@
 import { confirmDialog } from "@/components/ConfirmDialog";
 import { AmountInput } from "@/components/AmountInput";
 import { DatePickerField } from "@/components/DatePickerField";
+import { MonthPickerField } from "@/components/MonthPickerField";
 import { PageHeader } from "@/components/PageHeader";
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { Modal } from "@/components/Modal";
@@ -501,12 +502,9 @@ export default function MonthlyExpensesClient() {
 
             {!form.is_recurring && !form.date && (
               <Field label="Month">
-                <input
-                  required
-                  type="month"
-                  className={INPUT_CLASSES}
+                <MonthPickerField
                   value={form.month}
-                  onChange={(e) => setForm((f) => ({ ...f, month: e.target.value }))}
+                  onChange={(v) => setForm((f) => ({ ...f, month: v }))}
                   disabled={saving}
                 />
               </Field>

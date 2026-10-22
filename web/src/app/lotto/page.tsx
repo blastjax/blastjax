@@ -345,8 +345,7 @@ function DrawCalendar({ games }: { games: LottoGame[] }) {
             const draws = byDate.get(iso);
             return draws && <DayMark day={Number(iso.slice(8))} draws={draws} />;
           }}
-          onPrev={() => setView((v) => addMonths(v.y, v.m, -1))}
-          onNext={() => setView((v) => addMonths(v.y, v.m, 1))}
+          onNavigate={(y, m) => setView({ y, m })}
         />
       </div>
       <div className="mt-6 flex flex-col gap-3 border-t border-line pt-4 text-sm">

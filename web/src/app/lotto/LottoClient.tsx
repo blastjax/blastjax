@@ -3,6 +3,7 @@
 import { confirmDialog } from "@/components/ConfirmDialog";
 import Link from "next/link";
 import { AmountInput } from "@/components/AmountInput";
+import { DatePickerField } from "@/components/DatePickerField";
 import { ChevronRightIcon, PencilIcon, TrashIcon } from "@/components/Icons";
 import { PageHeader } from "@/components/PageHeader";
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
@@ -48,41 +49,6 @@ import {
 
 const NUMBERS_HELP =
   "6 unique numbers, 1-58 — separate with commas, spaces, or dashes (e.g. 3, 17, 29, 42, 58, 1 or 03-17-29-42-58-01)";
-
-const DRAW_DATE_HELP =
-  "MM/DD/YYYY, MM-DD-YYYY, or MM DD YYYY — 2- or 4-digit year (e.g. 8/28/2026, 08-28-26, 8 28 2026)";
-
-function toIsoDate(year: number, month: number, day: number): string {
-  const date = new Date(Date.UTC(year, month - 1, day));
-  if (
-    date.getUTCFullYear() !== year ||
-    date.getUTCMonth() !== month - 1 ||
-    date.getUTCDate() !== day
-  ) {
-    throw new Error("Enter a valid date.");
-  }
-  return date.toISOString().slice(0, 10);
-}
-
-function isoToUsDate(iso: string): string {
-  const [y, m, d] = iso.split("-").map(Number);
-  return `${m}/${d}/${y}`;
-}
-
-function twoDigitYearToFour(yy: number): number {
-  return yy <= 68 ? 2000 + yy : 1900 + yy;
-}
-
-function parseDrawDate(text: string): string {
-  const trimmed = text.trim();
-  const m = /^(\d{1,2})[/\-\s]+(\d{1,2})[/\-\s]+(\d{2}|\d{4})$/.exec(trimmed);
-  if (m) {
-    const [, mo, d, y] = m;
-    const year = y.length === 2 ? twoDigitYearToFour(Number(y)) : Number(y);
-    return toIsoDate(year, Number(mo), Number(d));
-  }
-  throw new Error(`Enter a date as ${DRAW_DATE_HELP}.`);
-}
 
 function parseNumbers(text: string): number[] {
   const parts = text.split(/[^0-9]+/).filter((p) => p.length > 0);
@@ -827,7 +793,7 @@ export default function LottoClient({ gameId }: { gameId: number }) {
     setDrawModal({
       open: true,
       drawId: detail.draw.id,
-      drawDate: isoToUsDate(detail.draw.draw_date),
+      drawDate: detail.draw.draw_date,
       numbersText: numbersToText(detail.draw.numbers),
       jackpotText:
         detail.draw.jackpot_prize != null ? String(detail.draw.jackpot_prize) : "",
@@ -853,7 +819,7 @@ export default function LottoClient({ gameId }: { gameId: number }) {
     let jackpotPrize: number | null;
     let winners: number;
     try {
-      drawDate = parseDrawDate(drawModal.drawDate);
+      drawDate = drawModal.drawDate;
       numbers = parseOptionalNumbers(drawModal.numbersText);
       jackpotPrize = parseOptionalJackpot(drawModal.jackpotText);
       winners = parseWinners(drawModal.winnersText);
@@ -2129,15 +2095,11 @@ export default function LottoClient({ gameId }: { gameId: number }) {
           )}
           <label className="flex flex-col gap-1 text-sm">
             <span className="text-ink-2">Draw date</span>
-            <input
-              required
-              type="text"
-              className={INPUT_CLASSES}
+            <DatePickerField
               value={drawModal.drawDate}
               disabled={saving}
-              onChange={(e) => setDrawModal((m) => ({ ...m, drawDate: e.target.value }))}
+              onChange={(v) => setDrawModal((m) => ({ ...m, drawDate: v }))}
             />
-            <span className="text-xs text-ink-3">{DRAW_DATE_HELP}</span>
           </label>
           <label className="flex flex-col gap-1 text-sm">
             <span className="text-ink-2">
@@ -2305,13 +2267,10 @@ export default function LottoClient({ gameId }: { gameId: number }) {
           )}
           <label className="flex flex-col gap-1 text-sm">
             <span className="text-ink-2">Draw date</span>
-            <input
-              required
-              type="date"
-              className={INPUT_CLASSES}
+            <DatePickerField
               value={pasteModal.drawDate}
               disabled={saving}
-              onChange={(e) => setPasteModal((m) => ({ ...m, drawDate: e.target.value }))}
+              onChange={(v) => setPasteModal((m) => ({ ...m, drawDate: v }))}
             />
           </label>
           <label className="flex flex-col gap-1 text-sm">
