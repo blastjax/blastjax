@@ -1,5 +1,6 @@
 "use client";
 
+import { confirmDialog } from "@/components/ConfirmDialog";
 import { AmountInput } from "@/components/AmountInput";
 import { DatePickerField } from "@/components/DatePickerField";
 import { PageHeader } from "@/components/PageHeader";
@@ -368,14 +369,16 @@ const DayGridCell = memo(function DayGridCell({
         </span>
         {adjusted && (
           <span
-            title="Changed from the even split"
+            data-tooltip="Changed from the even split"
+            role="img"
+            aria-label="Changed from the even split"
             className="mt-1.5 size-1.5 shrink-0 rounded-full bg-ink-4"
           />
         )}
       </div>
       {bills && (
         <span
-          title={bills.map((b) => `${b.name} · ${fmtMoney(b.amount)}`).join("\n")}
+          data-tooltip={bills.map((b) => `${b.name} · ${fmtMoney(b.amount)}`).join("\n")}
           className={`max-w-full self-start truncate rounded bg-danger-soft px-1 text-[10px] font-medium leading-4 text-danger-text ring-1 ring-inset ring-danger/20 sm:text-[11px] ${
             isPast ? "opacity-50" : ""
           }`}
@@ -384,7 +387,7 @@ const DayGridCell = memo(function DayGridCell({
         </span>
       )}
       <span
-        title={dailyBudget != null ? fmtMoney(dailyBudget) : undefined}
+        data-tooltip={dailyBudget != null ? fmtMoney(dailyBudget) : undefined}
         className={`block w-full min-w-0 truncate text-right text-[11px] tabular-nums leading-tight sm:text-sm ${
           isToday ? "font-semibold text-brand-text" : isPast ? "text-ink-4" : "font-medium text-ink-2"
         }`}
@@ -1322,7 +1325,7 @@ export default function CalendarClient() {
 
   const onDeleteEntry = useCallback(
     async (amount: number, confirmText: string, remove: () => Promise<unknown>) => {
-      if (!window.confirm(confirmText)) return;
+      if (!(await confirmDialog(confirmText))) return;
       setExpenseError(null);
       try {
         await changeBudget(amount, remove);
@@ -1571,7 +1574,7 @@ export default function CalendarClient() {
                     <button
                       type="button"
                       onClick={() => openPayDateModal(half)}
-                      title="Paid on a different day? Set the real pay date"
+                      data-tooltip="Paid on a different day? Set the real pay date"
                       className="-mr-1.5 inline-flex shrink-0 items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-medium text-ink-3 transition-colors duration-150 hover:bg-surface-2 hover:text-ink"
                     >
                       <CalendarIcon className="size-4" />
@@ -1678,7 +1681,7 @@ export default function CalendarClient() {
                 <button
                   type="button"
                   disabled={autoDividing || evenOutPlan.activeToday.length === 0}
-                  title={
+                  data-tooltip={
                     evenOutPlan.activeToday.length === 0
                       ? NOTHING_TO_EVEN_OUT
                       : "Split what's left of each pay period evenly across today and every later day in it"
@@ -1691,7 +1694,7 @@ export default function CalendarClient() {
                 <button
                   type="button"
                   disabled={autoDividing || evenOutPlan.future.length === 0}
-                  title={
+                  data-tooltip={
                     evenOutPlan.future.length === 0
                       ? NOTHING_TO_EVEN_OUT
                       : "Split what's left of each pay period evenly across the days after today, leaving today as it is"

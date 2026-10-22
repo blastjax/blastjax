@@ -1,5 +1,6 @@
 "use client";
 
+import { confirmDialog } from "@/components/ConfirmDialog";
 import { AmountInput } from "@/components/AmountInput";
 import { DatePickerField } from "@/components/DatePickerField";
 import { PageHeader } from "@/components/PageHeader";
@@ -219,7 +220,7 @@ export default function HousePaymentsClient() {
   };
 
   const onDeletePlan = async (id: number) => {
-    if (!confirm("Delete this house payment plan and all its payments?")) return;
+    if (!(await confirmDialog("Delete this house payment plan and all its payments?"))) return;
     setSaving(true);
     setError(null);
     try {
@@ -284,7 +285,7 @@ export default function HousePaymentsClient() {
 
   const onDeleteEntry = async (entryId: number) => {
     if (entriesModalId == null) return;
-    if (!confirm("Delete this payment?")) return;
+    if (!(await confirmDialog("Delete this payment?"))) return;
     setSavingEntry(true);
     setError(null);
     try {

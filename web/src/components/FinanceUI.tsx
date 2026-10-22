@@ -164,7 +164,7 @@ export function IconAction({
     <button
       type="button"
       aria-label={label}
-      title={label}
+      data-tooltip={label}
       disabled={disabled}
       onClick={(e) => {
         e.stopPropagation();

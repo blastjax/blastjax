@@ -249,7 +249,9 @@ export default function MastermindClient() {
                     key={i}
                     className="h-7 w-7 shrink-0 rounded-full border border-line-strong"
                     style={{ background: colorHex(v, colorMap) }}
-                    title={colorName(v, colorMap)}
+                    data-tooltip={colorName(v, colorMap)}
+                    role="img"
+                    aria-label={colorName(v, colorMap)}
                   />
                 ))}
               </div>
@@ -271,7 +273,9 @@ export default function MastermindClient() {
                     key={i}
                     className="h-6 w-6 shrink-0 rounded-full border border-line-strong"
                     style={{ background: colorHex(v, colorMap) }}
-                    title={colorName(v, colorMap)}
+                    data-tooltip={colorName(v, colorMap)}
+                    role="img"
+                    aria-label={colorName(v, colorMap)}
                   />
                 ))}
                 <span className="text-xs font-medium text-emerald-800 dark:text-emerald-200">
@@ -394,7 +398,7 @@ export default function MastermindClient() {
                   type="button"
                   disabled={gameOver}
                   onClick={(e) => handleLegendClick(idx, e)}
-                  title={`Click: place ${name} at peg ${pointer + 1} · double-click: change this pin's colour`}
+                  data-tooltip={`Click: place ${name} at peg ${pointer + 1} · double-click: change this pin's colour`}
                   aria-label={`Place ${name} at the targeted peg. Double-click to change this pin's colour.`}
                   className="flex h-8 w-8 items-center justify-center rounded-full border border-transparent p-1 transition-colors duration-150 hover:border-line-strong hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-50"
                 >
@@ -435,7 +439,9 @@ function GuessPeg({
       <span
         className={`${base} ${empty ? "border-dashed border-line-strong" : "border-line-strong"}`}
         style={{ background: empty ? "transparent" : colorHex(value, colorMap) }}
-        title={colorName(value, colorMap)}
+        data-tooltip={colorName(value, colorMap)}
+        role="img"
+        aria-label={colorName(value, colorMap)}
       />
     );
   }
@@ -444,7 +450,7 @@ function GuessPeg({
       type="button"
       onClick={onSelect}
       aria-label={`Guess peg: ${colorName(value, colorMap)}. Click to target it, then pick a colour below.`}
-      title="Click to target this peg, then click a colour in the legend"
+      data-tooltip="Click to target this peg, then click a colour in the legend"
       className={`${base} cursor-pointer ${
         empty ? "border-dashed border-zinc-400 hover:border-indigo-400" : "border-zinc-400 hover:brightness-110"
       } ${ghost ? "opacity-40" : ""} ${
@@ -475,14 +481,14 @@ function FeedbackPeg({
   }`;
   const label = isExact ? "correct position and colour" : isColorOnly ? "correct colour, wrong position" : "no result set";
   if (!interactive) {
-    return <span className={classes} title={label} aria-label={label} />;
+    return <span className={classes} data-tooltip={label} aria-label={label} />;
   }
   return (
     <button
       type="button"
       onClick={onClick}
       aria-label={`Feedback peg: ${label}. Click to cycle.`}
-      title="Click to cycle: none → correct spot → correct colour only"
+      data-tooltip="Click to cycle: none → correct spot → correct colour only"
       className={`${classes} cursor-pointer hover:border-indigo-500`}
     />
   );

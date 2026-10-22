@@ -128,7 +128,7 @@ function DayMark({ day, draws }: { day: number; draws: DayDraw[] }) {
   const label = draws.map(drawLabel).join("\n");
   const jackpots = draws.filter(({ result }) => result.winners > 0 || result.best_hits?.length === 6);
   return (
-    <span className="absolute inset-0" title={label}>
+    <span className="absolute inset-0" data-tooltip={label}>
       <span className="sr-only">{label}</span>
       {fill && (
         <span
@@ -373,7 +373,7 @@ export default function LottoGamesPage() {
                 className={PRIMARY_BUTTON_CLASSES}
                 disabled={syncing || games === null}
                 onClick={() => void updateResults()}
-                title="Fetch any 6/42–6/58 results newer than what's saved here from pcso.gov.ph"
+                data-tooltip="Fetch any 6/42–6/58 results newer than what's saved here from pcso.gov.ph"
               >
                 {syncing ? "Updating…" : "Update results"}
               </button>
@@ -396,7 +396,7 @@ export default function LottoGamesPage() {
               className={`${ACTION_BUTTON_CLASSES} px-3 py-1.5 text-sm`}
               onClick={openImport}
               disabled={games === null}
-              title="Bulk-load a day's results table for every game at once — rows for games not tracked here are discarded"
+              data-tooltip="Bulk-load a day's results table for every game at once — rows for games not tracked here are discarded"
             >
               Import historic results
             </button>

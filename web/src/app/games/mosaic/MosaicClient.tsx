@@ -803,7 +803,7 @@ export default function MosaicClient() {
               className={disabledSecondary}
               onClick={solveFreeCell}
               disabled={!painted || solving !== null}
-              title="Each move repaints whichever blob you tap — usually far fewer moves than a fixed start tile."
+              data-tooltip="Each move repaints whichever blob you tap — usually far fewer moves than a fixed start tile."
             >
               {solving === "free" ? "👆 Solving…" : "👆 Solve (tap any tile)"}
             </button>
@@ -946,7 +946,8 @@ export default function MosaicClient() {
             {mode === "paint" && (
               <button
                 type="button"
-                title="Erase"
+                data-tooltip="Erase"
+                aria-label="Erase"
                 onClick={() => onPaletteClick(BLANK)}
                 className={`flex h-12 w-12 items-center justify-center rounded-md border-2 border-dashed border-line-strong bg-surface text-lg text-ink-3 shadow transition-transform duration-150 hover:-translate-y-0.5 dark:shadow-none ${
                   paintColor === BLANK ? "ring-2 ring-zinc-900 dark:ring-zinc-100" : ""
@@ -964,7 +965,8 @@ export default function MosaicClient() {
                   key={idx}
                   type="button"
                   disabled={disabled}
-                  title={mode === "paint" ? "Click to paint · double-click to change this color" : undefined}
+                  data-tooltip={mode === "paint" ? "Click to paint · double-click to change this color" : undefined}
+                  aria-label={`Color ${idx + 1}`}
                   onClick={() => onPaletteClick(idx)}
                   onDoubleClick={
                     mode === "paint" ? () => cyclePaletteColor(idx) : undefined

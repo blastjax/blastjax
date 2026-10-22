@@ -1,5 +1,6 @@
 "use client";
 
+import { confirmDialog } from "@/components/ConfirmDialog";
 import {
   useEffect,
   useRef,
@@ -567,7 +568,7 @@ function PayslipPdfPanel({
   };
 
   const handleRemove = async () => {
-    if (!confirm("Remove the attached PDF from this payslip?")) return;
+    if (!(await confirmDialog("Remove the attached PDF from this payslip?", "Remove"))) return;
     setBusy(true);
     setErr(null);
     try {

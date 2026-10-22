@@ -1,5 +1,6 @@
 "use client";
 
+import { confirmDialog } from "@/components/ConfirmDialog";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   CartesianGrid,
@@ -270,7 +271,7 @@ export default function BloodPressureClient() {
   };
 
   const onDelete = async (id: number) => {
-    if (!confirm("Delete this reading?")) return;
+    if (!(await confirmDialog("Delete this reading?"))) return;
     setSaving(true);
     setError(null);
     try {
@@ -518,7 +519,7 @@ export default function BloodPressureClient() {
                           )}
                         </td>
                         <td className={TABLE_CELL_CLASSES}>
-                          <p className="max-w-64 truncate" title={r.notes ?? undefined}>
+                          <p className="max-w-64 truncate" data-tooltip={r.notes ?? undefined}>
                             {r.notes}
                           </p>
                         </td>
@@ -527,7 +528,7 @@ export default function BloodPressureClient() {
                             <button
                               type="button"
                               aria-label="Edit reading"
-                              title="Edit"
+                              data-tooltip="Edit"
                               className={ICON_BUTTON_CLASSES}
                               onClick={() => openEdit(r)}
                             >
@@ -537,7 +538,7 @@ export default function BloodPressureClient() {
                               type="button"
                               disabled={saving}
                               aria-label="Delete reading"
-                              title="Delete"
+                              data-tooltip="Delete"
                               className={ICON_BUTTON_CLASSES}
                               onClick={() => void onDelete(r.id)}
                             >

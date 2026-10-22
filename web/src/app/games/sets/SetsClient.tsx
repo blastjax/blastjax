@@ -204,7 +204,7 @@ export default function SetsClient() {
                   type="button"
                   onClick={() => removeCard(idx)}
                   aria-label={`Remove card ${idx + 1}`}
-                  title="Remove"
+                  data-tooltip="Remove"
                   className="absolute -right-2 -top-2 flex h-5 w-5 items-center justify-center rounded-full border border-line-strong bg-surface text-[10px] leading-none text-ink-2 shadow transition-colors duration-150 hover:bg-red-50 hover:text-red-600 dark:bg-zinc-800 dark:shadow-none dark:ring-1 dark:ring-white/10"
                 >
                   ×
@@ -320,7 +320,7 @@ function OptionTile({
       onClick={onClick}
       aria-label={label}
       aria-pressed={selected}
-      title={label}
+      data-tooltip={label}
       className={`flex flex-1 items-center justify-center rounded-lg border-2 bg-surface px-3 py-3 shadow-sm transition-colors duration-150 dark:shadow-none ${
         selected
           ? "border-indigo-500 ring-2 ring-indigo-400"

@@ -1,5 +1,6 @@
 "use client";
 
+import { confirmDialog } from "@/components/ConfirmDialog";
 import Link from "next/link";
 import { Source_Serif_4 } from "next/font/google";
 import { Fragment, useEffect, useState, type ReactNode } from "react";
@@ -619,8 +620,8 @@ export default function TravelsClient() {
       setModal(null);
     });
 
-  const deleteEntry = (e: Entry) => {
-    if (!trip || !confirm("Delete this item?")) return;
+  const deleteEntry = async (e: Entry) => {
+    if (!trip || !(await confirmDialog("Delete this item?"))) return;
     void run(async () => {
       upsert(await DELETE[e.table](trip.trip.id, e.id));
       setDrawerKey(null);
@@ -716,7 +717,7 @@ export default function TravelsClient() {
         <button
           key={it.key}
           type="button"
-          title={it.title}
+          data-tooltip={it.title}
           onClick={() => setDrawerKey(it.key)}
           className="flex h-16 shrink-0 cursor-pointer flex-col gap-[3px] overflow-hidden rounded-lg border px-[9px] py-[7px] text-left hover:brightness-95 dark:hover:brightness-[1.2]"
           style={{ background: it.bg, borderColor: it.bd }}
@@ -765,7 +766,7 @@ export default function TravelsClient() {
                 <button
                   key={sp.e.key}
                   type="button"
-                  title={titleOf(sp.e, false)}
+                  data-tooltip={titleOf(sp.e, false)}
                   onClick={() => setDrawerKey(sp.e.key)}
                   className="flex h-10 cursor-pointer items-center gap-2 overflow-hidden whitespace-nowrap px-2.5 text-left text-[12.5px] hover:brightness-95 dark:hover:brightness-[1.18]"
                   style={{
@@ -911,7 +912,7 @@ export default function TravelsClient() {
               {p.startDate && <span className="opacity-75">{placeRange(p.startDate, p.endDate)}</span>}
               <button
                 type="button"
-                title="Remove"
+                data-tooltip="Remove"
                 aria-label={`Remove ${p.name}`}
                 disabled={saving}
                 onClick={() => removePlace(p.id)}

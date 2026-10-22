@@ -1,5 +1,6 @@
 "use client";
 
+import { confirmDialog } from "@/components/ConfirmDialog";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   apiFetch,
@@ -225,7 +226,7 @@ export default function PayslipClient({ company = "Sophos" }: { company?: string
   };
 
   const handleDelete = async (id: number) => {
-    if (!confirm("Delete this payslip row?")) return;
+    if (!(await confirmDialog("Delete this payslip row?"))) return;
     setSaving(true);
     setError(null);
     try {
@@ -417,7 +418,7 @@ export default function PayslipClient({ company = "Sophos" }: { company?: string
               type="button"
               className={PAYSLIP_SECONDARY_BUTTON}
               onClick={openAddPayslipFreeform}
-              title="Add a payslip for any year/month, without picking a calendar slot first"
+              data-tooltip="Add a payslip for any year/month, without picking a calendar slot first"
             >
               + Add payslip
             </button>
@@ -444,7 +445,7 @@ export default function PayslipClient({ company = "Sophos" }: { company?: string
                   ? "Hide gross amounts in calendar"
                   : "Show gross amounts in calendar"
               }
-              title={
+              data-tooltip={
                 showGross
                   ? "Hide gross amounts in calendar"
                   : "Show gross amounts in calendar"

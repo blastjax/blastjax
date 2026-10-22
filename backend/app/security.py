@@ -1,14 +1,20 @@
 from __future__ import annotations
 
+import logging
 import os
 import secrets
 import time
 from typing import Any
 
+import jwt
+
 import cache
 from db import any_app_users
 
-_SESSION_PREFIX = "auth_session"
+_log = logging.getLogger(__name__)
+
+_JWT_ALGORITHM = "HS256"
+_REVOKED_PREFIX = "auth_revoked"
 _FAIL_PREFIX = "auth_fail"
 _USERS_EXIST_KEY = "auth_state:users_exist"
 
@@ -72,6 +78,20 @@ def _auth_disabled() -> bool:
     return (os.environ.get("BUDGET_DISABLE_AUTH") or "").strip().lower() in ("1", "true", "yes")
 
 
+def _load_jwt_secret() -> str:
+    secret = (os.environ.get("BUDGET_JWT_SECRET") or "").strip()
+    if secret:
+        if len(secret) < 32:
+            raise RuntimeError("BUDGET_JWT_SECRET must be at least 32 characters.")
+        return secret
+    if not _auth_disabled():
+        _log.warning("BUDGET_JWT_SECRET is not set; using a random key, so logins end whenever the API restarts.")
+    return secrets.token_urlsafe(48)
+
+
+_JWT_SECRET = _load_jwt_secret()
+
+
 def login_required() -> bool:
     if _auth_disabled():
         return False
@@ -100,26 +120,45 @@ def _session_ttl_seconds() -> int:
 
 
 def create_session(user_id: int) -> str:
-    token = secrets.token_urlsafe(32)
-    _store_set(f"{_SESSION_PREFIX}:{token}", user_id, _session_ttl_seconds())
-    return token
+    now = int(time.time())
+    claims = {
+        "sub": str(user_id),
+        "iat": now,
+        "exp": now + _session_ttl_seconds(),
+        "jti": secrets.token_urlsafe(16),
+    }
+    return jwt.encode(claims, _JWT_SECRET, algorithm=_JWT_ALGORITHM)
+
+
+def _session_claims(token: str) -> dict[str, Any] | None:
+    if not token:
+        return None
+    try:
+        claims = jwt.decode(
+            token,
+            _JWT_SECRET,
+            algorithms=[_JWT_ALGORITHM],
+            options={"require": ["sub", "iat", "exp", "jti"]},
+        )
+    except jwt.InvalidTokenError:
+        return None
+    return None if _store_get(f"{_REVOKED_PREFIX}:{claims['jti']}") else claims
 
 
 def session_is_valid(token: str) -> bool:
-    if not token:
-        return False
-    return _store_get(f"{_SESSION_PREFIX}:{token}") is not None
+    return _session_claims(token) is not None
 
 
 def session_user_id(token: str) -> int | None:
-    if not token:
-        return None
-    return _store_get(f"{_SESSION_PREFIX}:{token}")
+    claims = _session_claims(token)
+    return int(claims["sub"]) if claims else None
 
 
 def revoke_session(token: str) -> None:
-    if token:
-        _store_delete(f"{_SESSION_PREFIX}:{token}")
+    # A JWT stays valid until it expires, so logout records its id until then.
+    claims = _session_claims(token)
+    if claims:
+        _store_set(f"{_REVOKED_PREFIX}:{claims['jti']}", True, max(1, claims["exp"] - int(time.time())))
 
 
 def too_many_failed_attempts(client_ip: str) -> bool:

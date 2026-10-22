@@ -87,7 +87,10 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   }, [checkStatus]);
 
   useEffect(() => {
-    const onUnauthorized = () => setStatus("unauthenticated");
+    const onUnauthorized = () => {
+      setError("Your session ended. Log in again.");
+      setStatus("unauthenticated");
+    };
     window.addEventListener(AUTH_UNAUTHORIZED_EVENT, onUnauthorized);
     return () => window.removeEventListener(AUTH_UNAUTHORIZED_EVENT, onUnauthorized);
   }, []);

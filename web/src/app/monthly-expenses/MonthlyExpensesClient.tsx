@@ -1,5 +1,6 @@
 "use client";
 
+import { confirmDialog } from "@/components/ConfirmDialog";
 import { AmountInput } from "@/components/AmountInput";
 import { DatePickerField } from "@/components/DatePickerField";
 import { PageHeader } from "@/components/PageHeader";
@@ -240,7 +241,7 @@ export default function MonthlyExpensesClient() {
 
   const onDelete = useCallback(
     async (id: number) => {
-      if (!window.confirm("Delete this monthly expense?")) return;
+      if (!(await confirmDialog("Delete this monthly expense?"))) return;
       setError(null);
       try {
         await deleteMonthlyExpense(id);

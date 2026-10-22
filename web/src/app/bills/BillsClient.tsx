@@ -1,5 +1,6 @@
 "use client";
 
+import { confirmDialog } from "@/components/ConfirmDialog";
 import { useCallback, useEffect, useState } from "react";
 import { AmountInput } from "@/components/AmountInput";
 import { DatePickerField } from "@/components/DatePickerField";
@@ -284,12 +285,12 @@ export default function BillsClient() {
     }, closeCategory);
   };
 
-  const removeCategory = () => {
+  const removeCategory = async () => {
     const id = categoryDraft?.id;
     if (id == null) return;
     const count = bills.filter((b) => b.category_id === id).length;
     const name = nameOf(id);
-    if (!confirm(count > 0 ? `Delete ${name} and its ${plural(count, "bill")}?` : `Delete ${name}?`)) return;
+    if (!(await confirmDialog(count > 0 ? `Delete ${name} and its ${plural(count, "bill")}?` : `Delete ${name}?`))) return;
     void submit(() => deleteBillCategory(id), closeCategory);
   };
 
@@ -311,9 +312,9 @@ export default function BillsClient() {
     }, closeBill);
   };
 
-  const removeBill = () => {
+  const removeBill = async () => {
     const id = billDraft?.id;
-    if (id == null || !confirm("Delete this bill and its file?")) return;
+    if (id == null || !(await confirmDialog("Delete this bill and its file?"))) return;
     void submit(() => deleteBill(id), closeBill);
   };
 

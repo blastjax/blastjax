@@ -1,5 +1,6 @@
 "use client";
 
+import { confirmDialog } from "@/components/ConfirmDialog";
 import { useEffect, useState, type DragEvent } from "react";
 import {
   createCompany,
@@ -207,7 +208,7 @@ export function CompaniesSettingsPanel() {
   }
 
   async function handleDelete(company: CompanyRow) {
-    if (!confirm(`Delete "${company.name}"?`)) return;
+    if (!(await confirmDialog(`Delete "${company.name}"?`))) return;
     try {
       await deleteCompany(company.id);
       setInfoMsg(`Deleted "${company.name}".`);
@@ -282,7 +283,7 @@ export function CompaniesSettingsPanel() {
                 <li
                   key={company.id}
                   className="cursor-grab p-4 active:cursor-grabbing"
-                  title="Drag to reorder"
+                  data-tooltip="Drag to reorder"
                   draggable
                   onDragStart={(e) => handleCardDragStart(e, company)}
                   onDragOver={handleCardDragOver}

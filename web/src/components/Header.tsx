@@ -139,7 +139,7 @@ function ThemeToggle() {
       onClick={toggleTheme}
       className={ICON_BUTTON_CLASSES}
       aria-label={dark ? "Switch to light theme" : "Switch to dark theme"}
-      title={dark ? "Light mode" : "Dark mode"}
+      data-tooltip={dark ? "Light mode" : "Dark mode"}
     >
       {dark ? <SunIcon className="size-5" /> : <MoonIcon className="size-5" />}
     </button>
@@ -170,7 +170,7 @@ export function Header() {
         type="button"
         className={`${ICON_BUTTON_CLASSES} max-lg:hidden`}
         aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-        title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+        data-tooltip={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
         onClick={toggleSidebar}
       >
         <SidebarToggleIcon className="size-5" />

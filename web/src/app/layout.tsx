@@ -2,8 +2,10 @@ import type { Metadata, Viewport } from "next";
 import { IBM_Plex_Mono, Manrope } from "next/font/google";
 import { AppShell } from "@/components/AppShell";
 import { AuthGate } from "@/components/AuthGate";
+import { ConfirmHost } from "@/components/ConfirmDialog";
 import { ThemeInitScript } from "@/components/ThemeInitScript";
 import { ThemeProvider } from "@/components/ThemeProvider";
+import { TooltipLayer } from "@/components/TooltipLayer";
 import { THEME_COLOR } from "@/lib/theme";
 import "./globals.css";
 
@@ -56,6 +58,8 @@ export default function RootLayout({
           <AuthGate>
             <AppShell>{children}</AppShell>
           </AuthGate>
+          <ConfirmHost />
+          <TooltipLayer />
         </ThemeProvider>
       </body>
     </html>

@@ -1,5 +1,6 @@
 "use client";
 
+import { confirmDialog } from "@/components/ConfirmDialog";
 import { AmountInput } from "@/components/AmountInput";
 import { PageHeader } from "@/components/PageHeader";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -694,7 +695,7 @@ export default function InstallmentsClient() {
   };
 
   const onDelete = async (id: number) => {
-    if (!confirm("Delete this installment plan?")) return;
+    if (!(await confirmDialog("Delete this installment plan?"))) return;
     setSaving(true);
     setError(null);
     try {
@@ -1137,7 +1138,7 @@ export default function InstallmentsClient() {
                             <tr
                               key={ln.id}
                               draggable
-                              title="Drag to reorder"
+                              data-tooltip="Drag to reorder"
                               className={`cursor-grab transition-colors duration-150 active:cursor-grabbing ${
                                 isNext ? "bg-brand-soft" : "hover:bg-surface-2/50"
                               }`}
@@ -1326,7 +1327,7 @@ export default function InstallmentsClient() {
                               <li
                                 key={`${it.planId}-${it.seq}`}
                                 className="flex items-center gap-1.5 text-[11px] leading-tight"
-                                title={`${it.planName} #${it.seq} · ${it.paid ? "Paid" : "To pay"}`}
+                                data-tooltip={`${it.planName} #${it.seq} · ${it.paid ? "Paid" : "To pay"}`}
                               >
                                 <span
                                   className={`size-1.5 shrink-0 rounded-full ${it.paid ? "bg-success" : "bg-warning"}`}

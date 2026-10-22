@@ -978,7 +978,7 @@ function SignSlot({
       type="button"
       onClick={onClick}
       aria-label={label}
-      title="Click to cycle: none → = → ✕"
+      data-tooltip="Click to cycle: none → = → ✕"
       style={{ ...style, fontSize }}
       className={`${classes} rounded hover:bg-indigo-100`}
     >

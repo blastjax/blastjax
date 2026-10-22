@@ -1,5 +1,6 @@
 "use client";
 
+import { confirmDialog } from "@/components/ConfirmDialog";
 import { useEffect, useState } from "react";
 import {
   createAppUser,
@@ -217,7 +218,7 @@ export function UsersSettingsPanel() {
   }
 
   async function handleDelete(user: AppUserRow) {
-    if (!confirm(`Delete user "${user.username}"?`)) return;
+    if (!(await confirmDialog(`Delete user "${user.username}"?`))) return;
     try {
       await deleteAppUser(user.id);
       setInfoMsg(`Deleted "${user.username}".`);

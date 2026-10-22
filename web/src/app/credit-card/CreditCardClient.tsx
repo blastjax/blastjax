@@ -1,5 +1,6 @@
 "use client";
 
+import { confirmDialog } from "@/components/ConfirmDialog";
 import { AmountInput } from "@/components/AmountInput";
 import { DatePickerField } from "@/components/DatePickerField";
 import { PageHeader } from "@/components/PageHeader";
@@ -274,7 +275,7 @@ export default function CreditCardClient() {
 
   const onRemoveCard = useCallback(async () => {
     if (!card) return;
-    if (!confirm("Remove this credit card? Linked installments will be unlinked.")) return;
+    if (!(await confirmDialog("Remove this credit card? Linked installments will be unlinked.", "Remove"))) return;
     setCardFormError(null);
     try {
       await deleteCreditCard(card.id);
@@ -329,7 +330,7 @@ export default function CreditCardClient() {
 
   const onDeletePayment = useCallback(
     async (id: number) => {
-      if (!confirm("Delete this payment? The card balance goes back up by its amount.")) return;
+      if (!(await confirmDialog("Delete this payment? The card balance goes back up by its amount."))) return;
       setError(null);
       try {
         await deleteCreditCardPayment(id);
@@ -529,7 +530,7 @@ export default function CreditCardClient() {
                     type="button"
                     onClick={openBalanceModal}
                     className="rounded-md px-1.5 py-0.5 font-medium text-white transition-colors hover:bg-white/15"
-                    title="Match what your bank shows"
+                    data-tooltip="Match what your bank shows"
                   >
                     {fmtMoney(card.available_limit)} available · Adjust
                   </button>

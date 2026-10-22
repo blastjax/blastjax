@@ -611,7 +611,7 @@ function HeatRow({
           return (
             <div
               key={m}
-              title={`${MF[m]} ${year}: ${fmt(v)}`}
+              data-tooltip={`${MF[m]} ${year}: ${fmt(v)}`}
               className={`${cell} border-transparent`}
               style={{ background: `rgba(45,212,191,${a.toFixed(3)})` }}
             >
@@ -623,7 +623,7 @@ function HeatRow({
           return (
             <div
               key={m}
-              title={`${MF[m]} ${year} forecast: ${fmt(f)}`}
+              data-tooltip={`${MF[m]} ${year} forecast: ${fmt(f)}`}
               className={`${cell} border-dashed border-[rgba(45,212,191,.6)] italic text-st-teal`}
             >
               {fk(f)}
@@ -640,7 +640,7 @@ function HeatRow({
         {hasActual && <span>{fmt(total)}</span>}
         {fTotal > 0 && (
           <span
-            title={hasActual ? `${year} projected: actual + forecast` : `${year} forecast`}
+            data-tooltip={hasActual ? `${year} projected: actual + forecast` : `${year} forecast`}
             className="italic text-st-teal"
           >
             {fmt(total + fTotal)}

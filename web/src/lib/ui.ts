@@ -47,6 +47,7 @@ const SOFT_BRAND = "bg-brand-soft text-brand-text hover:bg-brand-soft-hover";
 const GHOST_NEUTRAL = "text-ink-3 hover:bg-surface-2 hover:text-ink";
 const OUTLINE_DANGER =
   "border border-danger/40 bg-danger-soft text-danger-text hover:border-danger/70";
+const FILL_DANGER = "bg-danger text-white shadow-xs hover:bg-danger/90";
 
 export const PRIMARY_BUTTON_CLASSES = `${BUTTON_MD} ${FILL_BRAND}`;
 
@@ -59,6 +60,8 @@ export const ADD_BUTTON_CLASSES = `${BUTTON_SM} ${FILL_BRAND}`;
 export const EDIT_BUTTON_CLASSES = `${BUTTON_SM} ${OUTLINE_NEUTRAL}`;
 
 export const DELETE_BUTTON_CLASSES = `${BUTTON_SM} ${OUTLINE_DANGER}`;
+
+export const DANGER_BUTTON_CLASSES = `${BUTTON_MD} ${FILL_DANGER}`;
 
 export const DETAIL_BUTTON_CLASSES = `${BUTTON_SM} ${GHOST_NEUTRAL}`;
 

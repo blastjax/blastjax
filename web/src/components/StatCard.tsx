@@ -61,7 +61,7 @@ export function StatCard({
             className={`inline-flex shrink-0 items-center gap-1 text-sm font-medium tabular-nums ${
               flat ? "text-ink-3" : good ? "text-success-text" : "text-danger-text"
             }`}
-            title={deltaLabel}
+            data-tooltip={deltaLabel}
           >
             {Math.abs(delta).toLocaleString(undefined, {
               maximumFractionDigits: 1,

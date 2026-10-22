@@ -9,6 +9,8 @@ import time
 from decimal import Decimal
 from pathlib import Path
 
+import jwt
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import db
@@ -139,6 +141,21 @@ def check_auth_disable_flag() -> None:
         assert d() is False, off
     del os.environ["BUDGET_DISABLE_AUTH"]
     assert d() is False
+
+
+def check_jwt_sessions() -> None:
+    token = security.create_session(7)
+    assert security.session_user_id(token) == 7
+    head, body, sig = token.split(".")
+    assert security.session_user_id(f"{head}.{body}.{sig[::-1]}") is None, "accepted a forged signature"
+    now = int(time.time())
+    claims = {"sub": "7", "iat": now, "exp": now + 60, "jti": "t"}
+    expired = jwt.encode({**claims, "exp": now - 1}, security._JWT_SECRET, algorithm="HS256")
+    assert not security.session_is_valid(expired), "accepted an expired token"
+    assert not security.session_is_valid(jwt.encode(claims, "k" * 32, algorithm="HS256")), "accepted another key"
+    assert not security.session_is_valid(jwt.encode(claims, None, algorithm="none")), "accepted an unsigned token"
+    security.revoke_session(token)
+    assert not security.session_is_valid(token), "token still valid after logout"
 
 
 def check_lotto_game_seed() -> None:

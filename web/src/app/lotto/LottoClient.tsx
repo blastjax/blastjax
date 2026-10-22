@@ -1,5 +1,6 @@
 "use client";
 
+import { confirmDialog } from "@/components/ConfirmDialog";
 import Link from "next/link";
 import { AmountInput } from "@/components/AmountInput";
 import { ChevronRightIcon, PencilIcon, TrashIcon } from "@/components/Icons";
@@ -877,7 +878,7 @@ export default function LottoClient({ gameId }: { gameId: number }) {
   };
 
   const onDeleteDraw = async (drawId: number) => {
-    if (!confirm("Delete this result and all its attempts?")) return;
+    if (!(await confirmDialog("Delete this result and all its attempts?"))) return;
     setSaving(true);
     setError(null);
     try {
@@ -1015,7 +1016,7 @@ export default function LottoClient({ gameId }: { gameId: number }) {
   };
 
   const onDeleteAttempt = async (drawId: number, attemptId: number) => {
-    if (!confirm("Delete this attempt?")) return;
+    if (!(await confirmDialog("Delete this attempt?"))) return;
     setSaving(true);
     setError(null);
     try {
@@ -1030,7 +1031,7 @@ export default function LottoClient({ gameId }: { gameId: number }) {
 
   const onDeleteTicket = async (drawId: number, items: { attempt: LottoAttemptRow }[]) => {
     if (
-      !confirm(`Delete this ticket and its ${items.length} attempt${items.length === 1 ? "" : "s"}?`)
+      !(await confirmDialog(`Delete this ticket and its ${items.length} attempt${items.length === 1 ? "" : "s"}?`))
     ) {
       return;
     }
@@ -1237,7 +1238,7 @@ export default function LottoClient({ gameId }: { gameId: number }) {
       return (
       <li
         key={attempt.id}
-        title={attempt.ticket == null ? "Double-click for edit/delete" : undefined}
+        data-tooltip={attempt.ticket == null ? "Double-click for edit/delete" : undefined}
         className="flex items-center gap-2 rounded-lg"
         onDoubleClick={
           attempt.ticket == null
@@ -1268,7 +1269,7 @@ export default function LottoClient({ gameId }: { gameId: number }) {
               type="button"
               disabled={saving}
               aria-label="Edit attempt"
-              title="Edit attempt"
+              data-tooltip="Edit attempt"
               className={ICON_BUTTON_CLASSES}
               onClick={() => openEditLooseAttempt(detail.draw.id, attempt)}
             >
@@ -1278,7 +1279,7 @@ export default function LottoClient({ gameId }: { gameId: number }) {
               type="button"
               disabled={saving}
               aria-label="Delete attempt"
-              title="Delete attempt"
+              data-tooltip="Delete attempt"
               className={ICON_BUTTON_CLASSES}
               onClick={() => void onDeleteAttempt(detail.draw.id, attempt.id)}
             >
@@ -1292,7 +1293,7 @@ export default function LottoClient({ gameId }: { gameId: number }) {
     return (
       <section
         key={detail.draw.id}
-        title="Double-click for edit/delete"
+        data-tooltip="Double-click for edit/delete"
         className={CARD_CLASSES}
         onDoubleClick={(e) => {
           e.stopPropagation();
@@ -1336,7 +1337,7 @@ export default function LottoClient({ gameId }: { gameId: number }) {
                   type="button"
                   disabled={saving}
                   aria-label="Edit draw"
-                  title="Edit draw"
+                  data-tooltip="Edit draw"
                   className={ICON_BUTTON_CLASSES}
                   onClick={() => openEditDraw(detail)}
                 >
@@ -1346,7 +1347,7 @@ export default function LottoClient({ gameId }: { gameId: number }) {
                   type="button"
                   disabled={saving}
                   aria-label="Delete draw"
-                  title="Delete draw"
+                  data-tooltip="Delete draw"
                   className={ICON_BUTTON_CLASSES}
                   onClick={() => void onDeleteDraw(detail.draw.id)}
                 >
@@ -1511,7 +1512,7 @@ export default function LottoClient({ gameId }: { gameId: number }) {
                   return (
                   <div
                     key={`ticket-${cluster.ticket}`}
-                    title="Double-click for edit/delete"
+                    data-tooltip="Double-click for edit/delete"
                     className={`rounded-lg border p-3 transition-colors duration-150 ${
                       cluster.bestMatch >= 3
                         ? "border-emerald-200 bg-emerald-50/40 dark:border-emerald-900 dark:bg-emerald-950/20"
@@ -1540,7 +1541,7 @@ export default function LottoClient({ gameId }: { gameId: number }) {
                                 type="button"
                                 disabled={saving}
                                 aria-label="Edit ticket"
-                                title="Edit ticket"
+                                data-tooltip="Edit ticket"
                                 className={ICON_BUTTON_CLASSES}
                                 onClick={() => openEditTicket(detail.draw.id, cluster.ticket, cluster.items)}
                               >
@@ -1550,7 +1551,7 @@ export default function LottoClient({ gameId }: { gameId: number }) {
                                 type="button"
                                 disabled={saving}
                                 aria-label="Delete ticket"
-                                title="Delete ticket"
+                                data-tooltip="Delete ticket"
                                 className={ICON_BUTTON_CLASSES}
                                 onClick={() => void onDeleteTicket(detail.draw.id, cluster.items)}
                               >
@@ -1730,7 +1731,7 @@ export default function LottoClient({ gameId }: { gameId: number }) {
               type="button"
               className={`${ACTION_BUTTON_CLASSES} px-3 py-1.5 text-sm`}
               onClick={openImport}
-              title="Bulk-load historic results (date, numbers, jackpot, winners) from pasted text"
+              data-tooltip="Bulk-load historic results (date, numbers, jackpot, winners) from pasted text"
             >
               Import historic results
             </button>
@@ -1739,7 +1740,7 @@ export default function LottoClient({ gameId }: { gameId: number }) {
               className={`${ACTION_BUTTON_CLASSES} px-3 py-1.5 text-sm`}
               onClick={onExportHistoric}
               disabled={draws.every((d) => d.draw.numbers.length !== 6)}
-              title="Download every draw with a result as a pipe-delimited text file, in the same format Import historic results reads"
+              data-tooltip="Download every draw with a result as a pipe-delimited text file, in the same format Import historic results reads"
             >
               Export historic results
             </button>
@@ -1748,7 +1749,7 @@ export default function LottoClient({ gameId }: { gameId: number }) {
               className={`${ACTION_BUTTON_CLASSES} px-3 py-1.5 text-sm`}
               onClick={onExportAllAttempts}
               disabled={draws.every((d) => d.attempts.length === 0)}
-              title="Download every attempt you've logged, across every draw, grouped by date"
+              data-tooltip="Download every attempt you've logged, across every draw, grouped by date"
             >
               Export all attempts
             </button>
@@ -1993,7 +1994,7 @@ export default function LottoClient({ gameId }: { gameId: number }) {
                             <div
                               key={tier}
                               className="flex items-center gap-3"
-                              title={`${fmtCount(count)} attempt${count === 1 ? "" : "s"} (${pct.toFixed(1)}%) matched ${tier} of 6`}
+                              data-tooltip={`${fmtCount(count)} attempt${count === 1 ? "" : "s"} (${pct.toFixed(1)}%) matched ${tier} of 6`}
                             >
                               <span
                                 className={`w-9 shrink-0 text-xs font-semibold tabular-nums ${
@@ -2046,7 +2047,7 @@ export default function LottoClient({ gameId }: { gameId: number }) {
                               <div
                                 key={verb}
                                 className="flex items-center gap-2"
-                                title={`${verb === "played" ? "You played" : "Drawn"} ${fmtCount(value)} time${value === 1 ? "" : "s"}`}
+                                data-tooltip={`${verb === "played" ? "You played" : "Drawn"} ${fmtCount(value)} time${value === 1 ? "" : "s"}`}
                               >
                                 <div className="h-2.5 min-w-0 flex-1 rounded bg-surface-2">
                                   <div className={`h-full rounded ${tone}`} style={{ width: `${(value / max) * 100}%` }} />
@@ -2078,7 +2079,7 @@ export default function LottoClient({ gameId }: { gameId: number }) {
                             className={`flex aspect-square items-center justify-center rounded-md text-xs font-semibold tabular-nums transition-colors duration-150 ${BOARD_SWATCH_CLASSES[c.tier]} ${
                               inLatest ? BOARD_SWATCH_CLASSES.latest : ""
                             }`}
-                            title={`${String(c.n).padStart(2, "0")}: played ${c.played} time${c.played === 1 ? "" : "s"}${
+                            data-tooltip={`${String(c.n).padStart(2, "0")}: played ${c.played} time${c.played === 1 ? "" : "s"}${
                               inLatest ? " · in the latest result" : ""
                             }`}
                           >
