@@ -106,6 +106,44 @@ def check_pcso_results() -> None:
     assert pcso_results.sync_start(["2020-01-01"], today) == floor
     assert pcso_results.sync_start(["2026-09-23"], today) > today
 
+    # Client: `replies` scripts what each request to PCSO returns; an unscripted request fails on pop.
+    replies: list[str | Exception] = []
+
+    def search(start: dt.date, end: dt.date) -> str:
+        reply = replies.pop(0)
+        if isinstance(reply, Exception):
+            raise reply
+        return reply
+
+    client = pcso_results._Client()
+    client._search = search  # type: ignore[method-assign]
+    at = lambda d, h, m=0: dt.datetime(2026, 9, d, h, m, tzinfo=pcso_results.PH_TIME)  # noqa: E731
+
+    def fetch(now: dt.datetime, start_day: int = 22) -> list[pcso_results.PcsoResult]:
+        client._clock = lambda: now
+        return client.fetch(dt.date(2026, 9, start_day), now.date(), games)
+
+    replies[:] = [html]
+    assert fetch(at(22, 23)) == got
+    assert fetch(at(22, 23, 10)) == got, "a repeat sync within REUSE should not hit PCSO"
+    assert fetch(at(23, 10), start_day=23) == [], "the 23rd's draws can't be up before 2:30 PM"
+    replies[:] = [pcso_results.PcsoBlocked("HTTP 403")]  # 11 hours later the 22nd is fetched again
+    try:
+        fetch(at(23, 10))
+    except pcso_results.PcsoBlocked as exc:
+        assert exc.retry_at == at(23, 10, 10), exc.retry_at
+    else:
+        raise AssertionError("a 403 from PCSO didn't raise")
+    try:
+        fetch(at(23, 10, 5))
+    except pcso_results.PcsoError as exc:
+        assert not isinstance(exc, pcso_results.PcsoBlocked) and exc.retry_at == at(23, 10, 10)
+    else:
+        raise AssertionError("retried PCSO during the backoff")
+    replies[:] = [html]
+    assert fetch(at(23, 10, 10)) == got
+    assert not replies
+
 
 def check_serialize_detail_shape() -> None:
     detail: dict[str, object] = {"trip": {"id": 1, "title": "Osaka"}}
