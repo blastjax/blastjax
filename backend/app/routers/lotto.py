@@ -25,6 +25,7 @@ from db import (
     list_lotto_draws,
     list_lotto_games,
     list_lotto_latest_results,
+    list_lotto_results_between,
     update_lotto_attempt,
     update_lotto_draw,
     upsert_lotto_draw,
@@ -89,6 +90,21 @@ def lotto_list(
         return hit
     rows = list_lotto_draws(game_id, limit=limit)
     result = {"draws": [_serialize_detail(r) for r in rows]}
+    cache.set(key, result)
+    return result
+
+
+@router.get("/api/lotto/calendar")
+def lotto_calendar(
+    year: int = Query(..., ge=1900, le=2100), month: int = Query(..., ge=1, le=12)
+) -> dict[str, Any]:
+    key = f"lotto:calendar:{year}-{month}"
+    hit = cache.get(key)
+    if hit is not None:
+        return hit
+    start = dt.date(year, month, 1)
+    next_month = (start + dt.timedelta(days=31)).replace(day=1)
+    result = {"draws": list_lotto_results_between(start, next_month)}
     cache.set(key, result)
     return result
 

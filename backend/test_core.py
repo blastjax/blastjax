@@ -437,7 +437,7 @@ def check_db_against_postgres() -> None:
 
         db.upsert_lotto_draw(3, dt.date(2026, 1, 1), [1, 2, 3, 4, 5, 6])
         rows = [
-            {"draw_date": dt.date(2026, 1, 1), "numbers": [1, 2, 3, 4, 5, 6], "jackpot_prize": 1.0, "winners": 0},
+            {"draw_date": dt.date(2026, 1, 1), "numbers": [1, 2, 3, 4, 5, 6], "jackpot_prize": 1.0, "winners": 1},
             {"draw_date": dt.date(2026, 1, 8), "numbers": [7, 8, 9, 10, 11, 12], "jackpot_prize": 2.0, "winners": 1},
             {"draw_date": dt.date(2026, 1, 8), "numbers": [13, 14, 15, 16, 17, 18], "jackpot_prize": 3.0, "winners": 2},
         ]
@@ -465,6 +465,17 @@ def check_db_against_postgres() -> None:
             "winners": 0,
             "best_hits": [2, 3, 4, 5, 6],
         }, game
+        jan29 = db.upsert_lotto_draw(3, dt.date(2026, 1, 29), [9, 10, 11, 12, 13, 14], winners=1)["draw"]["id"]
+        db.insert_lotto_attempts_bulk(jan29, [([9, 10, 11, 12, 13, 14], 1)])
+        db.upsert_lotto_draw(3, dt.date(2026, 2, 1), None)
+        month = db.list_lotto_results_between(dt.date(2026, 1, 1), dt.date(2026, 2, 1))
+        assert [(r["draw_date"], r["winners"], r["best_hits"]) for r in month] == [
+            ("2026-01-01", 1, None),
+            ("2026-01-08", 2, []),
+            ("2026-01-15", 0, [2, 3, 4, 5, 6]),
+            ("2026-01-22", 0, None),
+            ("2026-01-29", 1, [9, 10, 11, 12, 13, 14]),
+        ], month
 
         payslip = db.insert_payslip(1000, *([None] * 12), company="Acme")
         assert payslip["has_pdf"] is False

@@ -2,17 +2,20 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { CalendarMonth } from "@/components/CalendarMonth";
 import { ChevronRightIcon } from "@/components/Icons";
 import { Modal } from "@/components/Modal";
 import { PageHeader } from "@/components/PageHeader";
 import {
+  getLottoCalendar,
   getLottoGames,
   importLottoDrawResultsText,
   lottoGameSlug,
   syncLottoResultsFromPcso,
+  type LottoDrawResult,
   type LottoGame,
 } from "@/lib/api";
-import { formatDate, toIsoDateLocal } from "@/lib/dateFormat";
+import { addMonths, formatDate, toIsoDateLocal } from "@/lib/dateFormat";
 import { fmtCount, fmtJackpotCompact } from "@/lib/formatNumber";
 
 const DRAW_SCHEDULE: Record<string, number[]> = {
@@ -21,6 +24,22 @@ const DRAW_SCHEDULE: Record<string, number[]> = {
   "Superlotto 6/49": [0, 2, 4],
   "Megalotto 6/45": [1, 3, 5],
   "Lotto 6/42": [2, 4, 6],
+};
+
+// Colorblind-checked palette (light / dark). The pairs that are hard to tell apart
+// (orange–yellow, orange–magenta, magenta–aqua) only go to games that never draw on the same night.
+const GAME_COLORS: Record<string, string> = {
+  "Lotto 6/42": "text-[#2a78d6] dark:text-[#3987e5]",
+  "Megalotto 6/45": "text-[#1baf7a] dark:text-[#199e70]",
+  "Superlotto 6/49": "text-[#e87ba4] dark:text-[#d55181]",
+  "Grand Lotto 6/55": "text-[#eb6834] dark:text-[#d95926]",
+  "Ultra Lotto 6/58": "text-[#eda100] dark:text-[#c98500]",
+};
+
+const DAY_FILLS = {
+  played: { label: "You played", className: "bg-emerald-700 text-white" },
+  winner: { label: "Jackpot won by someone else", className: "bg-zinc-500 text-white" },
+  won: { label: "You won the jackpot", className: "bg-white text-zinc-900 shadow-md ring-1 ring-zinc-400" },
 };
 
 function nextDrawLabel(gameName: string): string | null {
@@ -80,6 +99,165 @@ type ImportSummary = {
   discarded: number;
   errors: string[];
 };
+
+const STAR_POINTS = "5,0 6.12,3.45 9.76,3.45 6.82,5.59 7.94,9.05 5,6.91 2.06,9.05 3.18,5.59 0.24,3.45 3.88,3.45";
+
+type DayDraw = { game: LottoGame; result: LottoDrawResult };
+
+function dayFill(draws: DayDraw[]): keyof typeof DAY_FILLS | null {
+  if (draws.some(({ result }) => result.best_hits?.length === 6)) return "won";
+  if (draws.some(({ result }) => result.winners > 0)) return "winner";
+  if (draws.some(({ result }) => result.best_hits)) return "played";
+  return null;
+}
+
+function drawLabel({ game, result }: DayDraw): string {
+  const won = result.best_hits?.length === 6;
+  const notes = [
+    won ? "you won the jackpot" : result.winners > 0 && "jackpot won",
+    result.best_hits && !won && "you played",
+  ].filter(Boolean);
+  return notes.length ? `${game.name}: ${notes.join(", ")}` : game.name;
+}
+
+function DayMark({ day, draws }: { day: number; draws: DayDraw[] }) {
+  const n = draws.length;
+  // ~24 dashes around the ring, rounded to a multiple of n so the colors alternate evenly.
+  const dash = (2 * Math.PI * 19) / (n * Math.round(24 / n));
+  const fill = dayFill(draws);
+  const label = draws.map(drawLabel).join("\n");
+  const jackpots = draws.filter(({ result }) => result.winners > 0 || result.best_hits?.length === 6);
+  return (
+    <span className="absolute inset-0" title={label}>
+      <span className="sr-only">{label}</span>
+      {fill && (
+        <span
+          aria-hidden
+          className={`absolute inset-[12.5%] flex items-center justify-center rounded-full ${DAY_FILLS[fill].className}`}
+        >
+          {day}
+        </span>
+      )}
+      <svg
+        viewBox="0 0 40 40"
+        aria-hidden
+        className={`size-full ${n > 1 ? "motion-safe:animate-[spin_12s_linear_infinite]" : ""}`}
+      >
+        {draws.map(({ game }, i) => (
+          <circle
+            key={game.id}
+            cx="20"
+            cy="20"
+            r="19"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeDasharray={n > 1 ? `${dash} ${dash * (n - 1)}` : undefined}
+            strokeDashoffset={-dash * i}
+            className={GAME_COLORS[game.name]}
+          />
+        ))}
+      </svg>
+      {jackpots.length > 0 && (
+        <svg viewBox="0 0 40 40" aria-hidden className="absolute inset-0 size-full overflow-visible">
+          {jackpots.map(({ game }, i) => (
+            <polygon
+              key={game.id}
+              points={STAR_POINTS}
+              transform={`translate(${14 + (i - (jackpots.length - 1) / 2) * 12.5} -3) scale(1.2)`}
+              fill="currentColor"
+              strokeWidth="2"
+              strokeLinejoin="round"
+              paintOrder="stroke"
+              className={`stroke-surface ${GAME_COLORS[game.name]}`}
+            />
+          ))}
+        </svg>
+      )}
+    </span>
+  );
+}
+
+function DrawCalendar({ games }: { games: LottoGame[] }) {
+  const [view, setView] = useState(() => {
+    const now = new Date();
+    return addMonths(now.getFullYear(), now.getMonth() + 1, 0);
+  });
+  const [results, setResults] = useState<LottoDrawResult[]>([]);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let stale = false;
+    getLottoCalendar(view.y, view.m)
+      .then((r) => {
+        if (stale) return;
+        setResults(r.draws);
+        setError(null);
+      })
+      .catch((e: unknown) => {
+        if (!stale) setError(e instanceof Error ? e.message : "Failed to load draws.");
+      });
+    return () => {
+      stale = true;
+    };
+  }, [view.y, view.m, games]);
+
+  const gameById = new Map(games.map((g) => [g.id, g]));
+  const byDate = new Map<string, DayDraw[]>();
+  for (const result of results) {
+    const game = gameById.get(result.game_id);
+    if (game) byDate.set(result.draw_date, [...(byDate.get(result.draw_date) ?? []), { game, result }]);
+  }
+
+  return (
+    <section className={CARD_CLASSES}>
+      <h2 className="text-lg font-semibold text-ink">Draw calendar</h2>
+      <p className="mt-0.5 text-sm text-ink-3">Each ring is a game drawn that day.</p>
+      {error && <ErrorAlert className="mt-4">{error}</ErrorAlert>}
+      <div className="mt-4">
+        <CalendarMonth
+          fluid
+          year={view.y}
+          month={view.m}
+          dayState={() => "none"}
+          dayAdornment={(iso) => {
+            const draws = byDate.get(iso);
+            return draws && <DayMark day={Number(iso.slice(8))} draws={draws} />;
+          }}
+          onPrev={() => setView((v) => addMonths(v.y, v.m, -1))}
+          onNext={() => setView((v) => addMonths(v.y, v.m, 1))}
+        />
+      </div>
+      <div className="mt-6 flex flex-col gap-3 border-t border-line pt-4 text-sm">
+        <ul className="flex flex-wrap gap-x-6 gap-y-2.5">
+          {games.map((g) => (
+            <li key={g.id} className="flex items-center gap-2.5">
+              <span
+                aria-hidden
+                className={`size-3.5 shrink-0 rounded-full border-2 border-current ${GAME_COLORS[g.name]}`}
+              />
+              <span className="text-ink-2">{g.name}</span>
+            </li>
+          ))}
+        </ul>
+        <ul className="flex flex-wrap gap-x-6 gap-y-2.5">
+          {Object.values(DAY_FILLS).map(({ label, className }) => (
+            <li key={label} className="flex items-center gap-2.5">
+              <span aria-hidden className={`size-3.5 shrink-0 rounded-full ${className}`} />
+              <span className="text-ink-2">{label}</span>
+            </li>
+          ))}
+          <li className="flex items-center gap-2.5">
+            <svg viewBox="0 0 10 10" aria-hidden className="size-3.5 shrink-0 fill-current text-ink-3">
+              <polygon points={STAR_POINTS} />
+            </svg>
+            <span className="text-ink-2">Star in a game&apos;s color: that game&apos;s jackpot was won</span>
+          </li>
+        </ul>
+      </div>
+    </section>
+  );
+}
 
 export default function LottoGamesPage() {
   const [games, setGames] = useState<LottoGame[] | null>(null);
@@ -350,6 +528,8 @@ export default function LottoGamesPage() {
           </div>
         </div>
       )}
+
+      {games && <DrawCalendar games={games} />}
 
       <Modal
         open={importOpen}

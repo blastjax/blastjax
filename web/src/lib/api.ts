@@ -990,6 +990,12 @@ export async function getLottoGames() {
   return getJson<{ games: LottoGame[] }>("/api/lotto/games");
 }
 
+export type LottoDrawResult = NonNullable<LottoGame["latest_result"]> & { game_id: number };
+
+export async function getLottoCalendar(year: number, month: number) {
+  return getJson<{ draws: LottoDrawResult[] }>("/api/lotto/calendar", { year, month });
+}
+
 export function lottoGameSlug(name: string): string {
   return name
     .replace(/\s*\d+\/\d+\s*$/, "")

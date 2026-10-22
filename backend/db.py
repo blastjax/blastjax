@@ -1434,6 +1434,17 @@ def list_lotto_draws(game_id: int, limit: int = 200) -> list[dict[str, Any]]:
         return [_lotto_draw(d) for d in s.scalars(stmt)]
 
 
+def list_lotto_results_between(start: Any, end: Any) -> list[dict[str, Any]]:
+    stmt = (
+        select(LottoDraw)
+        .where(LottoDraw.draw_date >= start, LottoDraw.draw_date < end)
+        .order_by(LottoDraw.draw_date, LottoDraw.game_id)
+        .options(selectinload(LottoDraw.attempts))
+    )
+    with _session() as s:
+        return [{**_latest_result(d), "game_id": d.game_id} for d in s.scalars(stmt)]
+
+
 def upsert_lotto_draw(
     game_id: int,
     draw_date: Any,

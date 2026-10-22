@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { ChevronLeftIcon, ChevronRightIcon } from "@/components/Icons";
 import { ICON_BUTTON_CLASSES } from "@/lib/ui";
 import { MONTH_NAMES_FULL, toIsoDateLocal } from "@/lib/dateFormat";
@@ -20,13 +21,15 @@ function shiftIso(iso: string, days: number): string {
 export type CalendarMonthProps = {
   year: number;
   month: number;
-  onSelectDay: (iso: string) => void;
+  onSelectDay?: (iso: string) => void;
   dayState: (iso: string) => DayState;
   onPrev?: () => void;
   onNext?: () => void;
   disabledDay?: (iso: string) => boolean;
   highlightDay?: (iso: string) => boolean;
   onHoverDay?: (iso: string | null) => void;
+  dayAdornment?: (iso: string) => ReactNode;
+  fluid?: boolean;
 };
 
 export function CalendarMonth({
@@ -39,6 +42,8 @@ export function CalendarMonth({
   disabledDay,
   highlightDay,
   onHoverDay,
+  dayAdornment,
+  fluid,
 }: CalendarMonthProps) {
   const firstWeekday = new Date(year, month - 1, 1).getDay();
   const daysInMonth = new Date(year, month, 0).getDate();
@@ -47,9 +52,13 @@ export function CalendarMonth({
     ...Array.from({ length: daysInMonth }, (_, i) => i + 1),
   ];
   while (cells.length % 7 !== 0) cells.push(null);
+  const cellSize = fluid ? "p-0.5 @lg:p-1" : "h-11";
+  const daySize = fluid
+    ? "aspect-square w-full max-w-20 text-base @lg:text-lg @3xl:text-2xl"
+    : "h-10 w-10 text-base";
 
   return (
-    <div className="w-full">
+    <div className={fluid ? "@container w-full" : "w-full"}>
       <div className="mb-3 flex items-center justify-between">
         <button
           type="button"
@@ -60,7 +69,7 @@ export function CalendarMonth({
         >
           <ChevronLeftIcon className="size-4" />
         </button>
-        <div className="text-base font-semibold text-ink">
+        <div className={`text-base font-semibold text-ink ${fluid ? "@lg:text-lg" : ""}`}>
           {MONTH_NAMES_FULL[month - 1]} {year}
         </div>
         <button
@@ -77,7 +86,7 @@ export function CalendarMonth({
         {WEEKDAY_LABELS.map((w, i) => (
           <div
             key={i}
-            className="pb-1 text-center text-xs font-medium text-ink-4"
+            className={`pb-1 text-center text-xs font-medium text-ink-4 ${fluid ? "@lg:text-sm" : ""}`}
           >
             {w}
           </div>
@@ -85,7 +94,7 @@ export function CalendarMonth({
       </div>
       <div className="grid grid-cols-7" onMouseLeave={() => onHoverDay?.(null)}>
         {cells.map((day, i) => {
-          if (day == null) return <div key={i} className="h-11" />;
+          if (day == null) return <div key={i} className={cellSize} />;
           const iso = `${year}-${pad(month)}-${pad(day)}`;
           const state = dayState(iso);
           const disabled = disabledDay?.(iso) ?? false;
@@ -107,16 +116,17 @@ export function CalendarMonth({
                 ]
               : [];
           return (
-            <div key={i} className={`flex h-11 items-center justify-center ${bgClasses.filter(Boolean).join(" ")}`}>
+            <div key={i} className={`flex ${cellSize} items-center justify-center ${bgClasses.filter(Boolean).join(" ")}`}>
               <button
                 type="button"
-                onClick={() => onSelectDay(iso)}
+                onClick={() => onSelectDay?.(iso)}
                 onMouseEnter={() => onHoverDay?.(iso)}
                 onFocus={() => onHoverDay?.(iso)}
                 disabled={disabled}
+                tabIndex={onSelectDay ? undefined : -1}
                 aria-pressed={isCap}
                 className={[
-                  "flex h-10 w-10 items-center justify-center rounded-full text-base font-medium tabular-nums transition-colors duration-150",
+                  `relative flex ${daySize} items-center justify-center rounded-full font-medium tabular-nums transition-colors duration-150`,
                   disabled
                     ? "cursor-not-allowed text-ink-4/40"
                     : isCap
@@ -129,6 +139,7 @@ export function CalendarMonth({
                 ].join(" ")}
               >
                 {day}
+                {dayAdornment?.(iso)}
               </button>
             </div>
           );
