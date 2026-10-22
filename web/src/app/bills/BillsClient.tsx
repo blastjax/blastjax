@@ -58,12 +58,13 @@ type BillForm = {
   period_start: string;
   period_end: string;
   amount: string;
+  minimum_due: string;
 };
 
 type DateKey = "bill_date" | "due_date" | "period_start" | "period_end";
 
 // `form` shows the defaults as dates for a bill added this month; `saved` is what they were when opened.
-type CategoryDraft = { id: number | null; name: string; saved: BillDefaults; form: BillForm };
+type CategoryDraft = { id: number | null; name: string; is_credit_card: boolean; saved: BillDefaults; form: BillForm };
 
 // `preset` is what the category's defaults put in the form, so a PDF or another category may still replace it.
 type BillDraft = {
@@ -86,10 +87,10 @@ const billMonth = (b: BillRow) => formatMonthYear(Number(b.bill_date.slice(0, 4)
 
 const isPdf = (file: File) => file.type === "application/pdf" || /\.pdf$/i.test(file.name);
 
-function parseAmount(s: string): number | null {
+function parseAmount(s: string, label = "Amount"): number | null {
   const amount = parseFormNumber(s);
   if (s.trim() !== "" && (amount == null || amount < 0)) {
-    throw new Error("Amount must be a non-negative number.");
+    throw new Error(`${label} must be a non-negative number.`);
   }
   return amount;
 }
@@ -120,6 +121,7 @@ function presetForm(categoryId: number, d: BillDefaults = {}): BillForm {
     period_start: resolveDay(d.period_start, today),
     period_end: resolveDay(d.period_end, today),
     amount: d.amount == null ? "" : formatAmountNumber(d.amount),
+    minimum_due: "",
   };
 }
 
@@ -143,7 +145,13 @@ function switchCategory(d: BillDraft, c: BillCategoryRow): BillDraft {
 
 function toCategoryDraft(c: BillCategoryRow | null): CategoryDraft {
   const saved = c?.defaults ?? {};
-  return { id: c?.id ?? null, name: c?.name ?? "", saved, form: presetForm(c?.id ?? 0, saved) };
+  return {
+    id: c?.id ?? null,
+    name: c?.name ?? "",
+    is_credit_card: c?.is_credit_card ?? false,
+    saved,
+    form: presetForm(c?.id ?? 0, saved),
+  };
 }
 
 function toCategoryBody(c: CategoryDraft): BillCategoryBody {
@@ -155,6 +163,7 @@ function toCategoryBody(c: CategoryDraft): BillCategoryBody {
     c.form[key] === resolveDay(c.saved[key], today) ? (c.saved[key] ?? null) : toRelativeDay(c.form[key], today);
   return {
     name,
+    is_credit_card: c.is_credit_card,
     defaults: {
       bill_date: day("bill_date"),
       due_date: day("due_date"),
@@ -170,11 +179,13 @@ function BillDateFields({
   onChange,
   disabled,
   clearLabel,
+  showMinimumDue,
 }: {
   form: BillForm;
   onChange: (patch: Partial<BillForm>) => void;
   disabled: boolean;
   clearLabel?: string;
+  showMinimumDue?: boolean;
 }) {
   return (
     <>
@@ -206,14 +217,26 @@ function BillDateFields({
           clearLabel={clearLabel}
         />
       </Field>
-      <Field label="Amount" hint="Optional">
-        <AmountInput
-          placeholder="0.00"
-          value={form.amount}
-          onChange={(v) => onChange({ amount: v })}
-          disabled={disabled}
-        />
-      </Field>
+      <div className={showMinimumDue ? "grid gap-4 sm:grid-cols-2" : "grid"}>
+        <Field label="Amount" hint="Optional">
+          <AmountInput
+            placeholder="0.00"
+            value={form.amount}
+            onChange={(v) => onChange({ amount: v })}
+            disabled={disabled}
+          />
+        </Field>
+        {showMinimumDue && (
+          <Field label="Minimum amount due" hint="Optional">
+            <AmountInput
+              placeholder="0.00"
+              value={form.minimum_due}
+              onChange={(v) => onChange({ minimum_due: v })}
+              disabled={disabled}
+            />
+          </Field>
+        )}
+      </div>
     </>
   );
 }
@@ -232,11 +255,12 @@ function editBillDraft(b: BillRow): BillDraft {
       period_start: b.period_start,
       period_end: b.period_end,
       amount: b.amount == null ? "" : formatAmountNumber(b.amount),
+      minimum_due: b.minimum_due == null ? "" : formatAmountNumber(b.minimum_due),
     },
   };
 }
 
-function toBillBody(f: BillForm): BillBody {
+function toBillBody(f: BillForm, isCreditCard: boolean): BillBody {
   if (!f.bill_date) throw new Error("Pick the bill date.");
   if (!f.due_date) throw new Error("Pick the due date.");
   if (!f.period_start || !f.period_end) throw new Error("Pick the first and last day of the billing period.");
@@ -247,6 +271,7 @@ function toBillBody(f: BillForm): BillBody {
     period_start: f.period_start,
     period_end: f.period_end,
     amount: parseAmount(f.amount),
+    minimum_due: isCreditCard ? parseAmount(f.minimum_due, "Minimum amount due") : null,
   };
 }
 
@@ -392,6 +417,7 @@ export default function BillsClient() {
   };
 
   const nameOf = (categoryId: number) => categories.find((c) => c.id === categoryId)?.name ?? "Bill";
+  const isCreditCard = (categoryId: string) => !!categories.find((c) => String(c.id) === categoryId)?.is_credit_card;
 
   // Refreshes from the server even when the action fails: a new bill may have saved before its PDF upload didn't.
   const submit = async (action: () => Promise<unknown>, close: () => void) => {
@@ -435,7 +461,7 @@ export default function BillsClient() {
     if (!billDraft) return;
     const { form, file } = billDraft;
     void submit(async () => {
-      const body = toBillBody(form);
+      const body = toBillBody(form, isCreditCard(form.category_id));
       let id = billDraft.id;
       if (id == null) {
         id = (await createBill(body)).bill.id;
@@ -553,8 +579,9 @@ export default function BillsClient() {
                             )}
                           </p>
                           <p className="mt-0.5 text-xs text-ink-3">
-                            Due {formatDate(b.due_date)} · Period {formatDate(b.period_start)} –{" "}
-                            {formatDate(b.period_end)}
+                            Due {formatDate(b.due_date)}
+                            {b.minimum_due != null && ` · Minimum ${fmtAmountOrDash(b.minimum_due)}`} · Period{" "}
+                            {formatDate(b.period_start)} – {formatDate(b.period_end)}
                           </p>
                         </div>
                         <div className="-my-1 flex shrink-0 items-center">
@@ -613,6 +640,19 @@ export default function BillsClient() {
                     disabled={saving}
                   />
                 </Field>
+                <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-line p-3.5 transition-colors duration-150 hover:bg-surface-2/60">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 size-4"
+                    checked={categoryDraft.is_credit_card}
+                    onChange={(e) => setCategoryDraft({ ...categoryDraft, is_credit_card: e.target.checked })}
+                    disabled={saving}
+                  />
+                  <span className="text-sm">
+                    <span className="block font-medium text-ink">Credit card</span>
+                    <span className="text-ink-3">Its bills also get a minimum amount due.</span>
+                  </span>
+                </label>
                 <div className="grid gap-4 border-t border-line-soft pt-4">
                   <div>
                     <p className="text-sm font-medium text-ink">Defaults for new bills</p>
@@ -697,7 +737,12 @@ export default function BillsClient() {
                     disabled={saving}
                   />
                 </Field>
-                <BillDateFields form={billDraft.form} onChange={setForm} disabled={saving} />
+                <BillDateFields
+                  form={billDraft.form}
+                  onChange={setForm}
+                  disabled={saving}
+                  showMinimumDue={isCreditCard(billDraft.form.category_id)}
+                />
                 {modalError && <ErrorAlert>{modalError}</ErrorAlert>}
               </div>
               <div className={DIALOG_FOOTER_CLASSES}>

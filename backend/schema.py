@@ -71,6 +71,7 @@ class BillCategory(Base):
 
     id: Mapped[IntPK]
     name: Mapped[str]
+    is_credit_card: Mapped[bool] = mapped_column(server_default=text("false"))
     defaults: Mapped[dict[str, Any]] = mapped_column(JSONB, server_default=text("'{}'"))
     created_at: Mapped[StampNN]
 
@@ -86,6 +87,7 @@ class Bill(Base):
     period_start: Mapped[dt.date]
     period_end: Mapped[dt.date]
     amount: Mapped[float | None]
+    minimum_due: Mapped[float | None]
     pdf_data: Mapped[bytes | None] = mapped_column(deferred=True)
     created_at: Mapped[StampNN]
 

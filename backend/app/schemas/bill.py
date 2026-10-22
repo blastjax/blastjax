@@ -33,6 +33,7 @@ class BillCategoryCreate(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
     name: str = Field(min_length=1, max_length=100)
+    is_credit_card: bool = False
     defaults: BillDefaults = Field(default_factory=BillDefaults)
 
 
@@ -43,9 +44,12 @@ class BillCreate(BaseModel):
     period_start: dt.date
     period_end: dt.date
     amount: float | None = Field(default=None, ge=0)
+    minimum_due: float | None = Field(default=None, ge=0)  # credit card bills
 
     @model_validator(mode="after")
     def _check_period(self) -> BillCreate:
         if self.period_end < self.period_start:
             raise ValueError("The billing period can't end before it starts.")
+        if self.minimum_due is not None and self.amount is not None and self.minimum_due > self.amount:
+            raise ValueError("The minimum amount due can't be more than the amount.")
         return self

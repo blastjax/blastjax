@@ -308,6 +308,9 @@ def check_bill_request_models() -> None:
     }
     assert BillCreate(**bill).amount is None
     assert BillCreate(**{**bill, "period_end": "2026-09-01"}).period_end == dt.date(2026, 9, 1)
+    assert BillCategoryCreate(name="Visa").is_credit_card is False
+    assert BillCreate(**{**bill, "amount": 15000, "minimum_due": 850}).minimum_due == 850
+    assert BillCreate(**{**bill, "minimum_due": 850}).minimum_due == 850  # amount not entered yet
     for model, bad in (
         (BillCategoryCreate, {"name": "   "}),
         (BillCategoryCreate, {"name": "Power", "defaults": {"due_date": {"months": 3, "day": 8}}}),
@@ -316,6 +319,8 @@ def check_bill_request_models() -> None:
         (BillCategoryCreate, {"name": "Power", "defaults": {**period, "period_end": {"months": -1, "day": 14}}}),
         (BillCreate, {**bill, "period_end": "2026-08-31"}),
         (BillCreate, {**bill, "amount": -1}),
+        (BillCreate, {**bill, "minimum_due": -1}),
+        (BillCreate, {**bill, "amount": 500, "minimum_due": 850}),
         (BillCreate, {**bill, "due_date": None}),
     ):
         try:
@@ -562,6 +567,12 @@ def check_db_against_postgres() -> None:
         assert power["defaults"] == {}, power
         due = {"due_date": {"months": 1, "day": 8}, "amount": 1500.0}
         assert db.update_bill_category(power["id"], {"name": "Electricity", "defaults": due})["defaults"] == due
+        visa = db.insert_bill_category({"name": "Visa", "is_credit_card": True})
+        card_bill = {"bill_date": dt.date(2026, 10, 5), "due_date": dt.date(2026, 10, 25), "amount": 15000.0}
+        card_bill |= {"period_start": dt.date(2026, 9, 6), "period_end": dt.date(2026, 10, 5), "minimum_due": 850.0}
+        assert visa["is_credit_card"] and power["is_credit_card"] is False, (visa, power)
+        assert db.insert_bill({**card_bill, "category_id": visa["id"]})["minimum_due"] == 850.0
+        assert db.delete_bill_category(visa["id"])
         db.insert_bill_category({"name": "Internet"})
         try:
             db.insert_bill_category({"name": "electricity"})

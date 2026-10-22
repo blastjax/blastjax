@@ -35,7 +35,7 @@ function messageFromErrorResponseBody(text: string): string {
         .map((item) => {
           if (typeof item === "string") return item;
           if (item && typeof item === "object" && "msg" in item) {
-            return String((item as { msg?: string }).msg ?? "");
+            return String((item as { msg?: string }).msg ?? "").replace(/^Value error, /, "");
           }
           return "";
         })
@@ -1617,11 +1617,12 @@ export type BillDefaults = {
 export type BillCategoryRow = {
   id: number;
   name: string;
-  defaults?: BillDefaults; // missing from a bill list cached before categories had defaults
+  is_credit_card?: boolean; // this and `defaults` are missing from a bill list cached before they existed
+  defaults?: BillDefaults;
   created_at: string;
 };
 
-export type BillCategoryBody = Pick<BillCategoryRow, "name" | "defaults">;
+export type BillCategoryBody = Pick<BillCategoryRow, "name" | "is_credit_card" | "defaults">;
 
 export type BillRow = {
   id: number;
@@ -1631,6 +1632,7 @@ export type BillRow = {
   period_start: string;
   period_end: string;
   amount: number | null;
+  minimum_due?: number | null; // credit card bills; missing from a bill list cached before it existed
   has_pdf: boolean;
   created_at: string;
 };
