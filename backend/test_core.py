@@ -493,6 +493,8 @@ def check_db_against_postgres() -> None:
             ("2026-01-22", 0, None),
             ("2026-01-29", 1, [9, 10, 11, 12, 13, 14]),
         ], month
+        assert month[1]["jackpot_prize"] == 3.0, month[1]
+        assert month[1]["attempts"] == [[1, 2, 3, 4, 5, 6], [7, 8, 9, 10, 11, 12]], month[1]
 
         payslip = db.insert_payslip(1000, *([None] * 12), company="Acme")
         assert payslip["has_pdf"] is False

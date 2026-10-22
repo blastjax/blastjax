@@ -1442,7 +1442,15 @@ def list_lotto_results_between(start: Any, end: Any) -> list[dict[str, Any]]:
         .options(selectinload(LottoDraw.attempts))
     )
     with _session() as s:
-        return [{**_latest_result(d), "game_id": d.game_id} for d in s.scalars(stmt)]
+        return [
+            {
+                **_latest_result(d),
+                "game_id": d.game_id,
+                "jackpot_prize": _normalize(d.jackpot_prize),
+                "attempts": [[getattr(a, c) for c in _LOTTO_NUMBER_COLS] for a in d.attempts],
+            }
+            for d in s.scalars(stmt)
+        ]
 
 
 def upsert_lotto_draw(

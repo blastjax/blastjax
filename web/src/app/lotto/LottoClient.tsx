@@ -346,7 +346,7 @@ function parseAttemptsLines(text: string): number[][] {
   });
 }
 
-function NumberBall({
+export function NumberBall({
   n,
   variant = "neutral",
   size = "md",
@@ -389,14 +389,14 @@ function bestAttempt(detail: LottoDrawDetail): { count: number; hits: Set<number
 }
 
 const WEEKDAY_FORMAT = new Intl.DateTimeFormat("en-US", { weekday: "short" });
-const LONG_DATE_FORMAT = new Intl.DateTimeFormat("en-US", {
+export const LONG_DATE_FORMAT = new Intl.DateTimeFormat("en-US", {
   weekday: "long",
   month: "long",
   day: "numeric",
   year: "numeric",
 });
 
-function ScoreCell({ count }: { count: number }) {
+export function ScoreCell({ count }: { count: number }) {
   return (
     <span
       className={`flex h-9 w-11 shrink-0 items-center justify-center rounded-lg text-xs font-semibold tabular-nums ${
@@ -410,7 +410,7 @@ function ScoreCell({ count }: { count: number }) {
   );
 }
 
-function MatchPill({ count }: { count: number }) {
+export function MatchPill({ count }: { count: number }) {
   const tone =
     count === 6
       ? "bg-amber-400 text-amber-950"
@@ -424,7 +424,7 @@ function MatchPill({ count }: { count: number }) {
   );
 }
 
-function NumberChip({ n, variant = "neutral" }: { n: number; variant?: "neutral" | "match" | "miss" }) {
+export function NumberChip({ n, variant = "neutral" }: { n: number; variant?: "neutral" | "match" | "miss" }) {
   const styles: Record<string, string> = {
     neutral: "border-transparent bg-surface-2 text-ink-2",
     match:

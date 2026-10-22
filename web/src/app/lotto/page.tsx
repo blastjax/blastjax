@@ -15,8 +15,9 @@ import {
   type LottoDrawResult,
   type LottoGame,
 } from "@/lib/api";
-import { addMonths, formatDate, toIsoDateLocal } from "@/lib/dateFormat";
+import { addMonths, formatDate, monthKey, parseDateOnlyLocal, toIsoDateLocal } from "@/lib/dateFormat";
 import { fmtCount, fmtJackpotCompact } from "@/lib/formatNumber";
+import { LONG_DATE_FORMAT, MatchPill, NumberBall, NumberChip, ScoreCell } from "./LottoClient";
 
 const DRAW_SCHEDULE: Record<string, number[]> = {
   "Ultra Lotto 6/58": [0, 2, 5],
@@ -67,6 +68,10 @@ import {
   PRIMARY_BUTTON_CLASSES,
   SECONDARY_BUTTON_CLASSES,
   SECTION_LABEL_CLASSES,
+  SEGMENTED_BUTTON_ACTIVE_CLASSES,
+  SEGMENTED_BUTTON_CLASSES,
+  SEGMENTED_BUTTON_INACTIVE_CLASSES,
+  SEGMENTED_WRAPPER_CLASSES,
 } from "@/lib/ui";
 
 type RoutedRows = { game: LottoGame; lines: string[] };
@@ -104,6 +109,8 @@ const STAR_POINTS = "5,0 6.12,3.45 9.76,3.45 6.82,5.59 7.94,9.05 5,6.91 2.06,9.0
 
 type DayDraw = { game: LottoGame; result: LottoDrawResult };
 
+const isJackpotWon = (result: LottoDrawResult) => result.winners > 0 || result.best_hits?.length === 6;
+
 function dayFill(draws: DayDraw[]): keyof typeof DAY_FILLS | null {
   if (draws.some(({ result }) => result.best_hits?.length === 6)) return "won";
   if (draws.some(({ result }) => result.winners > 0)) return "winner";
@@ -126,7 +133,7 @@ function DayMark({ day, draws }: { day: number; draws: DayDraw[] }) {
   const dash = (2 * Math.PI * 19) / (n * Math.round(24 / n));
   const fill = dayFill(draws);
   const label = draws.map(drawLabel).join("\n");
-  const jackpots = draws.filter(({ result }) => result.winners > 0 || result.best_hits?.length === 6);
+  const jackpots = draws.filter(({ result }) => isJackpotWon(result));
   return (
     <span className="absolute inset-0" data-tooltip={label}>
       <span className="sr-only">{label}</span>
@@ -178,12 +185,120 @@ function DayMark({ day, draws }: { day: number; draws: DayDraw[] }) {
   );
 }
 
+function DayDrawsModal({ iso, draws, onClose }: { iso: string; draws: DayDraw[]; onClose: () => void }) {
+  // Open on the game that decided the day's fill: your win, then a jackpot, then a draw you played.
+  const rank = ({ result }: DayDraw) =>
+    result.best_hits?.length === 6 ? 3 : result.winners > 0 ? 2 : result.best_hits ? 1 : 0;
+  const [tab, setTab] = useState(() => draws.reduce((a, b) => (rank(b) > rank(a) ? b : a)).game.id);
+  const { game, result } = draws.find((d) => d.game.id === tab) ?? draws[0];
+  const drawn = new Set(result.numbers);
+  const hasResult = result.numbers.every((n) => n != null);
+  const hits = (nums: number[]) => nums.filter((n) => drawn.has(n)).length;
+  const attempts = hasResult ? [...result.attempts].sort((a, b) => hits(b) - hits(a)) : result.attempts;
+  const date = parseDateOnlyLocal(iso);
+
+  return (
+    <Modal open onClose={onClose} ariaLabelledBy="day-draws-title">
+      <div className="mb-4 flex items-start justify-between gap-2">
+        <h2 id="day-draws-title" className="text-lg font-semibold text-ink">
+          {date ? LONG_DATE_FORMAT.format(date) : iso}
+        </h2>
+        <button type="button" className={CLOSE_BUTTON_CLASSES} onClick={onClose}>
+          Close
+        </button>
+      </div>
+      <div role="tablist" aria-label="Games drawn this day" className={`${SEGMENTED_WRAPPER_CLASSES} max-w-full flex-wrap`}>
+        {draws.map(({ game: g, result: r }) => (
+          <button
+            key={g.id}
+            type="button"
+            role="tab"
+            id={`day-draw-tab-${g.id}`}
+            aria-selected={g.id === game.id}
+            aria-controls="day-draw-panel"
+            onClick={() => setTab(g.id)}
+            className={`${SEGMENTED_BUTTON_CLASSES} inline-flex items-center gap-2 ${
+              g.id === game.id ? SEGMENTED_BUTTON_ACTIVE_CLASSES : SEGMENTED_BUTTON_INACTIVE_CLASSES
+            }`}
+          >
+            <span
+              aria-hidden
+              className={`size-3 shrink-0 rounded-full border-2 border-current bg-surface ${GAME_COLORS[g.name]}`}
+            />
+            {g.name}
+            {isJackpotWon(r) && <span aria-hidden>★</span>}
+          </button>
+        ))}
+      </div>
+      <div role="tabpanel" id="day-draw-panel" aria-labelledby={`day-draw-tab-${game.id}`} className="mt-5 flex flex-col gap-5">
+        {hasResult ? (
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between gap-2">
+              <span className={SECTION_LABEL_CLASSES}>Winning numbers</span>
+              {result.best_hits && <MatchPill count={result.best_hits.length} />}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {result.numbers.map((n) => (
+                <NumberBall key={n} n={n} variant={result.best_hits?.includes(n) ? "match" : "result"} />
+              ))}
+            </div>
+          </div>
+        ) : (
+          <p className="text-sm text-ink-3">The result isn&apos;t in yet.</p>
+        )}
+        <dl className="grid grid-cols-2 gap-4">
+          <div>
+            <dt className={SECTION_LABEL_CLASSES}>Jackpot</dt>
+            <dd className="mt-1 text-lg font-semibold tabular-nums text-ink">
+              {result.jackpot_prize != null ? fmtJackpotCompact(result.jackpot_prize) : "—"}
+            </dd>
+          </div>
+          <div>
+            <dt className={SECTION_LABEL_CLASSES}>Jackpot winners</dt>
+            <dd className="mt-1 text-lg font-semibold tabular-nums text-ink">
+              {result.winners > 0 ? fmtCount(result.winners) : "None"}
+            </dd>
+          </div>
+        </dl>
+        <div className="flex flex-col gap-2">
+          <span className={SECTION_LABEL_CLASSES}>
+            Your attempts{attempts.length > 0 && ` · ${fmtCount(attempts.length)}`}
+          </span>
+          {attempts.length === 0 ? (
+            <p className="text-sm text-ink-3">You didn&apos;t play this draw.</p>
+          ) : (
+            <ul className="flex flex-col gap-2">
+              {attempts.map((nums, i) => (
+                <li key={i} className="flex items-center gap-2">
+                  <div className="flex min-w-0 flex-1 gap-1.5">
+                    {nums.map((n) => (
+                      <NumberChip key={n} n={n} variant={!hasResult ? "neutral" : drawn.has(n) ? "match" : "miss"} />
+                    ))}
+                  </div>
+                  {hasResult && <ScoreCell count={hits(nums)} />}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+        <Link
+          href={`/lotto/${lottoGameSlug(game.name)}`}
+          className="self-start text-sm font-medium text-brand-text hover:underline"
+        >
+          Open {game.name} →
+        </Link>
+      </div>
+    </Modal>
+  );
+}
+
 function DrawCalendar({ games }: { games: LottoGame[] }) {
   const [view, setView] = useState(() => {
     const now = new Date();
     return addMonths(now.getFullYear(), now.getMonth() + 1, 0);
   });
-  const [results, setResults] = useState<LottoDrawResult[]>([]);
+  const [month, setMonth] = useState<{ key: string; draws: LottoDrawResult[] } | null>(null);
+  const [openDay, setOpenDay] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -191,7 +306,7 @@ function DrawCalendar({ games }: { games: LottoGame[] }) {
     getLottoCalendar(view.y, view.m)
       .then((r) => {
         if (stale) return;
-        setResults(r.draws);
+        setMonth({ key: monthKey(view.y, view.m), draws: r.draws });
         setError(null);
       })
       .catch((e: unknown) => {
@@ -202,12 +317,14 @@ function DrawCalendar({ games }: { games: LottoGame[] }) {
     };
   }, [view.y, view.m, games]);
 
+  const loaded = month?.key === monthKey(view.y, view.m);
   const gameById = new Map(games.map((g) => [g.id, g]));
   const byDate = new Map<string, DayDraw[]>();
-  for (const result of results) {
+  for (const result of month?.draws ?? []) {
     const game = gameById.get(result.game_id);
     if (game) byDate.set(result.draw_date, [...(byDate.get(result.draw_date) ?? []), { game, result }]);
   }
+  const openDraws = openDay ? byDate.get(openDay) : undefined;
 
   return (
     <section className={CARD_CLASSES}>
@@ -220,6 +337,10 @@ function DrawCalendar({ games }: { games: LottoGame[] }) {
           year={view.y}
           month={view.m}
           dayState={() => "none"}
+          onSelectDay={(iso) => {
+            if (byDate.has(iso)) setOpenDay(iso);
+          }}
+          disabledDay={(iso) => loaded && !byDate.has(iso)}
           dayAdornment={(iso) => {
             const draws = byDate.get(iso);
             return draws && <DayMark day={Number(iso.slice(8))} draws={draws} />;
@@ -255,6 +376,9 @@ function DrawCalendar({ games }: { games: LottoGame[] }) {
           </li>
         </ul>
       </div>
+      {openDay && openDraws && (
+        <DayDrawsModal key={openDay} iso={openDay} draws={openDraws} onClose={() => setOpenDay(null)} />
+      )}
     </section>
   );
 }
