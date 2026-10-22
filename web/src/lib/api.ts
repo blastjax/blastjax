@@ -1617,7 +1617,7 @@ export type BillDefaults = {
 export type BillCategoryRow = {
   id: number;
   name: string;
-  defaults: BillDefaults;
+  defaults?: BillDefaults; // missing from a bill list cached before categories had defaults
   created_at: string;
 };
 

@@ -12,6 +12,7 @@ export type DateRangePickerFieldProps = {
   onChange: (start: string, end: string) => void;
   disabled?: boolean;
   placeholder?: string;
+  clearLabel?: string;
 };
 
 const MAX_POPOVER_WIDTH = 680;
@@ -26,6 +27,7 @@ export function DateRangePickerField({
   onChange,
   disabled,
   placeholder = "Select dates",
+  clearLabel,
 }: DateRangePickerFieldProps) {
   const today = toIsoDateLocal(new Date());
   const base = startValue || endValue || today;
@@ -158,6 +160,20 @@ export function DateRangePickerField({
               Next month ›
             </button>
           </div>
+          {clearLabel && (startValue || endValue) && (
+            <div className="mt-3 flex justify-end border-t border-line pt-3 text-xs">
+              <button
+                type="button"
+                onClick={() => {
+                  onChange("", "");
+                  close();
+                }}
+                className="rounded-md px-2 py-1 font-semibold text-indigo-600 transition-colors hover:bg-indigo-500/10 dark:text-indigo-400"
+              >
+                {clearLabel}
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>

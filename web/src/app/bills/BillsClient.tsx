@@ -36,11 +36,12 @@ import {
   type BillBody,
   type BillCategoryBody,
   type BillCategoryRow,
+  type BillDefaults,
   type BillPdfFields,
   type BillRow,
   type RelativeDay,
 } from "@/lib/api";
-import { addMonths, formatDate, formatMonthYear, toIsoDateLocal } from "@/lib/dateFormat";
+import { addMonths, formatDate, formatMonthYear, parseDateOnlyLocal, toIsoDateLocal } from "@/lib/dateFormat";
 import { fmtAmountOrDash, fmtCount } from "@/lib/formatNumber";
 import { formatAmountNumber, parseFormNumber } from "@/lib/parseFormNumber";
 import {
@@ -61,12 +62,8 @@ type BillForm = {
 
 type DateKey = "bill_date" | "due_date" | "period_start" | "period_end";
 
-type CategoryDraft = {
-  id: number | null;
-  name: string;
-  days: Record<DateKey, { day: string; months: string }>;
-  amount: string;
-};
+// `form` shows the defaults as dates for a bill added this month; `saved` is what they were when opened.
+type CategoryDraft = { id: number | null; name: string; saved: BillDefaults; form: BillForm };
 
 // `preset` is what the category's defaults put in the form, so a PDF or another category may still replace it.
 type BillDraft = {
@@ -77,21 +74,6 @@ type BillDraft = {
   note: string | null;
   preset: Partial<BillForm>;
 };
-
-const DEFAULT_DAYS: [DateKey, string][] = [
-  ["bill_date", "Bill date"],
-  ["due_date", "Due date"],
-  ["period_start", "Billing period starts"],
-  ["period_end", "Billing period ends"],
-];
-
-const MONTH_OFFSETS = [
-  [-2, "2 months ago"],
-  [-1, "Last month"],
-  [0, "This month"],
-  [1, "Next month"],
-  [2, "In 2 months"],
-] as const;
 
 const FILE_INPUT_CLASSES =
   "block w-full text-sm text-ink-3 file:mr-3 file:h-9 file:cursor-pointer file:rounded-lg file:border file:border-solid file:border-line-strong file:bg-surface file:px-3 file:text-sm file:font-medium file:text-ink-2 hover:file:bg-surface-2 disabled:opacity-60";
@@ -119,11 +101,20 @@ function resolveDay(r: RelativeDay | null | undefined, today: Date): string {
   return toIsoDateLocal(new Date(y, m - 1, Math.min(r.day, new Date(y, m, 0).getDate())));
 }
 
-function presetForm(c: BillCategoryRow): BillForm {
-  const d = c.defaults;
+// A picked date as months from this month plus its day; a month's last day stays the last day.
+function toRelativeDay(iso: string, today: Date): RelativeDay | null {
+  const d = parseDateOnlyLocal(iso);
+  if (!d) return null;
+  const months = (d.getFullYear() - today.getFullYear()) * 12 + d.getMonth() - today.getMonth();
+  if (Math.abs(months) > 2) throw new Error("Pick default dates within 2 months of this month.");
+  const last = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+  return { months, day: d.getDate() === last ? 31 : d.getDate() };
+}
+
+function presetForm(categoryId: number, d: BillDefaults = {}): BillForm {
   const today = new Date();
   return {
-    category_id: String(c.id),
+    category_id: String(categoryId),
     bill_date: resolveDay(d.bill_date, today),
     due_date: resolveDay(d.due_date, today),
     period_start: resolveDay(d.period_start, today),
@@ -133,7 +124,7 @@ function presetForm(c: BillCategoryRow): BillForm {
 }
 
 function newBillDraft(c: BillCategoryRow): BillDraft {
-  const form = presetForm(c);
+  const form = presetForm(c.id, c.defaults);
   return { id: null, hasPdf: false, file: null, note: null, form, preset: form };
 }
 
@@ -142,7 +133,7 @@ const untouched = (d: BillDraft, key: keyof BillForm) => !d.form[key].trim() || 
 
 // A new bill takes the picked category's defaults wherever it still holds the old one's.
 function switchCategory(d: BillDraft, c: BillCategoryRow): BillDraft {
-  const preset = d.id == null ? presetForm(c) : {};
+  const preset = d.id == null ? presetForm(c.id, c.defaults) : {};
   const form = { ...d.form };
   for (const [key, value] of Object.entries(preset) as [keyof BillForm, string][]) {
     if (untouched(d, key)) form[key] = value;
@@ -151,27 +142,80 @@ function switchCategory(d: BillDraft, c: BillCategoryRow): BillDraft {
 }
 
 function toCategoryDraft(c: BillCategoryRow | null): CategoryDraft {
-  const d = c?.defaults ?? {};
-  const days = DEFAULT_DAYS.map(([key]) => {
-    const r = d[key];
-    return [key, { day: r ? String(r.day) : "", months: String(r?.months ?? 0) }];
-  });
-  return {
-    id: c?.id ?? null,
-    name: c?.name ?? "",
-    days: Object.fromEntries(days),
-    amount: d.amount == null ? "" : formatAmountNumber(d.amount),
-  };
+  const saved = c?.defaults ?? {};
+  return { id: c?.id ?? null, name: c?.name ?? "", saved, form: presetForm(c?.id ?? 0, saved) };
 }
 
 function toCategoryBody(c: CategoryDraft): BillCategoryBody {
   const name = c.name.trim();
   if (!name) throw new Error("Name is required.");
-  const days = DEFAULT_DAYS.map(([key]) => {
-    const { day, months } = c.days[key];
-    return [key, day ? { months: Number(months), day: Number(day) } : null];
-  });
-  return { name, defaults: { ...Object.fromEntries(days), amount: parseAmount(c.amount) } };
+  const today = new Date();
+  // A date left as shown keeps its saved day, which this month may have cut short (the 31st shows as the 30th).
+  const day = (key: DateKey) =>
+    c.form[key] === resolveDay(c.saved[key], today) ? (c.saved[key] ?? null) : toRelativeDay(c.form[key], today);
+  return {
+    name,
+    defaults: {
+      bill_date: day("bill_date"),
+      due_date: day("due_date"),
+      period_start: day("period_start"),
+      period_end: day("period_end"),
+      amount: parseAmount(c.form.amount),
+    },
+  };
+}
+
+function BillDateFields({
+  form,
+  onChange,
+  disabled,
+  clearLabel,
+}: {
+  form: BillForm;
+  onChange: (patch: Partial<BillForm>) => void;
+  disabled: boolean;
+  clearLabel?: string;
+}) {
+  return (
+    <>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field label="Bill date">
+          <DatePickerField
+            value={form.bill_date}
+            onChange={(v) => onChange({ bill_date: v })}
+            disabled={disabled}
+            clearLabel={clearLabel}
+          />
+        </Field>
+        <Field label="Due date">
+          <DatePickerField
+            value={form.due_date}
+            onChange={(v) => onChange({ due_date: v })}
+            disabled={disabled}
+            clearLabel={clearLabel}
+          />
+        </Field>
+      </div>
+      <Field label="Billing period">
+        <DateRangePickerField
+          startValue={form.period_start}
+          endValue={form.period_end}
+          onChange={(start, end) => onChange({ period_start: start, period_end: end })}
+          disabled={disabled}
+          placeholder="First and last day"
+          clearLabel={clearLabel}
+        />
+      </Field>
+      <Field label="Amount" hint="Optional">
+        <AmountInput
+          placeholder="0.00"
+          value={form.amount}
+          onChange={(v) => onChange({ amount: v })}
+          disabled={disabled}
+        />
+      </Field>
+    </>
+  );
 }
 
 function editBillDraft(b: BillRow): BillDraft {
@@ -374,8 +418,8 @@ export default function BillsClient() {
     }, closeCategory);
   };
 
-  const setDay = (key: DateKey, patch: Partial<CategoryDraft["days"][DateKey]>) =>
-    setCategoryDraft((d) => d && { ...d, days: { ...d.days, [key]: { ...d.days[key], ...patch } } });
+  const setCategoryForm = (patch: Partial<BillForm>) =>
+    setCategoryDraft((d) => d && { ...d, form: { ...d.form, ...patch } });
 
   const removeCategory = async () => {
     const id = categoryDraft?.id;
@@ -569,52 +613,16 @@ export default function BillsClient() {
                     disabled={saving}
                   />
                 </Field>
-                <div className="grid gap-4 border-t border-line-soft pt-4 sm:grid-cols-2">
-                  <div className="sm:col-span-2">
+                <div className="grid gap-4 border-t border-line-soft pt-4">
+                  <div>
                     <p className="text-sm font-medium text-ink">Defaults for new bills</p>
                     <p className="mt-0.5 text-xs text-ink-3">
-                      Optional. Months count from the month you add the bill. Day 31 means the last day of any month.
+                      {
+                        "Optional. Pick them as they'd be for a bill added this month; later bills move by the same number of months. A month's last day stays the last day."
+                      }
                     </p>
                   </div>
-                  {DEFAULT_DAYS.map(([key, label]) => (
-                    <Field key={key} label={label}>
-                      <div className="flex gap-2">
-                        <input
-                          type="number"
-                          min={1}
-                          max={31}
-                          step={1}
-                          inputMode="numeric"
-                          placeholder="Day"
-                          className={`${INPUT_CLASSES} w-20 shrink-0`}
-                          value={categoryDraft.days[key].day}
-                          onChange={(e) => setDay(key, { day: e.target.value })}
-                          disabled={saving}
-                        />
-                        <select
-                          aria-label={`${label}, month`}
-                          className={`${INPUT_CLASSES} min-w-0 flex-1`}
-                          value={categoryDraft.days[key].months}
-                          onChange={(e) => setDay(key, { months: e.target.value })}
-                          disabled={saving}
-                        >
-                          {MONTH_OFFSETS.map(([n, text]) => (
-                            <option key={n} value={n}>
-                              {text}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    </Field>
-                  ))}
-                  <Field label="Amount" className="sm:col-span-2">
-                    <AmountInput
-                      placeholder="0.00"
-                      value={categoryDraft.amount}
-                      onChange={(v) => setCategoryDraft({ ...categoryDraft, amount: v })}
-                      disabled={saving}
-                    />
-                  </Field>
+                  <BillDateFields form={categoryDraft.form} onChange={setCategoryForm} disabled={saving} clearLabel="Clear" />
                 </div>
                 {modalError && <ErrorAlert>{modalError}</ErrorAlert>}
               </div>
@@ -689,39 +697,7 @@ export default function BillsClient() {
                     disabled={saving}
                   />
                 </Field>
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <Field label="Bill date">
-                    <DatePickerField
-                      value={billDraft.form.bill_date}
-                      onChange={(v) => setForm({ bill_date: v })}
-                      disabled={saving}
-                    />
-                  </Field>
-                  <Field label="Due date">
-                    <DatePickerField
-                      value={billDraft.form.due_date}
-                      onChange={(v) => setForm({ due_date: v })}
-                      disabled={saving}
-                    />
-                  </Field>
-                </div>
-                <Field label="Billing period">
-                  <DateRangePickerField
-                    startValue={billDraft.form.period_start}
-                    endValue={billDraft.form.period_end}
-                    onChange={(start, end) => setForm({ period_start: start, period_end: end })}
-                    disabled={saving}
-                    placeholder="First and last day"
-                  />
-                </Field>
-                <Field label="Amount" hint="Optional">
-                  <AmountInput
-                    placeholder="0.00"
-                    value={billDraft.form.amount}
-                    onChange={(v) => setForm({ amount: v })}
-                    disabled={saving}
-                  />
-                </Field>
+                <BillDateFields form={billDraft.form} onChange={setForm} disabled={saving} />
                 {modalError && <ErrorAlert>{modalError}</ErrorAlert>}
               </div>
               <div className={DIALOG_FOOTER_CLASSES}>
