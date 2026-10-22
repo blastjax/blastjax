@@ -1013,15 +1013,15 @@ def list_bills() -> dict[str, Any]:
         }
 
 
-def insert_bill_category(name: str) -> dict[str, Any]:
+def insert_bill_category(values: dict[str, Any]) -> dict[str, Any]:
     with _session(write=True) as s:
-        return _row(s.scalar(insert(BillCategory).values(name=name).returning(BillCategory)))
+        return _row(s.scalar(insert(BillCategory).values(values).returning(BillCategory)))
 
 
-def update_bill_category(category_id: int, name: str) -> dict[str, Any] | None:
+def update_bill_category(category_id: int, values: dict[str, Any]) -> dict[str, Any] | None:
     with _session(write=True) as s:
         c = s.scalar(
-            update(BillCategory).where(BillCategory.id == category_id).values(name=name).returning(BillCategory)
+            update(BillCategory).where(BillCategory.id == category_id).values(values).returning(BillCategory)
         )
         return _row(c) if c else None
 

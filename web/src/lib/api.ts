@@ -1603,11 +1603,25 @@ export async function deleteTravelCity(tripId: number, cityId: number) {
   return sendJson<TravelTripDetail>("DELETE", `/api/travel/${tripId}/cities/${cityId}`);
 }
 
+/** A day counted from the month a bill is added: next month's 8th is { months: 1, day: 8 }. */
+export type RelativeDay = { months: number; day: number };
+
+export type BillDefaults = {
+  bill_date?: RelativeDay | null;
+  due_date?: RelativeDay | null;
+  period_start?: RelativeDay | null;
+  period_end?: RelativeDay | null;
+  amount?: number | null;
+};
+
 export type BillCategoryRow = {
   id: number;
   name: string;
+  defaults: BillDefaults;
   created_at: string;
 };
+
+export type BillCategoryBody = Pick<BillCategoryRow, "name" | "defaults">;
 
 export type BillRow = {
   id: number;
@@ -1627,12 +1641,12 @@ export async function getBills() {
   return getJson<{ categories: BillCategoryRow[]; bills: BillRow[] }>("/api/bill");
 }
 
-export async function createBillCategory(name: string) {
-  return sendJson<{ category: BillCategoryRow }>("POST", "/api/bill-category", { name });
+export async function createBillCategory(body: BillCategoryBody) {
+  return sendJson<{ category: BillCategoryRow }>("POST", "/api/bill-category", body);
 }
 
-export async function updateBillCategory(id: number, name: string) {
-  return sendJson<{ category: BillCategoryRow }>("PUT", `/api/bill-category/${id}`, { name });
+export async function updateBillCategory(id: number, body: BillCategoryBody) {
+  return sendJson<{ category: BillCategoryRow }>("PUT", `/api/bill-category/${id}`, body);
 }
 
 export async function deleteBillCategory(id: number) {

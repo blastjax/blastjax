@@ -34,11 +34,13 @@ import {
   updateBillCategory,
   uploadBillPdf,
   type BillBody,
+  type BillCategoryBody,
   type BillCategoryRow,
   type BillPdfFields,
   type BillRow,
+  type RelativeDay,
 } from "@/lib/api";
-import { formatDate, formatMonthYear } from "@/lib/dateFormat";
+import { addMonths, formatDate, formatMonthYear, toIsoDateLocal } from "@/lib/dateFormat";
 import { fmtAmountOrDash, fmtCount } from "@/lib/formatNumber";
 import { formatAmountNumber, parseFormNumber } from "@/lib/parseFormNumber";
 import {
@@ -57,8 +59,39 @@ type BillForm = {
   amount: string;
 };
 
-type CategoryDraft = { id: number | null; name: string };
-type BillDraft = { id: number | null; hasPdf: boolean; form: BillForm; file: File | null; note: string | null };
+type DateKey = "bill_date" | "due_date" | "period_start" | "period_end";
+
+type CategoryDraft = {
+  id: number | null;
+  name: string;
+  days: Record<DateKey, { day: string; months: string }>;
+  amount: string;
+};
+
+// `preset` is what the category's defaults put in the form, so a PDF or another category may still replace it.
+type BillDraft = {
+  id: number | null;
+  hasPdf: boolean;
+  form: BillForm;
+  file: File | null;
+  note: string | null;
+  preset: Partial<BillForm>;
+};
+
+const DEFAULT_DAYS: [DateKey, string][] = [
+  ["bill_date", "Bill date"],
+  ["due_date", "Due date"],
+  ["period_start", "Billing period starts"],
+  ["period_end", "Billing period ends"],
+];
+
+const MONTH_OFFSETS = [
+  [-2, "2 months ago"],
+  [-1, "Last month"],
+  [0, "This month"],
+  [1, "Next month"],
+  [2, "In 2 months"],
+] as const;
 
 const FILE_INPUT_CLASSES =
   "block w-full text-sm text-ink-3 file:mr-3 file:h-9 file:cursor-pointer file:rounded-lg file:border file:border-solid file:border-line-strong file:bg-surface file:px-3 file:text-sm file:font-medium file:text-ink-2 hover:file:bg-surface-2 disabled:opacity-60";
@@ -71,21 +104,74 @@ const billMonth = (b: BillRow) => formatMonthYear(Number(b.bill_date.slice(0, 4)
 
 const isPdf = (file: File) => file.type === "application/pdf" || /\.pdf$/i.test(file.name);
 
-function newBillDraft(categoryId: number): BillDraft {
+function parseAmount(s: string): number | null {
+  const amount = parseFormNumber(s);
+  if (s.trim() !== "" && (amount == null || amount < 0)) {
+    throw new Error("Amount must be a non-negative number.");
+  }
+  return amount;
+}
+
+// A day past the end of its month lands on that month's last day.
+function resolveDay(r: RelativeDay | null | undefined, today: Date): string {
+  if (!r) return "";
+  const { y, m } = addMonths(today.getFullYear(), today.getMonth() + 1, r.months);
+  return toIsoDateLocal(new Date(y, m - 1, Math.min(r.day, new Date(y, m, 0).getDate())));
+}
+
+function presetForm(c: BillCategoryRow): BillForm {
+  const d = c.defaults;
+  const today = new Date();
   return {
-    id: null,
-    hasPdf: false,
-    file: null,
-    note: null,
-    form: {
-      category_id: String(categoryId),
-      bill_date: "",
-      due_date: "",
-      period_start: "",
-      period_end: "",
-      amount: "",
-    },
+    category_id: String(c.id),
+    bill_date: resolveDay(d.bill_date, today),
+    due_date: resolveDay(d.due_date, today),
+    period_start: resolveDay(d.period_start, today),
+    period_end: resolveDay(d.period_end, today),
+    amount: d.amount == null ? "" : formatAmountNumber(d.amount),
   };
+}
+
+function newBillDraft(c: BillCategoryRow): BillDraft {
+  const form = presetForm(c);
+  return { id: null, hasPdf: false, file: null, note: null, form, preset: form };
+}
+
+// Empty, or still holding the category's default.
+const untouched = (d: BillDraft, key: keyof BillForm) => !d.form[key].trim() || d.form[key] === d.preset[key];
+
+// A new bill takes the picked category's defaults wherever it still holds the old one's.
+function switchCategory(d: BillDraft, c: BillCategoryRow): BillDraft {
+  const preset = d.id == null ? presetForm(c) : {};
+  const form = { ...d.form };
+  for (const [key, value] of Object.entries(preset) as [keyof BillForm, string][]) {
+    if (untouched(d, key)) form[key] = value;
+  }
+  return { ...d, form: { ...form, category_id: String(c.id) }, preset };
+}
+
+function toCategoryDraft(c: BillCategoryRow | null): CategoryDraft {
+  const d = c?.defaults ?? {};
+  const days = DEFAULT_DAYS.map(([key]) => {
+    const r = d[key];
+    return [key, { day: r ? String(r.day) : "", months: String(r?.months ?? 0) }];
+  });
+  return {
+    id: c?.id ?? null,
+    name: c?.name ?? "",
+    days: Object.fromEntries(days),
+    amount: d.amount == null ? "" : formatAmountNumber(d.amount),
+  };
+}
+
+function toCategoryBody(c: CategoryDraft): BillCategoryBody {
+  const name = c.name.trim();
+  if (!name) throw new Error("Name is required.");
+  const days = DEFAULT_DAYS.map(([key]) => {
+    const { day, months } = c.days[key];
+    return [key, day ? { months: Number(months), day: Number(day) } : null];
+  });
+  return { name, defaults: { ...Object.fromEntries(days), amount: parseAmount(c.amount) } };
 }
 
 function editBillDraft(b: BillRow): BillDraft {
@@ -94,6 +180,7 @@ function editBillDraft(b: BillRow): BillDraft {
     hasPdf: b.has_pdf,
     file: null,
     note: null,
+    preset: {},
     form: {
       category_id: String(b.category_id),
       bill_date: b.bill_date,
@@ -109,17 +196,13 @@ function toBillBody(f: BillForm): BillBody {
   if (!f.bill_date) throw new Error("Pick the bill date.");
   if (!f.due_date) throw new Error("Pick the due date.");
   if (!f.period_start || !f.period_end) throw new Error("Pick the first and last day of the billing period.");
-  const amount = parseFormNumber(f.amount);
-  if (f.amount.trim() !== "" && (amount == null || amount < 0)) {
-    throw new Error("Amount must be a non-negative number.");
-  }
   return {
     category_id: Number(f.category_id),
     bill_date: f.bill_date,
     due_date: f.due_date,
     period_start: f.period_start,
     period_end: f.period_end,
-    amount,
+    amount: parseAmount(f.amount),
   };
 }
 
@@ -132,22 +215,29 @@ const PDF_FIELDS = [
 const AND_LIST = new Intl.ListFormat("en", { type: "conjunction" });
 const OR_LIST = new Intl.ListFormat("en", { type: "disjunction" });
 
-// Only fills fields that are still empty, so nothing typed by hand gets overwritten.
+// Only fills fields that are empty or hold a category default, so nothing typed by hand gets overwritten.
 function fillFromPdf(d: BillDraft, found: BillPdfFields): BillDraft {
   const f = d.form;
+  const free = (key: keyof BillForm) => untouched(d, key);
   const period =
-    !f.period_start && !f.period_end && found.period_start && found.period_end
+    free("period_start") && free("period_end") && found.period_start && found.period_end
       ? { period_start: found.period_start, period_end: found.period_end }
       : {};
   const form: BillForm = {
     ...f,
     ...period,
-    bill_date: f.bill_date || (found.bill_date ?? ""),
-    due_date: f.due_date || (found.due_date ?? ""),
-    amount: f.amount.trim() || (found.amount == null ? "" : formatAmountNumber(found.amount)),
+    bill_date: (free("bill_date") && found.bill_date) || f.bill_date,
+    due_date: (free("due_date") && found.due_date) || f.due_date,
+    amount: free("amount") && found.amount != null ? formatAmountNumber(found.amount) : f.amount,
   };
-  const filled = PDF_FIELDS.filter(([key]) => !f[key] && form[key]).map(([, label]) => label);
-  const missing = PDF_FIELDS.filter(([key]) => !form[key]).map(([, label]) => label);
+  const read = {
+    bill_date: !!found.bill_date,
+    due_date: !!found.due_date,
+    period_start: "period_start" in period,
+    amount: found.amount != null,
+  };
+  const filled = PDF_FIELDS.filter(([key]) => free(key) && read[key]).map(([, label]) => label);
+  const missing = PDF_FIELDS.filter(([key]) => free(key) && !read[key]).map(([, label]) => label);
   let note: string | null = null;
   if (filled.length > 0) {
     const gaps = missing.length > 0 ? `, but couldn't find the ${OR_LIST.format(missing)}` : "";
@@ -277,13 +367,15 @@ export default function BillsClient() {
   const saveCategory = (e: React.FormEvent) => {
     e.preventDefault();
     if (!categoryDraft) return;
-    const id = categoryDraft.id;
-    const name = categoryDraft.name.trim();
+    const draft = categoryDraft;
     void submit(async () => {
-      if (!name) throw new Error("Name is required.");
-      await (id == null ? createBillCategory(name) : updateBillCategory(id, name));
+      const body = toCategoryBody(draft);
+      await (draft.id == null ? createBillCategory(body) : updateBillCategory(draft.id, body));
     }, closeCategory);
   };
+
+  const setDay = (key: DateKey, patch: Partial<CategoryDraft["days"][DateKey]>) =>
+    setCategoryDraft((d) => d && { ...d, days: { ...d.days, [key]: { ...d.days[key], ...patch } } });
 
   const removeCategory = async () => {
     const id = categoryDraft?.id;
@@ -345,7 +437,7 @@ export default function BillsClient() {
             <button
               type="button"
               className={categories.length === 0 ? PRIMARY_BUTTON_CLASSES : SECONDARY_BUTTON_CLASSES}
-              onClick={() => openCategory({ id: null, name: "" })}
+              onClick={() => openCategory(toCategoryDraft(null))}
             >
               <PlusIcon className="size-4" />
               New category
@@ -354,7 +446,7 @@ export default function BillsClient() {
               <button
                 type="button"
                 className={PRIMARY_BUTTON_CLASSES}
-                onClick={() => openBill(newBillDraft(categories[0].id))}
+                onClick={() => openBill(newBillDraft(categories[0]))}
               >
                 <PlusIcon className="size-4" />
                 Add bill
@@ -391,14 +483,14 @@ export default function BillsClient() {
                 subtitle={plural(list.length, "bill")}
                 actions={
                   <>
-                    <button type="button" className={TEXT_BUTTON_CLASSES} onClick={() => openBill(newBillDraft(c.id))}>
+                    <button type="button" className={TEXT_BUTTON_CLASSES} onClick={() => openBill(newBillDraft(c))}>
                       <PlusIcon className="size-4" />
                       Add
                     </button>
                     <IconAction
                       kind="edit"
                       label={`Edit ${c.name}`}
-                      onClick={() => openCategory({ id: c.id, name: c.name })}
+                      onClick={() => openCategory(toCategoryDraft(c))}
                     />
                   </>
                 }
@@ -453,7 +545,7 @@ export default function BillsClient() {
         open={categoryDraft != null}
         onClose={closeCategory}
         ariaLabelledBy="bill-category-title"
-        dialogClassName={`${DIALOG_CLASSES} max-w-md`}
+        dialogClassName={`${DIALOG_CLASSES} max-w-lg`}
       >
         {categoryDraft && (
           <>
@@ -477,6 +569,53 @@ export default function BillsClient() {
                     disabled={saving}
                   />
                 </Field>
+                <div className="grid gap-4 border-t border-line-soft pt-4 sm:grid-cols-2">
+                  <div className="sm:col-span-2">
+                    <p className="text-sm font-medium text-ink">Defaults for new bills</p>
+                    <p className="mt-0.5 text-xs text-ink-3">
+                      Optional. Months count from the month you add the bill. Day 31 means the last day of any month.
+                    </p>
+                  </div>
+                  {DEFAULT_DAYS.map(([key, label]) => (
+                    <Field key={key} label={label}>
+                      <div className="flex gap-2">
+                        <input
+                          type="number"
+                          min={1}
+                          max={31}
+                          step={1}
+                          inputMode="numeric"
+                          placeholder="Day"
+                          className={`${INPUT_CLASSES} w-20 shrink-0`}
+                          value={categoryDraft.days[key].day}
+                          onChange={(e) => setDay(key, { day: e.target.value })}
+                          disabled={saving}
+                        />
+                        <select
+                          aria-label={`${label}, month`}
+                          className={`${INPUT_CLASSES} min-w-0 flex-1`}
+                          value={categoryDraft.days[key].months}
+                          onChange={(e) => setDay(key, { months: e.target.value })}
+                          disabled={saving}
+                        >
+                          {MONTH_OFFSETS.map(([n, text]) => (
+                            <option key={n} value={n}>
+                              {text}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </Field>
+                  ))}
+                  <Field label="Amount" className="sm:col-span-2">
+                    <AmountInput
+                      placeholder="0.00"
+                      value={categoryDraft.amount}
+                      onChange={(v) => setCategoryDraft({ ...categoryDraft, amount: v })}
+                      disabled={saving}
+                    />
+                  </Field>
+                </div>
                 {modalError && <ErrorAlert>{modalError}</ErrorAlert>}
               </div>
               <div className={DIALOG_FOOTER_CLASSES}>
@@ -516,7 +655,10 @@ export default function BillsClient() {
                   <select
                     className={INPUT_CLASSES}
                     value={billDraft.form.category_id}
-                    onChange={(e) => setForm({ category_id: e.target.value })}
+                    onChange={(e) => {
+                      const c = categories.find((x) => String(x.id) === e.target.value);
+                      if (c) setBillDraft((d) => d && switchCategory(d, c));
+                    }}
                     disabled={saving}
                   >
                     {categories.map((c) => (

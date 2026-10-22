@@ -42,7 +42,7 @@ def bill_list() -> dict[str, Any]:
 @router.post("/api/bill-category")
 def bill_category_create(body: BillCategoryCreate) -> dict[str, Any]:
     try:
-        return {"category": insert_bill_category(body.name)}
+        return {"category": insert_bill_category(body.model_dump())}
     except IntegrityError:
         raise HTTPException(status_code=409, detail=_DUPLICATE_CATEGORY)
 
@@ -50,7 +50,7 @@ def bill_category_create(body: BillCategoryCreate) -> dict[str, Any]:
 @router.put("/api/bill-category/{category_id}")
 def bill_category_update(category_id: int, body: BillCategoryCreate) -> dict[str, Any]:
     try:
-        row = update_bill_category(category_id, body.name)
+        row = update_bill_category(category_id, body.model_dump())
     except IntegrityError:
         raise HTTPException(status_code=409, detail=_DUPLICATE_CATEGORY)
     if row is None:

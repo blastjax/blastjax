@@ -21,7 +21,7 @@ from sqlalchemy import (
     select,
     text,
 )
-from sqlalchemy.dialects.postgresql import TIMESTAMP, insert
+from sqlalchemy.dialects.postgresql import JSONB, TIMESTAMP, insert
 from sqlalchemy.orm import DeclarativeBase, Mapped, column_property, mapped_column, relationship
 
 IntPK = Annotated[int, mapped_column(Identity(), primary_key=True)]
@@ -71,6 +71,7 @@ class BillCategory(Base):
 
     id: Mapped[IntPK]
     name: Mapped[str]
+    defaults: Mapped[dict[str, Any]] = mapped_column(JSONB, server_default=text("'{}'"))
     created_at: Mapped[StampNN]
 
 

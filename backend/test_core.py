@@ -296,6 +296,9 @@ def check_bill_request_models() -> None:
     from app.schemas.bill import BillCategoryCreate, BillCreate
 
     assert BillCategoryCreate(name="  Internet ").name == "Internet"
+    assert BillCategoryCreate(name="Internet").defaults.due_date is None
+    period = {"period_start": {"months": -1, "day": 15}, "period_end": {"months": 0, "day": 14}}
+    assert BillCategoryCreate(name="Power", defaults=period).defaults.period_end.day == 14
     bill = {
         "category_id": 1,
         "bill_date": "2026-10-05",
@@ -307,6 +310,10 @@ def check_bill_request_models() -> None:
     assert BillCreate(**{**bill, "period_end": "2026-09-01"}).period_end == dt.date(2026, 9, 1)
     for model, bad in (
         (BillCategoryCreate, {"name": "   "}),
+        (BillCategoryCreate, {"name": "Power", "defaults": {"due_date": {"months": 3, "day": 8}}}),
+        (BillCategoryCreate, {"name": "Power", "defaults": {"due_date": {"months": 1, "day": 32}}}),
+        (BillCategoryCreate, {"name": "Power", "defaults": {"period_start": {"months": 0, "day": 1}}}),
+        (BillCategoryCreate, {"name": "Power", "defaults": {**period, "period_end": {"months": -1, "day": 14}}}),
         (BillCreate, {**bill, "period_end": "2026-08-31"}),
         (BillCreate, {**bill, "amount": -1}),
         (BillCreate, {**bill, "due_date": None}),
@@ -551,10 +558,13 @@ def check_db_against_postgres() -> None:
         assert bill["expense_date"] == "2026-10-20", bill
         assert db.list_monthly_expenses(period_year=2026, period_month=11)[0]["expense_date"] == "2026-10-20"
 
-        power = db.insert_bill_category("Electricity")
-        db.insert_bill_category("Internet")
+        power = db.insert_bill_category({"name": "Electricity"})
+        assert power["defaults"] == {}, power
+        due = {"due_date": {"months": 1, "day": 8}, "amount": 1500.0}
+        assert db.update_bill_category(power["id"], {"name": "Electricity", "defaults": due})["defaults"] == due
+        db.insert_bill_category({"name": "Internet"})
         try:
-            db.insert_bill_category("electricity")
+            db.insert_bill_category({"name": "electricity"})
         except IntegrityError:
             pass
         else:
