@@ -78,7 +78,9 @@ jobs:
           export BUDGET_CORS_ORIGINS='${{ secrets.BUDGET_CORS_ORIGINS }}'
           compose() { docker compose -f docker-compose.yml -f docker-compose.edge.yml "$@"; }
           compose pull --policy always api web
-          compose up --remove-orphans --wait --wait-timeout 200 || { compose logs --tail 50 >&2; exit 1; }
+          # --wait fails on any exited container, so the one-shot redis-flush runs separately.
+          compose up --remove-orphans --wait --wait-timeout 200 redis api web || { compose logs --tail 50 >&2; exit 1; }
+          compose run --rm redis-flush
           docker image prune -f
 
           /srv/edge/bin/edge-install Caddyfile docker/edge/Caddyfile
