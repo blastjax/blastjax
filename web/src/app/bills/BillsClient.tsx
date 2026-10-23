@@ -18,7 +18,7 @@ import {
   Panel,
   TEXT_BUTTON_CLASSES,
 } from "@/components/FinanceUI";
-import { DocumentIcon, PlusIcon, ReceiptIcon } from "@/components/Icons";
+import { PlusIcon, ReceiptIcon } from "@/components/Icons";
 import { Modal } from "@/components/Modal";
 import { PageHeader } from "@/components/PageHeader";
 import {
@@ -41,8 +41,9 @@ import {
   type BillRow,
   type RelativeDay,
 } from "@/lib/api";
-import { addMonths, formatDate, formatMonthYear, parseDateOnlyLocal, toIsoDateLocal } from "@/lib/dateFormat";
-import { fmtAmountOrDash, fmtCount } from "@/lib/formatNumber";
+import { BillYearBlock } from "./BillYearBlock";
+import { addMonths, formatMonthYear, parseDateOnlyLocal, toIsoDateLocal } from "@/lib/dateFormat";
+import { fmtCount } from "@/lib/formatNumber";
 import { formatAmountNumber, parseFormNumber } from "@/lib/parseFormNumber";
 import {
   INPUT_CLASSES,
@@ -76,6 +77,7 @@ type BillDraft = {
   file: File | null;
   note: string | null;
   preset: Partial<BillForm>;
+  anchor?: Date; // the month a new bill's defaults are counted from
 };
 
 const FILE_INPUT_CLASSES =
@@ -98,9 +100,9 @@ function parseAmount(s: string, label = "Amount"): number | null {
 
 const billYear = (b: BillRow) => Number(b.bill_date.slice(0, 4));
 
-// Each year that has bills, newest first, with how many it has.
-function yearCounts(list: BillRow[]): [number, number][] {
-  const counts = new Map<number, number>();
+// Each year that has bills (plus any in `include`), newest first, with how many it has.
+function yearCounts(list: BillRow[], include: number[] = []): [number, number][] {
+  const counts = new Map(include.map((y) => [y, 0]));
   for (const b of list) counts.set(billYear(b), (counts.get(billYear(b)) ?? 0) + 1);
   return [...counts].sort((a, b) => b[0] - a[0]);
 }
@@ -122,8 +124,7 @@ function toRelativeDay(iso: string, today: Date): RelativeDay | null {
   return { months, day: d.getDate() === last ? 31 : d.getDate() };
 }
 
-function presetForm(categoryId: number, d: BillDefaults = {}): BillForm {
-  const today = new Date();
+function presetForm(categoryId: number, d: BillDefaults = {}, today = new Date()): BillForm {
   return {
     category_id: String(categoryId),
     bill_date: resolveDay(d.bill_date, today),
@@ -135,9 +136,9 @@ function presetForm(categoryId: number, d: BillDefaults = {}): BillForm {
   };
 }
 
-function newBillDraft(c: BillCategoryRow): BillDraft {
-  const form = presetForm(c.id, c.defaults);
-  return { id: null, hasPdf: false, file: null, note: null, form, preset: form };
+function newBillDraft(c: BillCategoryRow, anchor = new Date()): BillDraft {
+  const form = presetForm(c.id, c.defaults, anchor);
+  return { id: null, hasPdf: false, file: null, note: null, form, preset: form, anchor };
 }
 
 // Empty, or still holding the category's default.
@@ -145,7 +146,7 @@ const untouched = (d: BillDraft, key: keyof BillForm) => !d.form[key].trim() || 
 
 // A new bill takes the picked category's defaults wherever it still holds the old one's.
 function switchCategory(d: BillDraft, c: BillCategoryRow): BillDraft {
-  const preset = d.id == null ? presetForm(c.id, c.defaults) : {};
+  const preset = d.id == null ? presetForm(c.id, c.defaults, d.anchor) : {};
   const form = { ...d.form };
   for (const [key, value] of Object.entries(preset) as [keyof BillForm, string][]) {
     if (untouched(d, key)) form[key] = value;
@@ -426,7 +427,8 @@ export default function BillsClient() {
 
   const listCategory = listView && categories.find((c) => c.id === listView.categoryId);
   const listBills = listCategory ? bills.filter((b) => b.category_id === listCategory.id) : [];
-  const listYears = yearCounts(listBills);
+  // The calendar always has this year, so its months can be filled in before it has a bill.
+  const listYears = yearCounts(listBills, [new Date().getFullYear()]);
   // A year whose last bill was deleted falls back to every year.
   const listYear = listView?.year != null && listYears.some(([y]) => y === listView.year) ? listView.year : null;
   const shownBills = listYear == null ? listBills : listBills.filter((b) => billYear(b) === listYear);
@@ -625,7 +627,7 @@ export default function BillsClient() {
         // Escape reaches every open modal; leave this one open under an edit or PDF on top of it.
         onClose={billDraft || pdfBill ? () => {} : closeList}
         ariaLabelledBy="bill-list-title"
-        dialogClassName={`${DIALOG_CLASSES} max-w-2xl`}
+        dialogClassName={`${DIALOG_CLASSES} max-w-5xl`}
       >
         {listCategory && (
           <>
@@ -650,48 +652,15 @@ export default function BillsClient() {
                   </button>
                 ))}
               </div>
-              {listBills.length === 0 && <p className="text-sm text-ink-3">No bills yet.</p>}
               {(listYear == null ? listYears.map(([y]) => y) : [listYear]).map((y) => (
-                <section key={y}>
-                  {listYear == null && <h3 className="text-sm font-semibold tabular-nums text-ink">{y}</h3>}
-                  <ul className="divide-y divide-line-soft">
-                    {shownBills.filter((b) => billYear(b) === y).map((b) => (
-                      <li key={b.id} className="flex items-start gap-2 py-3">
-                        <div className="min-w-0 flex-1">
-                          <p className="flex flex-wrap items-baseline justify-between gap-x-3 text-sm">
-                            <span className="font-medium text-ink">{billMonth(b)}</span>
-                            {b.amount != null && (
-                              <span className="font-semibold tabular-nums text-ink">{fmtAmountOrDash(b.amount)}</span>
-                            )}
-                          </p>
-                          <p className="mt-0.5 text-xs text-ink-3">
-                            Due {formatDate(b.due_date)}
-                            {b.minimum_due != null && ` · Minimum ${fmtAmountOrDash(b.minimum_due)}`} · Period{" "}
-                            {formatDate(b.period_start)} – {formatDate(b.period_end)}
-                          </p>
-                        </div>
-                        <div className="-my-1 flex shrink-0 items-center">
-                          {b.has_pdf && (
-                            <button
-                              type="button"
-                              className={TEXT_BUTTON_CLASSES}
-                              aria-label={`View the ${billMonth(b)} bill`}
-                              onClick={() => setPdfBill(b)}
-                            >
-                              <DocumentIcon className="size-4" />
-                              View
-                            </button>
-                          )}
-                          <IconAction
-                            kind="edit"
-                            label={`Edit the ${billMonth(b)} bill`}
-                            onClick={() => openBill(editBillDraft(b))}
-                          />
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                </section>
+                <BillYearBlock
+                  key={y}
+                  year={y}
+                  bills={shownBills.filter((b) => billYear(b) === y)}
+                  onAdd={(month) => openBill(newBillDraft(listCategory, new Date(y, month - 1, 1)))}
+                  onEdit={(b) => openBill(editBillDraft(b))}
+                  onView={setPdfBill}
+                />
               ))}
             </div>
             <div className={DIALOG_FOOTER_CLASSES}>

@@ -7,13 +7,16 @@ import {
   ChartBarIcon,
   ChevronRightIcon,
   CreditCardIcon,
+  DiceIcon,
   DocumentIcon,
   GridIcon,
   HeartPulseIcon,
+  HomeIcon,
   LayersIcon,
   MusicIcon,
   PlaneIcon,
   PuzzleIcon,
+  ReceiptIcon,
   TicketIcon,
   type IconProps,
 } from "@/components/Icons";
@@ -43,6 +46,8 @@ const AREAS: readonly Area[] = [
       { href: "/monthly-expenses", label: "Monthly Expenses", icon: DocumentIcon },
       { href: "/credit-card", label: "Credit Card", icon: CreditCardIcon },
       { href: "/installments", label: "Installments", icon: LayersIcon },
+      { href: "/house-payments", label: "House Payments", icon: HomeIcon },
+      { href: "/bills", label: "Bills", icon: ReceiptIcon },
     ],
   },
   {
@@ -84,6 +89,7 @@ const AREAS: readonly Area[] = [
       { href: "/games/mosaic", label: "Mosaic", icon: GridIcon },
       { href: "/games/mambo", label: "Mambo", icon: MusicIcon },
       { href: "/games/mastermind", label: "Mastermind", icon: PuzzleIcon },
+      { href: "/games/sets", label: "Sets", icon: DiceIcon },
     ],
   },
 ];
