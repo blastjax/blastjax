@@ -46,6 +46,7 @@ _CACHE_PREFIXES: dict[str, str] = {
 
 _CACHE_ALSO_INVALIDATES: dict[str, tuple[str, ...]] = {
     "installment": ("credit_card",),
+    "bill": ("credit_card",),  # a linked card reads its statement from the latest bill
 }
 
 
@@ -76,7 +77,8 @@ def _run_extra_invalidators(path: str) -> None:
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     init_schema()
     cache.init_cache()
-    cache.invalidate("lotto")
+    # A fresh start never serves what an older build (or a change made outside the API) left cached.
+    cache.flush()
     try:
         yield
     finally:

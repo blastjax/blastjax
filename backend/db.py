@@ -1075,10 +1075,31 @@ def _first_credit_card(s: Session) -> CreditCard | None:
     return s.scalar(select(CreditCard).order_by(CreditCard.id).limit(1))
 
 
+def _card_row(s: Session, card: CreditCard) -> dict[str, Any]:
+    """The card, its statement read from the latest bill of the bill category it is linked to."""
+    row = _row(card)
+    if card.bill_category_id is None:
+        return row
+    bill = s.scalar(
+        select(Bill)
+        .where(Bill.category_id == card.bill_category_id)
+        .order_by(Bill.bill_date.desc(), Bill.id.desc())
+        .limit(1)
+    )
+    if bill is not None:
+        row["statement_date"] = _normalize(bill.bill_date)
+        row["due_date"] = _normalize(bill.due_date)
+        if bill.amount is not None:
+            row["last_statement_balance"] = bill.amount
+        if bill.minimum_due is not None:
+            row["minimum_due"] = bill.minimum_due
+    return row
+
+
 def get_credit_card() -> dict[str, Any] | None:
     with _session() as s:
         card = _first_credit_card(s)
-        return _row(card) if card else None
+        return _card_row(s, card) if card else None
 
 
 def fetch_credit_card_bundle(installment_limit: int = 2000) -> dict[str, Any]:
@@ -1087,7 +1108,7 @@ def fetch_credit_card_bundle(installment_limit: int = 2000) -> dict[str, Any]:
         if card is None:
             return {"card": None, "installments": [], "payments": []}
         return {
-            "card": _row(card),
+            "card": _card_row(s, card),
             "installments": _installment_rows(s, installment_limit, card.id),
             "payments": _credit_card_payment_rows(s, card.id),
         }
@@ -1101,10 +1122,11 @@ def insert_credit_card(
     interest_rate: float,
     statement_date: Any,
     due_date: Any,
+    bill_category_id: int | None = None,
 ) -> dict[str, Any]:
     values = dict(locals(), current_balance=last_statement_balance)
     with _session(write=True) as s:
-        return _row(s.scalar(insert(CreditCard).values(values).returning(CreditCard)))
+        return _card_row(s, s.scalar(insert(CreditCard).values(values).returning(CreditCard)))
 
 
 def update_credit_card(
@@ -1116,12 +1138,16 @@ def update_credit_card(
     interest_rate: float,
     statement_date: Any,
     due_date: Any,
+    bill_category_id: int | None = None,
 ) -> dict[str, Any] | None:
-    values = dict(locals(), current_balance=last_statement_balance)
+    values = dict(locals())
     del values["card_id"]
+    # A statement typed in starts the balance over; one read from bills leaves the adjusted balance alone.
+    if bill_category_id is None:
+        values["current_balance"] = last_statement_balance
     with _session(write=True) as s:
         card = s.scalar(update(CreditCard).where(CreditCard.id == card_id).values(values).returning(CreditCard))
-        return _row(card) if card else None
+        return _card_row(s, card) if card else None
 
 
 def adjust_credit_card_balance(card_id: int, current_balance: float) -> dict[str, Any] | None:
@@ -1132,7 +1158,7 @@ def adjust_credit_card_balance(card_id: int, current_balance: float) -> dict[str
             .values(current_balance=current_balance)
             .returning(CreditCard)
         )
-        return _row(card) if card else None
+        return _card_row(s, card) if card else None
 
 
 def delete_credit_card(card_id: int) -> bool:

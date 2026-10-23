@@ -49,6 +49,8 @@ import {
   PAGE_CONTAINER_CLASSES,
   PRIMARY_BUTTON_CLASSES,
   SECONDARY_BUTTON_CLASSES,
+  TOGGLE_ACTIVE_BUTTON_CLASSES,
+  TOGGLE_INACTIVE_BUTTON_CLASSES,
 } from "@/lib/ui";
 
 type BillForm = {
@@ -87,12 +89,20 @@ const billMonth = (b: BillRow) => formatMonthYear(Number(b.bill_date.slice(0, 4)
 
 const isPdf = (file: File) => file.type === "application/pdf" || /\.pdf$/i.test(file.name);
 
+// Negative is fine: a credit card statement can carry a credit balance.
 function parseAmount(s: string, label = "Amount"): number | null {
   const amount = parseFormNumber(s);
-  if (s.trim() !== "" && (amount == null || amount < 0)) {
-    throw new Error(`${label} must be a non-negative number.`);
-  }
+  if (s.trim() !== "" && amount == null) throw new Error(`${label} must be a number.`);
   return amount;
+}
+
+const billYear = (b: BillRow) => Number(b.bill_date.slice(0, 4));
+
+// Each year that has bills, newest first, with how many it has.
+function yearCounts(list: BillRow[]): [number, number][] {
+  const counts = new Map<number, number>();
+  for (const b of list) counts.set(billYear(b), (counts.get(billYear(b)) ?? 0) + 1);
+  return [...counts].sort((a, b) => b[0] - a[0]);
 }
 
 // A day past the end of its month lands on that month's last day.
@@ -271,8 +281,14 @@ function toBillBody(f: BillForm, isCreditCard: boolean): BillBody {
     period_start: f.period_start,
     period_end: f.period_end,
     amount: parseAmount(f.amount),
-    minimum_due: isCreditCard ? parseAmount(f.minimum_due, "Minimum amount due") : null,
+    minimum_due: isCreditCard ? parseMinimumDue(f.minimum_due) : null,
   };
+}
+
+function parseMinimumDue(s: string): number | null {
+  const due = parseAmount(s, "Minimum amount due");
+  if (due != null && due < 0) throw new Error("Minimum amount due can't be negative.");
+  return due;
 }
 
 const PDF_FIELDS = [
@@ -384,6 +400,7 @@ export default function BillsClient() {
   const [saving, setSaving] = useState(false);
   const [modalError, setModalError] = useState<string | null>(null);
   const [pdfBill, setPdfBill] = useState<BillRow | null>(null);
+  const [listView, setListView] = useState<{ categoryId: number; year: number | null } | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -405,6 +422,14 @@ export default function BillsClient() {
   const closeCategory = useCallback(() => setCategoryDraft(null), []);
   const closeBill = useCallback(() => setBillDraft(null), []);
   const closePdf = useCallback(() => setPdfBill(null), []);
+  const closeList = useCallback(() => setListView(null), []);
+
+  const listCategory = listView && categories.find((c) => c.id === listView.categoryId);
+  const listBills = listCategory ? bills.filter((b) => b.category_id === listCategory.id) : [];
+  const listYears = yearCounts(listBills);
+  // A year whose last bill was deleted falls back to every year.
+  const listYear = listView?.year != null && listYears.some(([y]) => y === listView.year) ? listView.year : null;
+  const shownBills = listYear == null ? listBills : listBills.filter((b) => billYear(b) === listYear);
 
   const openCategory = (draft: CategoryDraft) => {
     setModalError(null);
@@ -542,15 +567,14 @@ export default function BillsClient() {
           </p>
         </section>
       ) : (
-        <div className="grid gap-5 lg:grid-cols-2 lg:items-start">
+        <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
           {categories.map((c) => {
             const list = bills.filter((b) => b.category_id === c.id);
             return (
               <Panel
                 key={c.id}
-                flush
                 title={c.name}
-                subtitle={plural(list.length, "bill")}
+                subtitle={list.length > 0 ? `${plural(list.length, "bill")} · latest ${billMonth(list[0])}` : undefined}
                 actions={
                   <>
                     <button type="button" className={TEXT_BUTTON_CLASSES} onClick={() => openBill(newBillDraft(c))}>
@@ -566,11 +590,73 @@ export default function BillsClient() {
                 }
               >
                 {list.length === 0 ? (
-                  <p className="px-5 pb-6 text-sm text-ink-3 sm:px-6">No bills yet.</p>
+                  <p className="text-sm text-ink-3">No bills yet.</p>
                 ) : (
-                  <ul className="divide-y divide-line-soft border-t border-line-soft">
-                    {list.map((b) => (
-                      <li key={b.id} className="flex items-start gap-2 py-3 pl-5 pr-3 sm:pl-6">
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      className={TOGGLE_INACTIVE_BUTTON_CLASSES}
+                      onClick={() => setListView({ categoryId: c.id, year: null })}
+                    >
+                      All bills
+                    </button>
+                    {yearCounts(list).map(([y, n]) => (
+                      <button
+                        key={y}
+                        type="button"
+                        aria-label={`${y}, ${plural(n, "bill")}`}
+                        className={TOGGLE_INACTIVE_BUTTON_CLASSES}
+                        onClick={() => setListView({ categoryId: c.id, year: y })}
+                      >
+                        {y}
+                        <span className="tabular-nums opacity-60">{n}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </Panel>
+            );
+          })}
+        </div>
+      )}
+
+      <Modal
+        open={listCategory != null}
+        // Escape reaches every open modal; leave this one open under an edit or PDF on top of it.
+        onClose={billDraft || pdfBill ? () => {} : closeList}
+        ariaLabelledBy="bill-list-title"
+        dialogClassName={`${DIALOG_CLASSES} max-w-2xl`}
+      >
+        {listCategory && (
+          <>
+            <ModalHeader
+              id="bill-list-title"
+              title={listYear == null ? listCategory.name : `${listCategory.name} · ${listYear}`}
+              subtitle={plural(shownBills.length, "bill")}
+              onClose={closeList}
+            />
+            <div className={`${DIALOG_BODY_CLASSES} grid gap-5`}>
+              <div role="group" aria-label="Year" className="flex flex-wrap gap-2">
+                {[[null, listBills.length] as const, ...listYears].map(([y, n]) => (
+                  <button
+                    key={y ?? "all"}
+                    type="button"
+                    aria-pressed={y === listYear}
+                    className={y === listYear ? TOGGLE_ACTIVE_BUTTON_CLASSES : TOGGLE_INACTIVE_BUTTON_CLASSES}
+                    onClick={() => setListView({ categoryId: listCategory.id, year: y })}
+                  >
+                    {y ?? "All"}
+                    <span className="tabular-nums opacity-70">{n}</span>
+                  </button>
+                ))}
+              </div>
+              {listBills.length === 0 && <p className="text-sm text-ink-3">No bills yet.</p>}
+              {(listYear == null ? listYears.map(([y]) => y) : [listYear]).map((y) => (
+                <section key={y}>
+                  {listYear == null && <h3 className="text-sm font-semibold tabular-nums text-ink">{y}</h3>}
+                  <ul className="divide-y divide-line-soft">
+                    {shownBills.filter((b) => billYear(b) === y).map((b) => (
+                      <li key={b.id} className="flex items-start gap-2 py-3">
                         <div className="min-w-0 flex-1">
                           <p className="flex flex-wrap items-baseline justify-between gap-x-3 text-sm">
                             <span className="font-medium text-ink">{billMonth(b)}</span>
@@ -605,12 +691,22 @@ export default function BillsClient() {
                       </li>
                     ))}
                   </ul>
-                )}
-              </Panel>
-            );
-          })}
-        </div>
-      )}
+                </section>
+              ))}
+            </div>
+            <div className={DIALOG_FOOTER_CLASSES}>
+              <button
+                type="button"
+                className={PRIMARY_BUTTON_CLASSES}
+                onClick={() => openBill(newBillDraft(listCategory))}
+              >
+                <PlusIcon className="size-4" />
+                Add bill
+              </button>
+            </div>
+          </>
+        )}
+      </Modal>
 
       <Modal
         open={categoryDraft != null}

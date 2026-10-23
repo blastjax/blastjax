@@ -898,6 +898,7 @@ export type CreditCardRow = {
   interest_rate: number;
   statement_date: string | null;
   due_date: string | null;
+  bill_category_id: number | null; // when set, the statement is that bill category's latest bill
   monthly_dues: number;
   created_at: string;
 };
@@ -919,6 +920,7 @@ export type CreditCardCreateBody = {
   interest_rate: number;
   statement_date?: string | null;
   due_date?: string | null;
+  bill_category_id?: number | null;
 };
 
 export type CreditCardPaymentCreateBody = {

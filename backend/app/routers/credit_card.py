@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.exc import IntegrityError
 
 import cache
 from app.deps import require_db
@@ -89,34 +90,45 @@ def credit_card_get() -> dict[str, Any]:
     return result
 
 
+_NO_BILL_CATEGORY = "That bill category doesn't exist."
+
+
 @router.post("/api/credit-card")
 def credit_card_create(body: CreditCardCreate) -> dict[str, Any]:
     if get_credit_card() is not None:
         raise HTTPException(status_code=409, detail="A credit card already exists.")
-    row = insert_credit_card(
-        body.name.strip(),
-        body.credit_limit,
-        body.last_statement_balance,
-        body.minimum_due,
-        body.interest_rate,
-        body.statement_date,
-        body.due_date,
-    )
+    try:
+        row = insert_credit_card(
+            body.name.strip(),
+            body.credit_limit,
+            body.last_statement_balance,
+            body.minimum_due,
+            body.interest_rate,
+            body.statement_date,
+            body.due_date,
+            body.bill_category_id,
+        )
+    except IntegrityError:
+        raise HTTPException(status_code=404, detail=_NO_BILL_CATEGORY)
     return {"card": _serialize_card(row)}
 
 
 @router.put("/api/credit-card/{card_id}")
 def credit_card_replace(card_id: int, body: CreditCardCreate) -> dict[str, Any]:
-    row = update_credit_card(
-        card_id,
-        body.name.strip(),
-        body.credit_limit,
-        body.last_statement_balance,
-        body.minimum_due,
-        body.interest_rate,
-        body.statement_date,
-        body.due_date,
-    )
+    try:
+        row = update_credit_card(
+            card_id,
+            body.name.strip(),
+            body.credit_limit,
+            body.last_statement_balance,
+            body.minimum_due,
+            body.interest_rate,
+            body.statement_date,
+            body.due_date,
+            body.bill_category_id,
+        )
+    except IntegrityError:
+        raise HTTPException(status_code=404, detail=_NO_BILL_CATEGORY)
     if row is None:
         raise HTTPException(status_code=404, detail="Credit card not found.")
     return {"card": _serialize_card(row)}

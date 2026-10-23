@@ -17,7 +17,7 @@ class BillDefaults(BaseModel):
     due_date: RelativeDay | None = None
     period_start: RelativeDay | None = None
     period_end: RelativeDay | None = None
-    amount: float | None = Field(default=None, ge=0)
+    amount: float | None = None
 
     @model_validator(mode="after")
     def _check_period(self) -> BillDefaults:
@@ -43,13 +43,13 @@ class BillCreate(BaseModel):
     due_date: dt.date
     period_start: dt.date
     period_end: dt.date
-    amount: float | None = Field(default=None, ge=0)
+    amount: float | None = None  # negative is a credit balance
     minimum_due: float | None = Field(default=None, ge=0)  # credit card bills
 
     @model_validator(mode="after")
     def _check_period(self) -> BillCreate:
         if self.period_end < self.period_start:
             raise ValueError("The billing period can't end before it starts.")
-        if self.minimum_due is not None and self.amount is not None and self.minimum_due > self.amount:
+        if self.minimum_due is not None and self.amount is not None and self.minimum_due > max(self.amount, 0):
             raise ValueError("The minimum amount due can't be more than the amount.")
         return self

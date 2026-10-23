@@ -29,8 +29,10 @@ import {
   createCreditCardPayment,
   deleteCreditCard,
   deleteCreditCardPayment,
+  getBills,
   getCreditCard,
   updateCreditCard,
+  type BillCategoryRow,
   type CreditCardPaymentRow,
   type CreditCardRow,
   type InstallmentRow,
@@ -119,6 +121,7 @@ type CardForm = {
   interest_rate: string;
   statement_date: string;
   due_date: string;
+  bill_category_id: string; // "" when the statement is typed in
 };
 
 const emptyCardForm = (): CardForm => ({
@@ -129,6 +132,7 @@ const emptyCardForm = (): CardForm => ({
   interest_rate: "3.5",
   statement_date: "",
   due_date: "",
+  bill_category_id: "",
 });
 
 type PaymentForm = { amount: string; payment_date: string; note: string };
@@ -152,6 +156,7 @@ export default function CreditCardClient() {
   const [card, setCard] = useState<CreditCardRow | null>(null);
   const [installments, setInstallments] = useState<InstallmentRow[]>([]);
   const [payments, setPayments] = useState<CreditCardPaymentRow[]>([]);
+  const [billCategories, setBillCategories] = useState<BillCategoryRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -177,10 +182,12 @@ export default function CreditCardClient() {
   const load = useCallback(async () => {
     setError(null);
     try {
-      const r = await getCreditCard();
+      // Bills only name where a linked statement comes from; the card page works without them.
+      const [r, bills] = await Promise.all([getCreditCard(), getBills().catch(() => null)]);
       setCard(r.card);
       setInstallments(r.installments);
       setPayments(r.payments);
+      setBillCategories(bills?.categories ?? []);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load credit card");
       setCard(null);
@@ -206,6 +213,7 @@ export default function CreditCardClient() {
         interest_rate: String(card.interest_rate),
         statement_date: card.statement_date ? card.statement_date.slice(0, 10) : "",
         due_date: card.due_date ? card.due_date.slice(0, 10) : "",
+        bill_category_id: card.bill_category_id == null ? "" : String(card.bill_category_id),
       });
     } else {
       setCardForm(emptyCardForm());
@@ -230,13 +238,15 @@ export default function CreditCardClient() {
         setCardFormError("Enter a valid credit limit greater than zero.");
         return;
       }
+      // A linked card's statement comes from its bills, so only a typed-in one is checked here.
+      const linked = cardForm.bill_category_id !== "";
       const lastStatementBalance = parseFormNumber(cardForm.last_statement_balance);
-      if (lastStatementBalance == null || lastStatementBalance < 0) {
+      if (!linked && lastStatementBalance == null) {
         setCardFormError("Enter a valid last statement balance.");
         return;
       }
       const minimumDue = parseFormNumber(cardForm.minimum_due);
-      if (minimumDue == null || minimumDue < 0) {
+      if (!linked && (minimumDue == null || minimumDue < 0)) {
         setCardFormError("Enter a valid minimum amount due.");
         return;
       }
@@ -251,11 +261,12 @@ export default function CreditCardClient() {
         const body = {
           name,
           credit_limit: creditLimit,
-          last_statement_balance: lastStatementBalance,
-          minimum_due: minimumDue,
+          last_statement_balance: lastStatementBalance ?? 0,
+          minimum_due: minimumDue ?? 0,
           interest_rate: interestRate,
           statement_date: cardForm.statement_date || null,
           due_date: cardForm.due_date || null,
+          bill_category_id: linked ? Number(cardForm.bill_category_id) : null,
         };
         if (card) {
           await updateCreditCard(card.id, body);
@@ -445,6 +456,10 @@ export default function CreditCardClient() {
     }
   }
 
+  const linkedCategory = card ? billCategories.find((c) => c.id === card.bill_category_id) : undefined;
+  const statementSources = billCategories.filter((c) => c.is_credit_card || c === linkedCategory);
+  const formLinked = cardForm.bill_category_id !== "";
+
   return (
     <div className={PAGE_CONTAINER_CLASSES}>
       <PageHeader
@@ -462,7 +477,7 @@ export default function CreditCardClient() {
           card && (
             <>
               <button type="button" className={SECONDARY_BUTTON_CLASSES} onClick={openCardModal}>
-                Update statement
+                {card.bill_category_id != null ? "Edit card" : "Update statement"}
               </button>
               <button type="button" className={PRIMARY_BUTTON_CLASSES} onClick={openPaymentModal}>
                 <PlusIcon className="size-4" />
@@ -538,7 +553,21 @@ export default function CreditCardClient() {
               </div>
             </div>
 
-            <Panel title="Statement" actions={due && <Pill tone={due.tone}>{due.text}</Pill>}>
+            <Panel
+              title="Statement"
+              subtitle={
+                linkedCategory && (
+                  <>
+                    Latest{" "}
+                    <Link href="/bills" className="font-medium text-brand-text hover:underline">
+                      {linkedCategory.name}
+                    </Link>{" "}
+                    bill
+                  </>
+                )
+              }
+              actions={due && <Pill tone={due.tone}>{due.text}</Pill>}
+            >
               <dl className="-my-2.5 divide-y divide-line-soft">
                 <Row label="Statement balance">{fmtMoney(card.last_statement_balance)}</Row>
                 <Row label="Minimum due">{fmtMoney(card.minimum_due)}</Row>
@@ -777,8 +806,8 @@ export default function CreditCardClient() {
       >
         <ModalHeader
           id="credit-card-title"
-          title={card ? "Update statement" : "Add credit card"}
-          subtitle={card ? "Saving resets the current balance to the new statement balance." : undefined}
+          title={card ? (card.bill_category_id != null ? "Edit card" : "Update statement") : "Add credit card"}
+          subtitle={card && !formLinked ? "Saving resets the current balance to the new statement balance." : undefined}
           onClose={closeCardModal}
         />
         <form onSubmit={submitCardForm} className="flex min-h-0 flex-1 flex-col">
@@ -812,38 +841,67 @@ export default function CreditCardClient() {
                 disabled={cardSaving}
               />
             </Field>
-            <Field label="Statement balance">
-              <AmountInput
-                required
-                value={cardForm.last_statement_balance}
-                onChange={(v) => setCardForm((f) => ({ ...f, last_statement_balance: v }))}
-                disabled={cardSaving}
-              />
-            </Field>
-            <Field label="Minimum due">
-              <AmountInput
-                required
-                value={cardForm.minimum_due}
-                onChange={(v) => setCardForm((f) => ({ ...f, minimum_due: v }))}
-                disabled={cardSaving}
-              />
-            </Field>
-            <Field label="Statement date" hint="Optional">
-              <DatePickerField
-                value={cardForm.statement_date}
-                onChange={(v) => setCardForm((f) => ({ ...f, statement_date: v }))}
-                disabled={cardSaving}
-                clearLabel="Clear"
-              />
-            </Field>
-            <Field label="Due date" hint="Optional">
-              <DatePickerField
-                value={cardForm.due_date}
-                onChange={(v) => setCardForm((f) => ({ ...f, due_date: v }))}
-                disabled={cardSaving}
-                clearLabel="Clear"
-              />
-            </Field>
+            {statementSources.length > 0 && (
+              <Field
+                label="Statement"
+                hint={
+                  formLinked
+                    ? "Read from the latest bill there, so each new bill updates it. The current balance stays as you adjusted it."
+                    : "Typed in below, or read from a credit card's bills."
+                }
+                className="sm:col-span-2"
+              >
+                <select
+                  className={INPUT_CLASSES}
+                  value={cardForm.bill_category_id}
+                  onChange={(e) => setCardForm((f) => ({ ...f, bill_category_id: e.target.value }))}
+                  disabled={cardSaving}
+                >
+                  <option value="">Typed in here</option>
+                  {statementSources.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      From the {c.name} bills
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            )}
+            {!formLinked && (
+              <>
+                <Field label="Statement balance">
+                  <AmountInput
+                    required
+                    value={cardForm.last_statement_balance}
+                    onChange={(v) => setCardForm((f) => ({ ...f, last_statement_balance: v }))}
+                    disabled={cardSaving}
+                  />
+                </Field>
+                <Field label="Minimum due">
+                  <AmountInput
+                    required
+                    value={cardForm.minimum_due}
+                    onChange={(v) => setCardForm((f) => ({ ...f, minimum_due: v }))}
+                    disabled={cardSaving}
+                  />
+                </Field>
+                <Field label="Statement date" hint="Optional">
+                  <DatePickerField
+                    value={cardForm.statement_date}
+                    onChange={(v) => setCardForm((f) => ({ ...f, statement_date: v }))}
+                    disabled={cardSaving}
+                    clearLabel="Clear"
+                  />
+                </Field>
+                <Field label="Due date" hint="Optional">
+                  <DatePickerField
+                    value={cardForm.due_date}
+                    onChange={(v) => setCardForm((f) => ({ ...f, due_date: v }))}
+                    disabled={cardSaving}
+                    clearLabel="Clear"
+                  />
+                </Field>
+              </>
+            )}
 
             {cardFormError && (
               <ErrorAlert className="sm:col-span-2">
@@ -866,7 +924,7 @@ export default function CreditCardClient() {
               Cancel
             </button>
             <button type="submit" disabled={cardSaving} className={PRIMARY_BUTTON_CLASSES}>
-              {cardSaving ? "Saving…" : card ? "Save statement" : "Add card"}
+              {cardSaving ? "Saving…" : !card ? "Add card" : formLinked ? "Save card" : "Save statement"}
             </button>
           </div>
         </form>

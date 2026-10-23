@@ -13,6 +13,13 @@ services:
       retries: 5
       start_period: 5s
       start_interval: 1s
+  # Runs on every `docker compose up` and exits: empties the API cache so pages show current data.
+  redis-flush:
+    image: redis:7-alpine
+    command: ["redis-cli", "-u", "${REDIS_URL:-redis://redis:6379}", "FLUSHDB"]
+    depends_on:
+      redis:
+        condition: service_healthy
   api:
     restart: always
     image: ${API_IMAGE:-blastjax-api}:latest

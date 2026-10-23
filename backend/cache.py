@@ -90,6 +90,15 @@ def delete(key: str) -> None:
         _log.debug("cache.delete(%s): %s", key, exc)
 
 
+def flush() -> None:
+    if _client is None:
+        return
+    try:
+        _client.flushdb()
+    except Exception as exc:
+        _log.debug("cache.flush: %s", exc)
+
+
 def invalidate(prefix: str) -> None:
     if _client is None:
         return

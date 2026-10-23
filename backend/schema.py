@@ -130,6 +130,8 @@ class CreditCard(Base):
     interest_rate: Mapped[float | None] = mapped_column(server_default=text("3.5"))
     statement_date: Mapped[dt.date | None]
     due_date: Mapped[dt.date | None]
+    # When set, the statement comes from this bill category's latest bill instead of the columns above.
+    bill_category_id: Mapped[int | None] = mapped_column(ForeignKey("bill_category.id", ondelete="SET NULL"))
     created_at: Mapped[Stamp]
 
 

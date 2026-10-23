@@ -311,6 +311,8 @@ def check_bill_request_models() -> None:
     assert BillCategoryCreate(name="Visa").is_credit_card is False
     assert BillCreate(**{**bill, "amount": 15000, "minimum_due": 850}).minimum_due == 850
     assert BillCreate(**{**bill, "minimum_due": 850}).minimum_due == 850  # amount not entered yet
+    assert BillCreate(**{**bill, "amount": -250.5, "minimum_due": 0}).amount == -250.5  # a credit balance
+    assert BillCategoryCreate(name="Visa", defaults={"amount": -100}).defaults.amount == -100
     for model, bad in (
         (BillCategoryCreate, {"name": "   "}),
         (BillCategoryCreate, {"name": "Power", "defaults": {"due_date": {"months": 3, "day": 8}}}),
@@ -318,8 +320,8 @@ def check_bill_request_models() -> None:
         (BillCategoryCreate, {"name": "Power", "defaults": {"period_start": {"months": 0, "day": 1}}}),
         (BillCategoryCreate, {"name": "Power", "defaults": {**period, "period_end": {"months": -1, "day": 14}}}),
         (BillCreate, {**bill, "period_end": "2026-08-31"}),
-        (BillCreate, {**bill, "amount": -1}),
         (BillCreate, {**bill, "minimum_due": -1}),
+        (BillCreate, {**bill, "amount": -250.5, "minimum_due": 100}),
         (BillCreate, {**bill, "amount": 500, "minimum_due": 850}),
         (BillCreate, {**bill, "due_date": None}),
     ):
@@ -572,7 +574,19 @@ def check_db_against_postgres() -> None:
         card_bill |= {"period_start": dt.date(2026, 9, 6), "period_end": dt.date(2026, 10, 5), "minimum_due": 850.0}
         assert visa["is_credit_card"] and power["is_credit_card"] is False, (visa, power)
         assert db.insert_bill({**card_bill, "category_id": visa["id"]})["minimum_due"] == 850.0
+        card = db.insert_credit_card("Visa", 50000.0, 1000.0, 100.0, 3.5, None, None)
+        db.adjust_credit_card_balance(card["id"], 20000.0)
+        linked = db.update_credit_card(card["id"], "Visa", 50000.0, 1000.0, 100.0, 3.5, None, None, visa["id"])
+        statement = (linked["last_statement_balance"], linked["minimum_due"], linked["statement_date"], linked["due_date"])
+        assert statement == (15000.0, 850.0, "2026-10-05", "2026-10-25"), linked
+        assert linked["current_balance"] == 20000.0, "linking reset the adjusted balance"
+        older = {**card_bill, "bill_date": dt.date(2026, 9, 5), "amount": 9.0, "category_id": visa["id"]}
+        db.insert_bill(older)
+        assert db.get_credit_card()["last_statement_balance"] == 15000.0, "an older bill became the statement"
         assert db.delete_bill_category(visa["id"])
+        unlinked = db.get_credit_card()
+        assert unlinked["bill_category_id"] is None and unlinked["last_statement_balance"] == 1000.0, unlinked
+        assert db.delete_credit_card(card["id"])
         db.insert_bill_category({"name": "Internet"})
         try:
             db.insert_bill_category({"name": "electricity"})
