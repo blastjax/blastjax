@@ -54,8 +54,6 @@ import {
 
 const TITLE_ID = "payslip-modal-title";
 
-const nonZero = (v: number | null | undefined) => v != null && v !== 0;
-
 export function PayslipClientModal({
   nav,
   setNav,
@@ -162,66 +160,68 @@ export function PayslipClientModal({
                   <div className="grid min-w-0 gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,17.5rem)] lg:items-start lg:gap-8">
                     <div className="min-w-0">
                       <dl className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-2 font-mono tabular-nums">
-                        {(() => {
-                          // Fixed [left, right] pairs; a hidden cell keeps its slot so
-                          // columns stay aligned, and a fully empty row is dropped.
-                          const cell = (
-                            label: string,
-                            value: number | null,
-                            show: boolean,
-                            strong = false,
-                          ) => (show && nonZero(value) ? { label, value, strong } : null);
-                          const incomeRows = [
-                            [
-                              cell("Gross total", grossTotalFromRow(row), detailFlags.show_total, true),
-                              cell("Net total", row.total, detailFlags.show_total, true),
-                            ],
-                            [
-                              cell("Basic salary", row.basic_salary, detailFlags.show_basic_salary),
-                              cell("Allowances", row.allowances, detailFlags.show_allowances),
-                            ],
-                            [
-                              cell(
-                                "Medical reimbursement",
-                                row.medical_reimbursement,
-                                detailFlags.show_medical_reimbursement,
-                              ),
-                              cell("Reimbursement", row.reimbursement, detailFlags.show_reimbursement),
-                            ],
-                            [
-                              cell("Others", row.others, detailFlags.show_others),
-                              cell(
-                                "Commission",
-                                row.commission,
-                                detailFlags.show_commission && row.period_half === 2,
-                              ),
-                            ],
-                            [
-                              cell(
-                                "13th Month",
-                                row.thirteenth_month,
-                                detailFlags.show_thirteenth_month &&
-                                  row.period_month === 11 &&
-                                  row.period_half === 2,
-                              ),
-                              null,
-                            ],
-                          ].filter((pair) => pair.some(Boolean));
-                          return incomeRows.flatMap((pair, i) =>
-                            pair.map((c, j) =>
-                              c ? (
-                                <div key={`${i}-${j}`}>
-                                  <dt className="text-xs text-ink-3">{c.label}</dt>
-                                  <dd className={c.strong ? "font-medium text-ink" : "text-ink-2"}>
-                                    {fmtNum(c.value)}
-                                  </dd>
-                                </div>
-                              ) : (
-                                <div key={`${i}-${j}`} className="hidden sm:block" aria-hidden />
-                              ),
-                            ),
-                          );
-                        })()}
+                        {detailFlags.show_total && (
+                          <>
+                            <div>
+                              <dt className="text-xs text-ink-3">Gross total</dt>
+                              <dd className="font-medium text-ink">
+                                {fmtNum(grossTotalFromRow(row))}
+                              </dd>
+                            </div>
+                            <div>
+                              <dt className="text-xs text-ink-3">Net total</dt>
+                              <dd className="font-medium text-ink">
+                                {fmtNum(row.total)}
+                              </dd>
+                            </div>
+                          </>
+                        )}
+                        {detailFlags.show_basic_salary && (
+                          <div>
+                            <dt className="text-xs text-ink-3">Basic salary</dt>
+                            <dd className="text-ink-2">
+                              {fmtNum(row.basic_salary)}
+                            </dd>
+                          </div>
+                        )}
+                        {(
+                          [
+                            ["commission", "Commission"],
+                            ["reimbursement", "Reimbursement"],
+                            ["medical_reimbursement", "Medical reimbursement"],
+                            ["others", "Others"],
+                            ["allowances", "Allowances"],
+                          ] as const
+                        )
+                        .filter(([k]) => k !== "commission" || row.period_half === 2)
+                        .filter(([k]) => {
+                          if (k === "commission") return detailFlags.show_commission;
+                          if (k === "reimbursement") return detailFlags.show_reimbursement;
+                          if (k === "medical_reimbursement") {
+                            return detailFlags.show_medical_reimbursement;
+                          }
+                          if (k === "others") return detailFlags.show_others;
+                          if (k === "allowances") return detailFlags.show_allowances;
+                          return true;
+                        })
+                        .map(([k, lab]) => (
+                          <div key={k}>
+                            <dt className="text-xs text-ink-3">{lab}</dt>
+                            <dd className="text-ink-2">
+                              {fmtNum(row[k])}
+                            </dd>
+                          </div>
+                        ))}
+                        {detailFlags.show_thirteenth_month &&
+                          row.period_month === 11 &&
+                          row.period_half === 2 && (
+                          <div>
+                            <dt className="text-xs text-ink-3">13th Month</dt>
+                            <dd className="text-ink-2">
+                              {fmtNum(row.thirteenth_month)}
+                            </dd>
+                          </div>
+                        )}
                       </dl>
                       {row.notes && (
                         <div className="mt-3">
@@ -237,7 +237,7 @@ export function PayslipClientModal({
                         Deductions
                       </p>
                       <dl className="flex flex-col gap-3 text-sm font-mono tabular-nums">
-                        {detailFlags.show_withholding_tax && nonZero(row.withholding_tax) && (
+                        {detailFlags.show_withholding_tax && (
                           <div>
                             <dt className="text-xs text-ink-3">
                               Withholding tax
@@ -247,7 +247,7 @@ export function PayslipClientModal({
                             </dd>
                           </div>
                         )}
-                        {detailFlags.show_sss_contribution && nonZero(row.sss_contribution) && (
+                        {detailFlags.show_sss_contribution && (
                           <div>
                             <dt className="text-xs text-ink-3">
                               SSS contribution
@@ -257,7 +257,7 @@ export function PayslipClientModal({
                             </dd>
                           </div>
                         )}
-                        {detailFlags.show_philhealth && nonZero(row.philhealth) && (
+                        {detailFlags.show_philhealth && (
                           <div>
                             <dt className="text-xs text-ink-3">Philhealth</dt>
                             <dd className="text-danger-text">
@@ -265,7 +265,7 @@ export function PayslipClientModal({
                             </dd>
                           </div>
                         )}
-                        {detailFlags.show_pag_ibig && nonZero(row.pag_ibig) && (
+                        {detailFlags.show_pag_ibig && (
                           <div>
                             <dt className="text-xs text-ink-3">
                               Pag-ibig (Employee HDMF)
@@ -275,7 +275,7 @@ export function PayslipClientModal({
                             </dd>
                           </div>
                         )}
-                        {detailFlags.show_mp2 && nonZero(row.mp2) && (
+                        {detailFlags.show_mp2 && (
                           <div>
                             <dt className="text-xs text-ink-3">MP2</dt>
                             <dd className="text-danger-text">
@@ -283,7 +283,7 @@ export function PayslipClientModal({
                             </dd>
                           </div>
                         )}
-                        {detailFlags.show_bereavement_asst && nonZero(row.bereavement_asst) && (
+                        {detailFlags.show_bereavement_asst && (
                           <div>
                             <dt className="text-xs text-ink-3">Bereavement asst</dt>
                             <dd className="text-danger-text">
