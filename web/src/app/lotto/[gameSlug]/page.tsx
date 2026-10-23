@@ -5,7 +5,9 @@ import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import LottoClient from "../LottoClient";
 import { getLottoGames, lottoGameSlug, type LottoGame } from "@/lib/api";
-import { ERROR_ALERT_CLASSES, LOADING_TEXT_CLASSES, PAGE_CONTAINER_CLASSES } from "@/lib/ui";
+import { ErrorAlert } from "@/components/ErrorAlert";
+import { LoadingBlocks } from "@/components/FinanceUI";
+import { ERROR_ALERT_CLASSES, PAGE_CONTAINER_CLASSES } from "@/lib/ui";
 
 export default function LottoGameSlugPage() {
   const { gameSlug } = useParams<{ gameSlug: string }>();
@@ -21,14 +23,14 @@ export default function LottoGameSlugPage() {
   if (error) {
     return (
       <div className={PAGE_CONTAINER_CLASSES}>
-        <p className={ERROR_ALERT_CLASSES}>{error}</p>
+        <ErrorAlert>{error}</ErrorAlert>
       </div>
     );
   }
   if (game === undefined) {
     return (
       <div className={PAGE_CONTAINER_CLASSES}>
-        <p className={LOADING_TEXT_CLASSES}>Loading…</p>
+        <LoadingBlocks label="Loading game…" />
       </div>
     );
   }

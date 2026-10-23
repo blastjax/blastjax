@@ -10,6 +10,7 @@ import {
   DIALOG_BODY_CLASSES,
   DIALOG_CLASSES,
   DIALOG_FOOTER_CLASSES,
+  EmptyState,
   Field,
   IconAction,
   LoadingBlocks,
@@ -345,15 +346,10 @@ export default function HousePaymentsClient() {
       {loading ? (
         <LoadingBlocks label="Loading house payments…" rows={2} />
       ) : rows.length === 0 ? (
-        <section className="flex flex-col items-center rounded-2xl border border-line bg-surface px-6 py-14 text-center shadow-xs">
-          <span className="grid size-12 place-items-center rounded-2xl bg-brand-soft text-brand-text">
-            <HomeIcon className="size-6" />
-          </span>
-          <h2 className="mt-4 text-base font-semibold text-ink">No plans yet</h2>
-          <p className="mt-1 max-w-sm text-sm text-ink-3">
-            Create a plan for the property or loan you&apos;re paying toward with <strong className="font-medium text-ink-2">New plan</strong>. Then log each payment right here.
-          </p>
-        </section>
+        <EmptyState icon={<HomeIcon className="size-6" />} title="No plans yet">
+          Create a plan for the property or loan you&apos;re paying toward with{" "}
+          <strong className="font-medium text-ink-2">New plan</strong>. Then log each payment right here.
+        </EmptyState>
       ) : (
         <>
           <StatStrip className="grid-cols-2 lg:grid-cols-4">

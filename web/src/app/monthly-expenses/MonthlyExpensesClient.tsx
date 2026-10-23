@@ -20,6 +20,7 @@ import {
   MonthStepper,
   Panel,
   Pill,
+  Segmented,
   StatStrip,
   TEXT_BUTTON_CLASSES,
 } from "@/components/FinanceUI";
@@ -49,10 +50,6 @@ import {
   PAGE_CONTAINER_CLASSES,
   PRIMARY_BUTTON_CLASSES,
   SECONDARY_BUTTON_CLASSES,
-  SEGMENTED_BUTTON_ACTIVE_CLASSES,
-  SEGMENTED_BUTTON_CLASSES,
-  SEGMENTED_BUTTON_INACTIVE_CLASSES,
-  SEGMENTED_WRAPPER_CLASSES,
   TOGGLE_ACTIVE_BUTTON_CLASSES,
   TOGGLE_INACTIVE_BUTTON_CLASSES,
 } from "@/lib/ui";
@@ -467,23 +464,22 @@ export default function MonthlyExpensesClient() {
                   </span>
                 )}
               </span>
-              <div className={`${SEGMENTED_WRAPPER_CLASSES} w-full`}>
-                {([1, 2] as const).map((half) => (
-                  <button
-                    key={half}
-                    type="button"
-                    aria-pressed={form.period_half === half}
-                    className={`flex-1 ${SEGMENTED_BUTTON_CLASSES} ${
-                      form.period_half === half ? SEGMENTED_BUTTON_ACTIVE_CLASSES : SEGMENTED_BUTTON_INACTIVE_CLASSES
-                    }`}
-                    onClick={() => setForm((f) => ({ ...f, period_half: half }))}
-                    disabled={saving || !!form.date}
-                  >
-                    {HALF[half].label}
-                    <span className="ml-1.5 text-xs opacity-70">{halfRange(half, parseMonthKey(form.month))}</span>
-                  </button>
-                ))}
-              </div>
+              <Segmented
+                label="Pay period"
+                options={([1, 2] as const).map((half) => ({
+                  value: half,
+                  label: (
+                    <>
+                      {HALF[half].label}
+                      <span className="text-xs opacity-70">{halfRange(half, parseMonthKey(form.month))}</span>
+                    </>
+                  ),
+                }))}
+                value={form.period_half}
+                onChange={(half) => setForm((f) => ({ ...f, period_half: half }))}
+                disabled={saving || !!form.date}
+                fill
+              />
             </div>
 
             <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-line p-3.5 transition-colors duration-150 hover:bg-surface-2/60">

@@ -19,6 +19,19 @@ const MONTH_DAY_FORMAT = new Intl.DateTimeFormat(LOCALE, {
   day: "numeric",
 });
 
+const WEEKDAY_MONTH_DAY_FORMAT = new Intl.DateTimeFormat(LOCALE, {
+  weekday: "short",
+  month: "short",
+  day: "numeric",
+});
+
+const LONG_DATE_FORMAT = new Intl.DateTimeFormat(LOCALE, {
+  weekday: "long",
+  month: "long",
+  day: "numeric",
+  year: "numeric",
+});
+
 export const MONTH_NAMES_FULL = [
   "January",
   "February",
@@ -94,37 +107,40 @@ export function parseDateOnlyLocal(iso: string): Date | null {
   return new Date(y, mo - 1, d);
 }
 
+// A bare "2026-10-23" is a calendar day: `new Date` would read it as UTC midnight,
+// which is the previous day west of UTC. Timestamps go through `new Date` as usual.
+function parseLocal(iso: string | null | undefined): Date | null {
+  if (!iso) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(iso)) return parseDateOnlyLocal(iso);
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? parseDateOnlyLocal(iso) : d;
+}
+
+function formatWith(format: Intl.DateTimeFormat, iso: string | null | undefined): string {
+  const d = parseLocal(iso);
+  return d ? format.format(d) : "—";
+}
+
+/** Oct 23, 2026 */
 export function formatDate(iso: string | null | undefined): string {
-  if (!iso) return "—";
-  const d = parseDateOnlyLocal(iso);
-  if (!d) return "—";
-  return DATE_FORMAT.format(d);
+  return formatWith(DATE_FORMAT, iso);
 }
 
 export function formatDateTime(iso: string | null | undefined): string {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "—";
-  return DATE_TIME_FORMAT.format(d);
+  return formatWith(DATE_TIME_FORMAT, iso);
 }
 
+/** Oct 23 */
 export function formatMonthDayShort(iso: string | null | undefined): string {
-  if (!iso) return "";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "";
-  return MONTH_DAY_FORMAT.format(d);
+  return formatWith(MONTH_DAY_FORMAT, iso);
 }
 
-export function formatTimeLabel(t: string | null | undefined): string | null {
-  if (!t) return null;
-  const m = /^(\d{1,2}):(\d{2})/.exec(t.trim());
-  if (!m) return t;
-  return `${m[1].padStart(2, "0")}:${m[2]}`;
+/** Fri, Oct 23 */
+export function formatWeekdayMonthDay(iso: string | null | undefined): string {
+  return formatWith(WEEKDAY_MONTH_DAY_FORMAT, iso);
 }
 
-export function formatTimeRange(start: string | null, end: string | null): string | null {
-  const s = formatTimeLabel(start);
-  const e = formatTimeLabel(end);
-  if (s && e) return `${s} – ${e}`;
-  return s ?? e ?? null;
+/** Friday, October 23, 2026 */
+export function formatDateLong(iso: string | null | undefined): string {
+  return formatWith(LONG_DATE_FORMAT, iso);
 }

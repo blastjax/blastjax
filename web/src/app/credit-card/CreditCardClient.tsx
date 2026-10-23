@@ -12,6 +12,7 @@ import {
   DIALOG_BODY_CLASSES,
   DIALOG_CLASSES,
   DIALOG_FOOTER_CLASSES,
+  EmptyState,
   Field,
   IconAction,
   LoadingBlocks,
@@ -20,6 +21,7 @@ import {
   ModalHeader,
   Panel,
   Pill,
+  Segmented,
   TEXT_BUTTON_CLASSES,
 } from "@/components/FinanceUI";
 import { CreditCardIcon, PlusIcon } from "@/components/Icons";
@@ -46,10 +48,10 @@ import {
   PAGE_CONTAINER_CLASSES,
   PRIMARY_BUTTON_CLASSES,
   SECONDARY_BUTTON_CLASSES,
-  SEGMENTED_BUTTON_ACTIVE_CLASSES,
-  SEGMENTED_BUTTON_CLASSES,
-  SEGMENTED_BUTTON_INACTIVE_CLASSES,
-  SEGMENTED_WRAPPER_CLASSES,
+  TABLE_CELL_CLASSES,
+  TABLE_HEAD_CELL_CLASSES,
+  TABLE_HEAD_ROW_CLASSES,
+  TABLE_ROW_CLASSES,
 } from "@/lib/ui";
 
 const fmtMoney = fmtAmountOrDash;
@@ -497,22 +499,19 @@ export default function CreditCardClient() {
       {loading ? (
         <LoadingBlocks label="Loading credit card…" />
       ) : !card ? (
-        <Panel>
-          <div className="flex flex-col items-center py-10 text-center">
-            <span className="grid size-14 place-items-center rounded-full bg-brand-soft text-brand-text">
-              <CreditCardIcon className="size-7" />
-            </span>
-            <h2 className="mt-4 text-lg font-semibold text-ink">No credit card yet</h2>
-            <p className="mt-1 max-w-sm text-sm text-ink-3">
-              Add your card&apos;s limit and latest statement to track your balance, what&apos;s due,
-              and how long it takes to pay off.
-            </p>
-            <button type="button" className={`mt-5 ${PRIMARY_BUTTON_CLASSES}`} onClick={openCardModal}>
+        <EmptyState
+          icon={<CreditCardIcon className="size-6" />}
+          title="No credit card yet"
+          action={
+            <button type="button" className={PRIMARY_BUTTON_CLASSES} onClick={openCardModal}>
               <PlusIcon className="size-4" />
               Add credit card
             </button>
-          </div>
-        </Panel>
+          }
+        >
+          Add your card&apos;s limit and latest statement to track your balance, what&apos;s due, and how long it
+          takes to pay off.
+        </EmptyState>
       ) : (
         <>
           <div className="grid gap-5 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
@@ -620,24 +619,28 @@ export default function CreditCardClient() {
               <div className="overflow-x-auto max-sm:hidden">
                 <table className="w-full min-w-[34rem] text-sm">
                   <thead>
-                    <tr className="border-y border-line-soft text-xs text-ink-3">
-                      <th className="px-5 py-2.5 text-left font-medium sm:px-6">If you…</th>
-                      <th className="px-3 py-2.5 text-right font-medium">Pay now</th>
-                      <th className="px-3 py-2.5 text-right font-medium">Carried over</th>
-                      <th className="px-3 py-2.5 text-right font-medium">Interest</th>
-                      <th className="px-5 py-2.5 text-right font-medium sm:px-6">Next statement</th>
+                    <tr className={TABLE_HEAD_ROW_CLASSES}>
+                      <th className={`${TABLE_HEAD_CELL_CLASSES} text-left`}>If you…</th>
+                      <th className={`${TABLE_HEAD_CELL_CLASSES} text-right`}>Pay now</th>
+                      <th className={`${TABLE_HEAD_CELL_CLASSES} text-right`}>Carried over</th>
+                      <th className={`${TABLE_HEAD_CELL_CLASSES} text-right`}>Interest</th>
+                      <th className={`${TABLE_HEAD_CELL_CLASSES} text-right`}>Next statement</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-line-soft tabular-nums">
+                  <tbody>
                     {scenarios.map((s) => (
-                      <tr key={s.label}>
-                        <td className="px-5 py-3 font-medium text-ink sm:px-6">{s.label}</td>
-                        <td className="px-3 py-3 text-right text-ink-2">{fmtMoney(s.pay)}</td>
-                        <td className="px-3 py-3 text-right text-ink-2">{fmtMoney(s.remaining)}</td>
-                        <td className={`px-3 py-3 text-right font-medium ${s.interest > 0 ? "text-danger-text" : "text-success-text"}`}>
+                      <tr key={s.label} className={TABLE_ROW_CLASSES}>
+                        <td className={`${TABLE_CELL_CLASSES} font-medium text-ink`}>{s.label}</td>
+                        <td className={`${TABLE_CELL_CLASSES} text-right`}>{fmtMoney(s.pay)}</td>
+                        <td className={`${TABLE_CELL_CLASSES} text-right`}>{fmtMoney(s.remaining)}</td>
+                        <td
+                          className={`${TABLE_CELL_CLASSES} text-right font-medium ${s.interest > 0 ? "text-danger-text" : "text-success-text"}`}
+                        >
                           {s.interest > 0 ? `+${fmtMoney(s.interest)}` : "None"}
                         </td>
-                        <td className="px-5 py-3 text-right font-semibold text-ink sm:px-6">{fmtMoney(s.nextStatement)}</td>
+                        <td className={`${TABLE_CELL_CLASSES} text-right font-semibold text-ink`}>
+                          {fmtMoney(s.nextStatement)}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -657,26 +660,16 @@ export default function CreditCardClient() {
             ) : (
               <div className="grid gap-5 md:grid-cols-[minmax(0,20rem)_minmax(0,1fr)] md:items-start">
                 <div className="flex flex-col gap-3">
-                  <div className={`${SEGMENTED_WRAPPER_CLASSES} w-full`}>
-                    {(
-                      [
-                        ["payment", "By payment"],
-                        ["months", "By months"],
-                      ] as const
-                    ).map(([mode, label]) => (
-                      <button
-                        key={mode}
-                        type="button"
-                        aria-pressed={calcMode === mode}
-                        className={`flex-1 ${SEGMENTED_BUTTON_CLASSES} ${
-                          calcMode === mode ? SEGMENTED_BUTTON_ACTIVE_CLASSES : SEGMENTED_BUTTON_INACTIVE_CLASSES
-                        }`}
-                        onClick={() => setCalcMode(mode)}
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
+                  <Segmented
+                    label="Calculate by"
+                    options={[
+                      { value: "payment", label: "By payment" },
+                      { value: "months", label: "By months" },
+                    ]}
+                    value={calcMode}
+                    onChange={setCalcMode}
+                    fill
+                  />
                   {calcMode === "payment" ? (
                     <Field label="I can pay each month">
                       <AmountInput placeholder="0.00" value={calcPaymentInput} onChange={setCalcPaymentInput} />

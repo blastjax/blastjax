@@ -5,9 +5,9 @@ import { getPayslips, type PayslipRow } from "@/lib/api";
 import { fmtAmount as fmt } from "@/lib/formatNumber";
 import { MONTH_NAMES_FULL as MF, MONTH_NAMES_SHORT as MN } from "@/lib/dateFormat";
 import { ErrorAlert } from "@/components/ErrorAlert";
-import { LOADING_TEXT_CLASSES } from "@/lib/ui";
+import { EmptyState, LoadingBlocks } from "@/components/FinanceUI";
 import { useWheelStep } from "@/lib/useWheelStep";
-import { ChevronDownIcon, ChevronUpIcon } from "@/components/Icons";
+import { ChevronDownIcon, ChevronUpIcon, TrendingUpIcon } from "@/components/Icons";
 import {
   Chip,
   Segmented,
@@ -87,12 +87,12 @@ export default function CommissionClient({ company = "Sophos" }: { company?: str
         <StatsHeader company={company} title="Commission" description={DESCRIPTION} />
         {error ? (
           <ErrorAlert>{error}</ErrorAlert>
+        ) : loading ? (
+          <LoadingBlocks label="Loading payslips…" />
         ) : (
-          <p className={LOADING_TEXT_CLASSES}>
-            {loading
-              ? "Loading payslips…"
-              : "No commission history yet — add payslip entries with a commission amount to see a forecast here."}
-          </p>
+          <EmptyState icon={<TrendingUpIcon className="size-6" />} title="No commission history yet">
+            Add payslip entries with a commission amount to see a forecast here.
+          </EmptyState>
         )}
       </div>
     );

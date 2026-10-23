@@ -1,5 +1,5 @@
 import type { MonthlyExpenseRow } from "@/lib/api";
-import { addMonths, parseDateOnlyLocal } from "@/lib/dateFormat";
+import { addMonths, formatMonthDayShort } from "@/lib/dateFormat";
 
 export type PeriodHalf = 1 | 2;
 
@@ -75,17 +75,11 @@ export function compareDue(a: string | null, b: string | null): number {
   return (a ?? "9999").localeCompare(b ?? "9999");
 }
 
-const SHORT_DAY = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" });
-
 export function periodRangeLabel(
   overrides: Map<string, string>,
   year: number,
   month: number,
   half: PeriodHalf,
 ): string {
-  const fmt = (iso: string) => {
-    const d = parseDateOnlyLocal(iso);
-    return d ? SHORT_DAY.format(d) : iso;
-  };
-  return `${fmt(effectiveHalfStartIso(overrides, year, month, half))} – ${fmt(periodEndIso(overrides, year, month, half))}`;
+  return `${formatMonthDayShort(effectiveHalfStartIso(overrides, year, month, half))} – ${formatMonthDayShort(periodEndIso(overrides, year, month, half))}`;
 }

@@ -138,6 +138,69 @@ export function Meter({
   );
 }
 
+export function Segmented<T extends string | number>({
+  label,
+  options,
+  value,
+  onChange,
+  fill = false,
+  disabled = false,
+  className = "",
+}: {
+  label: string;
+  options: readonly { value: T; label: ReactNode }[];
+  value: T;
+  onChange: (value: T) => void;
+  /** Stretch to the container's width, splitting it evenly between the options. */
+  fill?: boolean;
+  disabled?: boolean;
+  className?: string;
+}) {
+  return (
+    <div
+      role="group"
+      aria-label={label}
+      className={`inline-flex rounded-lg border border-line bg-surface-2 p-1 ${fill ? "w-full" : ""} ${className}`}
+    >
+      {options.map((o) => (
+        <button
+          key={o.value}
+          type="button"
+          aria-pressed={o.value === value}
+          disabled={disabled}
+          onClick={() => onChange(o.value)}
+          className={`inline-flex items-center justify-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm font-medium transition-colors duration-150 disabled:opacity-50 sm:px-3.5 ${
+            fill ? "flex-1" : ""
+          } ${o.value === value ? "bg-brand text-brand-on shadow-xs" : "text-ink-3 hover:text-ink"}`}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+export function EmptyState({
+  icon,
+  title,
+  action,
+  children,
+}: {
+  icon: ReactNode;
+  title: ReactNode;
+  action?: ReactNode;
+  children?: ReactNode;
+}) {
+  return (
+    <section className="flex flex-col items-center rounded-2xl border border-line bg-surface px-6 py-14 text-center shadow-xs">
+      <span className="grid size-12 place-items-center rounded-2xl bg-brand-soft text-brand-text">{icon}</span>
+      <h2 className="mt-4 text-base font-semibold text-ink">{title}</h2>
+      {children && <p className="mt-1 max-w-sm text-sm text-ink-3">{children}</p>}
+      {action && <div className="mt-5">{action}</div>}
+    </section>
+  );
+}
+
 export function Pill({ tone = "neutral", children }: { tone?: Tone; children: ReactNode }) {
   return (
     <span
@@ -249,11 +312,14 @@ export function ModalHeader({
   id,
   title,
   subtitle,
+  actions,
   onClose,
 }: {
   id: string;
   title: ReactNode;
   subtitle?: ReactNode;
+  /** Extra header controls, shown before the close button. */
+  actions?: ReactNode;
   onClose: () => void;
 }) {
   return (
@@ -264,14 +330,17 @@ export function ModalHeader({
         </h2>
         {subtitle && <p className="mt-0.5 text-sm text-ink-3">{subtitle}</p>}
       </div>
-      <button
-        type="button"
-        aria-label="Close"
-        onClick={onClose}
-        className="-mr-1.5 grid size-9 shrink-0 place-items-center rounded-lg text-ink-3 transition-colors duration-150 hover:bg-surface-2 hover:text-ink"
-      >
-        <CloseIcon className="size-5" />
-      </button>
+      <div className="flex shrink-0 items-center gap-1">
+        {actions}
+        <button
+          type="button"
+          aria-label="Close"
+          onClick={onClose}
+          className="-mr-1.5 grid size-9 shrink-0 place-items-center rounded-lg text-ink-3 transition-colors duration-150 hover:bg-surface-2 hover:text-ink"
+        >
+          <CloseIcon className="size-5" />
+        </button>
+      </div>
     </div>
   );
 }

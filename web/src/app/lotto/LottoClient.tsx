@@ -24,6 +24,7 @@ import {
 import {
   MONTH_NAMES_FULL,
   formatDate,
+  formatDateLong,
   formatMonthDayShort,
   parseDateOnlyLocal,
 } from "@/lib/dateFormat";
@@ -33,19 +34,23 @@ import {
   ACTION_BUTTON_CLASSES,
   ADD_BUTTON_CLASSES,
   CARD_CLASSES,
-  CLOSE_BUTTON_CLASSES,
   DASHED_EMPTY_CLASSES,
   ICON_BUTTON_CLASSES,
   INPUT_CLASSES,
   PAGE_CONTAINER_CLASSES,
   PRIMARY_BUTTON_CLASSES,
   SECONDARY_BUTTON_CLASSES,
-  SEGMENTED_BUTTON_ACTIVE_CLASSES,
-  SEGMENTED_BUTTON_CLASSES,
-  SEGMENTED_BUTTON_INACTIVE_CLASSES,
-  SEGMENTED_WRAPPER_CLASSES,
   alertClasses,
 } from "@/lib/ui";
+import {
+  DIALOG_BODY_CLASSES,
+  DIALOG_CLASSES,
+  DIALOG_FOOTER_CLASSES,
+  Field,
+  ModalHeader,
+  Pill,
+  Segmented,
+} from "@/components/FinanceUI";
 
 const NUMBERS_HELP =
   "6 unique numbers, 1-58 — separate with commas, spaces, or dashes (e.g. 3, 17, 29, 42, 58, 1 or 03-17-29-42-58-01)";
@@ -355,12 +360,6 @@ function bestAttempt(detail: LottoDrawDetail): { count: number; hits: Set<number
 }
 
 const WEEKDAY_FORMAT = new Intl.DateTimeFormat("en-US", { weekday: "short" });
-export const LONG_DATE_FORMAT = new Intl.DateTimeFormat("en-US", {
-  weekday: "long",
-  month: "long",
-  day: "numeric",
-  year: "numeric",
-});
 
 export function ScoreCell({ count }: { count: number }) {
   return (
@@ -624,17 +623,17 @@ const emptyPasteModal: PasteAttemptsModalState = { open: false, drawDate: "", at
 const emptyImportModal: ImportModalState = { open: false, text: "" };
 
 type LottoTab = "draw" | "history" | "insights";
-const TAB_LABELS: Record<LottoTab, string> = {
-  draw: "This draw",
-  history: "History",
-  insights: "Insights",
-};
+const TAB_OPTIONS: { value: LottoTab; label: string }[] = [
+  { value: "draw", label: "This draw" },
+  { value: "history", label: "History" },
+  { value: "insights", label: "Insights" },
+];
 
 type AttemptSort = "ticket" | "best";
-const SORT_LABELS: Record<AttemptSort, string> = {
-  ticket: "By ticket",
-  best: "Best first",
-};
+const SORT_OPTIONS: { value: AttemptSort; label: string }[] = [
+  { value: "ticket", label: "By ticket" },
+  { value: "best", label: "Best first" },
+];
 
 type RevealedActions =
   | { type: "draw"; drawId: number }
@@ -1125,7 +1124,6 @@ export default function LottoClient({ gameId }: { gameId: number }) {
   const renderDrawCard = (detail: LottoDrawDetail) => {
     const hasResult = detail.draw.numbers.length === 6;
     const drawSet = new Set(detail.draw.numbers);
-    const drawDate = parseDateOnlyLocal(detail.draw.draw_date);
     const totalAttempts = detail.attempts.length;
     const ticketCount = new Set(
       detail.attempts.flatMap((a) => (a.ticket != null ? [a.ticket] : [])),
@@ -1269,18 +1267,18 @@ export default function LottoClient({ gameId }: { gameId: number }) {
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
             {hasResult ? (
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300">
-                <span className="size-1.5 rounded-full bg-emerald-500" aria-hidden />
+              <Pill tone="success">
+                <span className="size-1.5 rounded-full bg-success" aria-hidden />
                 Result in
-              </span>
+              </Pill>
             ) : (
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-800 dark:bg-amber-950/60 dark:text-amber-300">
-                <span className="size-1.5 animate-pulse rounded-full bg-amber-500" aria-hidden />
+              <Pill tone="warning">
+                <span className="size-1.5 animate-pulse rounded-full bg-warning" aria-hidden />
                 Awaiting result
-              </span>
+              </Pill>
             )}
             <h2 className="mt-2 text-xl font-semibold tracking-tight text-ink sm:text-2xl">
-              {drawDate ? LONG_DATE_FORMAT.format(drawDate) : formatDate(detail.draw.draw_date)}
+              {formatDateLong(detail.draw.draw_date)}
             </h2>
           </div>
           <div
@@ -1375,23 +1373,7 @@ export default function LottoClient({ gameId }: { gameId: number }) {
               </p>
             </div>
             {hasResult && (
-              <div className={SEGMENTED_WRAPPER_CLASSES}>
-                {(Object.keys(SORT_LABELS) as AttemptSort[]).map((s) => (
-                  <button
-                    key={s}
-                    type="button"
-                    aria-pressed={attemptSort === s}
-                    className={`${SEGMENTED_BUTTON_CLASSES} ${
-                      attemptSort === s
-                        ? SEGMENTED_BUTTON_ACTIVE_CLASSES
-                        : SEGMENTED_BUTTON_INACTIVE_CLASSES
-                    }`}
-                    onClick={() => setAttemptSort(s)}
-                  >
-                    {SORT_LABELS[s]}
-                  </button>
-                ))}
-              </div>
+              <Segmented label="Sort attempts" options={SORT_OPTIONS} value={attemptSort} onChange={setAttemptSort} />
             )}
           </div>
 
@@ -1806,47 +1788,32 @@ export default function LottoClient({ gameId }: { gameId: number }) {
             </section>
           )}
 
-          <div className={`${SEGMENTED_WRAPPER_CLASSES} self-start`}>
-            {(Object.keys(TAB_LABELS) as LottoTab[]).map((t) => (
-              <button
-                key={t}
-                type="button"
-                className={`${SEGMENTED_BUTTON_CLASSES} ${
-                  activeTab === t ? SEGMENTED_BUTTON_ACTIVE_CLASSES : SEGMENTED_BUTTON_INACTIVE_CLASSES
-                }`}
-                onClick={() => setActiveTab(t)}
-              >
-                {TAB_LABELS[t]}
-              </button>
-            ))}
-          </div>
+          <Segmented label="Section" options={TAB_OPTIONS} value={activeTab} onChange={setActiveTab} className="self-start" />
 
           {activeTab === "draw" && pinnedDraw && renderDrawCard(pinnedDraw)}
 
           {activeTab === "history" && (
             <div className="flex flex-col gap-4">
-              <div className={`${SEGMENTED_WRAPPER_CLASSES} self-start`}>
-                {(
+              <Segmented
+                label="Show draws"
+                options={(
                   [
                     ["all", "All draws", draws.length],
                     ["played", "Played", playedDraws.length],
                   ] as const
-                ).map(([value, label, count]) => (
-                  <button
-                    key={value}
-                    type="button"
-                    aria-pressed={historyFilter === value}
-                    className={`${SEGMENTED_BUTTON_CLASSES} ${
-                      historyFilter === value
-                        ? SEGMENTED_BUTTON_ACTIVE_CLASSES
-                        : SEGMENTED_BUTTON_INACTIVE_CLASSES
-                    }`}
-                    onClick={() => setHistoryFilter(value)}
-                  >
-                    {label} <span className="tabular-nums opacity-70">{fmtCount(count)}</span>
-                  </button>
-                ))}
-              </div>
+                ).map(([value, label, count]) => ({
+                  value,
+                  label: (
+                    <>
+                      {label}
+                      <span className="tabular-nums opacity-70">{fmtCount(count)}</span>
+                    </>
+                  ),
+                }))}
+                value={historyFilter}
+                onChange={setHistoryFilter}
+                className="self-start"
+              />
 
               {yearGroups.length === 0 && (
                 <p className={DASHED_EMPTY_CLASSES}>
@@ -2074,166 +2041,164 @@ export default function LottoClient({ gameId }: { gameId: number }) {
         </>
       )}
 
-      <Modal open={drawModal.open} onClose={closeDrawModal} ariaLabelledBy="lotto-draw-title">
-        <div className="mb-4 flex items-start justify-between gap-2">
-          <h2 id="lotto-draw-title" className="text-lg font-semibold text-ink">
-            {drawModal.isEdit ? "Edit result" : "Add result"}
-          </h2>
-          <button
-            type="button"
-            className={CLOSE_BUTTON_CLASSES}
-            onClick={closeDrawModal}
-          >
-            Close
-          </button>
-        </div>
-        <form onSubmit={submitDraw} className="flex flex-col gap-4">
-          {drawFormError && (
-            <ErrorAlert>
-              {drawFormError}
-            </ErrorAlert>
-          )}
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-ink-2">Draw date</span>
-            <DatePickerField
-              value={drawModal.drawDate}
-              disabled={saving}
-              onChange={(v) => setDrawModal((m) => ({ ...m, drawDate: v }))}
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-ink-2">
-              Winning numbers <span className="font-normal text-ink-4">(optional)</span>
-            </span>
-            <input
-              type="text"
-              className={INPUT_CLASSES}
-              value={drawModal.numbersText}
-              disabled={saving}
-              onChange={(e) => setDrawModal((m) => ({ ...m, numbersText: e.target.value }))}
-            />
-            <span className="text-xs text-ink-3">
-              {NUMBERS_HELP} — leave blank if the draw hasn&apos;t happened yet; fill it in
-              once the result is announced.
-            </span>
-          </label>
-          <div className="flex flex-wrap gap-4">
-            <label className="flex min-w-[10rem] flex-1 flex-col gap-1 text-sm">
-              <span className="text-ink-2">
-                Jackpot prize <span className="font-normal text-ink-4">(optional)</span>
-              </span>
-              <AmountInput
-                value={drawModal.jackpotText}
+      <Modal
+        open={drawModal.open}
+        onClose={closeDrawModal}
+        ariaLabelledBy="lotto-draw-title"
+        dialogClassName={`${DIALOG_CLASSES} max-w-lg`}
+      >
+        <ModalHeader
+          id="lotto-draw-title"
+          title={drawModal.isEdit ? "Edit result" : "Add result"}
+          onClose={closeDrawModal}
+        />
+        <form onSubmit={submitDraw} className="flex min-h-0 flex-1 flex-col">
+          <div className={`${DIALOG_BODY_CLASSES} flex flex-col gap-4`}>
+            {drawFormError && <ErrorAlert>{drawFormError}</ErrorAlert>}
+            <Field label="Draw date">
+              <DatePickerField
+                value={drawModal.drawDate}
                 disabled={saving}
-                onChange={(v) => setDrawModal((m) => ({ ...m, jackpotText: v }))}
+                onChange={(v) => setDrawModal((m) => ({ ...m, drawDate: v }))}
               />
-            </label>
-            <label className="flex min-w-[8rem] flex-1 flex-col gap-1 text-sm">
-              <span className="text-ink-2">
-                Winners <span className="font-normal text-ink-4">(optional)</span>
-              </span>
+            </Field>
+            <Field
+              label={
+                <>
+                  Winning numbers <span className="font-normal text-ink-4">(optional)</span>
+                </>
+              }
+              hint={
+                <>
+                  {NUMBERS_HELP} — leave blank if the draw hasn&apos;t happened yet; fill it in once the result is
+                  announced.
+                </>
+              }
+            >
               <input
                 type="text"
-                inputMode="numeric"
                 className={INPUT_CLASSES}
-                value={drawModal.winnersText}
+                value={drawModal.numbersText}
                 disabled={saving}
-                onChange={(e) => setDrawModal((m) => ({ ...m, winnersText: e.target.value }))}
+                onChange={(e) => setDrawModal((m) => ({ ...m, numbersText: e.target.value }))}
               />
-            </label>
+            </Field>
+            <div className="flex flex-wrap gap-4">
+              <Field
+                className="min-w-[10rem] flex-1"
+                label={
+                  <>
+                    Jackpot prize <span className="font-normal text-ink-4">(optional)</span>
+                  </>
+                }
+              >
+                <AmountInput
+                  value={drawModal.jackpotText}
+                  disabled={saving}
+                  onChange={(v) => setDrawModal((m) => ({ ...m, jackpotText: v }))}
+                />
+              </Field>
+              <Field
+                className="min-w-[8rem] flex-1"
+                label={
+                  <>
+                    Winners <span className="font-normal text-ink-4">(optional)</span>
+                  </>
+                }
+              >
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  className={INPUT_CLASSES}
+                  value={drawModal.winnersText}
+                  disabled={saving}
+                  onChange={(e) => setDrawModal((m) => ({ ...m, winnersText: e.target.value }))}
+                />
+              </Field>
+            </div>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className={DIALOG_FOOTER_CLASSES}>
+            <button type="button" disabled={saving} className={SECONDARY_BUTTON_CLASSES} onClick={closeDrawModal}>
+              Cancel
+            </button>
             <button type="submit" disabled={saving} className={PRIMARY_BUTTON_CLASSES}>
               {saving ? "Saving…" : drawModal.isEdit ? "Update" : "Add"}
-            </button>
-            <button
-              type="button"
-              disabled={saving}
-              className={SECONDARY_BUTTON_CLASSES}
-              onClick={closeDrawModal}
-            >
-              Cancel
             </button>
           </div>
         </form>
       </Modal>
 
-      <Modal open={attemptsModal.open} onClose={closeAttemptsModal} ariaLabelledBy="lotto-attempts-title">
-        <div className="mb-4 flex items-start justify-between gap-2">
-          <h2 id="lotto-attempts-title" className="text-lg font-semibold text-ink">
-            {attemptsModalTitle}
-          </h2>
-          <button
-            type="button"
-            className={CLOSE_BUTTON_CLASSES}
-            onClick={closeAttemptsModal}
-          >
-            Close
-          </button>
-        </div>
-        <form onSubmit={submitAttemptsModal} className="flex flex-col gap-4">
-          {attemptsFormError && (
-            <ErrorAlert>
-              {attemptsFormError}
-            </ErrorAlert>
-          )}
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-ink-2">Your numbers</span>
-            <textarea
-              required
-              rows={
-                attemptsModal.mode === "add" ? 10 : attemptsModal.editingIds.length > 1 ? 6 : 3
+      <Modal
+        open={attemptsModal.open}
+        onClose={closeAttemptsModal}
+        ariaLabelledBy="lotto-attempts-title"
+        dialogClassName={`${DIALOG_CLASSES} max-w-lg`}
+      >
+        <ModalHeader id="lotto-attempts-title" title={attemptsModalTitle} onClose={closeAttemptsModal} />
+        <form onSubmit={submitAttemptsModal} className="flex min-h-0 flex-1 flex-col">
+          <div className={`${DIALOG_BODY_CLASSES} flex flex-col gap-4`}>
+            {attemptsFormError && <ErrorAlert>{attemptsFormError}</ErrorAlert>}
+            <Field
+              label="Your numbers"
+              hint={
+                attemptsModal.mode === "add" ? (
+                  <>
+                    One attempt per line, {NUMBERS_HELP} — a blank line starts a new ticket,
+                    so each group of lines becomes one ticket&apos;s attempts. Ticket numbers
+                    are worked out for you, carrying on from the ones already on this draw.
+                  </>
+                ) : (
+                  <>
+                    One attempt per line, {NUMBERS_HELP} — add more lines for more attempts on
+                    the same ticket.
+                  </>
+                )
               }
-              className={`${INPUT_CLASSES} font-mono`}
-              placeholder={
-                attemptsModal.mode === "add"
-                  ? "01 02 34 37 52 57\n03 12 19 27 41 58\n\n07 14 21 28 35 42"
-                  : "03 12 19 27 41 58\n01 02 34 37 52 57"
-              }
-              value={attemptsModal.attemptsText}
-              disabled={saving}
-              onChange={(e) =>
-                setAttemptsModal((m) => ({ ...m, attemptsText: e.target.value }))
-              }
-            />
-            <span className="text-xs text-ink-3">
-              {attemptsModal.mode === "add" ? (
-                <>
-                  One attempt per line, {NUMBERS_HELP} — a blank line starts a new ticket,
-                  so each group of lines becomes one ticket&apos;s attempts. Ticket numbers
-                  are worked out for you, carrying on from the ones already on this draw.
-                </>
-              ) : (
-                <>
-                  One attempt per line, {NUMBERS_HELP} — add more lines for more attempts on
-                  the same ticket.
-                </>
-              )}
-            </span>
-          </label>
-          {attemptsModal.mode === "edit" && (
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="text-ink-2">
-                Ticket # <span className="font-normal text-ink-4">(optional)</span>
-              </span>
-              <input
-                type="text"
-                inputMode="numeric"
-                className={INPUT_CLASSES}
-                value={attemptsModal.ticketText}
+            >
+              <textarea
+                required
+                rows={
+                  attemptsModal.mode === "add" ? 10 : attemptsModal.editingIds.length > 1 ? 6 : 3
+                }
+                className={`${INPUT_CLASSES} font-mono`}
+                placeholder={
+                  attemptsModal.mode === "add"
+                    ? "01 02 34 37 52 57\n03 12 19 27 41 58\n\n07 14 21 28 35 42"
+                    : "03 12 19 27 41 58\n01 02 34 37 52 57"
+                }
+                value={attemptsModal.attemptsText}
                 disabled={saving}
-                onChange={(e) => setAttemptsModal((m) => ({ ...m, ticketText: e.target.value }))}
+                onChange={(e) =>
+                  setAttemptsModal((m) => ({ ...m, attemptsText: e.target.value }))
+                }
               />
-              <span className="text-xs text-ink-3">
-                Groups every line above onto the same physical ticket, so they cluster
-                together — leave blank if they aren&apos;t part of a ticket.
-              </span>
-            </label>
-          )}
-          <div className="flex flex-wrap gap-2">
-            <button type="submit" disabled={saving} className={PRIMARY_BUTTON_CLASSES}>
-              {saving ? "Saving…" : attemptsModal.mode === "edit" ? "Save changes" : "Add"}
-            </button>
+            </Field>
+            {attemptsModal.mode === "edit" && (
+              <Field
+                label={
+                  <>
+                    Ticket # <span className="font-normal text-ink-4">(optional)</span>
+                  </>
+                }
+                hint={
+                  <>
+                    Groups every line above onto the same physical ticket, so they cluster
+                    together — leave blank if they aren&apos;t part of a ticket.
+                  </>
+                }
+              >
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  className={INPUT_CLASSES}
+                  value={attemptsModal.ticketText}
+                  disabled={saving}
+                  onChange={(e) => setAttemptsModal((m) => ({ ...m, ticketText: e.target.value }))}
+                />
+              </Field>
+            )}
+          </div>
+          <div className={DIALOG_FOOTER_CLASSES}>
             <button
               type="button"
               disabled={saving}
@@ -2242,69 +2207,58 @@ export default function LottoClient({ gameId }: { gameId: number }) {
             >
               Cancel
             </button>
+            <button type="submit" disabled={saving} className={PRIMARY_BUTTON_CLASSES}>
+              {saving ? "Saving…" : attemptsModal.mode === "edit" ? "Save changes" : "Add"}
+            </button>
           </div>
         </form>
       </Modal>
 
-      <Modal open={pasteModal.open} onClose={closePasteModal} ariaLabelledBy="lotto-paste-title">
-        <div className="mb-4 flex items-start justify-between gap-2">
-          <h2 id="lotto-paste-title" className="text-lg font-semibold text-ink">
-            Paste attempts
-          </h2>
-          <button
-            type="button"
-            className={CLOSE_BUTTON_CLASSES}
-            onClick={closePasteModal}
-          >
-            Close
-          </button>
-        </div>
-        <form onSubmit={submitPasteAttempts} className="flex flex-col gap-4">
-          {pasteFormError && (
-            <ErrorAlert>
-              {pasteFormError}
-            </ErrorAlert>
-          )}
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-ink-2">Draw date</span>
-            <DatePickerField
-              value={pasteModal.drawDate}
-              disabled={saving}
-              onChange={(v) => setPasteModal((m) => ({ ...m, drawDate: v }))}
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-ink-2">Attempts</span>
-            <textarea
-              required
-              rows={10}
-              className={`${INPUT_CLASSES} font-mono`}
-              placeholder={"01 02 34 37 52 57\n\nTicket 2\n03 12 19 27 41 58"}
-              value={pasteModal.attemptsText}
-              disabled={saving}
-              onChange={(e) =>
-                setPasteModal((m) => ({ ...m, attemptsText: e.target.value }))
+      <Modal
+        open={pasteModal.open}
+        onClose={closePasteModal}
+        ariaLabelledBy="lotto-paste-title"
+        dialogClassName={`${DIALOG_CLASSES} max-w-lg`}
+      >
+        <ModalHeader id="lotto-paste-title" title="Paste attempts" onClose={closePasteModal} />
+        <form onSubmit={submitPasteAttempts} className="flex min-h-0 flex-1 flex-col">
+          <div className={`${DIALOG_BODY_CLASSES} flex flex-col gap-4`}>
+            {pasteFormError && <ErrorAlert>{pasteFormError}</ErrorAlert>}
+            <Field label="Draw date">
+              <DatePickerField
+                value={pasteModal.drawDate}
+                disabled={saving}
+                onChange={(v) => setPasteModal((m) => ({ ...m, drawDate: v }))}
+              />
+            </Field>
+            <Field
+              label="Attempts"
+              hint={
+                <>
+                  6 numbers per line (e.g. &quot;01 02 34 37 52 57&quot;) — a blank line starts a new ticket, so
+                  each group of lines becomes one ticket&apos;s attempts against the draw date above. A
+                  group&apos;s first line may optionally read &quot;ticket N&quot; to pin its number; otherwise
+                  tickets are numbered in the order they&apos;re pasted.
+                </>
               }
-            />
-            <span className="text-xs text-ink-3">
-              6 numbers per line (e.g. &quot;01 02 34 37 52 57&quot;) — a blank line starts a
-              new ticket, so each group of lines becomes one ticket&apos;s attempts against
-              the draw date above. A group&apos;s first line may optionally read
-              &quot;ticket N&quot; to pin its number; otherwise tickets are numbered in the
-              order they&apos;re pasted.
-            </span>
-          </label>
-          <div className="flex flex-wrap gap-2">
+            >
+              <textarea
+                required
+                rows={10}
+                className={`${INPUT_CLASSES} font-mono`}
+                placeholder={"01 02 34 37 52 57\n\nTicket 2\n03 12 19 27 41 58"}
+                value={pasteModal.attemptsText}
+                disabled={saving}
+                onChange={(e) => setPasteModal((m) => ({ ...m, attemptsText: e.target.value }))}
+              />
+            </Field>
+          </div>
+          <div className={DIALOG_FOOTER_CLASSES}>
+            <button type="button" disabled={saving} className={SECONDARY_BUTTON_CLASSES} onClick={closePasteModal}>
+              Cancel
+            </button>
             <button type="submit" disabled={saving} className={PRIMARY_BUTTON_CLASSES}>
               {saving ? "Saving…" : "Add attempts"}
-            </button>
-            <button
-              type="button"
-              disabled={saving}
-              className={SECONDARY_BUTTON_CLASSES}
-              onClick={closePasteModal}
-            >
-              Cancel
             </button>
           </div>
         </form>
@@ -2314,77 +2268,61 @@ export default function LottoClient({ gameId }: { gameId: number }) {
         open={importModal.open}
         onClose={closeImportModal}
         ariaLabelledBy="lotto-import-title"
-        dialogClassName="max-h-[90dvh] w-full max-w-3xl overflow-y-auto rounded-xl border border-line bg-surface p-5 shadow-pop sm:p-6"
+        dialogClassName={`${DIALOG_CLASSES} max-w-3xl`}
       >
-        <div className="mb-4 flex items-start justify-between gap-2">
-          <h2 id="lotto-import-title" className="text-lg font-semibold text-ink">
-            Import historic results
-          </h2>
-          <button
-            type="button"
-            className={CLOSE_BUTTON_CLASSES}
-            onClick={closeImportModal}
-          >
-            Close
-          </button>
-        </div>
-        <form onSubmit={submitImport} className="flex flex-col gap-4">
-          {importFormError && (
-            <ErrorAlert>
-              {importFormError}
-            </ErrorAlert>
-          )}
-          {importSummary && (
-            <div className={alertClasses("success")}>
-              Imported {fmtCount(importSummary.total)} row
-              {importSummary.total === 1 ? "" : "s"}: {fmtCount(importSummary.inserted)} added,{" "}
-              {fmtCount(importSummary.updated)} updated.
-              {importSummary.errors.length > 0 && (
-                <div className="mt-2 text-amber-700 dark:text-amber-300">
-                  {importSummary.errors.length} line
-                  {importSummary.errors.length === 1 ? "" : "s"} couldn&apos;t be parsed:
-                  <ul className="mt-1 list-disc pl-5">
-                    {importSummary.errors.slice(0, 10).map((msg, i) => (
-                      <li key={i}>{msg}</li>
-                    ))}
-                  </ul>
-                  {importSummary.errors.length > 10 && (
-                    <div className="mt-1">…and {importSummary.errors.length - 10} more.</div>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-ink-2">Results</span>
-            <textarea
-              required
-              rows={14}
-              wrap="off"
-              className={`${INPUT_CLASSES} font-mono whitespace-pre overflow-x-auto`}
-              value={importModal.text}
-              disabled={saving}
-              onChange={(e) => setImportModal((m) => ({ ...m, text: e.target.value }))}
-            />
-            <span className="text-xs text-ink-3">
-              One draw per line: <code>| n1-n2-n3-n4-n5-n6 | m/d/yyyy | jackpot | winners |</code>.
-              A leading game-name column (e.g. pasted straight from a spreadsheet, tab-separated)
-              is fine too — it&apos;s discarded on import. Each row is upserted by date, so
-              re-pasting (e.g. to backfill jackpot/winners on draws already here) overwrites
-              rather than duplicating.
-            </span>
-          </label>
-          <div className="flex flex-wrap gap-2">
+        <ModalHeader id="lotto-import-title" title="Import historic results" onClose={closeImportModal} />
+        <form onSubmit={submitImport} className="flex min-h-0 flex-1 flex-col">
+          <div className={`${DIALOG_BODY_CLASSES} flex flex-col gap-4`}>
+            {importFormError && <ErrorAlert>{importFormError}</ErrorAlert>}
+            {importSummary && (
+              <div className={alertClasses("success")}>
+                Imported {fmtCount(importSummary.total)} row
+                {importSummary.total === 1 ? "" : "s"}: {fmtCount(importSummary.inserted)} added,{" "}
+                {fmtCount(importSummary.updated)} updated.
+                {importSummary.errors.length > 0 && (
+                  <div className="mt-2 text-amber-700 dark:text-amber-300">
+                    {importSummary.errors.length} line
+                    {importSummary.errors.length === 1 ? "" : "s"} couldn&apos;t be parsed:
+                    <ul className="mt-1 list-disc pl-5">
+                      {importSummary.errors.slice(0, 10).map((msg, i) => (
+                        <li key={i}>{msg}</li>
+                      ))}
+                    </ul>
+                    {importSummary.errors.length > 10 && (
+                      <div className="mt-1">…and {importSummary.errors.length - 10} more.</div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+            <Field
+              label="Results"
+              hint={
+                <>
+                  One draw per line: <code>| n1-n2-n3-n4-n5-n6 | m/d/yyyy | jackpot | winners |</code>. A leading
+                  game-name column (e.g. pasted straight from a spreadsheet, tab-separated) is fine too — it&apos;s
+                  discarded on import. Each row is upserted by date, so re-pasting (e.g. to backfill jackpot/winners on
+                  draws already here) overwrites rather than duplicating.
+                </>
+              }
+            >
+              <textarea
+                required
+                rows={14}
+                wrap="off"
+                className={`${INPUT_CLASSES} font-mono whitespace-pre overflow-x-auto`}
+                value={importModal.text}
+                disabled={saving}
+                onChange={(e) => setImportModal((m) => ({ ...m, text: e.target.value }))}
+              />
+            </Field>
+          </div>
+          <div className={DIALOG_FOOTER_CLASSES}>
+            <button type="button" disabled={saving} className={SECONDARY_BUTTON_CLASSES} onClick={closeImportModal}>
+              {importSummary ? "Done" : "Cancel"}
+            </button>
             <button type="submit" disabled={saving} className={PRIMARY_BUTTON_CLASSES}>
               {saving ? "Importing…" : "Import"}
-            </button>
-            <button
-              type="button"
-              disabled={saving}
-              className={SECONDARY_BUTTON_CLASSES}
-              onClick={closeImportModal}
-            >
-              {importSummary ? "Done" : "Cancel"}
             </button>
           </div>
         </form>
@@ -2399,21 +2337,14 @@ export default function LottoClient({ gameId }: { gameId: number }) {
               open
               onClose={() => setHistoryModalDrawId(null)}
               ariaLabelledBy="lotto-history-draw-title"
-              dialogClassName="max-h-[90dvh] w-full max-w-5xl overflow-y-auto rounded-xl border border-line bg-surface p-5 shadow-pop sm:p-6"
+              dialogClassName={`${DIALOG_CLASSES} max-w-5xl`}
             >
-              <div className="mb-4 flex items-start justify-between gap-2">
-                <h2 id="lotto-history-draw-title" className="sr-only">
-                  {formatDate(detail.draw.draw_date)}
-                </h2>
-                <button
-                  type="button"
-                  className={`${CLOSE_BUTTON_CLASSES} ml-auto`}
-                  onClick={() => setHistoryModalDrawId(null)}
-                >
-                  Close
-                </button>
-              </div>
-              {renderDrawCard(detail)}
+              <ModalHeader
+                id="lotto-history-draw-title"
+                title={`${gameName ?? "Lotto"} draw`}
+                onClose={() => setHistoryModalDrawId(null)}
+              />
+              <div className={DIALOG_BODY_CLASSES}>{renderDrawCard(detail)}</div>
             </Modal>
           );
         })()}

@@ -11,6 +11,7 @@ import {
   DIALOG_BODY_CLASSES,
   DIALOG_CLASSES,
   DIALOG_FOOTER_CLASSES,
+  EmptyState,
   Field,
   IconAction,
   LoadingBlocks,
@@ -558,16 +559,10 @@ export default function BillsClient() {
       {loading ? (
         <LoadingBlocks label="Loading bills…" rows={2} />
       ) : categories.length === 0 ? (
-        <section className="flex flex-col items-center rounded-2xl border border-line bg-surface px-6 py-14 text-center shadow-xs">
-          <span className="grid size-12 place-items-center rounded-2xl bg-brand-soft text-brand-text">
-            <ReceiptIcon className="size-6" />
-          </span>
-          <h2 className="mt-4 text-base font-semibold text-ink">No categories yet</h2>
-          <p className="mt-1 max-w-sm text-sm text-ink-3">
-            Add one for each kind of bill, like Electricity, Internet or Credit Card, with{" "}
-            <strong className="font-medium text-ink-2">New category</strong>. Then add each bill under it.
-          </p>
-        </section>
+        <EmptyState icon={<ReceiptIcon className="size-6" />} title="No categories yet">
+          Add one for each kind of bill, like Electricity, Internet or Credit Card, with{" "}
+          <strong className="font-medium text-ink-2">New category</strong>. Then add each bill under it.
+        </EmptyState>
       ) : (
         <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
           {categories.map((c) => {

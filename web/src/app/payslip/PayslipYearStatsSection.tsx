@@ -17,20 +17,6 @@ import {
   type PayslipFieldKey,
 } from "./PayslipFieldMonthsModal";
 import {
-  PAYSLIP_ACCENT_BG,
-  PAYSLIP_BG_3,
-  PAYSLIP_BORDER_SOFT,
-  PAYSLIP_DANGER_TEXT,
-  PAYSLIP_ICON_BUTTON,
-  PAYSLIP_MONO,
-  PAYSLIP_SECONDARY_BUTTON,
-  PAYSLIP_TEXT_2,
-  PAYSLIP_TEXT_DIM,
-  PAYSLIP_TEXT_INK,
-  PAYSLIP_TILE,
-  PAYSLIP_TRACK_BG,
-} from "./payslipTheme";
-import {
   DEFAULT_STAT_CARD_ORDER,
   DRAGGABLE_FIELD,
   MEDICAL_REIMBURSEMENT_ANNUAL_CAP,
@@ -41,6 +27,7 @@ import {
   STAT_LABEL,
   STAT_THEMES,
 } from "./payslipStatConstants";
+import { SECONDARY_BUTTON_CLASSES } from "@/lib/ui";
 
 export function PayslipYearStatsSection({
   index,
@@ -156,7 +143,7 @@ export function PayslipYearStatsSection({
                   {fmtPctOfTotal(amount, pctDenominator)}
                 </p>
               </div>
-              <div className={`shrink-0 ${PAYSLIP_MONO} text-sm font-semibold leading-tight sm:text-base ${theme.value}`}>
+              <div className={`shrink-0 font-mono tabular-nums text-sm font-semibold leading-tight sm:text-base ${theme.value}`}>
                 {fmtNum(amount)}
               </div>
             </div>
@@ -203,7 +190,7 @@ export function PayslipYearStatsSection({
                 {fmtPctOfTotal(amount, pctDenominator)}
               </p>
             </div>
-            <div className={`shrink-0 ${PAYSLIP_MONO} text-sm font-semibold leading-tight sm:text-base ${theme.value}`}>
+            <div className={`shrink-0 font-mono tabular-nums text-sm font-semibold leading-tight sm:text-base ${theme.value}`}>
               {fmtNum(amount)}
             </div>
           </div>
@@ -225,23 +212,23 @@ export function PayslipYearStatsSection({
   };
 
   return (
-    <div className={`mb-6 rounded-2xl border ${PAYSLIP_BORDER_SOFT} ${PAYSLIP_BG_3}/40 p-4 sm:p-6`}>
+    <div className="mb-6 rounded-2xl border border-line-soft bg-surface-3/40 p-4 sm:p-6">
       <div className="mb-6 flex items-center justify-center gap-3">
         <button
           type="button"
-          className={PAYSLIP_ICON_BUTTON}
+          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-line-strong bg-transparent text-sm text-ink-2 transition-colors duration-150 hover:bg-surface-2 disabled:pointer-events-none disabled:opacity-40"
           aria-label="Previous year"
           disabled={statsYear <= minYear}
           onClick={() => setStatsYear(Math.max(minYear, statsYear - 1))}
         >
           ‹
         </button>
-        <span className={`min-w-[4.5rem] text-center ${PAYSLIP_MONO} text-lg font-extrabold ${PAYSLIP_TEXT_INK}`}>
+        <span className="min-w-[4.5rem] text-center font-mono tabular-nums text-lg font-extrabold text-ink">
           {statsYear}
         </span>
         <button
           type="button"
-          className={PAYSLIP_ICON_BUTTON}
+          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-line-strong bg-transparent text-sm text-ink-2 transition-colors duration-150 hover:bg-surface-2 disabled:pointer-events-none disabled:opacity-40"
           aria-label="Next year"
           disabled={statsYear >= maxYear}
           onClick={() => setStatsYear(Math.min(maxYear, statsYear + 1))}
@@ -251,7 +238,7 @@ export function PayslipYearStatsSection({
         {currentYear >= minYear && currentYear <= maxYear && (
           <button
             type="button"
-            className={PAYSLIP_SECONDARY_BUTTON}
+            className={SECONDARY_BUTTON_CLASSES}
             disabled={statsYear === currentYear}
             onClick={() => setStatsYear(currentYear)}
           >
@@ -263,55 +250,55 @@ export function PayslipYearStatsSection({
       <div className="mb-5 grid grid-cols-1 gap-4 lg:grid-cols-[1.4fr_1fr]">
         {flags.show_total && (
           <div
-            className={`${PAYSLIP_TILE} cursor-pointer p-6`}
+            className="rounded-xl border border-line-soft bg-surface-3 cursor-pointer p-6"
             onClick={() =>
               setFieldModal({ label: "Net income", fieldKey: "total", isDeduction: false })
             }
           >
-            <div className={`text-[11px] font-medium uppercase tracking-wider ${PAYSLIP_TEXT_DIM}`}>
+            <div className="text-[11px] font-medium uppercase tracking-wider text-ink-3">
               Net income
             </div>
-            <div className={`mt-2.5 ${PAYSLIP_MONO} text-4xl font-semibold tracking-tight ${PAYSLIP_TEXT_INK}`}>
+            <div className="mt-2.5 font-mono tabular-nums text-4xl font-semibold tracking-tight text-ink">
               {fmtNum(sums.total)}
             </div>
-            <div className={`mt-3.5 flex flex-wrap gap-6 ${PAYSLIP_MONO} text-sm`}>
+            <div className="mt-3.5 flex flex-wrap gap-6 font-mono tabular-nums text-sm">
               <div>
-                <span className={PAYSLIP_TEXT_DIM}>Gross </span>
-                <span className={PAYSLIP_TEXT_2}>{fmtNum(totalPlusDeductions)}</span>
+                <span className="text-ink-3">Gross </span>
+                <span className="text-ink-2">{fmtNum(totalPlusDeductions)}</span>
               </div>
               <div>
-                <span className={PAYSLIP_TEXT_DIM}>Deductions </span>
-                <span className={PAYSLIP_DANGER_TEXT}>−{fmtNum(deductionsSumYtd)}</span>
+                <span className="text-ink-3">Deductions </span>
+                <span className="text-danger-text">−{fmtNum(deductionsSumYtd)}</span>
               </div>
             </div>
           </div>
         )}
         <div className="grid grid-rows-2 gap-4">
-          <div className={`${PAYSLIP_TILE} p-4`}>
+          <div className="rounded-xl border border-line-soft bg-surface-3 p-4">
             <div className="flex items-center justify-between gap-2">
-              <span className={`text-[11px] font-medium uppercase tracking-wider ${PAYSLIP_TEXT_DIM}`}>
+              <span className="text-[11px] font-medium uppercase tracking-wider text-ink-3">
                 Months remaining
               </span>
-              <span className={`${PAYSLIP_MONO} text-sm font-semibold ${PAYSLIP_TEXT_INK}`}>
+              <span className="font-mono tabular-nums text-sm font-semibold text-ink">
                 {payCount}/24
               </span>
             </div>
             <div
-              className={`mt-2 h-1.5 w-full overflow-hidden rounded-full ${PAYSLIP_TRACK_BG}`}
+              className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-line-strong"
               role="progressbar"
               aria-valuemin={0}
               aria-valuemax={24}
               aria-valuenow={payCount}
               aria-label={`Payslip rows this year ${payCount} of 24 half-month slots`}
             >
-              <div className={`h-full rounded-full ${PAYSLIP_ACCENT_BG}`} style={{ width: `${payslipSlotPct}%` }} />
+              <div className="h-full rounded-full bg-brand" style={{ width: `${payslipSlotPct}%` }} />
             </div>
-            <p className={`mt-1 text-[11px] ${PAYSLIP_TEXT_DIM}`}>{pctRemainingLabel}</p>
+            <p className="mt-1 text-[11px] text-ink-3">{pctRemainingLabel}</p>
           </div>
 
           {flags.show_medical_reimbursement && (
             <div
-              className={`${PAYSLIP_TILE} cursor-pointer p-4`}
+              className="rounded-xl border border-line-soft bg-surface-3 cursor-pointer p-4"
               onClick={() =>
                 setFieldModal({
                   label: MEDICAL_REIMBURSEMENT_LABEL,
@@ -324,12 +311,12 @@ export function PayslipYearStatsSection({
                 <span className={`text-[11px] font-medium uppercase tracking-wider ${MEDICAL_REIMBURSEMENT_STAT_THEME.title}`}>
                   {MEDICAL_REIMBURSEMENT_LABEL}
                 </span>
-                <span className={`text-[11px] ${PAYSLIP_TEXT_DIM}`}>
+                <span className="text-[11px] text-ink-3">
                   {medicalAprilStart}–{medicalAprilStart + 1}
                 </span>
               </div>
               <div
-                className={`mt-2 h-1.5 w-full overflow-hidden rounded-full ${PAYSLIP_TRACK_BG}`}
+                className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-line-strong"
                 role="progressbar"
                 aria-valuemin={0}
                 aria-valuemax={MEDICAL_REIMBURSEMENT_ANNUAL_CAP}
@@ -337,13 +324,13 @@ export function PayslipYearStatsSection({
                 aria-label="Medical reimbursement used this policy year"
               >
                 <div
-                  className={`h-full rounded-full ${medicalOver ? "bg-[oklch(0.68_0.19_25)]" : PAYSLIP_ACCENT_BG}`}
+                  className={`h-full rounded-full ${medicalOver ? "bg-[oklch(0.68_0.19_25)]" : "bg-brand"}`}
                   style={{ width: `${Math.min(100, medicalPctCap)}%` }}
                 />
               </div>
-              <div className={`mt-1.5 ${PAYSLIP_MONO} text-xs ${PAYSLIP_TEXT_DIM}`}>
+              <div className="mt-1.5 font-mono tabular-nums text-xs text-ink-3">
                 Used {fmtNum(medicalUsed)} · Remaining{" "}
-                <span className={medicalOver ? PAYSLIP_DANGER_TEXT : undefined}>
+                <span className={medicalOver ? "text-danger-text" : undefined}>
                   {fmtNum(medicalRemaining)}
                 </span>
               </div>
@@ -371,8 +358,8 @@ export function PayslipYearStatsSection({
           .sort((a, b) => b[1] - a[1]);
         if (deductionRows.length === 0) return null;
         return (
-          <div className={`${PAYSLIP_TILE} p-5`}>
-            <div className={`mb-3.5 text-[11px] font-medium uppercase tracking-wider ${PAYSLIP_TEXT_DIM}`}>
+          <div className="rounded-xl border border-line-soft bg-surface-3 p-5">
+            <div className="mb-3.5 text-[11px] font-medium uppercase tracking-wider text-ink-3">
               Deductions
             </div>
             <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
@@ -385,9 +372,9 @@ export function PayslipYearStatsSection({
                 />
               ))}
             </div>
-            <div className={`mt-4 flex justify-between border-t ${PAYSLIP_BORDER_SOFT} pt-3.5`}>
-              <span className={`text-sm font-semibold ${PAYSLIP_TEXT_INK}`}>Total deductions</span>
-              <span className={`${PAYSLIP_MONO} text-base font-semibold ${PAYSLIP_DANGER_TEXT}`}>
+            <div className="mt-4 flex justify-between border-t border-line-soft pt-3.5">
+              <span className="text-sm font-semibold text-ink">Total deductions</span>
+              <span className="font-mono tabular-nums text-base font-semibold text-danger-text">
                 −{fmtNum(deductionsSumYtd)}
               </span>
             </div>
@@ -420,11 +407,11 @@ function DeductionRow({
 }) {
   return (
     <div
-      className={`flex cursor-pointer items-center justify-between gap-3 border-b ${PAYSLIP_BORDER_SOFT} pb-2`}
+      className="flex cursor-pointer items-center justify-between gap-3 border-b border-line-soft pb-2"
       onClick={onClick}
     >
-      <span className={`text-[13px] ${PAYSLIP_TEXT_2}`}>{label}</span>
-      <span className={`${PAYSLIP_MONO} text-sm ${PAYSLIP_DANGER_TEXT}`}>−{fmtNum(value)}</span>
+      <span className="text-[13px] text-ink-2">{label}</span>
+      <span className="font-mono tabular-nums text-sm text-danger-text">−{fmtNum(value)}</span>
     </div>
   );
 }

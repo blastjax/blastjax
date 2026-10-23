@@ -1,12 +1,13 @@
 "use client";
 
 import { useEffect, type ReactNode } from "react";
-import { MODAL_DIALOG_CLASSES } from "@/lib/ui";
+import { DIALOG_CLASSES } from "@/components/FinanceUI";
 
 const DEFAULT_BACKDROP =
   "fixed inset-0 z-[70] flex items-end justify-center bg-zinc-950/50 p-4 backdrop-blur-sm sm:items-center sm:p-6";
 
-const DEFAULT_DIALOG = MODAL_DIALOG_CLASSES;
+// Pair with <ModalHeader> and DIALOG_BODY_CLASSES / DIALOG_FOOTER_CLASSES from FinanceUI.
+const DEFAULT_DIALOG = `${DIALOG_CLASSES} max-w-lg`;
 
 export type ModalProps = {
   open: boolean;

@@ -51,7 +51,7 @@ import {
   type MonthlyExpenseRow,
   type PayslipRow,
 } from "@/lib/api";
-import { MONTH_NAMES_SHORT, formatMonthYear, parseDateOnlyLocal } from "@/lib/dateFormat";
+import { MONTH_NAMES_SHORT, formatMonthDayShort, formatMonthYear, formatWeekdayMonthDay } from "@/lib/dateFormat";
 import { fmtAmount, fmtCompactMoney } from "@/lib/formatNumber";
 import {
   evaluateAmountExpression,
@@ -288,13 +288,7 @@ const HALF_STYLE: Record<PeriodHalf, { label: string; dot: string; bar: string; 
   },
 };
 
-const SHORT_DAY = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" });
-const LONG_DAY = new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric" });
-
-function fmtDay(iso: string, long = false): string {
-  const d = parseDateOnlyLocal(iso);
-  return d ? (long ? LONG_DAY : SHORT_DAY).format(d) : iso;
-}
+const fmtDay = (iso: string, long = false) => (long ? formatWeekdayMonthDay : formatMonthDayShort)(iso);
 
 const DayGridCell = memo(function DayGridCell({
   cell,

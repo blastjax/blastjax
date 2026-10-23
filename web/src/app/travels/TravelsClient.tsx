@@ -27,7 +27,7 @@ import {
   updateTravelTrip,
   type TravelTripDetail,
 } from "@/lib/api";
-import { toIsoDateLocal } from "@/lib/dateFormat";
+import { formatMonthDayShort, formatMonthYear, formatWeekdayMonthDay, toIsoDateLocal } from "@/lib/dateFormat";
 import { mapsUrlFor } from "@/lib/maps";
 
 const serif = Source_Serif_4({ subsets: ["latin"], weight: ["600", "700"], variable: "--tv-serif" });
@@ -66,8 +66,8 @@ const addD = (s: string, n: number) => {
   return toIsoDateLocal(d);
 };
 const diffD = (a: string, b: string) => Math.round((pd(b).getTime() - pd(a).getTime()) / 86_400_000);
-const fmtD = (s: string) => pd(s).toLocaleDateString("en-US", { month: "short", day: "numeric" });
-const fmtDL = (s: string) => pd(s).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+const fmtD = formatMonthDayShort;
+const fmtDL = formatWeekdayMonthDay;
 const rangeOf = (a: string, b: string) => `${fmtD(a)} – ${fmtD(b)}, ${pd(b).getFullYear()}`;
 const placeRange = (a: string, b: string) => (a === b ? fmtD(a) : `${fmtD(a)} – ${fmtD(b)}`);
 const short = (s: string) => s.split(",")[0].trim();
@@ -329,7 +329,8 @@ function buildWeeks(start: string, end: string, entries: Entry[], places: Place[
     let monthHeader: string | null = null;
     for (const c of cells) {
       if (c.iso >= start && c.iso <= end && (c.num === 1 || c.iso === start)) {
-        monthHeader = pd(c.iso).toLocaleDateString("en-US", { month: "long", year: "numeric" });
+        const dt = pd(c.iso);
+        monthHeader = formatMonthYear(dt.getFullYear(), dt.getMonth() + 1);
       }
     }
 

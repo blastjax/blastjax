@@ -6,21 +6,7 @@ import { MONTH_NAMES_FULL } from "@/lib/dateFormat";
 import { fmtNum } from "./payslipDisplay";
 import { MONTHS } from "./payslipModalForm";
 import type { YearSlots } from "./payslipAggregates";
-import {
-  PAYSLIP_BG_0,
-  PAYSLIP_BG_2,
-  PAYSLIP_BORDER_DASHED,
-  PAYSLIP_BORDER_SOFT,
-  PAYSLIP_BORDER_STRONG,
-  PAYSLIP_DANGER_TEXT,
-  PAYSLIP_FONT_CLASS,
-  PAYSLIP_MONO,
-  PAYSLIP_SECONDARY_BUTTON,
-  PAYSLIP_TEXT_2,
-  PAYSLIP_TEXT_DIM,
-  PAYSLIP_TEXT_GHOST,
-  PAYSLIP_TEXT_INK,
-} from "./payslipTheme";
+import { DIALOG_BODY_CLASSES, DIALOG_CLASSES, ModalHeader } from "@/components/FinanceUI";
 
 export type PayslipFieldKey = Extract<
   keyof PayslipRow,
@@ -62,7 +48,7 @@ export function PayslipFieldMonthsModal({
   months: YearSlots["months"];
   onClose: () => void;
 }) {
-  const valueClass = isDeduction ? PAYSLIP_DANGER_TEXT : PAYSLIP_TEXT_INK;
+  const valueClass = isDeduction ? "text-danger-text" : "text-ink";
   const sign = isDeduction ? "−" : "";
   const yearTotal = MONTHS.reduce((acc, m) => {
     const ms = months.get(m);
@@ -74,57 +60,50 @@ export function PayslipFieldMonthsModal({
     <Modal
       open
       onClose={onClose}
-      backdropClassName="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-5 backdrop-blur-sm sm:items-center sm:p-6"
-      dialogClassName={`${PAYSLIP_FONT_CLASS} max-h-[90dvh] w-full max-w-3xl overflow-y-auto rounded-xl border ${PAYSLIP_BORDER_STRONG} ${PAYSLIP_BG_0} p-6 shadow-pop sm:p-8`}
+      ariaLabelledBy="payslip-field-months-title"
+      dialogClassName={`${DIALOG_CLASSES} max-w-3xl`}
     >
-      <div className="mb-1 flex items-start justify-between gap-2">
-        <div>
-          <h2 className={`text-lg font-semibold ${PAYSLIP_TEXT_INK}`}>{label}</h2>
-          <p className={`mt-1 text-sm ${PAYSLIP_TEXT_DIM}`}>{year} · by month</p>
+      <ModalHeader id="payslip-field-months-title" title={label} subtitle={`${year} · by month`} onClose={onClose} />
+      <div className={DIALOG_BODY_CLASSES}>
+        <div className="mb-5 flex items-baseline justify-between border-b border-line-soft pb-3">
+          <span className="text-xs font-medium uppercase tracking-wider text-ink-3">
+            Year total
+          </span>
+          <span className={`font-mono tabular-nums text-xl font-semibold ${valueClass}`}>
+            {sign}
+            {fmtNum(yearTotal)}
+          </span>
         </div>
-        <button type="button" className={PAYSLIP_SECONDARY_BUTTON} onClick={onClose}>
-          Close
-        </button>
-      </div>
 
-      <div className={`mb-5 mt-3 flex items-baseline justify-between border-b ${PAYSLIP_BORDER_SOFT} pb-3`}>
-        <span className={`text-xs font-medium uppercase tracking-wider ${PAYSLIP_TEXT_DIM}`}>
-          Year total
-        </span>
-        <span className={`${PAYSLIP_MONO} text-xl font-semibold ${valueClass}`}>
-          {sign}
-          {fmtNum(yearTotal)}
-        </span>
-      </div>
-
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-        {MONTHS.map((month) => {
-          const ms = months.get(month);
-          const v1 = ms ? sumField(ms.rows1, fieldKey) : 0;
-          const v2 = ms ? sumField(ms.rows2, fieldKey) : 0;
-          const total = v1 + v2;
-          const hasData = ms != null && (ms.rows1.length > 0 || ms.rows2.length > 0);
-          const monthLabel = MONTH_NAMES_FULL[month - 1];
-          return (
-            <div
-              key={month}
-              className={`rounded-lg border p-3 ${hasData ? `${PAYSLIP_BORDER_SOFT} ${PAYSLIP_BG_2}` : PAYSLIP_BORDER_DASHED}`}
-            >
-              <div className={`text-xs font-semibold ${hasData ? PAYSLIP_TEXT_2 : PAYSLIP_TEXT_GHOST}`}>
-                {monthLabel}
-              </div>
-              <div className={`mt-1 ${PAYSLIP_MONO} text-sm font-semibold ${hasData ? valueClass : PAYSLIP_TEXT_GHOST}`}>
-                {hasData ? `${sign}${fmtNum(total)}` : "—"}
-              </div>
-              {hasData && v1 > 0 && v2 > 0 && (
-                <div className={`mt-1.5 flex justify-between ${PAYSLIP_MONO} text-[11px] ${PAYSLIP_TEXT_DIM}`}>
-                  <span>1st {fmtNum(v1)}</span>
-                  <span>2nd {fmtNum(v2)}</span>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+          {MONTHS.map((month) => {
+            const ms = months.get(month);
+            const v1 = ms ? sumField(ms.rows1, fieldKey) : 0;
+            const v2 = ms ? sumField(ms.rows2, fieldKey) : 0;
+            const total = v1 + v2;
+            const hasData = ms != null && (ms.rows1.length > 0 || ms.rows2.length > 0);
+            const monthLabel = MONTH_NAMES_FULL[month - 1];
+            return (
+              <div
+                key={month}
+                className={`rounded-lg border p-3 ${hasData ? `border-line-soft bg-surface-2` : "border-dashed border-line"}`}
+              >
+                <div className={`text-xs font-semibold ${hasData ? "text-ink-2" : "text-ink-4"}`}>
+                  {monthLabel}
                 </div>
-              )}
-            </div>
-          );
-        })}
+                <div className={`mt-1 font-mono tabular-nums text-sm font-semibold ${hasData ? valueClass : "text-ink-4"}`}>
+                  {hasData ? `${sign}${fmtNum(total)}` : "—"}
+                </div>
+                {hasData && v1 > 0 && v2 > 0 && (
+                  <div className="mt-1.5 flex justify-between font-mono tabular-nums text-[11px] text-ink-3">
+                    <span>1st {fmtNum(v1)}</span>
+                    <span>2nd {fmtNum(v2)}</span>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
       </div>
     </Modal>
   );

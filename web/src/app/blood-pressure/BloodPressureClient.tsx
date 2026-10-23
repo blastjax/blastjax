@@ -14,10 +14,24 @@ import {
   YAxis,
 } from "recharts";
 import { ChartZoomControls } from "@/components/ChartZoomControls";
-import { PencilIcon, TrashIcon } from "@/components/Icons";
+import {
+  DIALOG_BODY_CLASSES,
+  DIALOG_CLASSES,
+  DIALOG_FOOTER_CLASSES,
+  EmptyState,
+  Field,
+  IconAction,
+  LoadingBlocks,
+  Metric,
+  ModalHeader,
+  Panel,
+  Pill,
+  Segmented,
+  StatStrip,
+} from "@/components/FinanceUI";
+import { HeartPulseIcon, PlusIcon } from "@/components/Icons";
 import { Modal } from "@/components/Modal";
 import { PageHeader } from "@/components/PageHeader";
-import { StatCard } from "@/components/StatCard";
 import { useTheme } from "@/components/ThemeProvider";
 import {
   createBloodPressure,
@@ -32,24 +46,16 @@ import { getChartTooltipStyle } from "@/lib/chartTooltipStyle";
 import { formatDateTime, formatMonthDayShort } from "@/lib/dateFormat";
 import { ErrorAlert } from "@/components/ErrorAlert";
 import {
-  CARD_CLASSES,
   DASHED_EMPTY_CLASSES,
-  ICON_BUTTON_CLASSES,
   INPUT_CLASSES,
-  LOADING_TEXT_CLASSES,
   PAGE_CONTAINER_CLASSES,
   PRIMARY_BUTTON_CLASSES,
   SECONDARY_BUTTON_CLASSES,
   SECTION_LABEL_CLASSES,
-  SEGMENTED_BUTTON_ACTIVE_CLASSES,
-  SEGMENTED_BUTTON_CLASSES,
-  SEGMENTED_BUTTON_INACTIVE_CLASSES,
-  SEGMENTED_WRAPPER_CLASSES,
   TABLE_CELL_CLASSES,
   TABLE_HEAD_CELL_CLASSES,
   TABLE_HEAD_ROW_CLASSES,
   TABLE_ROW_CLASSES,
-  TABLE_WRAPPER_CLASSES,
 } from "@/lib/ui";
 import { useChartZoom } from "@/lib/useChartZoom";
 
@@ -72,7 +78,7 @@ function verdict(r: BloodPressureRow): boolean | null {
   return !(Object.keys(NORMAL) as Field[]).some((f) => outOfRange(f, r[f]));
 }
 
-type Metric = {
+type ChartMetric = {
   tab: string;
   label: string;
   unit: string;
@@ -80,7 +86,7 @@ type Metric = {
   lines: { key: Field; name: string; color: string }[];
 };
 
-const METRICS: Metric[] = [
+const METRICS: ChartMetric[] = [
   {
     tab: "BP",
     label: "Blood pressure",
@@ -100,12 +106,12 @@ const METRICS: Metric[] = [
 const fmt = (v: number | null, digits: number) =>
   v == null || Number.isNaN(v) ? "—" : v.toFixed(digits);
 
-function metricValue(m: Metric, r: BloodPressureRow): string | null {
+function metricValue(m: ChartMetric, r: BloodPressureRow): string | null {
   if (r[m.lines[0].key] == null) return null;
   return m.lines.map((l) => fmt(r[l.key], m.digits)).join("/");
 }
 
-function metricOut(m: Metric, r: BloodPressureRow): boolean {
+function metricOut(m: ChartMetric, r: BloodPressureRow): boolean {
   return m.lines.some((l) => outOfRange(l.key, r[l.key]));
 }
 
@@ -143,7 +149,7 @@ const emptyForm: Record<Field | "notes", string> = {
 const num = (s: string) => (s.trim() === "" ? null : Number(s));
 const str = (v: number | null) => (v == null ? "" : String(v));
 
-const PILL = "inline-flex items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium";
+const METRIC_OPTIONS = METRICS.map((m, i) => ({ value: i, label: m.tab }));
 
 export default function BloodPressureClient() {
   const [rows, setRows] = useState<BloodPressureRow[]>([]);
@@ -285,10 +291,14 @@ export default function BloodPressureClient() {
   };
 
   const renderField = (f: FormField) => (
-    <label key={f.key} className="flex min-w-0 flex-col gap-1.5 text-sm">
-      <span className="font-medium text-ink-2">
-        {f.label} <span className="font-normal text-ink-4">{f.unit}</span>
-      </span>
+    <Field
+      key={f.key}
+      label={
+        <>
+          {f.label} <span className="font-normal text-ink-4">{f.unit}</span>
+        </>
+      }
+    >
       <input
         type="number"
         inputMode={f.step ? "decimal" : "numeric"}
@@ -303,7 +313,14 @@ export default function BloodPressureClient() {
         onChange={(e) => setForm((prev) => ({ ...prev, [f.key]: e.target.value }))}
         disabled={saving}
       />
-    </label>
+    </Field>
+  );
+
+  const addButton = (
+    <button type="button" className={PRIMARY_BUTTON_CLASSES} onClick={openAdd}>
+      <PlusIcon className="size-4" />
+      Add reading
+    </button>
   );
 
   return (
@@ -311,11 +328,7 @@ export default function BloodPressureClient() {
       <PageHeader
         title="Health"
         description="Blood pressure, pulse, SpO2, temperature, and weight over time."
-        actions={
-          <button type="button" className={PRIMARY_BUTTON_CLASSES} onClick={openAdd}>
-            + Add reading
-          </button>
-        }
+        actions={addButton}
       />
 
       {error && !modalOpen && (
@@ -325,78 +338,55 @@ export default function BloodPressureClient() {
       )}
 
       {loading ? (
-        <p className={LOADING_TEXT_CLASSES}>Loading readings…</p>
+        <LoadingBlocks label="Loading readings…" />
       ) : rows.length === 0 ? (
         !error && (
-          <p className={DASHED_EMPTY_CLASSES}>
-            No readings yet. Use <span className="font-medium text-ink-2">Add reading</span> to log
-            your first one.
-          </p>
+          <EmptyState icon={<HeartPulseIcon className="size-6" />} title="No readings yet" action={addButton}>
+            Log your blood pressure, pulse, SpO2, temperature or weight to see how they trend over time.
+          </EmptyState>
         )
       ) : (
         <>
-          <section className="grid grid-cols-2 gap-4 sm:grid-cols-3 2xl:grid-cols-6">
-            {tiles.map(({ m, latest, avg }, i) => (
-              <div key={m.tab} className={i === 0 ? "col-span-2 grid sm:col-span-1" : "grid"}>
-                <StatCard
-                  label={m.label}
-                  value={
-                    latest ? (
-                      <span className={metricOut(m, latest) ? "text-danger-text" : undefined}>
-                        {metricValue(m, latest)}
-                        <span className="ml-1 text-sm font-medium text-ink-3">{m.unit}</span>
-                      </span>
-                    ) : (
-                      "—"
-                    )
-                  }
-                  footer={
-                    latest
-                      ? `${formatMonthDayShort(latest.created_at)} · avg ${avg}`
-                      : "Nothing logged yet"
-                  }
-                />
-              </div>
-            ))}
-            <div className="col-span-2 grid sm:col-span-1">
-              <StatCard
-                label="In normal range"
+          <StatStrip className="grid-cols-2 sm:grid-cols-3 2xl:grid-cols-6">
+            {tiles.map(({ m, latest, avg }) => (
+              <Metric
+                key={m.tab}
+                label={m.label}
+                tone={latest && metricOut(m, latest) ? "danger" : "neutral"}
                 value={
-                  judged.length > 0 ? `${Math.round((normalCount / judged.length) * 100)}%` : "—"
+                  latest ? (
+                    <>
+                      {metricValue(m, latest)}
+                      <span className="ml-1 text-sm font-medium text-ink-3">{m.unit}</span>
+                    </>
+                  ) : (
+                    "—"
+                  )
                 }
-                footer={`${normalCount} of ${judged.length} BP readings`}
+                hint={latest ? `${formatMonthDayShort(latest.created_at)} · avg ${avg}` : "Nothing logged yet"}
               />
-            </div>
-          </section>
+            ))}
+            <Metric
+              label="In normal range"
+              value={judged.length > 0 ? `${Math.round((normalCount / judged.length) * 100)}%` : "—"}
+              hint={`${normalCount} of ${judged.length} BP readings`}
+            />
+          </StatStrip>
 
-          <section className={CARD_CLASSES}>
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <h2 className="text-lg font-semibold text-ink">{metric.label} trend</h2>
-                <p className="mt-1 text-sm text-ink-3">
-                  {metric.lines.some((l) => NORMAL[l.key])
-                    ? "The shaded band is the normal range."
-                    : "Oldest to newest."}
-                </p>
-              </div>
-              <div className="flex max-w-full flex-wrap items-center gap-3">
-                <div className={`${SEGMENTED_WRAPPER_CLASSES} max-w-full flex-wrap`}>
-                  {METRICS.map((m, i) => (
-                    <button
-                      key={m.tab}
-                      type="button"
-                      aria-pressed={i === metricIdx}
-                      className={`${SEGMENTED_BUTTON_CLASSES} ${
-                        i === metricIdx
-                          ? SEGMENTED_BUTTON_ACTIVE_CLASSES
-                          : SEGMENTED_BUTTON_INACTIVE_CLASSES
-                      }`}
-                      onClick={() => setMetricIdx(i)}
-                    >
-                      {m.tab}
-                    </button>
-                  ))}
-                </div>
+          <Panel
+            title={`${metric.label} trend`}
+            subtitle={
+              metric.lines.some((l) => NORMAL[l.key]) ? "The shaded band is the normal range." : "Oldest to newest."
+            }
+            actions={
+              <>
+                <Segmented
+                  label="Measurement"
+                  options={METRIC_OPTIONS}
+                  value={metricIdx}
+                  onChange={setMetricIdx}
+                  className="max-w-full flex-wrap"
+                />
                 <ChartZoomControls
                   zoom={zoom.zoom}
                   onZoomIn={zoom.zoomIn}
@@ -405,9 +395,10 @@ export default function BloodPressureClient() {
                   canZoomIn={zoom.canZoomIn}
                   canZoomOut={zoom.canZoomOut}
                 />
-              </div>
-            </div>
-            <div className="mt-5 h-[min(22rem,55vh)] min-h-[240px] w-full">
+              </>
+            }
+          >
+            <div className="h-[min(22rem,55vh)] min-h-[240px] w-full">
               {points.length === 0 ? (
                 <p className={DASHED_EMPTY_CLASSES}>Nothing logged for {metric.label} yet.</p>
               ) : (
@@ -471,22 +462,21 @@ export default function BloodPressureClient() {
                 </div>
               )}
             </div>
-          </section>
+          </Panel>
 
-          <section className="flex flex-col gap-3">
-            <h2 className="text-lg font-semibold text-ink">History</h2>
-            <div className={`${TABLE_WRAPPER_CLASSES} overflow-x-auto`}>
+          <Panel title="History" flush className="overflow-hidden">
+            <div className="overflow-x-auto">
               <table className="w-full min-w-[760px]">
                 <thead>
                   <tr className={TABLE_HEAD_ROW_CLASSES}>
-                    <th className={TABLE_HEAD_CELL_CLASSES}>Date</th>
+                    <th className={`${TABLE_HEAD_CELL_CLASSES} text-left`}>Date</th>
                     {METRICS.map((m) => (
-                      <th key={m.tab} className={TABLE_HEAD_CELL_CLASSES}>
-                        {m.tab} <span className="normal-case">({m.unit})</span>
+                      <th key={m.tab} className={`${TABLE_HEAD_CELL_CLASSES} text-left`}>
+                        {m.tab} ({m.unit})
                       </th>
                     ))}
-                    <th className={TABLE_HEAD_CELL_CLASSES}>Status</th>
-                    <th className={TABLE_HEAD_CELL_CLASSES}>Notes</th>
+                    <th className={`${TABLE_HEAD_CELL_CLASSES} text-left`}>Status</th>
+                    <th className={`${TABLE_HEAD_CELL_CLASSES} text-left`}>Notes</th>
                     <th className={TABLE_HEAD_CELL_CLASSES}>
                       <span className="sr-only">Actions</span>
                     </th>
@@ -508,42 +498,22 @@ export default function BloodPressureClient() {
                           </td>
                         ))}
                         <td className={TABLE_CELL_CLASSES}>
-                          {v != null && (
-                            <span
-                              className={`${PILL} ${
-                                v ? "bg-success-soft text-success-text" : "bg-danger-soft text-danger-text"
-                              }`}
-                            >
-                              {v ? "Normal" : "Out of range"}
-                            </span>
-                          )}
+                          {v != null && <Pill tone={v ? "success" : "danger"}>{v ? "Normal" : "Out of range"}</Pill>}
                         </td>
                         <td className={TABLE_CELL_CLASSES}>
                           <p className="max-w-64 truncate" data-tooltip={r.notes ?? undefined}>
                             {r.notes}
                           </p>
                         </td>
-                        <td className="px-2 py-1.5">
+                        <td className="py-1.5 pl-3 pr-5 sm:pr-6">
                           <div className="flex justify-end gap-1">
-                            <button
-                              type="button"
-                              aria-label="Edit reading"
-                              data-tooltip="Edit"
-                              className={ICON_BUTTON_CLASSES}
-                              onClick={() => openEdit(r)}
-                            >
-                              <PencilIcon className="size-5" />
-                            </button>
-                            <button
-                              type="button"
+                            <IconAction kind="edit" label="Edit reading" onClick={() => openEdit(r)} />
+                            <IconAction
+                              kind="delete"
+                              label="Delete reading"
                               disabled={saving}
-                              aria-label="Delete reading"
-                              data-tooltip="Delete"
-                              className={ICON_BUTTON_CLASSES}
                               onClick={() => void onDelete(r.id)}
-                            >
-                              <TrashIcon className="size-5" />
-                            </button>
+                            />
                           </div>
                         </td>
                       </tr>
@@ -552,43 +522,51 @@ export default function BloodPressureClient() {
                 </tbody>
               </table>
             </div>
-          </section>
+          </Panel>
         </>
       )}
 
-      <Modal open={modalOpen} onClose={closeModal} ariaLabelledBy="bp-form-title">
-        <h2 id="bp-form-title" className="text-lg font-semibold text-ink">
-          {editingId != null ? "Edit reading" : "Add reading"}
-        </h2>
-        <p className="mt-1 text-sm text-ink-3">Log whatever you measured — every group is optional.</p>
-        <form onSubmit={submit} className="mt-5 flex flex-col gap-5">
-          {error && (
-            <ErrorAlert>
-              {error}
-            </ErrorAlert>
-          )}
-          <fieldset className="grid grid-cols-3 gap-3">
-            <legend className={`${SECTION_LABEL_CLASSES} mb-2`}>
-              Blood pressure · all three or none
-            </legend>
-            {BP_FIELDS.map(renderField)}
-          </fieldset>
-          <fieldset className="grid grid-cols-3 gap-3">
-            <legend className={`${SECTION_LABEL_CLASSES} mb-2`}>Other vitals</legend>
-            {OTHER_FIELDS.map(renderField)}
-          </fieldset>
-          <label className="flex flex-col gap-1.5 text-sm">
-            <span className="font-medium text-ink-2">Notes</span>
-            <input
-              type="text"
-              placeholder="After coffee, left arm…"
-              className={INPUT_CLASSES}
-              value={form.notes}
-              onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
-              disabled={saving}
-            />
-          </label>
-          <div className="flex justify-end gap-2">
+      <Modal
+        open={modalOpen}
+        onClose={closeModal}
+        ariaLabelledBy="bp-form-title"
+        dialogClassName={`${DIALOG_CLASSES} max-w-lg`}
+      >
+        <ModalHeader
+          id="bp-form-title"
+          title={editingId != null ? "Edit reading" : "Add reading"}
+          subtitle="Log whatever you measured — every group is optional."
+          onClose={closeModal}
+        />
+        <form onSubmit={submit} className="flex min-h-0 flex-1 flex-col">
+          <div className={`${DIALOG_BODY_CLASSES} flex flex-col gap-5`}>
+            {error && (
+              <ErrorAlert>
+                {error}
+              </ErrorAlert>
+            )}
+            <fieldset className="grid grid-cols-3 gap-3">
+              <legend className={`${SECTION_LABEL_CLASSES} mb-2`}>
+                Blood pressure · all three or none
+              </legend>
+              {BP_FIELDS.map(renderField)}
+            </fieldset>
+            <fieldset className="grid grid-cols-3 gap-3">
+              <legend className={`${SECTION_LABEL_CLASSES} mb-2`}>Other vitals</legend>
+              {OTHER_FIELDS.map(renderField)}
+            </fieldset>
+            <Field label="Notes">
+              <input
+                type="text"
+                placeholder="After coffee, left arm…"
+                className={INPUT_CLASSES}
+                value={form.notes}
+                onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
+                disabled={saving}
+              />
+            </Field>
+          </div>
+          <div className={DIALOG_FOOTER_CLASSES}>
             <button
               type="button"
               disabled={saving}

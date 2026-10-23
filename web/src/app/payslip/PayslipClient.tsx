@@ -1,6 +1,10 @@
 "use client";
 
 import { confirmDialog } from "@/components/ConfirmDialog";
+import { ErrorAlert } from "@/components/ErrorAlert";
+import { LoadingBlocks, Panel } from "@/components/FinanceUI";
+import { PlusIcon } from "@/components/Icons";
+import { PageHeader } from "@/components/PageHeader";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   apiFetch,
@@ -43,24 +47,13 @@ import type { Nav } from "./payslipNav";
 import { PayslipClientModal } from "./PayslipClientModal";
 import { PayslipYearStatsSection } from "./PayslipYearStatsSection";
 import { YearPayslipBlock } from "./YearPayslipBlock";
-import { PAGE_CONTAINER_CLASSES } from "@/lib/ui";
-import { useWheelStep } from "@/lib/useWheelStep";
 import {
-  PAYSLIP_ACCENT_TEXT,
-  PAYSLIP_BG_0,
-  PAYSLIP_BORDER,
-  PAYSLIP_BORDER_SOFT,
-  PAYSLIP_DANGER_BUTTON,
-  PAYSLIP_ERROR_ALERT,
-  PAYSLIP_FONT_CLASS,
-  PAYSLIP_GHOST_BUTTON,
-  PAYSLIP_ICON_BUTTON,
-  PAYSLIP_MONO,
-  PAYSLIP_SECONDARY_BUTTON,
-  PAYSLIP_TEXT_2,
-  PAYSLIP_TEXT_DIM,
-  PAYSLIP_TEXT_INK,
-} from "./payslipTheme";
+  DELETE_BUTTON_CLASSES,
+  DETAIL_BUTTON_CLASSES,
+  PAGE_CONTAINER_CLASSES,
+  SECONDARY_BUTTON_CLASSES,
+} from "@/lib/ui";
+import { useWheelStep } from "@/lib/useWheelStep";
 
 const LS_PAYSLIP_SHOW_GROSS = "blastjax:payslip:showGross";
 
@@ -392,142 +385,134 @@ export default function PayslipClient({ company = "Sophos" }: { company?: string
 
   return (
     <div className={PAGE_CONTAINER_CLASSES}>
-      <div className={`${PAYSLIP_FONT_CLASS} rounded-2xl border ${PAYSLIP_BORDER} ${PAYSLIP_BG_0} p-4 sm:p-6 lg:p-8`}>
-        <header className="mb-6 flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <h1 className={`text-[26px] font-extrabold tracking-tight ${PAYSLIP_TEXT_INK}`}>
-              {company} Payslip
-            </h1>
-            <p className={`mt-1.5 text-sm ${PAYSLIP_TEXT_DIM}`}>
-              Browse payslips by year and month, split by pay period.
-            </p>
-          </div>
-          <button
-            type="button"
-            className={PAYSLIP_SECONDARY_BUTTON}
-            aria-expanded={showDataTools}
-            onClick={() => setShowDataTools((v) => !v)}
-          >
-            Data tools <span aria-hidden>{showDataTools ? "▴" : "▾"}</span>
-          </button>
-        </header>
-
-        {showDataTools && (
-          <div className="mb-6 flex flex-wrap gap-2">
+      <header>
+        <PageHeader
+          title={`${company} Payslip`}
+          description="Browse payslips by year and month, split by pay period."
+          actions={
             <button
               type="button"
-              className={PAYSLIP_SECONDARY_BUTTON}
+              className={SECONDARY_BUTTON_CLASSES}
+              aria-expanded={showDataTools}
+              onClick={() => setShowDataTools((v) => !v)}
+            >
+              Data tools <span aria-hidden>{showDataTools ? "▴" : "▾"}</span>
+            </button>
+          }
+        />
+
+        {showDataTools && (
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              className={SECONDARY_BUTTON_CLASSES}
               onClick={openAddPayslipFreeform}
               data-tooltip="Add a payslip for any year/month, without picking a calendar slot first"
             >
-              + Add payslip
+              <PlusIcon className="size-4" />
+              Add payslip
             </button>
           </div>
         )}
+      </header>
 
-        {error && (
-          <div className={`mb-6 ${PAYSLIP_ERROR_ALERT}`} role="alert">
-            {error}
-          </div>
-        )}
+      {error && <ErrorAlert>{error}</ErrorAlert>}
 
-        <div className="mb-6 flex items-center justify-between gap-4">
-          <h2 className={`text-lg font-semibold ${PAYSLIP_TEXT_INK}`}>
-            Pay period calendar
-          </h2>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setShowGross((v) => !v)}
-              aria-pressed={showGross}
-              aria-label={
-                showGross
-                  ? "Hide gross amounts in calendar"
-                  : "Show gross amounts in calendar"
-              }
-              data-tooltip={
-                showGross
-                  ? "Hide gross amounts in calendar"
-                  : "Show gross amounts in calendar"
-              }
-              className={PAYSLIP_ICON_BUTTON}
-            >
-              {showGross ? <EyeIcon /> : <EyeOffIcon />}
-            </button>
-          </div>
+      {loading && <LoadingBlocks label="Loading payslips…" />}
+
+      <div className="flex items-center justify-between gap-4">
+        <h2 className="text-lg font-semibold text-ink">
+          Pay period calendar
+        </h2>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setShowGross((v) => !v)}
+            aria-pressed={showGross}
+            aria-label={
+              showGross
+                ? "Hide gross amounts in calendar"
+                : "Show gross amounts in calendar"
+            }
+            data-tooltip={
+              showGross
+                ? "Hide gross amounts in calendar"
+                : "Show gross amounts in calendar"
+            }
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-line-strong bg-transparent text-sm text-ink-2 transition-colors duration-150 hover:bg-surface-2 disabled:pointer-events-none disabled:opacity-40"
+          >
+            {showGross ? <EyeIcon /> : <EyeOffIcon />}
+          </button>
         </div>
-
-        {!loading && (
-          <PayslipYearStatsSection
-            index={index}
-            flags={flags}
-            statsYear={shownYear}
-            setStatsYear={setYear}
-            minYear={minYear}
-            maxYear={maxYear}
-          />
-        )}
-
-        {!loading && (
-          <div ref={yearWheelRef}>
-            <YearPayslipBlock
-              year={shownYear}
-              yearSlots={yearSlotsFromIndex(index, shownYear)}
-              saving={saving}
-              showGross={showGross}
-              onOpenSlot={openSlot}
-            />
-          </div>
-        )}
-
-        {!loading && unsorted.length > 0 && (
-          <div className={`mt-8 border-t ${PAYSLIP_BORDER_SOFT} pt-6`}>
-            <h3 className={`mb-3 text-sm font-semibold ${PAYSLIP_ACCENT_TEXT}`}>
-              Without pay period ({unsorted.length})
-            </h3>
-            <ul className="flex flex-col gap-2">
-              {unsorted.map((r) => (
-                <li
-                  key={r.id}
-                  className={`flex flex-wrap items-center justify-between gap-2 rounded-lg border ${PAYSLIP_BORDER} p-3 text-sm`}
-                >
-                  <span className={`${PAYSLIP_MONO} ${PAYSLIP_TEXT_2}`}>
-                    #{r.id} · Total {fmtNum(r.total)}
-                  </span>
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      className={PAYSLIP_GHOST_BUTTON}
-                      onClick={() =>
-                        setNav({ screen: "detail", row: r })
-                      }
-                    >
-                      Details
-                    </button>
-                    <button
-                      type="button"
-                      className={PAYSLIP_SECONDARY_BUTTON}
-                      onClick={() => {
-                        setModalForm(formFromRow(r));
-                        setNav({ screen: "edit", row: r });
-                      }}
-                    >
-                      Edit
-                    </button>
-                    <button
-                      type="button"
-                      className={PAYSLIP_DANGER_BUTTON}
-                      onClick={() => void handleDelete(r.id)}
-                    >
-                      Delete
-                    </button>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
       </div>
+
+      {!loading && (
+        <PayslipYearStatsSection
+          index={index}
+          flags={flags}
+          statsYear={shownYear}
+          setStatsYear={setYear}
+          minYear={minYear}
+          maxYear={maxYear}
+        />
+      )}
+
+      {!loading && (
+        <div ref={yearWheelRef}>
+          <YearPayslipBlock
+            year={shownYear}
+            yearSlots={yearSlotsFromIndex(index, shownYear)}
+            saving={saving}
+            showGross={showGross}
+            onOpenSlot={openSlot}
+          />
+        </div>
+      )}
+
+      {!loading && unsorted.length > 0 && (
+        <Panel title={`Without pay period (${unsorted.length})`}>
+          <ul className="flex flex-col gap-2">
+            {unsorted.map((r) => (
+              <li
+                key={r.id}
+                className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-line p-3 text-sm"
+              >
+                <span className="font-mono tabular-nums text-ink-2">
+                  #{r.id} · Total {fmtNum(r.total)}
+                </span>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    className={DETAIL_BUTTON_CLASSES}
+                    onClick={() =>
+                      setNav({ screen: "detail", row: r })
+                    }
+                  >
+                    Details
+                  </button>
+                  <button
+                    type="button"
+                    className={SECONDARY_BUTTON_CLASSES}
+                    onClick={() => {
+                      setModalForm(formFromRow(r));
+                      setNav({ screen: "edit", row: r });
+                    }}
+                  >
+                    Edit
+                  </button>
+                  <button
+                    type="button"
+                    className={DELETE_BUTTON_CLASSES}
+                    onClick={() => void handleDelete(r.id)}
+                  >
+                    Delete
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </Panel>
+      )}
 
       {nav && (
         <PayslipClientModal

@@ -11,8 +11,10 @@ import {
   verifyAppUserPassword,
   type AppUserRow,
 } from "@/lib/api";
+import { formatDate } from "@/lib/dateFormat";
 import { RESTRICTABLE_PAGES } from "@/lib/nav";
 import { ErrorAlert } from "@/components/ErrorAlert";
+import { LoadingBlocks } from "@/components/FinanceUI";
 import {
   ACTION_BUTTON_CLASSES,
   CARD_CLASSES,
@@ -20,7 +22,6 @@ import {
   DELETE_BUTTON_CLASSES,
   EDIT_BUTTON_CLASSES,
   INPUT_CLASSES,
-  LOADING_TEXT_CLASSES,
   PRIMARY_BUTTON_CLASSES,
   SECONDARY_BUTTON_CLASSES,
 } from "@/lib/ui";
@@ -259,7 +260,7 @@ export function UsersSettingsPanel() {
 
       <div className="mt-6">
         {loading ? (
-          <p className={LOADING_TEXT_CLASSES}>Loading users…</p>
+          <LoadingBlocks label="Loading users…" rows={0} />
         ) : loadError ? (
           <ErrorAlert>{loadError}</ErrorAlert>
         ) : users.length === 0 ? (
@@ -339,7 +340,7 @@ export function UsersSettingsPanel() {
                         {user.username}
                       </p>
                       <p className="text-xs text-ink-3">
-                        Added {new Date(user.created_at).toLocaleDateString()}
+                        Added {formatDate(user.created_at)}
                       </p>
                     </div>
                     <div className="flex items-center gap-2">

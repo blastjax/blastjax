@@ -13,13 +13,13 @@ import {
   type CompanyRow,
 } from "@/lib/api";
 import { ErrorAlert } from "@/components/ErrorAlert";
+import { LoadingBlocks } from "@/components/FinanceUI";
 import {
   CARD_CLASSES,
   DASHED_EMPTY_CLASSES,
   DELETE_BUTTON_CLASSES,
   EDIT_BUTTON_CLASSES,
   INPUT_CLASSES,
-  LOADING_TEXT_CLASSES,
   PRIMARY_BUTTON_CLASSES,
   SECONDARY_BUTTON_CLASSES,
 } from "@/lib/ui";
@@ -268,7 +268,7 @@ export function CompaniesSettingsPanel() {
 
       <div className="mt-6">
         {loading ? (
-          <p className={LOADING_TEXT_CLASSES}>Loading companies…</p>
+          <LoadingBlocks label="Loading companies…" rows={0} />
         ) : loadError ? (
           <ErrorAlert>{loadError}</ErrorAlert>
         ) : companies.length === 0 ? (

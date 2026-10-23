@@ -1,13 +1,3 @@
-import {
-  PAYSLIP_ACCENT_BG,
-  PAYSLIP_ACCENT_TEXT,
-  PAYSLIP_BG_3,
-  PAYSLIP_BORDER_SOFT,
-  PAYSLIP_TEXT_2,
-  PAYSLIP_TEXT_DIM,
-  PAYSLIP_TEXT_INK,
-  PAYSLIP_TRACK_BG,
-} from "./payslipTheme";
 
 export const MEDICAL_REIMBURSEMENT_ANNUAL_CAP = 11500;
 
@@ -73,19 +63,19 @@ export type StatTheme = {
 };
 
 const FLAT_THEME: StatTheme = {
-  border: PAYSLIP_BORDER_SOFT,
-  bg: PAYSLIP_BG_3,
-  title: PAYSLIP_TEXT_DIM,
-  sub: PAYSLIP_TEXT_DIM,
-  value: PAYSLIP_TEXT_INK,
-  barTrack: PAYSLIP_TRACK_BG,
-  barFill: PAYSLIP_ACCENT_BG,
+  border: "border-line-soft",
+  bg: "bg-surface-3",
+  title: "text-ink-3",
+  sub: "text-ink-3",
+  value: "text-ink",
+  barTrack: "bg-line-strong",
+  barFill: "bg-brand",
 };
 
 export const MEDICAL_REIMBURSEMENT_STAT_THEME: StatTheme = {
   ...FLAT_THEME,
-  title: PAYSLIP_ACCENT_TEXT,
-  sub: PAYSLIP_TEXT_2,
+  title: "text-brand-text",
+  sub: "text-ink-2",
 };
 
 export const STAT_THEMES: Record<DraggableStatId, StatTheme> = {
@@ -106,4 +96,4 @@ export const PAYSLIP_STAT_CARD_SHELL_PINNED =
   "flex h-full min-h-0 min-w-0 cursor-default flex-col rounded-xl border px-4 py-3.5";
 
 export const PAYSLIP_DEDUCTION_CARD_SHELL =
-  `flex h-full min-h-0 min-w-0 flex-col rounded-xl border ${PAYSLIP_BORDER_SOFT} ${PAYSLIP_BG_3} px-4 py-3.5`;
+  `flex h-full min-h-0 min-w-0 flex-col rounded-xl border border-line-soft bg-surface-3 px-4 py-3.5`;

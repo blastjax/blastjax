@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { DIALOG_BODY_CLASSES, DIALOG_CLASSES, DIALOG_FOOTER_CLASSES } from "@/components/FinanceUI";
 import { Modal } from "@/components/Modal";
 import { DANGER_BUTTON_CLASSES, SECONDARY_BUTTON_CLASSES } from "@/lib/ui";
 
@@ -45,11 +46,18 @@ export function ConfirmHost() {
   }, [pending]);
 
   return (
-    <Modal open={pending !== null} onClose={() => answer(false)} ariaLabelledBy="confirm-dialog-message">
-      <p id="confirm-dialog-message" className="text-base text-ink">
-        {pending?.message}
-      </p>
-      <div className="mt-6 flex justify-end gap-2">
+    <Modal
+      open={pending !== null}
+      onClose={() => answer(false)}
+      ariaLabelledBy="confirm-dialog-message"
+      dialogClassName={`${DIALOG_CLASSES} max-w-md`}
+    >
+      <div className={DIALOG_BODY_CLASSES}>
+        <p id="confirm-dialog-message" className="text-base text-ink">
+          {pending?.message}
+        </p>
+      </div>
+      <div className={DIALOG_FOOTER_CLASSES}>
         <button type="button" className={SECONDARY_BUTTON_CLASSES} onClick={() => answer(false)}>
           Cancel
         </button>

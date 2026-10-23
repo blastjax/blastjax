@@ -34,23 +34,25 @@ import {
 import { fmtNum, fmtPayPeriod, slotTitle } from "./payslipDisplay";
 import type { FormState } from "./payslipModalForm";
 import type { Nav } from "./payslipNav";
+import { ErrorAlert } from "@/components/ErrorAlert";
 import {
-  PAYSLIP_BG_0,
-  PAYSLIP_BG_4,
-  PAYSLIP_BORDER,
-  PAYSLIP_BORDER_STRONG,
-  PAYSLIP_DANGER_BUTTON,
-  PAYSLIP_DANGER_TEXT,
-  PAYSLIP_ERROR_ALERT,
-  PAYSLIP_FONT_CLASS,
-  PAYSLIP_ICON_BUTTON,
-  PAYSLIP_MONO,
-  PAYSLIP_PRIMARY_BUTTON,
-  PAYSLIP_SECONDARY_BUTTON,
-  PAYSLIP_TEXT_2,
-  PAYSLIP_TEXT_DIM,
-  PAYSLIP_TEXT_INK,
-} from "./payslipTheme";
+  DANGER_TEXT_BUTTON_CLASSES,
+  DIALOG_BODY_CLASSES,
+  DIALOG_CLASSES,
+  DIALOG_FOOTER_CLASSES,
+  ModalHeader,
+  TEXT_BUTTON_CLASSES,
+} from "@/components/FinanceUI";
+import { ChevronLeftIcon, ChevronRightIcon } from "@/components/Icons";
+import {
+  DELETE_BUTTON_CLASSES,
+  ICON_BUTTON_CLASSES,
+  PRIMARY_BUTTON_CLASSES,
+  SECONDARY_BUTTON_CLASSES,
+  alertClasses,
+} from "@/lib/ui";
+
+const TITLE_ID = "payslip-modal-title";
 
 export function PayslipClientModal({
   nav,
@@ -94,244 +96,229 @@ export function PayslipClientModal({
     <Modal
       open
       onClose={onCloseDialog}
-      backdropClassName="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-5 backdrop-blur-sm sm:items-center sm:p-6"
-      dialogClassName={`${PAYSLIP_FONT_CLASS} max-h-[95vh] w-full max-w-5xl overflow-y-auto rounded-xl border ${PAYSLIP_BORDER_STRONG} ${PAYSLIP_BG_0} p-6 shadow-pop sm:p-8 lg:max-w-6xl`}
+      ariaLabelledBy={TITLE_ID}
+      dialogClassName={`${DIALOG_CLASSES} max-w-5xl lg:max-w-6xl`}
     >
             {nav.screen === "detail" && (() => {
               const row = rows.find((r) => r.id === nav.row.id) ?? nav.row;
               const detailFlags = companyColumnFlags(companies, row.company);
+              const { older, newer } = detailPayslipNeighbors(rows, row.id);
               return (
               <>
-                <div className="mb-4 flex items-start justify-between gap-2">
-                  <div className="flex min-w-0 items-center gap-2 sm:gap-3">
-                    {(() => {
-                      const { older, newer } = detailPayslipNeighbors(
-                        rows,
-                        row.id,
-                      );
-                      return (
-                        <>
-                          <button
-                            type="button"
-                            className={PAYSLIP_ICON_BUTTON}
-                            aria-label="Older payslip"
-                            disabled={!older}
-                            onClick={() =>
-                              older &&
-                              setNav({ screen: "detail", row: older })
-                            }
-                          >
-                            ‹
-                          </button>
-                          <h2 className={`min-w-0 text-lg font-semibold ${PAYSLIP_TEXT_INK}`}>
-                            Details
-                          </h2>
-                          <button
-                            type="button"
-                            className={PAYSLIP_ICON_BUTTON}
-                            aria-label="Newer payslip"
-                            disabled={!newer}
-                            onClick={() =>
-                              newer &&
-                              setNav({ screen: "detail", row: newer })
-                            }
-                          >
-                            ›
-                          </button>
-                        </>
-                      );
-                    })()}
-                  </div>
-                  <button
-                    type="button"
-                    className={`shrink-0 ${PAYSLIP_SECONDARY_BUTTON}`}
-                    onClick={() => setNav(null)}
-                  >
-                    Close
-                  </button>
-                </div>
-                <p className={`mb-4 text-sm ${PAYSLIP_TEXT_2}`}>
-                  {fmtPayPeriod(
-                    row.period_year,
-                    row.period_month,
-                    row.period_half,
-                  )}
-                </p>
-                {(() => {
-                  const y = row.period_year;
-                  const m = row.period_month;
-                  const h = row.period_half;
-                  if (
-                    y == null ||
-                    m == null ||
-                    (h !== 1 && h !== 2)
-                  ) {
-                    return null;
+                <ModalHeader
+                  id={TITLE_ID}
+                  title="Details"
+                  subtitle={fmtPayPeriod(row.period_year, row.period_month, row.period_half)}
+                  actions={
+                    <>
+                      <button
+                        type="button"
+                        className={ICON_BUTTON_CLASSES}
+                        aria-label="Older payslip"
+                        data-tooltip="Older payslip"
+                        disabled={!older}
+                        onClick={() => older && setNav({ screen: "detail", row: older })}
+                      >
+                        <ChevronLeftIcon className="size-5" />
+                      </button>
+                      <button
+                        type="button"
+                        className={ICON_BUTTON_CLASSES}
+                        aria-label="Newer payslip"
+                        data-tooltip="Newer payslip"
+                        disabled={!newer}
+                        onClick={() => newer && setNav({ screen: "detail", row: newer })}
+                      >
+                        <ChevronRightIcon className="size-5" />
+                      </button>
+                    </>
                   }
-                  const n = rowsForSlot(rows, y, m, h).length;
-                  if (n <= 1) return null;
-                  return (
-                    <p className={`mb-4 rounded-md border ${PAYSLIP_BORDER_STRONG} bg-[oklch(0.72_0.11_195/0.1)] px-3 py-2 text-xs ${PAYSLIP_TEXT_2}`}>
-                      {n} entries in this half — use ‹ › or arrow keys for other
-                      payslips, or close and open that calendar slot to see the full
-                      list.
-                    </p>
-                  );
-                })()}
-                <div className="grid min-w-0 gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,17.5rem)] lg:items-start lg:gap-8">
-                  <div className="min-w-0">
-                    <dl className={`grid grid-cols-1 gap-2 text-sm sm:grid-cols-2 ${PAYSLIP_MONO}`}>
-                      {detailFlags.show_total && (
-                        <>
-                          <div>
-                            <dt className={`text-xs ${PAYSLIP_TEXT_DIM}`}>Gross total</dt>
-                            <dd className={`font-medium ${PAYSLIP_TEXT_INK}`}>
-                              {fmtNum(grossTotalFromRow(row))}
-                            </dd>
-                          </div>
-                          <div>
-                            <dt className={`text-xs ${PAYSLIP_TEXT_DIM}`}>Net total</dt>
-                            <dd className={`font-medium ${PAYSLIP_TEXT_INK}`}>
-                              {fmtNum(row.total)}
-                            </dd>
-                          </div>
-                        </>
-                      )}
-                      {detailFlags.show_basic_salary && (
-                        <div>
-                          <dt className={`text-xs ${PAYSLIP_TEXT_DIM}`}>Basic salary</dt>
-                          <dd className={PAYSLIP_TEXT_2}>
-                            {fmtNum(row.basic_salary)}
-                          </dd>
-                        </div>
-                      )}
-                      {(
-                        [
-                          ["commission", "Commission"],
-                          ["reimbursement", "Reimbursement"],
-                          ["medical_reimbursement", "Medical reimbursement"],
-                          ["others", "Others"],
-                          ["allowances", "Allowances"],
-                        ] as const
-                      )
-                      .filter(([k]) => k !== "commission" || row.period_half === 2)
-                      .filter(([k]) => {
-                        if (k === "commission") return detailFlags.show_commission;
-                        if (k === "reimbursement") return detailFlags.show_reimbursement;
-                        if (k === "medical_reimbursement") {
-                          return detailFlags.show_medical_reimbursement;
-                        }
-                        if (k === "others") return detailFlags.show_others;
-                        if (k === "allowances") return detailFlags.show_allowances;
-                        return true;
-                      })
-                      .map(([k, lab]) => (
-                        <div key={k}>
-                          <dt className={`text-xs ${PAYSLIP_TEXT_DIM}`}>{lab}</dt>
-                          <dd className={PAYSLIP_TEXT_2}>
-                            {fmtNum(row[k])}
-                          </dd>
-                        </div>
-                      ))}
-                      {detailFlags.show_thirteenth_month &&
-                        row.period_month === 11 &&
-                        row.period_half === 2 && (
-                        <div>
-                          <dt className={`text-xs ${PAYSLIP_TEXT_DIM}`}>13th Month</dt>
-                          <dd className={PAYSLIP_TEXT_2}>
-                            {fmtNum(row.thirteenth_month)}
-                          </dd>
-                        </div>
-                      )}
-                    </dl>
-                    {row.notes && (
-                      <div className="mt-3">
-                        <dt className={`text-xs ${PAYSLIP_TEXT_DIM}`}>Notes</dt>
-                        <dd className={`mt-1 whitespace-pre-wrap text-sm ${PAYSLIP_TEXT_2}`}>
-                          {row.notes}
-                        </dd>
-                      </div>
-                    )}
-                  </div>
-                  <aside className={`flex min-w-0 flex-col gap-4 rounded-lg ${PAYSLIP_BG_4} p-4`}>
-                    <p className={`text-xs font-semibold uppercase tracking-wide ${PAYSLIP_TEXT_DIM}`}>
-                      Deductions
-                    </p>
-                    <dl className={`flex flex-col gap-3 text-sm ${PAYSLIP_MONO}`}>
-                      {detailFlags.show_withholding_tax && (
-                        <div>
-                          <dt className={`text-xs ${PAYSLIP_TEXT_DIM}`}>
-                            Withholding tax
-                          </dt>
-                          <dd className={PAYSLIP_DANGER_TEXT}>
-                            {fmtNum(row.withholding_tax)}
-                          </dd>
-                        </div>
-                      )}
-                      {detailFlags.show_sss_contribution && (
-                        <div>
-                          <dt className={`text-xs ${PAYSLIP_TEXT_DIM}`}>
-                            SSS contribution
-                          </dt>
-                          <dd className={PAYSLIP_DANGER_TEXT}>
-                            {fmtNum(row.sss_contribution)}
-                          </dd>
-                        </div>
-                      )}
-                      {detailFlags.show_philhealth && (
-                        <div>
-                          <dt className={`text-xs ${PAYSLIP_TEXT_DIM}`}>Philhealth</dt>
-                          <dd className={PAYSLIP_DANGER_TEXT}>
-                            {fmtNum(row.philhealth)}
-                          </dd>
-                        </div>
-                      )}
-                      {detailFlags.show_pag_ibig && (
-                        <div>
-                          <dt className={`text-xs ${PAYSLIP_TEXT_DIM}`}>
-                            Pag-ibig (Employee HDMF)
-                          </dt>
-                          <dd className={PAYSLIP_DANGER_TEXT}>
-                            {fmtNum(row.pag_ibig)}
-                          </dd>
-                        </div>
-                      )}
-                      {detailFlags.show_mp2 && (
-                        <div>
-                          <dt className={`text-xs ${PAYSLIP_TEXT_DIM}`}>MP2</dt>
-                          <dd className={PAYSLIP_DANGER_TEXT}>
-                            {fmtNum(row.mp2)}
-                          </dd>
-                        </div>
-                      )}
-                      {detailFlags.show_bereavement_asst && (
-                        <div>
-                          <dt className={`text-xs ${PAYSLIP_TEXT_DIM}`}>Bereavement asst</dt>
-                          <dd className={PAYSLIP_DANGER_TEXT}>
-                            {fmtNum(row.bereavement_asst)}
-                          </dd>
-                        </div>
-                      )}
-                      <div className={`mt-1 border-t ${PAYSLIP_BORDER} pt-3`}>
-                        <dt className={`text-xs font-semibold ${PAYSLIP_TEXT_2}`}>
-                          Deductions total
-                        </dt>
-                        <dd className={`mt-0.5 text-sm font-semibold ${PAYSLIP_DANGER_TEXT}`}>
-                          {fmtNum(deductionsTotalFromRow(row))}
-                        </dd>
-                      </div>
-                    </dl>
-                  </aside>
-                </div>
-                <PayslipPdfPanel
-                  payslipId={row.id}
-                  initialHasPdf={!!row.has_pdf}
-                  onPdfChange={onPdfChange}
+                  onClose={() => setNav(null)}
                 />
-                <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
+                <div className={DIALOG_BODY_CLASSES}>
+                  {(() => {
+                    const y = row.period_year;
+                    const m = row.period_month;
+                    const h = row.period_half;
+                    if (
+                      y == null ||
+                      m == null ||
+                      (h !== 1 && h !== 2)
+                    ) {
+                      return null;
+                    }
+                    const n = rowsForSlot(rows, y, m, h).length;
+                    if (n <= 1) return null;
+                    return (
+                      <p className={`mb-4 ${alertClasses("info")}`}>
+                        {n} entries in this half — use ‹ › or arrow keys for other
+                        payslips, or close and open that calendar slot to see the full
+                        list.
+                      </p>
+                    );
+                  })()}
+                  <div className="grid min-w-0 gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,17.5rem)] lg:items-start lg:gap-8">
+                    <div className="min-w-0">
+                      <dl className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-2 font-mono tabular-nums">
+                        {detailFlags.show_total && (
+                          <>
+                            <div>
+                              <dt className="text-xs text-ink-3">Gross total</dt>
+                              <dd className="font-medium text-ink">
+                                {fmtNum(grossTotalFromRow(row))}
+                              </dd>
+                            </div>
+                            <div>
+                              <dt className="text-xs text-ink-3">Net total</dt>
+                              <dd className="font-medium text-ink">
+                                {fmtNum(row.total)}
+                              </dd>
+                            </div>
+                          </>
+                        )}
+                        {detailFlags.show_basic_salary && (
+                          <div>
+                            <dt className="text-xs text-ink-3">Basic salary</dt>
+                            <dd className="text-ink-2">
+                              {fmtNum(row.basic_salary)}
+                            </dd>
+                          </div>
+                        )}
+                        {(
+                          [
+                            ["commission", "Commission"],
+                            ["reimbursement", "Reimbursement"],
+                            ["medical_reimbursement", "Medical reimbursement"],
+                            ["others", "Others"],
+                            ["allowances", "Allowances"],
+                          ] as const
+                        )
+                        .filter(([k]) => k !== "commission" || row.period_half === 2)
+                        .filter(([k]) => {
+                          if (k === "commission") return detailFlags.show_commission;
+                          if (k === "reimbursement") return detailFlags.show_reimbursement;
+                          if (k === "medical_reimbursement") {
+                            return detailFlags.show_medical_reimbursement;
+                          }
+                          if (k === "others") return detailFlags.show_others;
+                          if (k === "allowances") return detailFlags.show_allowances;
+                          return true;
+                        })
+                        .map(([k, lab]) => (
+                          <div key={k}>
+                            <dt className="text-xs text-ink-3">{lab}</dt>
+                            <dd className="text-ink-2">
+                              {fmtNum(row[k])}
+                            </dd>
+                          </div>
+                        ))}
+                        {detailFlags.show_thirteenth_month &&
+                          row.period_month === 11 &&
+                          row.period_half === 2 && (
+                          <div>
+                            <dt className="text-xs text-ink-3">13th Month</dt>
+                            <dd className="text-ink-2">
+                              {fmtNum(row.thirteenth_month)}
+                            </dd>
+                          </div>
+                        )}
+                      </dl>
+                      {row.notes && (
+                        <div className="mt-3">
+                          <dt className="text-xs text-ink-3">Notes</dt>
+                          <dd className="mt-1 whitespace-pre-wrap text-sm text-ink-2">
+                            {row.notes}
+                          </dd>
+                        </div>
+                      )}
+                    </div>
+                    <aside className="flex min-w-0 flex-col gap-4 rounded-lg bg-surface-inset p-4">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-ink-3">
+                        Deductions
+                      </p>
+                      <dl className="flex flex-col gap-3 text-sm font-mono tabular-nums">
+                        {detailFlags.show_withholding_tax && (
+                          <div>
+                            <dt className="text-xs text-ink-3">
+                              Withholding tax
+                            </dt>
+                            <dd className="text-danger-text">
+                              {fmtNum(row.withholding_tax)}
+                            </dd>
+                          </div>
+                        )}
+                        {detailFlags.show_sss_contribution && (
+                          <div>
+                            <dt className="text-xs text-ink-3">
+                              SSS contribution
+                            </dt>
+                            <dd className="text-danger-text">
+                              {fmtNum(row.sss_contribution)}
+                            </dd>
+                          </div>
+                        )}
+                        {detailFlags.show_philhealth && (
+                          <div>
+                            <dt className="text-xs text-ink-3">Philhealth</dt>
+                            <dd className="text-danger-text">
+                              {fmtNum(row.philhealth)}
+                            </dd>
+                          </div>
+                        )}
+                        {detailFlags.show_pag_ibig && (
+                          <div>
+                            <dt className="text-xs text-ink-3">
+                              Pag-ibig (Employee HDMF)
+                            </dt>
+                            <dd className="text-danger-text">
+                              {fmtNum(row.pag_ibig)}
+                            </dd>
+                          </div>
+                        )}
+                        {detailFlags.show_mp2 && (
+                          <div>
+                            <dt className="text-xs text-ink-3">MP2</dt>
+                            <dd className="text-danger-text">
+                              {fmtNum(row.mp2)}
+                            </dd>
+                          </div>
+                        )}
+                        {detailFlags.show_bereavement_asst && (
+                          <div>
+                            <dt className="text-xs text-ink-3">Bereavement asst</dt>
+                            <dd className="text-danger-text">
+                              {fmtNum(row.bereavement_asst)}
+                            </dd>
+                          </div>
+                        )}
+                        <div className="mt-1 border-t border-line pt-3">
+                          <dt className="text-xs font-semibold text-ink-2">
+                            Deductions total
+                          </dt>
+                          <dd className="mt-0.5 text-sm font-semibold text-danger-text">
+                            {fmtNum(deductionsTotalFromRow(row))}
+                          </dd>
+                        </div>
+                      </dl>
+                    </aside>
+                  </div>
+                  <PayslipPdfPanel
+                    payslipId={row.id}
+                    initialHasPdf={!!row.has_pdf}
+                    onPdfChange={onPdfChange}
+                  />
+                </div>
+                <div className={DIALOG_FOOTER_CLASSES}>
                   <button
                     type="button"
-                    className={PAYSLIP_PRIMARY_BUTTON}
+                    className={DANGER_TEXT_BUTTON_CLASSES}
+                    onClick={() => void handleDelete(row.id)}
+                  >
+                    Delete
+                  </button>
+                  <button
+                    type="button"
+                    className={PRIMARY_BUTTON_CLASSES}
                     onClick={() => {
                       setModalForm(formFromRow(row));
                       setNav({ screen: "edit", row });
@@ -339,103 +326,47 @@ export function PayslipClientModal({
                   >
                     Edit
                   </button>
-                  <button
-                    type="button"
-                    className={PAYSLIP_DANGER_BUTTON}
-                    onClick={() => void handleDelete(row.id)}
-                  >
-                    Delete
-                  </button>
                 </div>
               </>
               );
             })()}
 
-            {nav.screen === "edit" && (
+            {nav.screen === "edit" && (() => {
+              const { period_year: y, period_month: m, period_half: h } = nav.row;
+              const scheduled = y != null && Number.isFinite(y) && m != null && m >= 1 && m <= 12 && (h === 1 || h === 2);
+              return (
               <>
-                <div className="mb-4 flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <h2 className={`text-lg font-semibold leading-snug ${PAYSLIP_TEXT_INK}`}>
-                      {(() => {
-                        const r = nav.row;
-                        const y = r.period_year;
-                        const m = r.period_month;
-                        const h = r.period_half;
-                        if (
-                          y != null &&
-                          Number.isFinite(y) &&
-                          m != null &&
-                          m >= 1 &&
-                          m <= 12 &&
-                          (h === 1 || h === 2)
-                        ) {
-                          return (
-                            <>
-                              Edit · {slotTitle(y, m, h)}
-                            </>
-                          );
-                        }
-                        return "Edit payslip";
-                      })()}
-                    </h2>
-                    {(() => {
-                      const r = nav.row;
-                      const y = r.period_year;
-                      const m = r.period_month;
-                      const h = r.period_half;
-                      const scheduled =
-                        y != null &&
-                        Number.isFinite(y) &&
-                        m != null &&
-                        m >= 1 &&
-                        m <= 12 &&
-                        (h === 1 || h === 2);
-                      if (scheduled) return null;
-                      return (
-                        <p className={`mt-1 text-sm font-normal ${PAYSLIP_TEXT_2}`}>
-                          {fmtPayPeriod(y, m, h)}
-                        </p>
-                      );
-                    })()}
-                  </div>
-                  <button
-                    type="button"
-                    className={PAYSLIP_SECONDARY_BUTTON}
-                    onClick={goBack}
-                  >
-                    Back
-                  </button>
-                </div>
+                <ModalHeader
+                  id={TITLE_ID}
+                  title={scheduled ? `Edit · ${slotTitle(y, m, h)}` : "Edit payslip"}
+                  subtitle={scheduled ? undefined : fmtPayPeriod(y, m, h)}
+                  onClose={onCloseDialog}
+                />
                 <form
-                  className="min-w-0"
+                  className="flex min-h-0 flex-1 flex-col"
                   onSubmit={(e) => {
                     e.preventDefault();
                     void saveEdit();
                   }}
                 >
-                  <PayslipFormFields
-                    form={modalForm}
-                    setForm={setModalForm}
-                    companies={companies}
-                    disabled={saving}
-                    flags={flags}
-                  />
-                  {error && (
-                    <p className={`mt-3 ${PAYSLIP_ERROR_ALERT}`} role="alert">
-                      {error}
-                    </p>
-                  )}
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    <button
-                      type="submit"
-                      className={PAYSLIP_PRIMARY_BUTTON}
+                  <div className={DIALOG_BODY_CLASSES}>
+                    <PayslipFormFields
+                      form={modalForm}
+                      setForm={setModalForm}
+                      companies={companies}
                       disabled={saving}
-                    >
-                      {saving ? "Saving…" : "Save changes"}
+                      flags={flags}
+                    />
+                    {error && <ErrorAlert className="mt-3">{error}</ErrorAlert>}
+                  </div>
+                  <div className={DIALOG_FOOTER_CLASSES}>
+                    <button type="button" className={`mr-auto ${TEXT_BUTTON_CLASSES}`} onClick={goBack}>
+                      <ChevronLeftIcon className="size-4" />
+                      Back
                     </button>
                     <button
                       type="button"
-                      className={PAYSLIP_SECONDARY_BUTTON}
+                      className={SECONDARY_BUTTON_CLASSES}
                       onClick={() => {
                         clearPayslipModalDraft(nav);
                         setNav({ screen: "detail", row: nav.row });
@@ -443,54 +374,46 @@ export function PayslipClientModal({
                     >
                       Cancel
                     </button>
+                    <button type="submit" className={PRIMARY_BUTTON_CLASSES} disabled={saving}>
+                      {saving ? "Saving…" : "Save changes"}
+                    </button>
                   </div>
                 </form>
               </>
-            )}
+              );
+            })()}
 
             {nav.screen === "add" && (
               <>
-                <div className="mb-4 flex items-start justify-between gap-2">
-                  <h2 className={`text-lg font-semibold ${PAYSLIP_TEXT_INK}`}>
-                    {nav.freeform
-                      ? "New payslip"
-                      : `New · ${slotTitle(nav.year, nav.month, nav.half)}`}
-                  </h2>
-                  <button
-                    type="button"
-                    className={PAYSLIP_SECONDARY_BUTTON}
-                    onClick={goBack}
-                  >
-                    Back
-                  </button>
-                </div>
+                <ModalHeader
+                  id={TITLE_ID}
+                  title={nav.freeform ? "New payslip" : `New · ${slotTitle(nav.year, nav.month, nav.half)}`}
+                  onClose={onCloseDialog}
+                />
                 <form
-                  className="min-w-0"
+                  className="flex min-h-0 flex-1 flex-col"
                   onSubmit={(e) => {
                     e.preventDefault();
                     void saveAddInModal();
                   }}
                 >
-                  <PayslipFormFields
-                    form={modalForm}
-                    setForm={setModalForm}
-                    companies={companies}
-                    disabled={saving}
-                    lockPeriod={!nav.freeform}
-                    lockCompany
-                    flags={flags}
-                  />
-                  {error && (
-                    <p className={`mt-3 ${PAYSLIP_ERROR_ALERT}`} role="alert">
-                      {error}
-                    </p>
-                  )}
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    <button
-                      type="submit"
-                      className={PAYSLIP_PRIMARY_BUTTON}
+                  <div className={DIALOG_BODY_CLASSES}>
+                    <PayslipFormFields
+                      form={modalForm}
+                      setForm={setModalForm}
+                      companies={companies}
                       disabled={saving}
-                    >
+                      lockPeriod={!nav.freeform}
+                      lockCompany
+                      flags={flags}
+                    />
+                    {error && <ErrorAlert className="mt-3">{error}</ErrorAlert>}
+                  </div>
+                  <div className={DIALOG_FOOTER_CLASSES}>
+                    <button type="button" className={SECONDARY_BUTTON_CLASSES} onClick={goBack}>
+                      Back
+                    </button>
+                    <button type="submit" className={PRIMARY_BUTTON_CLASSES} disabled={saving}>
                       {saving ? "Saving…" : "Save"}
                     </button>
                   </div>
@@ -584,22 +507,22 @@ function PayslipPdfPanel({
   };
 
   return (
-    <div className={`mt-6 border-t ${PAYSLIP_BORDER} pt-4`}>
+    <div className="mt-6 border-t border-line pt-4">
       <div className="flex flex-wrap items-center gap-2">
-        <span className={`mr-1 text-xs font-semibold uppercase tracking-wide ${PAYSLIP_TEXT_DIM}`}>
+        <span className="mr-1 text-xs font-semibold uppercase tracking-wide text-ink-3">
           Payslip PDF
         </span>
         {hasPdf ? (
           <>
             <button
               type="button"
-              className={PAYSLIP_PRIMARY_BUTTON}
+              className={PRIMARY_BUTTON_CLASSES}
               onClick={() => setShowing((s) => !s)}
             >
               {showing ? "Hide payslip" : "Show payslip"}
             </button>
             <a
-              className={`${PAYSLIP_SECONDARY_BUTTON}${blobUrl ? "" : " pointer-events-none opacity-50"}`}
+              className={`${SECONDARY_BUTTON_CLASSES}${blobUrl ? "" : " pointer-events-none opacity-50"}`}
               href={blobUrl ?? undefined}
               target="_blank"
               rel="noreferrer"
@@ -608,7 +531,7 @@ function PayslipPdfPanel({
             </a>
             <button
               type="button"
-              className={PAYSLIP_SECONDARY_BUTTON}
+              className={SECONDARY_BUTTON_CLASSES}
               onClick={() => fileRef.current?.click()}
               disabled={busy}
             >
@@ -616,7 +539,7 @@ function PayslipPdfPanel({
             </button>
             <button
               type="button"
-              className={PAYSLIP_DANGER_BUTTON}
+              className={DELETE_BUTTON_CLASSES}
               onClick={() => void handleRemove()}
               disabled={busy}
             >
@@ -626,7 +549,7 @@ function PayslipPdfPanel({
         ) : (
           <button
             type="button"
-            className={PAYSLIP_SECONDARY_BUTTON}
+            className={SECONDARY_BUTTON_CLASSES}
             onClick={() => fileRef.current?.click()}
             disabled={busy}
           >
@@ -646,19 +569,19 @@ function PayslipPdfPanel({
         />
       </div>
       {err && (
-        <p className={`mt-2 text-xs ${PAYSLIP_DANGER_TEXT}`}>{err}</p>
+        <p className="mt-2 text-xs text-danger-text">{err}</p>
       )}
       {hasPdf && blobUrl && (
         <div className={`mt-3${showing ? "" : " hidden"}`}>
-          <p className={`mb-1.5 text-xs ${PAYSLIP_TEXT_DIM}`}>
+          <p className="mb-1.5 text-xs text-ink-3">
             Preview
           </p>
-          <div className={`overflow-hidden rounded-lg border ${PAYSLIP_BORDER}`}>
+          <div className="overflow-hidden rounded-lg border border-line">
             <iframe
               key={blobUrl}
               src={blobUrl}
               title="Payslip PDF"
-              className={`h-[75vh] w-full ${PAYSLIP_BG_0}`}
+              className="h-[75vh] w-full bg-page"
             />
           </div>
         </div>

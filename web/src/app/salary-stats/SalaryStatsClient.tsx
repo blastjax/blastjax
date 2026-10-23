@@ -5,9 +5,9 @@ import { getPayslips, type PayslipRow } from "@/lib/api";
 import { fmtAmount as fmt } from "@/lib/formatNumber";
 import { MONTH_NAMES_FULL as MF, MONTH_NAMES_SHORT as MN } from "@/lib/dateFormat";
 import { ErrorAlert } from "@/components/ErrorAlert";
-import { LOADING_TEXT_CLASSES } from "@/lib/ui";
+import { EmptyState, LoadingBlocks } from "@/components/FinanceUI";
 import { useWheelStep } from "@/lib/useWheelStep";
-import { ArrowDownRightIcon, ArrowUpRightIcon } from "@/components/Icons";
+import { ArrowDownRightIcon, ArrowUpRightIcon, ChartBarIcon } from "@/components/Icons";
 import {
   Chip,
   Segmented,
@@ -125,10 +125,12 @@ export default function SalaryStatsClient({ company = "Sophos" }: { company?: st
         <StatsHeader company={company} title="Salary Stats" description={DESCRIPTION} />
         {error ? (
           <ErrorAlert>{error}</ErrorAlert>
+        ) : loading ? (
+          <LoadingBlocks label="Loading payslips…" />
         ) : (
-          <p className={LOADING_TEXT_CLASSES}>
-            {loading ? "Loading payslips…" : "No payslips yet — add some to see stats here."}
-          </p>
+          <EmptyState icon={<ChartBarIcon className="size-6" />} title="No payslips yet">
+            Add some to see stats here.
+          </EmptyState>
         )}
       </div>
     );

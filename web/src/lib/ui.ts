@@ -1,17 +1,15 @@
 export const PAGE_CONTAINER_CLASSES =
   "relative mx-auto flex w-full min-w-0 max-w-[1536px] flex-col gap-6 px-4 pb-28 pt-6 sm:gap-7 sm:px-6 sm:pb-10 xl:px-8";
 
+// Same look as FinanceUI's <Panel>, for cards that can't be one (links, buttons).
 export const CARD_CLASSES =
-  "rounded-xl border border-line bg-surface p-5 shadow-xs sm:p-6";
+  "rounded-2xl border border-line bg-surface p-5 shadow-xs sm:p-6";
 
 export const SECTION_LABEL_CLASSES =
   "text-xs font-medium uppercase tracking-wider text-ink-4";
 
 export const DASHED_EMPTY_CLASSES =
   "rounded-lg border border-dashed border-line-strong px-4 py-8 text-center text-sm text-ink-3";
-
-export const MODAL_DIALOG_CLASSES =
-  "max-h-[90dvh] w-full max-w-lg overflow-y-auto rounded-xl border border-line bg-surface p-5 shadow-pop sm:p-6";
 
 export function alertClasses(
   tone: "error" | "warning" | "success" | "info" = "error",
@@ -31,8 +29,6 @@ export function alertClasses(
 }
 
 export const ERROR_ALERT_CLASSES = alertClasses("error");
-
-export const LOADING_TEXT_CLASSES = "text-sm text-ink-3";
 
 const BUTTON_BASE =
   "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg font-medium transition-colors duration-150 disabled:pointer-events-none disabled:opacity-50";
@@ -65,8 +61,6 @@ export const DANGER_BUTTON_CLASSES = `${BUTTON_MD} ${FILL_DANGER}`;
 
 export const DETAIL_BUTTON_CLASSES = `${BUTTON_SM} ${GHOST_NEUTRAL}`;
 
-export const CLOSE_BUTTON_CLASSES = `${BUTTON_SM} ${OUTLINE_NEUTRAL}`;
-
 export const ICON_BUTTON_CLASSES =
   "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-ink-3 transition-colors duration-150 hover:bg-surface-2 hover:text-ink disabled:invisible";
 
@@ -78,28 +72,15 @@ export const INPUT_CLASSES =
 
 export const LABEL_CLASSES = "mb-1.5 block text-sm font-medium text-ink-2";
 
-export const SEGMENTED_WRAPPER_CLASSES =
-  "inline-flex rounded-lg border border-line bg-surface-2 p-1";
-export const SEGMENTED_BUTTON_CLASSES =
-  "rounded-md px-2.5 py-1.5 text-sm font-medium transition-colors duration-150 sm:px-3.5";
-export const SEGMENTED_BUTTON_ACTIVE_CLASSES =
-  "bg-brand text-brand-on shadow-xs";
-export const SEGMENTED_BUTTON_INACTIVE_CLASSES =
-  "text-ink-3 hover:text-ink";
-
 export const CHART_ZOOM_BUTTON_CLASSES =
   "flex h-7 min-w-7 select-none items-center justify-center rounded-md border border-line-strong bg-surface text-sm font-medium text-ink-2 transition-colors duration-150 hover:bg-surface-2 hover:text-ink disabled:pointer-events-none disabled:opacity-40";
 
-export const TABLE_WRAPPER_CLASSES =
-  "relative overflow-hidden rounded-xl border border-line bg-surface";
-export const TABLE_HEAD_ROW_CLASSES = "border-b border-line bg-surface-2/50";
-export const TABLE_HEAD_CELL_CLASSES =
-  "px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-ink-3";
+// Tables sit flush in a <Panel flush>: the outer cells pad out to line up with the panel's edges.
+// Rows carry the text color and size so a cell can override them without a class conflict.
+// Head cells need their own text-left / text-right, since browsers center <th>.
+const TABLE_EDGE_PADDING = "first:pl-5 last:pr-5 sm:first:pl-6 sm:last:pr-6";
+export const TABLE_HEAD_ROW_CLASSES = "border-y border-line-soft text-xs text-ink-3";
+export const TABLE_HEAD_CELL_CLASSES = `px-3 py-2.5 font-medium ${TABLE_EDGE_PADDING}`;
 export const TABLE_ROW_CLASSES =
-  "border-b border-line-soft last:border-0 transition-colors duration-150 hover:bg-surface-2/50";
-export const TABLE_CELL_CLASSES = "px-4 py-3 text-sm text-ink-2 tabular-nums";
-
-export const AMOUNT_POSITIVE_CLASSES =
-  "font-medium tabular-nums text-success-text";
-export const AMOUNT_NEGATIVE_CLASSES =
-  "font-medium tabular-nums text-danger-text";
+  "border-b border-line-soft text-sm tabular-nums text-ink-2 last:border-0 transition-colors duration-150 hover:bg-surface-2/50";
+export const TABLE_CELL_CLASSES = `px-3 py-3 ${TABLE_EDGE_PADDING}`;

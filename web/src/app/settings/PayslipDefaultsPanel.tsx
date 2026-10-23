@@ -7,13 +7,10 @@ import {
   CARD_CLASSES,
   DASHED_EMPTY_CLASSES,
   INPUT_CLASSES,
-  LOADING_TEXT_CLASSES,
   PRIMARY_BUTTON_CLASSES,
-  SEGMENTED_BUTTON_ACTIVE_CLASSES,
-  SEGMENTED_BUTTON_CLASSES,
-  SEGMENTED_BUTTON_INACTIVE_CLASSES,
-  SEGMENTED_WRAPPER_CLASSES,
 } from "@/lib/ui";
+import { ErrorAlert } from "@/components/ErrorAlert";
+import { LoadingBlocks, Segmented } from "@/components/FinanceUI";
 import { PayslipFormFields } from "../payslip/PayslipFormFields";
 import {
   getPayslipDefaultsBundleFallback,
@@ -120,9 +117,9 @@ export function PayslipDefaultsPanel() {
       <fieldset className="mt-8 rounded-lg border border-line bg-zinc-50/80 px-4 py-4 dark:bg-zinc-900/40">
         <legend className="px-1 text-sm font-medium text-ink">Company</legend>
         {companiesError ? (
-          <div className="mt-2 text-sm text-red-700 dark:text-red-400">{companiesError}</div>
+          <ErrorAlert className="mt-2">{companiesError}</ErrorAlert>
         ) : !companiesLoaded ? (
-          <p className={LOADING_TEXT_CLASSES}>Loading companies…</p>
+          <LoadingBlocks label="Loading companies…" rows={0} />
         ) : companies.length === 0 ? (
           <div className={DASHED_EMPTY_CLASSES}>
             Add a company under Settings → Companies first.
@@ -144,38 +141,24 @@ export function PayslipDefaultsPanel() {
 
       {company && (
         <>
-          <fieldset className="mt-8 rounded-lg border border-line bg-zinc-50/80 px-4 py-4 dark:bg-zinc-900/40">
+          <fieldset className="mt-8 rounded-lg border border-line bg-surface-2 px-4 py-4">
             <legend className="px-1 text-sm font-medium text-ink">
               Edit defaults for
             </legend>
-            <div
-              className={`w-full max-w-md flex-col sm:flex-row sm:items-stretch ${SEGMENTED_WRAPPER_CLASSES}`}
-              role="radiogroup"
-              aria-label="Which half template to edit"
-            >
-              {HALF_MODE_OPTIONS.map(({ value, label }) => (
-                <button
-                  key={value}
-                  type="button"
-                  role="radio"
-                  aria-checked={activeHalf === value}
-                  className={`flex-1 text-center sm:min-h-[2.75rem] ${SEGMENTED_BUTTON_CLASSES} ${
-                    activeHalf === value
-                      ? SEGMENTED_BUTTON_ACTIVE_CLASSES
-                      : SEGMENTED_BUTTON_INACTIVE_CLASSES
-                  }`}
-                  onClick={() => {
-                    setActiveHalf(value);
-                    setFormByHalf((prev) => ({
-                      first: { ...prev.first, period_half: "1" },
-                      second: { ...prev.second, period_half: "2" },
-                    }));
-                  }}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
+            <Segmented
+              label="Which half template to edit"
+              options={HALF_MODE_OPTIONS}
+              value={activeHalf}
+              onChange={(value) => {
+                setActiveHalf(value);
+                setFormByHalf((prev) => ({
+                  first: { ...prev.first, period_half: "1" },
+                  second: { ...prev.second, period_half: "2" },
+                }));
+              }}
+              fill
+              className="max-w-md"
+            />
           </fieldset>
           <div className="mt-8 min-w-0">
             <PayslipFormFields

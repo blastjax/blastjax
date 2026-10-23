@@ -15,9 +15,9 @@ import {
   type LottoDrawResult,
   type LottoGame,
 } from "@/lib/api";
-import { addMonths, formatDate, monthKey, parseDateOnlyLocal, toIsoDateLocal } from "@/lib/dateFormat";
+import { addMonths, formatDate, formatDateLong, monthKey, toIsoDateLocal } from "@/lib/dateFormat";
 import { fmtCount, fmtJackpotCompact } from "@/lib/formatNumber";
-import { LONG_DATE_FORMAT, MatchPill, NumberBall, NumberChip, ScoreCell } from "./LottoClient";
+import { MatchPill, NumberBall, NumberChip, ScoreCell } from "./LottoClient";
 
 const DRAW_SCHEDULE: Record<string, number[]> = {
   "Ultra Lotto 6/58": [0, 2, 5],
@@ -58,20 +58,22 @@ function nextDrawLabel(gameName: string): string | null {
 }
 import { ErrorAlert } from "@/components/ErrorAlert";
 import {
+  DIALOG_BODY_CLASSES,
+  DIALOG_CLASSES,
+  DIALOG_FOOTER_CLASSES,
+  LoadingBlocks,
+  ModalHeader,
+  Segmented,
+} from "@/components/FinanceUI";
+import {
   ACTION_BUTTON_CLASSES,
   alertClasses,
   CARD_CLASSES,
-  CLOSE_BUTTON_CLASSES,
   INPUT_CLASSES,
-  LOADING_TEXT_CLASSES,
   PAGE_CONTAINER_CLASSES,
   PRIMARY_BUTTON_CLASSES,
   SECONDARY_BUTTON_CLASSES,
   SECTION_LABEL_CLASSES,
-  SEGMENTED_BUTTON_ACTIVE_CLASSES,
-  SEGMENTED_BUTTON_CLASSES,
-  SEGMENTED_BUTTON_INACTIVE_CLASSES,
-  SEGMENTED_WRAPPER_CLASSES,
 } from "@/lib/ui";
 
 type RoutedRows = { game: LottoGame; lines: string[] };
@@ -195,42 +197,30 @@ function DayDrawsModal({ iso, draws, onClose }: { iso: string; draws: DayDraw[];
   const hasResult = result.numbers.every((n) => n != null);
   const hits = (nums: number[]) => nums.filter((n) => drawn.has(n)).length;
   const attempts = hasResult ? [...result.attempts].sort((a, b) => hits(b) - hits(a)) : result.attempts;
-  const date = parseDateOnlyLocal(iso);
 
   return (
-    <Modal open onClose={onClose} ariaLabelledBy="day-draws-title">
-      <div className="mb-4 flex items-start justify-between gap-2">
-        <h2 id="day-draws-title" className="text-lg font-semibold text-ink">
-          {date ? LONG_DATE_FORMAT.format(date) : iso}
-        </h2>
-        <button type="button" className={CLOSE_BUTTON_CLASSES} onClick={onClose}>
-          Close
-        </button>
-      </div>
-      <div role="tablist" aria-label="Games drawn this day" className={`${SEGMENTED_WRAPPER_CLASSES} max-w-full flex-wrap`}>
-        {draws.map(({ game: g, result: r }) => (
-          <button
-            key={g.id}
-            type="button"
-            role="tab"
-            id={`day-draw-tab-${g.id}`}
-            aria-selected={g.id === game.id}
-            aria-controls="day-draw-panel"
-            onClick={() => setTab(g.id)}
-            className={`${SEGMENTED_BUTTON_CLASSES} inline-flex items-center gap-2 ${
-              g.id === game.id ? SEGMENTED_BUTTON_ACTIVE_CLASSES : SEGMENTED_BUTTON_INACTIVE_CLASSES
-            }`}
-          >
-            <span
-              aria-hidden
-              className={`size-3 shrink-0 rounded-full border-2 border-current bg-surface ${GAME_COLORS[g.name]}`}
-            />
-            {g.name}
-            {isJackpotWon(r) && <span aria-hidden>★</span>}
-          </button>
-        ))}
-      </div>
-      <div role="tabpanel" id="day-draw-panel" aria-labelledby={`day-draw-tab-${game.id}`} className="mt-5 flex flex-col gap-5">
+    <Modal open onClose={onClose} ariaLabelledBy="day-draws-title" dialogClassName={`${DIALOG_CLASSES} max-w-lg`}>
+      <ModalHeader id="day-draws-title" title={formatDateLong(iso)} onClose={onClose} />
+      <div className={`${DIALOG_BODY_CLASSES} flex flex-col gap-5`}>
+        <Segmented
+          label="Games drawn this day"
+          options={draws.map(({ game: g, result: r }) => ({
+            value: g.id,
+            label: (
+              <>
+                <span
+                  aria-hidden
+                  className={`size-3 shrink-0 rounded-full border-2 border-current bg-surface ${GAME_COLORS[g.name]}`}
+                />
+                {g.name}
+                {isJackpotWon(r) && <span aria-hidden>★</span>}
+              </>
+            ),
+          }))}
+          value={game.id}
+          onChange={setTab}
+          className="max-w-full flex-wrap self-start"
+        />
         {hasResult ? (
           <div className="flex flex-col gap-2">
             <div className="flex items-center justify-between gap-2">
@@ -534,7 +524,7 @@ export default function LottoGamesPage() {
           {syncNote.text}
         </p>
       )}
-      {!error && games === null && <p className={LOADING_TEXT_CLASSES}>Loading…</p>}
+      {!error && games === null && <LoadingBlocks label="Loading games…" />}
 
       {games && (
         <div className="@container">
@@ -658,80 +648,72 @@ export default function LottoGamesPage() {
         open={importOpen}
         onClose={closeImport}
         ariaLabelledBy="lotto-games-import-title"
-        dialogClassName="max-h-[90dvh] w-full max-w-3xl overflow-y-auto rounded-xl border border-line bg-surface p-5 shadow-pop sm:p-6"
+        dialogClassName={`${DIALOG_CLASSES} max-w-3xl`}
       >
-        <div className="mb-4 flex items-start justify-between gap-2">
-          <h2 id="lotto-games-import-title" className="text-lg font-semibold text-ink">
-            Import historic results
-          </h2>
-          <button type="button" className={CLOSE_BUTTON_CLASSES} onClick={closeImport}>
-            Close
-          </button>
-        </div>
-        <form onSubmit={submitImport} className="flex flex-col gap-4">
-          {importError && (
-            <ErrorAlert>
-              {importError}
-            </ErrorAlert>
-          )}
-          {importSummary && (
-            <div className={alertClasses("success")}>
-              Imported {fmtCount(importedRows)} row{importedRows === 1 ? "" : "s"} across{" "}
-              {fmtCount(importSummary.perGame.length)} game
-              {importSummary.perGame.length === 1 ? "" : "s"}:
-              <ul className="mt-1 list-disc pl-5">
-                {importSummary.perGame.map((g) => (
-                  <li key={g.name}>
-                    {g.name} — {fmtCount(g.inserted)} added, {fmtCount(g.updated)} updated
-                  </li>
-                ))}
-              </ul>
-              {importSummary.discarded > 0 && (
-                <div className="mt-1">
-                  {fmtCount(importSummary.discarded)} row
-                  {importSummary.discarded === 1 ? "" : "s"} discarded — not a game tracked here.
-                </div>
-              )}
-              {importSummary.errors.length > 0 && (
-                <div className="mt-2 text-amber-700 dark:text-amber-300">
-                  {importSummary.errors.length} line
-                  {importSummary.errors.length === 1 ? "" : "s"} couldn&apos;t be parsed:
-                  <ul className="mt-1 list-disc pl-5">
-                    {importSummary.errors.slice(0, 10).map((msg, i) => (
-                      <li key={i}>{msg}</li>
-                    ))}
-                  </ul>
-                  {importSummary.errors.length > 10 && (
-                    <div className="mt-1">…and {importSummary.errors.length - 10} more.</div>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-ink-2">Results</span>
-            <textarea
-              required
-              rows={14}
-              wrap="off"
-              className={`${INPUT_CLASSES} font-mono whitespace-pre overflow-x-auto`}
-              value={importText}
-              disabled={saving}
-              onChange={(e) => setImportText(e.target.value)}
-            />
-            <span className="text-xs text-ink-3">
-              A whole day&apos;s results table, pasted straight from the results site: game name,
-              then <code>n1-n2-n3-n4-n5-n6</code>, <code>m/d/yyyy</code>, jackpot and winners, one
-              draw per line, tab-separated. The name picks the game, so 6/42, 6/45, 6/49, 6/55 and
-              6/58 rows all load at once and rows for anything else (2D, 3D, 4D, 6D) are
-              discarded. Each row is upserted by date, so re-pasting overwrites rather than
-              duplicating.
-            </span>
-          </label>
-          <div className="flex flex-wrap gap-2">
-            <button type="submit" disabled={saving} className={PRIMARY_BUTTON_CLASSES}>
-              {saving ? "Importing…" : "Import"}
-            </button>
+        <ModalHeader id="lotto-games-import-title" title="Import historic results" onClose={closeImport} />
+        <form onSubmit={submitImport} className="flex min-h-0 flex-1 flex-col">
+          <div className={`${DIALOG_BODY_CLASSES} flex flex-col gap-4`}>
+            {importError && (
+              <ErrorAlert>
+                {importError}
+              </ErrorAlert>
+            )}
+            {importSummary && (
+              <div className={alertClasses("success")}>
+                Imported {fmtCount(importedRows)} row{importedRows === 1 ? "" : "s"} across{" "}
+                {fmtCount(importSummary.perGame.length)} game
+                {importSummary.perGame.length === 1 ? "" : "s"}:
+                <ul className="mt-1 list-disc pl-5">
+                  {importSummary.perGame.map((g) => (
+                    <li key={g.name}>
+                      {g.name} — {fmtCount(g.inserted)} added, {fmtCount(g.updated)} updated
+                    </li>
+                  ))}
+                </ul>
+                {importSummary.discarded > 0 && (
+                  <div className="mt-1">
+                    {fmtCount(importSummary.discarded)} row
+                    {importSummary.discarded === 1 ? "" : "s"} discarded — not a game tracked here.
+                  </div>
+                )}
+                {importSummary.errors.length > 0 && (
+                  <div className="mt-2 text-amber-700 dark:text-amber-300">
+                    {importSummary.errors.length} line
+                    {importSummary.errors.length === 1 ? "" : "s"} couldn&apos;t be parsed:
+                    <ul className="mt-1 list-disc pl-5">
+                      {importSummary.errors.slice(0, 10).map((msg, i) => (
+                        <li key={i}>{msg}</li>
+                      ))}
+                    </ul>
+                    {importSummary.errors.length > 10 && (
+                      <div className="mt-1">…and {importSummary.errors.length - 10} more.</div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="text-ink-2">Results</span>
+              <textarea
+                required
+                rows={14}
+                wrap="off"
+                className={`${INPUT_CLASSES} font-mono whitespace-pre overflow-x-auto`}
+                value={importText}
+                disabled={saving}
+                onChange={(e) => setImportText(e.target.value)}
+              />
+              <span className="text-xs text-ink-3">
+                A whole day&apos;s results table, pasted straight from the results site: game name,
+                then <code>n1-n2-n3-n4-n5-n6</code>, <code>m/d/yyyy</code>, jackpot and winners, one
+                draw per line, tab-separated. The name picks the game, so 6/42, 6/45, 6/49, 6/55 and
+                6/58 rows all load at once and rows for anything else (2D, 3D, 4D, 6D) are
+                discarded. Each row is upserted by date, so re-pasting overwrites rather than
+                duplicating.
+              </span>
+            </label>
+          </div>
+          <div className={DIALOG_FOOTER_CLASSES}>
             <button
               type="button"
               disabled={saving}
@@ -739,6 +721,9 @@ export default function LottoGamesPage() {
               onClick={closeImport}
             >
               {importSummary ? "Done" : "Cancel"}
+            </button>
+            <button type="submit" disabled={saving} className={PRIMARY_BUTTON_CLASSES}>
+              {saving ? "Importing…" : "Import"}
             </button>
           </div>
         </form>

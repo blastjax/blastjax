@@ -10,15 +10,17 @@ import {
   DIALOG_BODY_CLASSES,
   DIALOG_CLASSES,
   DIALOG_FOOTER_CLASSES,
+  EmptyState,
   LoadingBlocks,
   Metric,
   Meter,
   ModalHeader,
   Pill,
+  Segmented,
   StatStrip,
   TEXT_BUTTON_CLASSES,
 } from "@/components/FinanceUI";
-import { CheckIcon, ChevronDownIcon, PlusIcon } from "@/components/Icons";
+import { CheckIcon, ChevronDownIcon, LayersIcon, PlusIcon } from "@/components/Icons";
 import {
   createInstallment,
   deleteInstallment,
@@ -45,10 +47,6 @@ import {
   PAGE_CONTAINER_CLASSES,
   PRIMARY_BUTTON_CLASSES,
   SECONDARY_BUTTON_CLASSES,
-  SEGMENTED_BUTTON_ACTIVE_CLASSES,
-  SEGMENTED_BUTTON_CLASSES,
-  SEGMENTED_BUTTON_INACTIVE_CLASSES,
-  SEGMENTED_WRAPPER_CLASSES,
 } from "@/lib/ui";
 import { InstallmentFieldGrid } from "./installmentFieldGrid";
 
@@ -817,16 +815,18 @@ export default function InstallmentsClient() {
           </StatStrip>
 
           {activeRows.length === 0 ? (
-            <div className="flex flex-col items-center rounded-2xl border border-dashed border-line-strong px-6 py-12 text-center">
-              <p className="font-medium text-ink">
-                {doneRows.length > 0 ? "Everything is paid off." : "No installment plans yet"}
-              </p>
-              <p className="mt-1 text-sm text-ink-3">Add a plan to track its payments month by month.</p>
-              <button type="button" className={`mt-4 ${PRIMARY_BUTTON_CLASSES}`} onClick={openAdd}>
-                <PlusIcon className="size-4" />
-                Add plan
-              </button>
-            </div>
+            <EmptyState
+              icon={<LayersIcon className="size-6" />}
+              title={doneRows.length > 0 ? "Everything is paid off" : "No installment plans yet"}
+              action={
+                <button type="button" className={PRIMARY_BUTTON_CLASSES} onClick={openAdd}>
+                  <PlusIcon className="size-4" />
+                  Add plan
+                </button>
+              }
+            >
+              Add a plan to track its payments month by month.
+            </EmptyState>
           ) : (
             <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
               {activeRows.map((r) => {
@@ -1070,26 +1070,15 @@ export default function InstallmentsClient() {
           onClose={closeScheduleModal}
         />
         <div className="shrink-0 px-5 pt-4 sm:px-6">
-          <div className={SEGMENTED_WRAPPER_CLASSES}>
-            {(
-              [
-                ["schedule", "Schedule"],
-                ["details", "Plan details"],
-              ] as const
-            ).map(([tab, label]) => (
-              <button
-                key={tab}
-                type="button"
-                aria-pressed={detailTab === tab}
-                className={`${SEGMENTED_BUTTON_CLASSES} ${
-                  detailTab === tab ? SEGMENTED_BUTTON_ACTIVE_CLASSES : SEGMENTED_BUTTON_INACTIVE_CLASSES
-                }`}
-                onClick={() => setDetailTab(tab)}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
+          <Segmented
+            label="Plan view"
+            options={[
+              { value: "schedule", label: "Schedule" },
+              { value: "details", label: "Plan details" },
+            ]}
+            value={detailTab}
+            onChange={setDetailTab}
+          />
         </div>
         {detailTab === "schedule" ? (
           <>

@@ -3,10 +3,6 @@ const AMOUNT_FORMAT = new Intl.NumberFormat(undefined, {
   maximumFractionDigits: 2,
 });
 
-const INTEGER_FORMAT = new Intl.NumberFormat(undefined, {
-  maximumFractionDigits: 0,
-});
-
 const COUNT_FORMAT = new Intl.NumberFormat(undefined);
 
 const EN_US_AMOUNT_FORMAT = new Intl.NumberFormat("en-US", {
@@ -20,10 +16,6 @@ export function fmtAmount(n: number): string {
 
 export function fmtAmountOrDash(n: number): string {
   return Number.isFinite(n) ? AMOUNT_FORMAT.format(n) : "—";
-}
-
-export function fmtIntegerOrDash(n: number): string {
-  return Number.isFinite(n) ? INTEGER_FORMAT.format(n) : "—";
 }
 
 export function fmtCount(n: number): string {
