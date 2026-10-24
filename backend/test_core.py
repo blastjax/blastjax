@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import db
 import schema
 from app import security
-from app.routers import travel
+from app.routers import auth, travel
 from app.services import pcso_results
 
 
@@ -194,6 +194,84 @@ def check_jwt_sessions() -> None:
     assert not security.session_is_valid(jwt.encode(claims, None, algorithm="none")), "accepted an unsigned token"
     security.revoke_session(token)
     assert not security.session_is_valid(token), "token still valid after logout"
+
+
+def check_passkey_ceremony() -> None:
+    import hashlib
+    import json
+
+    import cbor2
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from fastapi import HTTPException
+    from starlette.requests import Request
+    from webauthn.helpers import bytes_to_base64url as b64
+
+    from app.schemas.auth import PasskeyLoginBody, PasskeyRegisterBody
+
+    def request(origin: str, token: str = "") -> Request:
+        headers = [(b"origin", origin.encode()), (b"host", b"app.example"), (b"authorization", f"Bearer {token}".encode())]
+        return Request({"type": "http", "method": "POST", "path": "/", "headers": headers, "client": ("10.9.8.7", 1)})
+
+    def rejected(call, status: int) -> bool:
+        try:
+            call()
+        except HTTPException as exc:
+            return exc.status_code == status
+        return False
+
+    rows: list[dict] = []
+
+    def insert(user_id: int, credential_id: bytes, public_key: bytes, sign_count: int, name: str) -> dict:
+        rows.append({"id": 1, "user_id": user_id, "credential_id": credential_id, "public_key": public_key})
+        rows[-1] |= {"sign_count": sign_count, "name": name, "created_at": "", "last_used_at": None}
+        return rows[-1]
+
+    stubs = {
+        "get_app_user_by_id": lambda uid: {"id": uid, "username": "micah"} if uid == 7 else None,
+        "list_app_user_passkeys": lambda uid: [r for r in rows if r["user_id"] == uid],
+        "get_app_user_passkey": lambda cid: next((r for r in rows if r["credential_id"] == cid), None),
+        "insert_app_user_passkey": insert,
+        "mark_app_user_passkey_used": lambda pid, count: rows[0].update(sign_count=count),
+    }
+    saved = {name: getattr(auth, name) for name in stubs}
+    vars(auth).update(stubs)
+    origin, rp_hash = "https://app.example", hashlib.sha256(b"app.example").digest()
+    key, cred_id = ec.generate_private_key(ec.SECP256R1()), b"cred-1"
+    pub = key.public_key().public_numbers()
+    cose = cbor2.dumps({1: 2, 3: -7, -1: 1, -2: pub.x.to_bytes(32, "big"), -3: pub.y.to_bytes(32, "big")})
+    try:
+        token = security.create_session(7)
+        challenge = auth.auth_passkey_register_options(request(origin, token))["challenge"]
+        client = json.dumps({"type": "webauthn.create", "challenge": challenge, "origin": origin}).encode()
+        auth_data = rp_hash + b"\x45" + (0).to_bytes(4, "big") + bytes(16) + len(cred_id).to_bytes(2, "big") + cred_id + cose
+        attestation = cbor2.dumps({"fmt": "none", "attStmt": {}, "authData": auth_data})
+        made = {"id": b64(cred_id), "rawId": b64(cred_id), "type": "public-key"}
+        made["response"] = {"clientDataJSON": b64(client), "attestationObject": b64(attestation)}
+        body = PasskeyRegisterBody(credential=made, name=" Laptop ")
+        assert auth.auth_passkey_register(body, request(origin, token))["passkey"]["name"] == "Laptop"
+        assert rows[0]["user_id"] == 7 and rows[0]["credential_id"] == cred_id
+        assert rejected(lambda: auth.auth_passkey_register(body, request(origin, token)), 400), "registered twice"
+        assert rejected(lambda: auth.auth_passkey_register_options(request(origin)), 401), "registered logged out"
+
+        def assertion(sign_count: int, signer: ec.EllipticCurvePrivateKey = key) -> PasskeyLoginBody:
+            challenge = auth.auth_passkey_login_options(request(origin))["challenge"]
+            client = json.dumps({"type": "webauthn.get", "challenge": challenge, "origin": origin}).encode()
+            data = rp_hash + b"\x05" + sign_count.to_bytes(4, "big")
+            sig = signer.sign(data + hashlib.sha256(client).digest(), ec.ECDSA(hashes.SHA256()))
+            response = {"clientDataJSON": b64(client), "authenticatorData": b64(data), "signature": b64(sig)}
+            return PasskeyLoginBody(credential={**made, "response": response})
+
+        signed = assertion(1)
+        assert security.session_user_id(auth.auth_passkey_login(signed, request(origin))["token"]) == 7
+        assert rows[0]["sign_count"] == 1
+        assert rejected(lambda: auth.auth_passkey_login(signed, request(origin)), 401), "replayed a login"
+        forged = assertion(2, ec.generate_private_key(ec.SECP256R1()))
+        assert rejected(lambda: auth.auth_passkey_login(forged, request(origin)), 401), "accepted another key"
+        assert rejected(lambda: auth.auth_passkey_login_options(request("https://evil.example")), 400)
+    finally:
+        vars(auth).update(saved)
+        security.clear_failed_attempts("10.9.8.7")
 
 
 def check_lotto_game_seed() -> None:
@@ -617,6 +695,22 @@ def check_db_against_postgres() -> None:
             raise AssertionError("accepted a bill for a missing category")
         assert db.delete_bill_category(power["id"])
         assert db.list_bills()["bills"] == [], "a deleted category left its bills behind"
+
+        owner = db.insert_app_user("micah", "hash")["id"]
+        other = db.insert_app_user("ana", "hash")["id"]
+        passkey = db.insert_app_user_passkey(owner, b"cred", b"key", 0, "Laptop")
+        assert db.get_app_user_passkey(b"cred")["user_id"] == owner
+        db.mark_app_user_passkey_used(passkey["id"], 3)
+        used = db.list_app_user_passkeys(owner)[0]
+        assert used["sign_count"] == 3 and used["last_used_at"], used
+        assert not db.delete_app_user_passkey(other, passkey["id"]), "deleted another user's passkey"
+        try:
+            db.insert_app_user_passkey(other, b"cred", b"key", 0, "Phone")
+        except IntegrityError:
+            pass
+        else:
+            raise AssertionError("registered one credential twice")
+        assert db.delete_app_user(owner) and db.get_app_user_passkey(b"cred") is None, "a deleted user kept its passkeys"
 
         db.list_payslips()
         with engine.connect() as c:

@@ -16,10 +16,12 @@ _log = logging.getLogger(__name__)
 _JWT_ALGORITHM = "HS256"
 _REVOKED_PREFIX = "auth_revoked"
 _FAIL_PREFIX = "auth_fail"
+_PASSKEY_PREFIX = "auth_passkey"
 _USERS_EXIST_KEY = "auth_state:users_exist"
 
 _MAX_FAILED_ATTEMPTS = 8
 _FAIL_WINDOW_SECONDS = 15 * 60
+_PASSKEY_CHALLENGE_SECONDS = 5 * 60
 
 _USERS_EXIST_LOCAL_TTL = 5.0
 _USERS_EXIST_REDIS_TTL = 3600
@@ -174,3 +176,17 @@ def record_failed_attempt(client_ip: str) -> None:
 
 def clear_failed_attempts(client_ip: str) -> None:
     _store_delete(f"{_FAIL_PREFIX}:{client_ip}")
+
+
+def remember_passkey_challenge(challenge: bytes, user_id: int | None = None) -> None:
+    """user_id is who may register a passkey with it; None marks a login challenge."""
+    _store_set(f"{_PASSKEY_PREFIX}:{challenge.hex()}", {"user_id": user_id}, _PASSKEY_CHALLENGE_SECONDS)
+
+
+def take_passkey_challenge(challenge: bytes, user_id: int | None = None) -> bool:
+    """True once for a live challenge issued to user_id, so a signed response can't be replayed."""
+    # ponytail: get-then-delete, not atomic; two racing requests could both spend one challenge.
+    key = f"{_PASSKEY_PREFIX}:{challenge.hex()}"
+    hit = _store_get(key)
+    _store_delete(key)
+    return hit is not None and hit.get("user_id") == user_id

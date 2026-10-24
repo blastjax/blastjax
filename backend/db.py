@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session, aliased, selectinload, undefer
 import schema
 from schema import (
     AppUser,
+    AppUserPasskey,
     Bill,
     BillCategory,
     BloodPressure,
@@ -1685,6 +1686,51 @@ def update_app_user_access(
 def delete_app_user(user_id: int) -> bool:
     with _session(write=True) as s:
         return s.execute(delete(AppUser).where(AppUser.id == user_id)).rowcount > 0
+
+
+def list_app_user_passkeys(user_id: int) -> list[dict[str, Any]]:
+    stmt = select(AppUserPasskey).where(AppUserPasskey.user_id == user_id).order_by(AppUserPasskey.created_at)
+    with _session() as s:
+        return [_row(p) for p in s.scalars(stmt)]
+
+
+def get_app_user_passkey(credential_id: bytes) -> dict[str, Any] | None:
+    with _session() as s:
+        p = s.scalar(select(AppUserPasskey).where(AppUserPasskey.credential_id == credential_id))
+        return _row(p) if p else None
+
+
+def insert_app_user_passkey(
+    user_id: int,
+    credential_id: bytes,
+    public_key: bytes,
+    sign_count: int,
+    name: str,
+) -> dict[str, Any]:
+    values = {
+        "user_id": user_id,
+        "credential_id": credential_id,
+        "public_key": public_key,
+        "sign_count": sign_count,
+        "name": name,
+    }
+    with _session(write=True) as s:
+        return _row(s.scalar(insert(AppUserPasskey).values(values).returning(AppUserPasskey)))
+
+
+def mark_app_user_passkey_used(passkey_id: int, sign_count: int) -> None:
+    with _session(write=True) as s:
+        s.execute(
+            update(AppUserPasskey)
+            .where(AppUserPasskey.id == passkey_id)
+            .values(sign_count=sign_count, last_used_at=func.current_timestamp())
+        )
+
+
+def delete_app_user_passkey(user_id: int, passkey_id: int) -> bool:
+    stmt = delete(AppUserPasskey).where(AppUserPasskey.id == passkey_id, AppUserPasskey.user_id == user_id)
+    with _session(write=True) as s:
+        return s.execute(stmt).rowcount > 0
 
 
 _COMPANY_FLAG_COLUMNS: tuple[str, ...] = (

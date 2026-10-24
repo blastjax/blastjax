@@ -1175,6 +1175,37 @@ export async function verifyAppUserPassword(username: string, password: string) 
   });
 }
 
+export type PasskeyRow = {
+  id: number;
+  name: string;
+  created_at: string;
+  last_used_at: string | null;
+};
+
+export async function getPasskeys() {
+  return getJson<{ passkeys: PasskeyRow[] }>("/api/auth/passkeys");
+}
+
+/** Asks this device to create a passkey for the logged-in user, then saves it. */
+export async function addPasskey(name: string) {
+  const options = await sendJson<PublicKeyCredentialCreationOptionsJSON>(
+    "POST",
+    "/api/auth/passkey/register/options",
+  );
+  const credential = await navigator.credentials.create({
+    publicKey: PublicKeyCredential.parseCreationOptionsFromJSON(options),
+  });
+  if (!(credential instanceof PublicKeyCredential)) throw new Error("No passkey was created.");
+  return sendJson<{ passkey: PasskeyRow }>("POST", "/api/auth/passkey/register", {
+    credential: credential.toJSON(),
+    name,
+  });
+}
+
+export async function deletePasskey(id: number) {
+  return sendJson<{ ok: boolean }>("DELETE", `/api/auth/passkeys/${id}`);
+}
+
 export type CompanyColumnFlags = {
   show_total: boolean;
   show_basic_salary: boolean;

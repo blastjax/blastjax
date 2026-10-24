@@ -26,3 +26,18 @@ export function clearSessionToken(): void {
   } catch {
   }
 }
+
+export function passkeysSupported(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    typeof window.PublicKeyCredential?.parseRequestOptionsFromJSON === "function"
+  );
+}
+
+export function passkeyErrorMessage(err: unknown, fallback: string): string {
+  if (err instanceof DOMException && err.name === "NotAllowedError") return "Passkey request was cancelled.";
+  if (err instanceof DOMException && err.name === "InvalidStateError") {
+    return "This device already has a passkey for your account.";
+  }
+  return err instanceof Error ? err.message : fallback;
+}

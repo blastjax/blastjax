@@ -16,7 +16,7 @@ from db import close_connection_pool, init_schema
 _WRITE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
 
-def _cors_allow_origins() -> list[str]:
+def cors_allow_origins() -> list[str]:
     defaults = [
         "http://localhost:3000",
         "http://127.0.0.1:3000",
@@ -95,7 +95,7 @@ def create_app() -> FastAPI:
 
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=_cors_allow_origins(),
+        allow_origins=cors_allow_origins(),
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],

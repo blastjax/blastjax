@@ -6,6 +6,8 @@ import {
   AUTH_UNAUTHORIZED_EVENT,
   clearSessionToken,
   getSessionToken,
+  passkeyErrorMessage,
+  passkeysSupported,
   setSessionToken,
 } from "@/lib/auth";
 import type { PageAccess } from "@/lib/nav";
@@ -95,15 +97,14 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     return () => window.removeEventListener(AUTH_UNAUTHORIZED_EVENT, onUnauthorized);
   }, []);
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
+  async function logIn(path: string, body: () => Promise<unknown>) {
     setSubmitting(true);
     setError(null);
     try {
-      const res = await fetch(`${dataApiBase()}/api/auth/login`, {
+      const res = await fetch(`${dataApiBase()}${path}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password }),
+        body: JSON.stringify(await body()),
       });
       const data = (await res.json().catch(() => null)) as
         | { token?: string; detail?: string }
@@ -117,10 +118,27 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       setPassword("");
       await checkStatus();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Invalid username or password.");
+      setError(passkeyErrorMessage(err, "Invalid username or password."));
     } finally {
       setSubmitting(false);
     }
+  }
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    logIn("/api/auth/login", async () => ({ username, password }));
+  }
+
+  function handlePasskeyLogin() {
+    logIn("/api/auth/passkey/login", async () => {
+      const res = await fetch(`${dataApiBase()}/api/auth/passkey/login/options`, { method: "POST" });
+      if (!res.ok) throw new Error("Couldn't start passkey login.");
+      const credential = await navigator.credentials.get({
+        publicKey: PublicKeyCredential.parseRequestOptionsFromJSON(await res.json()),
+      });
+      if (!(credential instanceof PublicKeyCredential)) throw new Error("No passkey was chosen.");
+      return { credential: credential.toJSON() };
+    });
   }
 
   if (status === "checking") return null;
@@ -191,6 +209,16 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
           >
             {submitting ? "Checking…" : "Log in"}
           </button>
+          {passkeysSupported() ? (
+            <button
+              type="button"
+              onClick={handlePasskeyLogin}
+              disabled={submitting}
+              className={`mt-3 w-full ${SECONDARY_BUTTON_CLASSES}`}
+            >
+              Log in with a passkey
+            </button>
+          ) : null}
         </form>
       </Screen>
     );
