@@ -78,6 +78,8 @@ jobs:
           export BUDGET_CORS_ORIGINS='${{ secrets.BUDGET_CORS_ORIGINS }}'
           compose() { docker compose -f docker-compose.yml -f docker-compose.edge.yml "$@"; }
           compose pull --policy always api web
+          # The API refuses to start while a table in schema.py is missing, so the new image creates any first.
+          compose run --rm --no-deps api python scripts/create_missing_tables.py
           # --wait fails on any exited container, so the one-shot redis-flush runs separately.
           compose up --remove-orphans --wait --wait-timeout 200 redis api web || { compose logs --tail 50 >&2; exit 1; }
           compose run --rm redis-flush
