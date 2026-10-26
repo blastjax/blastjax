@@ -1,24 +1,20 @@
 from __future__ import annotations
 
-import logging
+import hashlib
 import os
 import secrets
 import time
 from typing import Any
 
-import jwt
-
 import cache
-from db import any_app_users
+from db import any_app_users, delete_app_user_session, get_app_user_session_user_id, insert_app_user_session
 
-_log = logging.getLogger(__name__)
-
-_JWT_ALGORITHM = "HS256"
-_REVOKED_PREFIX = "auth_revoked"
+_SESSION_PREFIX = "auth_session"
 _FAIL_PREFIX = "auth_fail"
 _PASSKEY_PREFIX = "auth_passkey"
 _USERS_EXIST_KEY = "auth_state:users_exist"
 
+_SESSION_CACHE_SECONDS = 5 * 60
 _MAX_FAILED_ATTEMPTS = 8
 _FAIL_WINDOW_SECONDS = 15 * 60
 _PASSKEY_CHALLENGE_SECONDS = 5 * 60
@@ -80,20 +76,6 @@ def _auth_disabled() -> bool:
     return (os.environ.get("BUDGET_DISABLE_AUTH") or "").strip().lower() in ("1", "true", "yes")
 
 
-def _load_jwt_secret() -> str:
-    secret = (os.environ.get("BUDGET_JWT_SECRET") or "").strip()
-    if secret:
-        if len(secret) < 32:
-            raise RuntimeError("BUDGET_JWT_SECRET must be at least 32 characters.")
-        return secret
-    if not _auth_disabled():
-        _log.warning("BUDGET_JWT_SECRET is not set; using a random key, so logins end whenever the API restarts.")
-    return secrets.token_urlsafe(48)
-
-
-_JWT_SECRET = _load_jwt_secret()
-
-
 def login_required() -> bool:
     if _auth_disabled():
         return False
@@ -117,50 +99,40 @@ def forget_login_required() -> None:
     cache.delete(_USERS_EXIST_KEY)
 
 
-def _session_ttl_seconds() -> int:
-    return int(os.environ.get("BUDGET_SESSION_TTL_SECONDS", str(12 * 3600)))
+def _token_hash(token: str) -> bytes:
+    return hashlib.sha256(token.encode()).digest()
 
 
 def create_session(user_id: int) -> str:
-    now = int(time.time())
-    claims = {
-        "sub": str(user_id),
-        "iat": now,
-        "exp": now + _session_ttl_seconds(),
-        "jti": secrets.token_urlsafe(16),
-    }
-    return jwt.encode(claims, _JWT_SECRET, algorithm=_JWT_ALGORITHM)
-
-
-def _session_claims(token: str) -> dict[str, Any] | None:
-    if not token:
-        return None
-    try:
-        claims = jwt.decode(
-            token,
-            _JWT_SECRET,
-            algorithms=[_JWT_ALGORITHM],
-            options={"require": ["sub", "iat", "exp", "jti"]},
-        )
-    except jwt.InvalidTokenError:
-        return None
-    return None if _store_get(f"{_REVOKED_PREFIX}:{claims['jti']}") else claims
-
-
-def session_is_valid(token: str) -> bool:
-    return _session_claims(token) is not None
+    """A login that lasts until logout. Only its hash is stored, so the table alone can't log anyone in."""
+    token = secrets.token_urlsafe(32)
+    insert_app_user_session(user_id, _token_hash(token))
+    return token
 
 
 def session_user_id(token: str) -> int | None:
-    claims = _session_claims(token)
-    return int(claims["sub"]) if claims else None
+    if not token:
+        return None
+    token_hash = _token_hash(token)
+    # Redis only, not _store_*: a logout must clear this for every worker, not just its own.
+    key = f"{_SESSION_PREFIX}:{token_hash.hex()}"
+    user_id = cache.get(key)
+    if user_id is None:
+        user_id = get_app_user_session_user_id(token_hash)
+        if user_id is not None:
+            cache.set(key, user_id, ttl=_SESSION_CACHE_SECONDS)
+    return user_id
+
+
+def session_is_valid(token: str) -> bool:
+    return session_user_id(token) is not None
 
 
 def revoke_session(token: str) -> None:
-    # A JWT stays valid until it expires, so logout records its id until then.
-    claims = _session_claims(token)
-    if claims:
-        _store_set(f"{_REVOKED_PREFIX}:{claims['jti']}", True, max(1, claims["exp"] - int(time.time())))
+    if token:
+        token_hash = _token_hash(token)
+        delete_app_user_session(token_hash)
+        cache.delete(f"{_SESSION_PREFIX}:{token_hash.hex()}")
 
 
 def too_many_failed_attempts(client_ip: str) -> bool:

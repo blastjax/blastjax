@@ -73,7 +73,7 @@ Then open the URL Next.js prints (usually `http://localhost:3000`).
 
 ## Configuration
 
-Login is opt-in and needs no environment variable: the app is open until you add at least one user under **Settings → Users** in the web app, after which every screen requires that username/password to log in (passwords are hashed with Argon2id).
+Login is opt-in and needs no environment variable: the app is open until you add at least one user under **Settings → Users** in the web app, after which every screen requires that username/password to log in (passwords are hashed with Argon2id). A login lasts on that browser until you log out, and survives API restarts and deploys.
 
 | Variable | Purpose |
 |----------|---------|
@@ -81,7 +81,6 @@ Login is opt-in and needs no environment variable: the app is open until you add
 | `NEXT_PUBLIC_API_URL` | Optional; override API base URL for the web app (default `http://127.0.0.1:8000`). Omit or leave blank to keep the default. |
 | `NEXT_PUBLIC_BASE_PATH` | Optional; set at **build** time with `STATIC_EXPORT=1` when the app is served under a subpath. |
 | `BUDGET_CORS_ORIGINS` | Optional; comma-separated extra browser origins allowed by the API. |
-| `BUDGET_SESSION_TTL_SECONDS` | Optional; server-side session cap in seconds once at least one user has been added (Settings → Users). Defaults to 43200 (12h). |
 | `REDIS_URL` | Optional; Redis connection string for the API's cache. Defaults to `redis://localhost:6379` for a bare `uvicorn` run, `redis://redis:6379` for the `api` container. |
 | `REDIS_CACHE_TTL` | Optional; cache entry lifetime in seconds. Defaults to 86400 (a day). A backstop only — every write invalidates the namespaces it affects, so lowering this doesn't make the app fresher, it just sends more reads to Neon. |
 | `BUDGET_DB_POOL_KEEP` | Optional; Postgres connections kept pooled between requests. Defaults to 6, sized to a page load's fan-out so repeat visits don't pay for fresh TLS handshakes. |

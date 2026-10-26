@@ -23,6 +23,7 @@ import schema
 from schema import (
     AppUser,
     AppUserPasskey,
+    AppUserSession,
     Bill,
     BillCategory,
     BloodPressure,
@@ -1731,6 +1732,21 @@ def delete_app_user_passkey(user_id: int, passkey_id: int) -> bool:
     stmt = delete(AppUserPasskey).where(AppUserPasskey.id == passkey_id, AppUserPasskey.user_id == user_id)
     with _session(write=True) as s:
         return s.execute(stmt).rowcount > 0
+
+
+def insert_app_user_session(user_id: int, token_hash: bytes) -> None:
+    with _session(write=True) as s:
+        s.execute(insert(AppUserSession).values(user_id=user_id, token_hash=token_hash))
+
+
+def get_app_user_session_user_id(token_hash: bytes) -> int | None:
+    with _session() as s:
+        return s.scalar(select(AppUserSession.user_id).where(AppUserSession.token_hash == token_hash))
+
+
+def delete_app_user_session(token_hash: bytes) -> None:
+    with _session(write=True) as s:
+        s.execute(delete(AppUserSession).where(AppUserSession.token_hash == token_hash))
 
 
 _COMPANY_FLAG_COLUMNS: tuple[str, ...] = (

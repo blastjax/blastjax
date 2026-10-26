@@ -35,7 +35,6 @@ from app.security import (
     record_failed_attempt,
     remember_passkey_challenge,
     revoke_session,
-    session_is_valid,
     session_user_id,
     take_passkey_challenge,
     too_many_failed_attempts,
@@ -218,12 +217,11 @@ def auth_status(request: Request) -> dict[str, Any]:
     if not login_required():
         return {"authenticated": True, "login_required": False, "user": None}
 
-    token = _bearer_token(request)
-    if not session_is_valid(token):
+    user_id = session_user_id(_bearer_token(request))
+    if user_id is None:
         return {"authenticated": False, "login_required": True, "user": None}
 
-    user_id = session_user_id(token)
-    user = get_app_user_by_id(user_id) if user_id is not None else None
+    user = get_app_user_by_id(user_id)
     public_user = (
         {
             "username": user["username"],

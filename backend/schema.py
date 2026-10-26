@@ -78,6 +78,14 @@ class AppUserPasskey(Base):
     last_used_at: Mapped[dt.datetime | None]
 
 
+class AppUserSession(Base):
+    __tablename__ = "app_user_session"
+
+    token_hash: Mapped[bytes] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("app_user.id", ondelete="CASCADE"))
+    created_at: Mapped[StampNN]
+
+
 class BillCategory(Base):
     __tablename__ = "bill_category"
     __table_args__ = (CheckConstraint("length(trim(name)) > 0"),)
@@ -551,6 +559,7 @@ class TravelTransport(Base):
 
 Index("idx_app_user_username_lower", func.lower(AppUser.username), unique=True)
 Index("idx_app_user_passkey_user", AppUserPasskey.user_id)
+Index("idx_app_user_session_user", AppUserSession.user_id)
 Index("idx_bill_category_name_lower", func.lower(BillCategory.name), unique=True)
 Index("idx_bill_parent", Bill.category_id, Bill.due_date.desc())
 Index("idx_blood_pressure_created", BloodPressure.created_at.desc())

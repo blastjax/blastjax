@@ -9,8 +9,6 @@ import time
 from decimal import Decimal
 from pathlib import Path
 
-import jwt
-
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import db
@@ -181,19 +179,33 @@ def check_auth_disable_flag() -> None:
     assert d() is False
 
 
-def check_jwt_sessions() -> None:
-    token = security.create_session(7)
-    assert security.session_user_id(token) == 7
-    head, body, sig = token.split(".")
-    assert security.session_user_id(f"{head}.{body}.{sig[::-1]}") is None, "accepted a forged signature"
-    now = int(time.time())
-    claims = {"sub": "7", "iat": now, "exp": now + 60, "jti": "t"}
-    expired = jwt.encode({**claims, "exp": now - 1}, security._JWT_SECRET, algorithm="HS256")
-    assert not security.session_is_valid(expired), "accepted an expired token"
-    assert not security.session_is_valid(jwt.encode(claims, "k" * 32, algorithm="HS256")), "accepted another key"
-    assert not security.session_is_valid(jwt.encode(claims, None, algorithm="none")), "accepted an unsigned token"
-    security.revoke_session(token)
-    assert not security.session_is_valid(token), "token still valid after logout"
+def _swap_session_table(rows: dict[bytes, int]) -> dict[str, object]:
+    """Point security's session queries at rows; returns the originals to restore with vars(security).update."""
+    stubs = {
+        "insert_app_user_session": lambda user_id, token_hash: rows.__setitem__(token_hash, user_id),
+        "get_app_user_session_user_id": rows.get,
+        "delete_app_user_session": lambda token_hash: rows.pop(token_hash, None),
+    }
+    saved = {name: getattr(security, name) for name in stubs}
+    vars(security).update(stubs)
+    return saved
+
+
+def check_sessions() -> None:
+    rows: dict[bytes, int] = {}
+    saved = _swap_session_table(rows)
+    try:
+        token = security.create_session(7)
+        assert security.session_user_id(token) == 7
+        assert len(rows) == 1 and token.encode() not in rows, "stored the token itself"
+        assert security.create_session(7) != token, "two logins share a token"
+        assert not security.session_is_valid(token[:-1] + ("B" if token[-1] == "A" else "A")), "accepted a guess"
+        assert not security.session_is_valid(""), "accepted no token"
+        security.revoke_session(token)
+        assert not security.session_is_valid(token), "token still valid after logout"
+        assert len(rows) == 1, "logout ended the other session too"
+    finally:
+        vars(security).update(saved)
 
 
 def check_passkey_ceremony() -> None:
@@ -236,6 +248,7 @@ def check_passkey_ceremony() -> None:
     }
     saved = {name: getattr(auth, name) for name in stubs}
     vars(auth).update(stubs)
+    saved_sessions = _swap_session_table({})
     origin, rp_hash = "https://app.example", hashlib.sha256(b"app.example").digest()
     key, cred_id = ec.generate_private_key(ec.SECP256R1()), b"cred-1"
     pub = key.public_key().public_numbers()
@@ -271,6 +284,7 @@ def check_passkey_ceremony() -> None:
         assert rejected(lambda: auth.auth_passkey_login_options(request("https://evil.example")), 400)
     finally:
         vars(auth).update(saved)
+        vars(security).update(saved_sessions)
         security.clear_failed_attempts("10.9.8.7")
 
 
@@ -710,7 +724,13 @@ def check_db_against_postgres() -> None:
             pass
         else:
             raise AssertionError("registered one credential twice")
+        db.insert_app_user_session(owner, b"hash")
+        assert db.get_app_user_session_user_id(b"hash") == owner
+        db.delete_app_user_session(b"hash")
+        assert db.get_app_user_session_user_id(b"hash") is None, "logout left the session behind"
+        db.insert_app_user_session(owner, b"hash")
         assert db.delete_app_user(owner) and db.get_app_user_passkey(b"cred") is None, "a deleted user kept its passkeys"
+        assert db.get_app_user_session_user_id(b"hash") is None, "a deleted user stayed logged in"
 
         db.list_payslips()
         with engine.connect() as c:
