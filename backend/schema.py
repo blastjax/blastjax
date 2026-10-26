@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import uuid
 from typing import Annotated, Any
 
 from sqlalchemy import (
@@ -8,7 +9,6 @@ from sqlalchemy import (
     Date,
     Double,
     ForeignKey,
-    Identity,
     Index,
     LargeBinary,
     MetaData,
@@ -18,18 +18,18 @@ from sqlalchemy import (
     Time,
     UniqueConstraint,
     func,
-    select,
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, TIMESTAMP, insert
 from sqlalchemy.orm import DeclarativeBase, Mapped, column_property, mapped_column, relationship
 
-IntPK = Annotated[int, mapped_column(Identity(), primary_key=True)]
+# uuid7 is time-ordered, so ORDER BY id still means oldest first.
+UuidPK = Annotated[uuid.UUID, mapped_column(primary_key=True, default=uuid.uuid7)]
 Stamp = Annotated[dt.datetime | None, mapped_column(server_default=func.current_timestamp())]
 StampNN = Annotated[dt.datetime, mapped_column(server_default=func.current_timestamp())]
 Flag = Annotated[bool, mapped_column(server_default=text("true"))]
 FormText = Annotated[str, mapped_column(server_default="")]
-TripId = Annotated[int, mapped_column(ForeignKey("travel_trip.id", ondelete="CASCADE"))]
+TripId = Annotated[uuid.UUID, mapped_column(ForeignKey("travel_trip.id", ondelete="CASCADE"))]
 
 _SIX_ASCENDING = "n1 >= 1 AND n1 < n2 AND n2 < n3 AND n3 < n4 AND n4 < n5 AND n5 < n6 AND n6 <= 58"
 
@@ -57,7 +57,7 @@ class AppUser(Base):
     __tablename__ = "app_user"
     __table_args__ = (CheckConstraint("length(trim(username)) > 0"),)
 
-    id: Mapped[IntPK]
+    id: Mapped[UuidPK]
     username: Mapped[str]
     password_hash: Mapped[str]
     is_superuser: Mapped[bool] = mapped_column(server_default=text("false"))
@@ -68,8 +68,8 @@ class AppUser(Base):
 class AppUserPasskey(Base):
     __tablename__ = "app_user_passkey"
 
-    id: Mapped[IntPK]
-    user_id: Mapped[int] = mapped_column(ForeignKey("app_user.id", ondelete="CASCADE"))
+    id: Mapped[UuidPK]
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("app_user.id", ondelete="CASCADE"))
     credential_id: Mapped[bytes] = mapped_column(unique=True)
     public_key: Mapped[bytes]
     sign_count: Mapped[int]
@@ -82,7 +82,7 @@ class AppUserSession(Base):
     __tablename__ = "app_user_session"
 
     token_hash: Mapped[bytes] = mapped_column(primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("app_user.id", ondelete="CASCADE"))
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("app_user.id", ondelete="CASCADE"))
     created_at: Mapped[StampNN]
 
 
@@ -90,7 +90,7 @@ class BillCategory(Base):
     __tablename__ = "bill_category"
     __table_args__ = (CheckConstraint("length(trim(name)) > 0"),)
 
-    id: Mapped[IntPK]
+    id: Mapped[UuidPK]
     name: Mapped[str]
     is_credit_card: Mapped[bool] = mapped_column(server_default=text("false"))
     defaults: Mapped[dict[str, Any]] = mapped_column(JSONB, server_default=text("'{}'"))
@@ -101,8 +101,8 @@ class Bill(Base):
     __tablename__ = "bill"
     __table_args__ = (CheckConstraint("period_end >= period_start"),)
 
-    id: Mapped[IntPK]
-    category_id: Mapped[int] = mapped_column(ForeignKey("bill_category.id", ondelete="CASCADE"))
+    id: Mapped[UuidPK]
+    category_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("bill_category.id", ondelete="CASCADE"))
     bill_date: Mapped[dt.date]
     due_date: Mapped[dt.date]
     period_start: Mapped[dt.date]
@@ -118,7 +118,7 @@ class Bill(Base):
 class BloodPressure(Base):
     __tablename__ = "blood_pressure"
 
-    id: Mapped[IntPK]
+    id: Mapped[UuidPK]
     systolic: Mapped[int | None]
     diastolic: Mapped[int | None]
     pulse: Mapped[int | None]
@@ -132,7 +132,7 @@ class BloodPressure(Base):
 class CalendarDayOverride(Base):
     __tablename__ = "calendar_day_override"
 
-    id: Mapped[IntPK]
+    id: Mapped[UuidPK]
     day: Mapped[dt.date | None] = mapped_column(unique=True)
     amount: Mapped[float | None]
     saved: Mapped[float | None]
@@ -142,7 +142,7 @@ class CalendarDayOverride(Base):
 class CreditCard(Base):
     __tablename__ = "credit_card"
 
-    id: Mapped[IntPK]
+    id: Mapped[UuidPK]
     name: Mapped[str | None]
     credit_limit: Mapped[float | None]
     last_statement_balance: Mapped[float | None] = mapped_column(server_default=text("0"))
@@ -152,15 +152,15 @@ class CreditCard(Base):
     statement_date: Mapped[dt.date | None]
     due_date: Mapped[dt.date | None]
     # When set, the statement comes from this bill category's latest bill instead of the columns above.
-    bill_category_id: Mapped[int | None] = mapped_column(ForeignKey("bill_category.id", ondelete="SET NULL"))
+    bill_category_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("bill_category.id", ondelete="SET NULL"))
     created_at: Mapped[Stamp]
 
 
 class CreditCardPayment(Base):
     __tablename__ = "credit_card_payment"
 
-    id: Mapped[IntPK]
-    credit_card_id: Mapped[int | None] = mapped_column(ForeignKey("credit_card.id", ondelete="CASCADE"))
+    id: Mapped[UuidPK]
+    credit_card_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("credit_card.id", ondelete="CASCADE"))
     amount: Mapped[float | None]
     payment_date: Mapped[dt.date | None]
     note: Mapped[str | None]
@@ -170,7 +170,7 @@ class CreditCardPayment(Base):
 class FixedExpense(Base):
     __tablename__ = "fixed_expense"
 
-    id: Mapped[IntPK]
+    id: Mapped[UuidPK]
     period_half: Mapped[int | None]
     period_year: Mapped[int | None]
     period_month: Mapped[int | None]
@@ -182,7 +182,7 @@ class FixedExpense(Base):
 class HousePayment(Base):
     __tablename__ = "house_payment"
 
-    id: Mapped[IntPK]
+    id: Mapped[UuidPK]
     name: Mapped[str | None]
     notes: Mapped[str | None]
     created_at: Mapped[Stamp]
@@ -195,8 +195,8 @@ class HousePayment(Base):
 class HousePaymentEntry(Base):
     __tablename__ = "house_payment_entry"
 
-    id: Mapped[IntPK]
-    house_payment_id: Mapped[int | None] = mapped_column(ForeignKey("house_payment.id", ondelete="CASCADE"))
+    id: Mapped[UuidPK]
+    house_payment_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("house_payment.id", ondelete="CASCADE"))
     paid_on: Mapped[dt.date | None]
     amount: Mapped[float | None]
     created_at: Mapped[Stamp]
@@ -205,7 +205,7 @@ class HousePaymentEntry(Base):
 class Installment(Base):
     __tablename__ = "installment"
 
-    id: Mapped[IntPK]
+    id: Mapped[UuidPK]
     name: Mapped[str | None]
     installment_current: Mapped[int | None]
     installment_total: Mapped[int | None]
@@ -216,7 +216,7 @@ class Installment(Base):
     finish_date: Mapped[dt.date | None]
     remaining: Mapped[float | None]
     original_total: Mapped[float | None]
-    credit_card_id: Mapped[int | None] = mapped_column(ForeignKey("credit_card.id", ondelete="SET NULL"))
+    credit_card_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("credit_card.id", ondelete="SET NULL"))
     created_at: Mapped[Stamp]
 
     lines: Mapped[list[InstallmentLine]] = relationship(order_by=lambda: InstallmentLine.seq)
@@ -226,8 +226,8 @@ class InstallmentLine(Base):
     __tablename__ = "installment_line"
     __table_args__ = (UniqueConstraint("installment_id", "seq"),)
 
-    id: Mapped[IntPK]
-    installment_id: Mapped[int | None] = mapped_column(ForeignKey("installment.id", ondelete="CASCADE"))
+    id: Mapped[UuidPK]
+    installment_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("installment.id", ondelete="CASCADE"))
     seq: Mapped[int | None]
     principal: Mapped[float | None] = mapped_column(server_default=text("0"))
     interest: Mapped[float | None]
@@ -237,7 +237,7 @@ class InstallmentLine(Base):
 class LottoGame(Base):
     __tablename__ = "lotto_game"
 
-    id: Mapped[IntPK]
+    id: Mapped[UuidPK]
     name: Mapped[str] = mapped_column(unique=True)
 
 
@@ -251,9 +251,9 @@ class LottoDraw(Base):
         ),
     )
 
-    id: Mapped[IntPK]
+    id: Mapped[UuidPK]
     draw_date: Mapped[dt.date]
-    game_id: Mapped[int] = mapped_column(ForeignKey("lotto_game.id", ondelete="RESTRICT"), server_default=text("3"))
+    game_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("lotto_game.id", ondelete="RESTRICT"))
     n1: Mapped[int | None]
     n2: Mapped[int | None]
     n3: Mapped[int | None]
@@ -273,8 +273,8 @@ class LottoAttempt(Base):
     __tablename__ = "lotto_attempt"
     __table_args__ = (CheckConstraint(_SIX_ASCENDING),)
 
-    id: Mapped[IntPK]
-    draw_id: Mapped[int] = mapped_column(ForeignKey("lotto_draw.id", ondelete="CASCADE"))
+    id: Mapped[UuidPK]
+    draw_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("lotto_draw.id", ondelete="CASCADE"))
     n1: Mapped[int]
     n2: Mapped[int]
     n3: Mapped[int]
@@ -288,7 +288,7 @@ class LottoAttempt(Base):
 class MonthlyExpense(Base):
     __tablename__ = "monthly_expense"
 
-    id: Mapped[IntPK]
+    id: Mapped[UuidPK]
     name: Mapped[str | None]
     description: Mapped[str | None]
     amount: Mapped[float | None]
@@ -304,7 +304,7 @@ class PayPeriodStartOverride(Base):
     __tablename__ = "pay_period_start_override"
     __table_args__ = (UniqueConstraint("period_year", "period_month", "period_half"),)
 
-    id: Mapped[IntPK]
+    id: Mapped[UuidPK]
     period_year: Mapped[int | None]
     period_month: Mapped[int | None]
     period_half: Mapped[int | None]
@@ -315,7 +315,7 @@ class PayPeriodStartOverride(Base):
 class Payslip(Base):
     __tablename__ = "payslip"
 
-    id: Mapped[IntPK]
+    id: Mapped[UuidPK]
     total: Mapped[float | None]
     commission: Mapped[float | None]
     reimbursement: Mapped[float | None]
@@ -345,7 +345,7 @@ class Company(Base):
     __tablename__ = "company"
     __table_args__ = (CheckConstraint("length(trim(name)) > 0"),)
 
-    id: Mapped[IntPK]
+    id: Mapped[UuidPK]
     name: Mapped[str]
     sort_order: Mapped[int]
     show_total: Mapped[Flag]
@@ -406,7 +406,7 @@ class TravelTrip(Base):
         CheckConstraint("end_date >= start_date"),
     )
 
-    id: Mapped[IntPK]
+    id: Mapped[UuidPK]
     title: Mapped[str]
     start_date: Mapped[dt.date]
     end_date: Mapped[dt.date]
@@ -441,7 +441,7 @@ class TravelCity(Base):
     __tablename__ = "travel_city"
     __table_args__ = (CheckConstraint("length(trim(name)) > 0"),)
 
-    id: Mapped[IntPK]
+    id: Mapped[UuidPK]
     trip_id: Mapped[TripId]
     name: Mapped[str]
     start_date: Mapped[dt.date | None]
@@ -457,7 +457,7 @@ class TravelAccommodation(Base):
         CheckConstraint("checkout_date >= checkin_date"),
     )
 
-    id: Mapped[IntPK]
+    id: Mapped[UuidPK]
     trip_id: Mapped[TripId]
     name: Mapped[str]
     checkin_date: Mapped[dt.date]
@@ -481,7 +481,7 @@ class TravelFlight(Base):
     __tablename__ = "travel_flight"
     __table_args__ = (CheckConstraint("length(trim(flight_number)) > 0"),)
 
-    id: Mapped[IntPK]
+    id: Mapped[UuidPK]
     trip_id: Mapped[TripId]
     flight_number: Mapped[str]
     flight_date: Mapped[dt.date | None]
@@ -511,7 +511,7 @@ class TravelItinerary(Base):
     __tablename__ = "travel_itinerary"
     __table_args__ = (CheckConstraint("length(trim(activity)) > 0"),)
 
-    id: Mapped[IntPK]
+    id: Mapped[UuidPK]
     trip_id: Mapped[TripId]
     item_date: Mapped[dt.date]
     start_time: Mapped[dt.time | None]
@@ -531,7 +531,7 @@ class TravelTransport(Base):
     __tablename__ = "travel_transport"
     __table_args__ = (CheckConstraint("mode IN ('bus', 'train', 'ferry')"),)
 
-    id: Mapped[IntPK]
+    id: Mapped[UuidPK]
     trip_id: Mapped[TripId]
     mode: Mapped[str]
     number: Mapped[str | None]
@@ -630,28 +630,16 @@ Index("idx_travel_trip_period", TravelTrip.start_date.desc(), TravelTrip.id.desc
 
 
 SEED_LOTTO_GAMES = [
-    (1, "Grand Lotto 6/55"),
-    (2, "Megalotto 6/45"),
-    (3, "Ultra Lotto 6/58"),
-    (4, "Superlotto 6/49"),
-    (5, "Lotto 6/42"),
+    "Grand Lotto 6/55",
+    "Megalotto 6/45",
+    "Ultra Lotto 6/58",
+    "Superlotto 6/49",
+    "Lotto 6/42",
 ]
 
 
 def sync_lotto_games(conn: Any) -> None:
-    conn.execute(
-        insert(LottoGame)
-        .values([{"id": i, "name": name} for i, name in SEED_LOTTO_GAMES])
-        .on_conflict_do_nothing()
-    )
-    conn.execute(
-        select(
-            func.setval(
-                func.pg_get_serial_sequence("lotto_game", "id"),
-                select(func.max(LottoGame.id)).scalar_subquery(),
-            )
-        )
-    )
+    conn.execute(insert(LottoGame).values([{"name": name} for name in SEED_LOTTO_GAMES]).on_conflict_do_nothing())
 
 
 def create_all(conn: Any) -> None:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.exc import IntegrityError
@@ -52,7 +53,7 @@ def companies_reorder(body: CompanyReorder) -> dict[str, Any]:
 
 
 @router.put("/{company_id}")
-def companies_update(company_id: int, body: CompanyUpdate) -> dict[str, Any]:
+def companies_update(company_id: UUID, body: CompanyUpdate) -> dict[str, Any]:
     try:
         row = update_company(company_id, body.name.strip(), body.flags_dict())
     except IntegrityError:
@@ -63,7 +64,7 @@ def companies_update(company_id: int, body: CompanyUpdate) -> dict[str, Any]:
 
 
 @router.delete("/{company_id}")
-def companies_remove(company_id: int) -> dict[str, Any]:
+def companies_remove(company_id: UUID) -> dict[str, Any]:
     try:
         deleted = delete_company(company_id)
     except ValueError as exc:

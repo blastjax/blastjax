@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+from uuid import UUID
 
 from pydantic import BaseModel, Field
 
@@ -16,7 +17,7 @@ class InstallmentCreate(BaseModel):
     finish_date: dt.date
     remaining: float | None = None
     original_total: float | None = Field(default=None, gt=0)
-    credit_card_id: int | None = None
+    credit_card_id: UUID | None = None
 
 
 class InstallmentLineUpdate(BaseModel):
@@ -35,4 +36,4 @@ class InstallmentLinesBulkUpdate(BaseModel):
 
 
 class InstallmentLinesReorder(BaseModel):
-    line_ids: list[int] = Field(min_length=1)
+    line_ids: list[UUID] = Field(min_length=1)

@@ -75,7 +75,7 @@ const short = (s: string) => s.split(",")[0].trim();
 type Entry = {
   key: string;
   table: Table;
-  id: number;
+  id: string;
   type: Kind;
   title: string;
   from: string;
@@ -189,7 +189,7 @@ const endOf = (e: Entry) => e.endDate || e.startDate;
 const titleOf = (e: Entry, sh: boolean) =>
   e.title || (e.from || e.to ? `${sh ? e.fromShort : e.from} → ${sh ? e.toShort : e.to}` : TYPES[e.type].label);
 
-type Place = { id: number; name: string; startDate: string; endDate: string; c: ReturnType<typeof pcol> };
+type Place = { id: string; name: string; startDate: string; endDate: string; c: ReturnType<typeof pcol> };
 const placesOf = (d: TravelTripDetail): Place[] =>
   d.cities.map((c, i) => ({ id: c.id, name: c.name, startDate: s(c.start_date), endDate: s(c.end_date) || s(c.start_date), c: pcol(i) }));
 
@@ -414,7 +414,7 @@ async function placeOf(text: string, prev: string, url: string, city: string, co
   }
 }
 
-const DELETE: Record<Table, (tripId: number, id: number) => Promise<TravelTripDetail>> = {
+const DELETE: Record<Table, (tripId: string, id: string) => Promise<TravelTripDetail>> = {
   flights: deleteTravelFlight,
   transport: deleteTravelTransport,
   itinerary: deleteTravelItinerary,
@@ -443,7 +443,7 @@ export default function TravelsClient() {
   const [trips, setTrips] = useState<TravelTripDetail[]>([]);
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState<"list" | "trip">("list");
-  const [activeId, setActiveId] = useState<number | null>(null);
+  const [activeId, setActiveId] = useState<string | null>(null);
   // Phones open trips in Agenda: the week grid needs ~720px and would scroll sideways.
   const [mode, setMode] = useState<"calendar" | "agenda">(() =>
     typeof window !== "undefined" && window.matchMedia("(max-width: 639px)").matches ? "agenda" : "calendar",
@@ -511,7 +511,7 @@ export default function TravelsClient() {
     upsert(d);
   };
 
-  const openTrip = (id: number) => {
+  const openTrip = (id: string) => {
     setView("trip");
     setActiveId(id);
     setDrawerKey(null);
@@ -596,8 +596,8 @@ export default function TravelsClient() {
         };
         d = o ? await updateTravelAccommodation(tid, o.id, body) : await createTravelAccommodation(tid, body);
       }
-      const before = new Set((trip[table] as { id: number }[]).map((r) => r.id));
-      const id = o?.id ?? (d[table] as { id: number }[]).find((r) => !before.has(r.id))?.id;
+      const before = new Set((trip[table] as { id: string }[]).map((r) => r.id));
+      const id = o?.id ?? (d[table] as { id: string }[]).find((r) => !before.has(r.id))?.id;
       await commit(d, f.startDate, endDate || f.startDate);
       setModal(null);
       setDrawerKey(id != null ? `${table}:${id}` : null);
@@ -628,7 +628,7 @@ export default function TravelsClient() {
       setDrawerKey(null);
     });
   };
-  const removePlace = (id: number) => {
+  const removePlace = (id: string) => {
     if (!trip) return;
     void run(async () => upsert(await deleteTravelCity(trip.trip.id, id)));
   };

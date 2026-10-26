@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.exc import IntegrityError
@@ -114,7 +115,7 @@ def credit_card_create(body: CreditCardCreate) -> dict[str, Any]:
 
 
 @router.put("/api/credit-card/{card_id}")
-def credit_card_replace(card_id: int, body: CreditCardCreate) -> dict[str, Any]:
+def credit_card_replace(card_id: UUID, body: CreditCardCreate) -> dict[str, Any]:
     try:
         row = update_credit_card(
             card_id,
@@ -136,7 +137,7 @@ def credit_card_replace(card_id: int, body: CreditCardCreate) -> dict[str, Any]:
 
 @router.patch("/api/credit-card/{card_id}/balance")
 def credit_card_adjust_balance(
-    card_id: int, body: CreditCardBalanceAdjust
+    card_id: UUID, body: CreditCardBalanceAdjust
 ) -> dict[str, Any]:
     card = get_credit_card()
     if not card or card["id"] != card_id:
@@ -148,7 +149,7 @@ def credit_card_adjust_balance(
 
 
 @router.delete("/api/credit-card/{card_id}")
-def credit_card_remove(card_id: int) -> dict[str, Any]:
+def credit_card_remove(card_id: UUID) -> dict[str, Any]:
     if not delete_credit_card(card_id):
         raise HTTPException(status_code=404, detail="Credit card not found.")
     return {"ok": True}
@@ -156,7 +157,7 @@ def credit_card_remove(card_id: int) -> dict[str, Any]:
 
 @router.post("/api/credit-card/{card_id}/payments")
 def credit_card_payment_create(
-    card_id: int, body: CreditCardPaymentCreate
+    card_id: UUID, body: CreditCardPaymentCreate
 ) -> dict[str, Any]:
     payment = insert_credit_card_payment(
         card_id, body.amount, body.payment_date, _clean_note(body.note)
@@ -169,7 +170,7 @@ def credit_card_payment_create(
 
 
 @router.delete("/api/credit-card/payments/{payment_id}")
-def credit_card_payment_remove(payment_id: int) -> dict[str, Any]:
+def credit_card_payment_remove(payment_id: UUID) -> dict[str, Any]:
     if not delete_credit_card_payment(payment_id):
         raise HTTPException(status_code=404, detail="Payment not found.")
     card = get_credit_card()

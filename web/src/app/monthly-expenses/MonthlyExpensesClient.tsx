@@ -100,7 +100,7 @@ export default function MonthlyExpensesClient() {
   const [showAll, setShowAll] = useState(false);
 
   const [modalOpen, setModalOpen] = useState(false);
-  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<ExpenseForm>(emptyForm(currentMonthKey));
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -238,7 +238,7 @@ export default function MonthlyExpensesClient() {
   );
 
   const onDelete = useCallback(
-    async (id: number) => {
+    async (id: string) => {
       if (!(await confirmDialog("Delete this monthly expense?"))) return;
       setError(null);
       try {

@@ -157,7 +157,7 @@ export default function BloodPressureClient() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState(emptyForm);
-  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [metricIdx, setMetricIdx] = useState(0);
 
@@ -276,7 +276,7 @@ export default function BloodPressureClient() {
     }
   };
 
-  const onDelete = async (id: number) => {
+  const onDelete = async (id: string) => {
     if (!(await confirmDialog("Delete this reading?"))) return;
     setSaving(true);
     setError(null);

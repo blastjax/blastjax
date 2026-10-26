@@ -418,7 +418,7 @@ export default function CalendarClient() {
     expense: emptyExpenseForm(),
   });
   const [savingEntry, setSavingEntry] = useState<EntryKind | null>(null);
-  const [editingEntry, setEditingEntry] = useState<{ id: number; form: ExpenseForm } | null>(null);
+  const [editingEntry, setEditingEntry] = useState<{ id: string; form: ExpenseForm } | null>(null);
   const [expenseError, setExpenseError] = useState<string | null>(null);
 
   const [payDateModalHalf, setPayDateModalHalf] = useState<PeriodHalf | null>(null);

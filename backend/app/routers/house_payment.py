@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
@@ -68,7 +69,7 @@ def house_payment_create(body: HousePaymentCreate) -> dict[str, Any]:
 
 
 @router.get("/api/house-payment/{house_payment_id}")
-def house_payment_one(house_payment_id: int) -> dict[str, Any]:
+def house_payment_one(house_payment_id: UUID) -> dict[str, Any]:
     key = f"house_payment:{house_payment_id}"
     hit = cache.get(key)
     if hit is not None:
@@ -83,7 +84,7 @@ def house_payment_one(house_payment_id: int) -> dict[str, Any]:
 
 @router.put("/api/house-payment/{house_payment_id}")
 def house_payment_replace(
-    house_payment_id: int, body: HousePaymentCreate
+    house_payment_id: UUID, body: HousePaymentCreate
 ) -> dict[str, Any]:
     row = update_house_payment(
         house_payment_id, body.name.strip(), _clean_notes(body.notes)
@@ -94,7 +95,7 @@ def house_payment_replace(
 
 
 @router.delete("/api/house-payment/{house_payment_id}")
-def house_payment_remove(house_payment_id: int) -> dict[str, Any]:
+def house_payment_remove(house_payment_id: UUID) -> dict[str, Any]:
     if not delete_house_payment(house_payment_id):
         raise HTTPException(status_code=404, detail="House payment not found.")
     return {"ok": True}
@@ -102,7 +103,7 @@ def house_payment_remove(house_payment_id: int) -> dict[str, Any]:
 
 @router.post("/api/house-payment/{house_payment_id}/entry")
 def house_payment_entry_create(
-    house_payment_id: int, body: HousePaymentEntryCreate
+    house_payment_id: UUID, body: HousePaymentEntryCreate
 ) -> dict[str, Any]:
     detail = insert_house_payment_entry(
         house_payment_id, body.paid_on, body.amount
@@ -114,8 +115,8 @@ def house_payment_entry_create(
 
 @router.put("/api/house-payment/{house_payment_id}/entry/{entry_id}")
 def house_payment_entry_update(
-    house_payment_id: int,
-    entry_id: int,
+    house_payment_id: UUID,
+    entry_id: UUID,
     body: HousePaymentEntryUpdate,
 ) -> dict[str, Any]:
     detail = update_house_payment_entry(
@@ -128,7 +129,7 @@ def house_payment_entry_update(
 
 @router.delete("/api/house-payment/{house_payment_id}/entry/{entry_id}")
 def house_payment_entry_remove(
-    house_payment_id: int, entry_id: int
+    house_payment_id: UUID, entry_id: UUID
 ) -> dict[str, Any]:
     detail = delete_house_payment_entry(house_payment_id, entry_id)
     if detail is None:

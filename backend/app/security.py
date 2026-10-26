@@ -5,6 +5,7 @@ import os
 import secrets
 import time
 from typing import Any
+from uuid import UUID
 
 import cache
 from db import any_app_users, delete_app_user_session, get_app_user_session_user_id, insert_app_user_session
@@ -103,24 +104,25 @@ def _token_hash(token: str) -> bytes:
     return hashlib.sha256(token.encode()).digest()
 
 
-def create_session(user_id: int) -> str:
+def create_session(user_id: UUID) -> str:
     """A login that lasts until logout. Only its hash is stored, so the table alone can't log anyone in."""
     token = secrets.token_urlsafe(32)
     insert_app_user_session(user_id, _token_hash(token))
     return token
 
 
-def session_user_id(token: str) -> int | None:
+def session_user_id(token: str) -> UUID | None:
     if not token:
         return None
     token_hash = _token_hash(token)
     # Redis only, not _store_*: a logout must clear this for every worker, not just its own.
     key = f"{_SESSION_PREFIX}:{token_hash.hex()}"
-    user_id = cache.get(key)
-    if user_id is None:
-        user_id = get_app_user_session_user_id(token_hash)
-        if user_id is not None:
-            cache.set(key, user_id, ttl=_SESSION_CACHE_SECONDS)
+    cached = cache.get(key)
+    if cached is not None:
+        return UUID(cached)
+    user_id = get_app_user_session_user_id(token_hash)
+    if user_id is not None:
+        cache.set(key, str(user_id), ttl=_SESSION_CACHE_SECONDS)
     return user_id
 
 
@@ -150,15 +152,17 @@ def clear_failed_attempts(client_ip: str) -> None:
     _store_delete(f"{_FAIL_PREFIX}:{client_ip}")
 
 
-def remember_passkey_challenge(challenge: bytes, user_id: int | None = None) -> None:
+def remember_passkey_challenge(challenge: bytes, user_id: UUID | None = None) -> None:
     """user_id is who may register a passkey with it; None marks a login challenge."""
-    _store_set(f"{_PASSKEY_PREFIX}:{challenge.hex()}", {"user_id": user_id}, _PASSKEY_CHALLENGE_SECONDS)
+    # Stored as text, since that's what a round trip through Redis's JSON gives back.
+    owner = str(user_id) if user_id else None
+    _store_set(f"{_PASSKEY_PREFIX}:{challenge.hex()}", {"user_id": owner}, _PASSKEY_CHALLENGE_SECONDS)
 
 
-def take_passkey_challenge(challenge: bytes, user_id: int | None = None) -> bool:
+def take_passkey_challenge(challenge: bytes, user_id: UUID | None = None) -> bool:
     """True once for a live challenge issued to user_id, so a signed response can't be replayed."""
     # ponytail: get-then-delete, not atomic; two racing requests could both spend one challenge.
     key = f"{_PASSKEY_PREFIX}:{challenge.hex()}"
     hit = _store_get(key)
     _store_delete(key)
-    return hit is not None and hit.get("user_id") == user_id
+    return hit is not None and hit.get("user_id") == (str(user_id) if user_id else None)

@@ -6,6 +6,7 @@ import os
 import re
 import sys
 import time
+import uuid
 from decimal import Decimal
 from pathlib import Path
 
@@ -179,7 +180,7 @@ def check_auth_disable_flag() -> None:
     assert d() is False
 
 
-def _swap_session_table(rows: dict[bytes, int]) -> dict[str, object]:
+def _swap_session_table(rows: dict[bytes, uuid.UUID]) -> dict[str, object]:
     """Point security's session queries at rows; returns the originals to restore with vars(security).update."""
     stubs = {
         "insert_app_user_session": lambda user_id, token_hash: rows.__setitem__(token_hash, user_id),
@@ -192,13 +193,14 @@ def _swap_session_table(rows: dict[bytes, int]) -> dict[str, object]:
 
 
 def check_sessions() -> None:
-    rows: dict[bytes, int] = {}
+    rows: dict[bytes, uuid.UUID] = {}
     saved = _swap_session_table(rows)
+    user = uuid.uuid4()
     try:
-        token = security.create_session(7)
-        assert security.session_user_id(token) == 7
+        token = security.create_session(user)
+        assert security.session_user_id(token) == user
         assert len(rows) == 1 and token.encode() not in rows, "stored the token itself"
-        assert security.create_session(7) != token, "two logins share a token"
+        assert security.create_session(user) != token, "two logins share a token"
         assert not security.session_is_valid(token[:-1] + ("B" if token[-1] == "A" else "A")), "accepted a guess"
         assert not security.session_is_valid(""), "accepted no token"
         security.revoke_session(token)
@@ -234,13 +236,14 @@ def check_passkey_ceremony() -> None:
 
     rows: list[dict] = []
 
-    def insert(user_id: int, credential_id: bytes, public_key: bytes, sign_count: int, name: str) -> dict:
-        rows.append({"id": 1, "user_id": user_id, "credential_id": credential_id, "public_key": public_key})
+    def insert(user_id: uuid.UUID, credential_id: bytes, public_key: bytes, sign_count: int, name: str) -> dict:
+        rows.append({"id": uuid.uuid4(), "user_id": user_id, "credential_id": credential_id, "public_key": public_key})
         rows[-1] |= {"sign_count": sign_count, "name": name, "created_at": "", "last_used_at": None}
         return rows[-1]
 
+    user = uuid.uuid4()
     stubs = {
-        "get_app_user_by_id": lambda uid: {"id": uid, "username": "micah"} if uid == 7 else None,
+        "get_app_user_by_id": lambda uid: {"id": uid, "username": "micah"} if uid == user else None,
         "list_app_user_passkeys": lambda uid: [r for r in rows if r["user_id"] == uid],
         "get_app_user_passkey": lambda cid: next((r for r in rows if r["credential_id"] == cid), None),
         "insert_app_user_passkey": insert,
@@ -254,7 +257,7 @@ def check_passkey_ceremony() -> None:
     pub = key.public_key().public_numbers()
     cose = cbor2.dumps({1: 2, 3: -7, -1: 1, -2: pub.x.to_bytes(32, "big"), -3: pub.y.to_bytes(32, "big")})
     try:
-        token = security.create_session(7)
+        token = security.create_session(user)
         challenge = auth.auth_passkey_register_options(request(origin, token))["challenge"]
         client = json.dumps({"type": "webauthn.create", "challenge": challenge, "origin": origin}).encode()
         auth_data = rp_hash + b"\x45" + (0).to_bytes(4, "big") + bytes(16) + len(cred_id).to_bytes(2, "big") + cred_id + cose
@@ -263,7 +266,7 @@ def check_passkey_ceremony() -> None:
         made["response"] = {"clientDataJSON": b64(client), "attestationObject": b64(attestation)}
         body = PasskeyRegisterBody(credential=made, name=" Laptop ")
         assert auth.auth_passkey_register(body, request(origin, token))["passkey"]["name"] == "Laptop"
-        assert rows[0]["user_id"] == 7 and rows[0]["credential_id"] == cred_id
+        assert rows[0]["user_id"] == user and rows[0]["credential_id"] == cred_id
         assert rejected(lambda: auth.auth_passkey_register(body, request(origin, token)), 400), "registered twice"
         assert rejected(lambda: auth.auth_passkey_register_options(request(origin)), 401), "registered logged out"
 
@@ -276,7 +279,7 @@ def check_passkey_ceremony() -> None:
             return PasskeyLoginBody(credential={**made, "response": response})
 
         signed = assertion(1)
-        assert security.session_user_id(auth.auth_passkey_login(signed, request(origin))["token"]) == 7
+        assert security.session_user_id(auth.auth_passkey_login(signed, request(origin))["token"]) == user
         assert rows[0]["sign_count"] == 1
         assert rejected(lambda: auth.auth_passkey_login(signed, request(origin)), 401), "replayed a login"
         forged = assertion(2, ec.generate_private_key(ec.SECP256R1()))
@@ -289,9 +292,7 @@ def check_passkey_ceremony() -> None:
 
 
 def check_lotto_game_seed() -> None:
-    ids = [i for i, _ in schema.SEED_LOTTO_GAMES]
-    names = [n for _, n in schema.SEED_LOTTO_GAMES]
-    assert len(set(ids)) == len(ids), f"duplicate seed ids: {ids}"
+    names = schema.SEED_LOTTO_GAMES
     assert len(set(names)) == len(names), f"duplicate seed names: {names}"
     for name in names:
         assert re.search(r"/\d+$", name), f"no field size in {name!r}"
@@ -392,7 +393,7 @@ def check_bill_request_models() -> None:
     period = {"period_start": {"months": -1, "day": 15}, "period_end": {"months": 0, "day": 14}}
     assert BillCategoryCreate(name="Power", defaults=period).defaults.period_end.day == 14
     bill = {
-        "category_id": 1,
+        "category_id": str(uuid.uuid4()),
         "bill_date": "2026-10-05",
         "due_date": "2026-10-25",
         "period_start": "2026-09-01",
@@ -585,50 +586,56 @@ def check_db_against_postgres() -> None:
         with engine.begin() as c:
             schema.create_all(c)
         db.init_schema()
+        db.init_schema()  # re-seeding the lotto games again is a no-op
+        missing = uuid.uuid4()
 
         trip_id = db.insert_travel_trip("Osaka", dt.date(2026, 4, 13), dt.date(2026, 4, 16), None)["trip"]["id"]
         city = dict.fromkeys(db.travel_child_columns("cities"))
         for name in ("Osaka", "Kyoto"):
             detail = db.insert_travel_child("cities", trip_id, {**city, "name": name})
         assert [(c["name"], c["sort_order"]) for c in detail["cities"]] == [("Osaka", 0), ("Kyoto", 1)]
-        assert db.insert_travel_child("cities", 404, {**city, "name": "x"}) is None
+        assert isinstance(trip_id, uuid.UUID)
+        assert db.insert_travel_child("cities", missing, {**city, "name": "x"}) is None
         kyoto = detail["cities"][1]["id"]
-        assert db.update_travel_child("cities", 404, kyoto, {**city, "name": "y"}) is None
+        assert db.update_travel_child("cities", missing, kyoto, {**city, "name": "y"}) is None
         assert [c["name"] for c in db.delete_travel_child("cities", trip_id, kyoto)["cities"]] == ["Osaka"]
 
-        db.upsert_lotto_draw(3, dt.date(2026, 1, 1), [1, 2, 3, 4, 5, 6])
+        games = {g["name"]: g["id"] for g in db.list_lotto_games()}
+        assert sorted(games) == sorted(schema.SEED_LOTTO_GAMES), games
+        ultra = games["Ultra Lotto 6/58"]
+        db.upsert_lotto_draw(ultra, dt.date(2026, 1, 1), [1, 2, 3, 4, 5, 6])
         rows = [
             {"draw_date": dt.date(2026, 1, 1), "numbers": [1, 2, 3, 4, 5, 6], "jackpot_prize": 1.0, "winners": 1},
             {"draw_date": dt.date(2026, 1, 8), "numbers": [7, 8, 9, 10, 11, 12], "jackpot_prize": 2.0, "winners": 1},
             {"draw_date": dt.date(2026, 1, 8), "numbers": [13, 14, 15, 16, 17, 18], "jackpot_prize": 3.0, "winners": 2},
         ]
-        assert db.upsert_lotto_draws_bulk(3, rows) == {"inserted": 1, "updated": 2, "total": 3}
-        jan8 = next(d["draw"] for d in db.list_lotto_draws(3) if d["draw"]["draw_date"] == "2026-01-08")
+        assert db.upsert_lotto_draws_bulk(ultra, rows) == {"inserted": 1, "updated": 2, "total": 3}
+        jan8 = next(d["draw"] for d in db.list_lotto_draws(ultra) if d["draw"]["draw_date"] == "2026-01-08")
         assert jan8["n1"] == 13 and jan8["winners"] == 2, jan8
 
         attempts = [([1, 2, 3, 4, 5, 6], 1), ([7, 8, 9, 10, 11, 12], None)]
         detail = db.insert_lotto_attempts_bulk(jan8["id"], attempts)
         assert [a["ticket"] for a in detail["attempts"]] == [1, None], detail
-        assert db.insert_lotto_attempts_bulk(404, attempts) is None
+        assert db.insert_lotto_attempts_bulk(missing, attempts) is None
 
-        result = {"game_id": 3, "numbers": [2, 3, 4, 5, 6, 7], "jackpot_prize": 9.0, "winners": 0}
+        result = {"game_id": ultra, "numbers": [2, 3, 4, 5, 6, 7], "jackpot_prize": 9.0, "winners": 0}
         fresh = {**result, "draw_date": dt.date(2026, 1, 15)}
         assert db.insert_lotto_results([{**result, "draw_date": dt.date(2026, 1, 8)}, fresh, fresh]) == 1
-        assert db.list_lotto_draws(3)[1]["draw"]["n1"] == 13, "results overwrote a draw that had numbers"
+        assert db.list_lotto_draws(ultra)[1]["draw"]["n1"] == 13, "results overwrote a draw that had numbers"
 
-        jan15 = db.list_lotto_draws(3)[0]["draw"]["id"]
+        jan15 = db.list_lotto_draws(ultra)[0]["draw"]["id"]
         db.insert_lotto_attempts_bulk(jan15, [([1, 2, 3, 4, 8, 9], None), ([2, 3, 4, 5, 6, 8], None)])
-        db.upsert_lotto_draw(3, dt.date(2026, 1, 22), None)
-        game = next(g for g in db.list_lotto_games() if g["id"] == 3)
+        db.upsert_lotto_draw(ultra, dt.date(2026, 1, 22), None)
+        game = next(g for g in db.list_lotto_games() if g["id"] == ultra)
         assert game["latest_result"] == {
             "draw_date": "2026-01-15",
             "numbers": [2, 3, 4, 5, 6, 7],
             "winners": 0,
             "best_hits": [2, 3, 4, 5, 6],
         }, game
-        jan29 = db.upsert_lotto_draw(3, dt.date(2026, 1, 29), [9, 10, 11, 12, 13, 14], winners=1)["draw"]["id"]
+        jan29 = db.upsert_lotto_draw(ultra, dt.date(2026, 1, 29), [9, 10, 11, 12, 13, 14], winners=1)["draw"]["id"]
         db.insert_lotto_attempts_bulk(jan29, [([9, 10, 11, 12, 13, 14], 1)])
-        db.upsert_lotto_draw(3, dt.date(2026, 2, 1), None)
+        db.upsert_lotto_draw(ultra, dt.date(2026, 2, 1), None)
         month = db.list_lotto_results_between(dt.date(2026, 1, 1), dt.date(2026, 2, 1))
         assert [(r["draw_date"], r["winners"], r["best_hits"]) for r in month] == [
             ("2026-01-01", 1, None),
@@ -644,6 +651,14 @@ def check_db_against_postgres() -> None:
         assert payslip["has_pdf"] is False
         assert db.set_payslip_pdf(payslip["id"], b"%PDF")
         assert db.get_payslip(payslip["id"])["has_pdf"] and db.get_payslip_pdf(payslip["id"]) == b"%PDF"
+
+        names = ["Sophos", "Acme", "Globex"]
+        companies = [db.insert_company(n)["id"] for n in names]
+        assert [c["name"] for c in db.reorder_companies(companies[::-1])] == names[::-1]
+        plan = db.insert_installment("Phone", 1, 3, 100.0, None, 100.0, None, None, 0, 0)
+        line_ids = [ln["id"] for ln in plan["lines"]][::-1]
+        moved = db.reorder_installment_lines(plan["installment"]["id"], line_ids)["lines"]
+        assert [(ln["id"], ln["seq"]) for ln in moved] == list(zip(line_ids, [1, 2, 3])), moved
 
         db.upsert_calendar_day_overrides([("2026-10-13", 1000.0, 1199.02)])
         rows = db.upsert_calendar_day_overrides([("2026-10-13", 900.0, None), ("2026-10-12", 50.0, None)])
@@ -702,7 +717,7 @@ def check_db_against_postgres() -> None:
         assert [c["name"] for c in listed["categories"]] == ["Electricity", "Internet"], listed
         assert listed["bills"][0]["has_pdf"] is True and "pdf_data" not in listed["bills"][0]
         try:
-            db.insert_bill({**statement, "category_id": 404})
+            db.insert_bill({**statement, "category_id": missing})
         except IntegrityError:
             pass
         else:

@@ -73,21 +73,21 @@ export default function HousePaymentsClient() {
   const [error, setError] = useState<string | null>(null);
 
   const [planForm, setPlanForm] = useState<PlanForm>(emptyPlanForm);
-  const [editingPlanId, setEditingPlanId] = useState<number | null>(null);
+  const [editingPlanId, setEditingPlanId] = useState<string | null>(null);
   const [planModalOpen, setPlanModalOpen] = useState(false);
 
-  const [payPlanId, setPayPlanId] = useState<number | null>(null);
+  const [payPlanId, setPayPlanId] = useState<string | null>(null);
   const [payForm, setPayForm] = useState<EntryForm>(emptyEntryForm());
   const [paying, setPaying] = useState(false);
   const [payError, setPayError] = useState<string | null>(null);
   const [lastAdded, setLastAdded] = useState<string | null>(null);
 
-  const [entriesModalId, setEntriesModalId] = useState<number | null>(null);
+  const [entriesModalId, setEntriesModalId] = useState<string | null>(null);
   const [detail, setDetail] = useState<HousePaymentDetailResponse | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
 
   const [entryForm, setEntryForm] = useState<EntryForm>(emptyEntryForm());
-  const [editingEntryId, setEditingEntryId] = useState<number | null>(null);
+  const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
   const [savingEntry, setSavingEntry] = useState(false);
 
   const load = useCallback(async () => {
@@ -131,7 +131,7 @@ export default function HousePaymentsClient() {
     });
   }, []);
 
-  const removeRow = useCallback((id: number) => {
+  const removeRow = useCallback((id: string) => {
     setRows((rs) => rs.filter((r) => r.id !== id));
   }, []);
 
@@ -159,7 +159,7 @@ export default function HousePaymentsClient() {
     setEditingEntryId(null);
   }, []);
 
-  const openEntries = async (id: number) => {
+  const openEntries = async (id: string) => {
     setEntriesModalId(id);
     setDetail(null);
     setDetailLoading(true);
@@ -220,7 +220,7 @@ export default function HousePaymentsClient() {
     setPlanModalOpen(true);
   };
 
-  const onDeletePlan = async (id: number) => {
+  const onDeletePlan = async (id: string) => {
     if (!(await confirmDialog("Delete this house payment plan and all its payments?"))) return;
     setSaving(true);
     setError(null);
@@ -284,7 +284,7 @@ export default function HousePaymentsClient() {
     setEntryForm(emptyEntryForm());
   };
 
-  const onDeleteEntry = async (entryId: number) => {
+  const onDeleteEntry = async (entryId: string) => {
     if (entriesModalId == null) return;
     if (!(await confirmDialog("Delete this payment?"))) return;
     setSavingEntry(true);

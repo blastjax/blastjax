@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 from urllib.parse import urlparse
+from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Request
 from sqlalchemy.exc import IntegrityError
@@ -205,7 +206,7 @@ def auth_passkeys(request: Request) -> dict[str, Any]:
 
 
 @router.delete("/passkeys/{passkey_id}")
-def auth_passkey_remove(passkey_id: int, request: Request) -> dict[str, Any]:
+def auth_passkey_remove(passkey_id: UUID, request: Request) -> dict[str, Any]:
     user = _session_user(request)
     if not delete_app_user_passkey(user["id"], passkey_id):
         raise HTTPException(status_code=404, detail="Passkey not found.")

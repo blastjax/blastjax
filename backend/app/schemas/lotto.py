@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -19,7 +20,7 @@ class LottoNumbers(BaseModel):
 
 
 class LottoDrawCreate(BaseModel):
-    game_id: int = Field(..., gt=0)
+    game_id: UUID
     draw_date: dt.date
     numbers: list[int] | None = None
     jackpot_prize: float | None = None
@@ -62,5 +63,5 @@ class LottoAttemptsBulkCreate(BaseModel):
 
 
 class LottoImportText(BaseModel):
-    game_id: int = Field(..., gt=0)
+    game_id: UUID
     text: str

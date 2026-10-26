@@ -149,11 +149,11 @@ export default function PayslipClient({ company = "Sophos" }: { company?: string
     });
   }, []);
 
-  const removeRow = useCallback((id: number) => {
+  const removeRow = useCallback((id: string) => {
     setRows((rs) => rs.filter((r) => r.id !== id));
   }, []);
 
-  const setRowPdfFlag = useCallback((id: number, hasPdf: boolean) => {
+  const setRowPdfFlag = useCallback((id: string, hasPdf: boolean) => {
     setRows((rs) =>
       rs.map((r) => (r.id === id ? { ...r, has_pdf: hasPdf } : r)),
     );
@@ -170,7 +170,7 @@ export default function PayslipClient({ company = "Sophos" }: { company?: string
       });
   }, []);
 
-  const warmedPdfIdsRef = useRef<Set<number>>(new Set());
+  const warmedPdfIdsRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     for (const row of rows) {
       if (!row.has_pdf || warmedPdfIdsRef.current.has(row.id)) continue;
@@ -218,7 +218,7 @@ export default function PayslipClient({ company = "Sophos" }: { company?: string
     });
   };
 
-  const handleDelete = async (id: number) => {
+  const handleDelete = async (id: string) => {
     if (!(await confirmDialog("Delete this payslip row?"))) return;
     setSaving(true);
     setError(null);

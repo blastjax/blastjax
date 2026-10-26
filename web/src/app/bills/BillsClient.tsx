@@ -68,11 +68,11 @@ type BillForm = {
 type DateKey = "bill_date" | "due_date" | "period_start" | "period_end";
 
 // `form` shows the defaults as dates for a bill added this month; `saved` is what they were when opened.
-type CategoryDraft = { id: number | null; name: string; is_credit_card: boolean; saved: BillDefaults; form: BillForm };
+type CategoryDraft = { id: string | null; name: string; is_credit_card: boolean; saved: BillDefaults; form: BillForm };
 
 // `preset` is what the category's defaults put in the form, so a PDF or another category may still replace it.
 type BillDraft = {
-  id: number | null;
+  id: string | null;
   hasPdf: boolean;
   form: BillForm;
   file: File | null;
@@ -125,9 +125,9 @@ function toRelativeDay(iso: string, today: Date): RelativeDay | null {
   return { months, day: d.getDate() === last ? 31 : d.getDate() };
 }
 
-function presetForm(categoryId: number, d: BillDefaults = {}, today = new Date()): BillForm {
+function presetForm(categoryId: string, d: BillDefaults = {}, today = new Date()): BillForm {
   return {
-    category_id: String(categoryId),
+    category_id: categoryId,
     bill_date: resolveDay(d.bill_date, today),
     due_date: resolveDay(d.due_date, today),
     period_start: resolveDay(d.period_start, today),
@@ -152,7 +152,7 @@ function switchCategory(d: BillDraft, c: BillCategoryRow): BillDraft {
   for (const [key, value] of Object.entries(preset) as [keyof BillForm, string][]) {
     if (untouched(d, key)) form[key] = value;
   }
-  return { ...d, form: { ...form, category_id: String(c.id) }, preset };
+  return { ...d, form: { ...form, category_id: c.id }, preset };
 }
 
 function toCategoryDraft(c: BillCategoryRow | null): CategoryDraft {
@@ -162,7 +162,7 @@ function toCategoryDraft(c: BillCategoryRow | null): CategoryDraft {
     name: c?.name ?? "",
     is_credit_card: c?.is_credit_card ?? false,
     saved,
-    form: presetForm(c?.id ?? 0, saved),
+    form: presetForm(c?.id ?? "", saved),
   };
 }
 
@@ -261,7 +261,7 @@ function editBillDraft(b: BillRow): BillDraft {
     note: null,
     preset: {},
     form: {
-      category_id: String(b.category_id),
+      category_id: b.category_id,
       bill_date: b.bill_date,
       due_date: b.due_date,
       period_start: b.period_start,
@@ -277,7 +277,7 @@ function toBillBody(f: BillForm, isCreditCard: boolean): BillBody {
   if (!f.due_date) throw new Error("Pick the due date.");
   if (!f.period_start || !f.period_end) throw new Error("Pick the first and last day of the billing period.");
   return {
-    category_id: Number(f.category_id),
+    category_id: f.category_id,
     bill_date: f.bill_date,
     due_date: f.due_date,
     period_start: f.period_start,
@@ -402,7 +402,7 @@ export default function BillsClient() {
   const [saving, setSaving] = useState(false);
   const [modalError, setModalError] = useState<string | null>(null);
   const [pdfBill, setPdfBill] = useState<BillRow | null>(null);
-  const [listView, setListView] = useState<{ categoryId: number; year: number | null } | null>(null);
+  const [listView, setListView] = useState<{ categoryId: string; year: number | null } | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -444,8 +444,8 @@ export default function BillsClient() {
     setBillDraft(draft);
   };
 
-  const nameOf = (categoryId: number) => categories.find((c) => c.id === categoryId)?.name ?? "Bill";
-  const isCreditCard = (categoryId: string) => !!categories.find((c) => String(c.id) === categoryId)?.is_credit_card;
+  const nameOf = (categoryId: string) => categories.find((c) => c.id === categoryId)?.name ?? "Bill";
+  const isCreditCard = (categoryId: string) => !!categories.find((c) => c.id === categoryId)?.is_credit_card;
 
   // Refreshes from the server even when the action fails: a new bill may have saved before its PDF upload didn't.
   const submit = async (action: () => Promise<unknown>, close: () => void) => {
@@ -511,7 +511,7 @@ export default function BillsClient() {
   const setForm = (patch: Partial<BillForm>) =>
     setBillDraft((d) => d && { ...d, form: { ...d.form, ...patch } });
 
-  const readPdf = async (file: File, categoryId: number) => {
+  const readPdf = async (file: File, categoryId: string) => {
     setBillDraft((d) => d && { ...d, note: "Reading the PDF…" });
     let apply: (d: BillDraft) => BillDraft;
     try {
@@ -764,7 +764,7 @@ export default function BillsClient() {
                     className={INPUT_CLASSES}
                     value={billDraft.form.category_id}
                     onChange={(e) => {
-                      const c = categories.find((x) => String(x.id) === e.target.value);
+                      const c = categories.find((x) => x.id === e.target.value);
                       if (c) setBillDraft((d) => d && switchCategory(d, c));
                     }}
                     disabled={saving}
@@ -792,7 +792,7 @@ export default function BillsClient() {
                     onChange={(e) => {
                       const file = e.target.files?.[0] ?? null;
                       setBillDraft((d) => d && { ...d, file, note: null });
-                      if (file && isPdf(file)) void readPdf(file, Number(billDraft.form.category_id));
+                      if (file && isPdf(file)) void readPdf(file, billDraft.form.category_id);
                     }}
                     disabled={saving}
                   />

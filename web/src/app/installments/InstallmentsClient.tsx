@@ -179,13 +179,13 @@ export default function InstallmentsClient() {
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [addModalOpen, setAddModalOpen] = useState(false);
-  const [scheduleModalId, setScheduleModalId] = useState<number | null>(null);
+  const [scheduleModalId, setScheduleModalId] = useState<string | null>(null);
   const [detail, setDetail] = useState<InstallmentDetailResponse | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [lineEdits, setLineEdits] = useState<
-    Record<number, { principal: string; interest: string }>
+    Record<string, { principal: string; interest: string }>
   >({});
-  const [lineOrderIds, setLineOrderIds] = useState<number[]>([]);
+  const [lineOrderIds, setLineOrderIds] = useState<string[]>([]);
   const [savingSchedule, setSavingSchedule] = useState(false);
   const [paymentsModalOpen, setPaymentsModalOpen] = useState(false);
   const [paymentsLoading, setPaymentsLoading] = useState(false);
@@ -194,7 +194,7 @@ export default function InstallmentsClient() {
   >([]);
   const [showArchived, setShowArchived] = useState(false);
   const [detailTab, setDetailTab] = useState<"schedule" | "details">("schedule");
-  const [cardId, setCardId] = useState<number | null>(null);
+  const [cardId, setCardId] = useState<string | null>(null);
   const [linkToCard, setLinkToCard] = useState(false);
   const [lineDrafts, setLineDrafts] = useState<
     Record<number, { principal: string; interest: string }>
@@ -278,7 +278,7 @@ export default function InstallmentsClient() {
     });
   }, []);
 
-  const removeRow = useCallback((id: number) => {
+  const removeRow = useCallback((id: string) => {
     setRows((rs) => rs.filter((r) => r.id !== id));
   }, []);
 
@@ -298,7 +298,7 @@ export default function InstallmentsClient() {
       setLineOrderIds([]);
       return;
     }
-    const e: Record<number, { principal: string; interest: string }> = {};
+    const e: Record<string, { principal: string; interest: string }> = {};
     for (const ln of detail.lines) {
       e[ln.id] = {
         principal: String(ln.principal),
@@ -472,7 +472,7 @@ export default function InstallmentsClient() {
 
   const paymentsByMonth = useMemo(() => {
     type Item = {
-      planId: number;
+      planId: string;
       planName: string;
       seq: number;
       amount: number;
@@ -544,7 +544,7 @@ export default function InstallmentsClient() {
     return { map, years, grandTotal, grandDone, grandToPay };
   }, [paymentsDetails]);
 
-  const openDetail = async (id: number) => {
+  const openDetail = async (id: string) => {
     setDetailTab("schedule");
     setScheduleModalId(id);
     setDetail(null);
@@ -679,7 +679,7 @@ export default function InstallmentsClient() {
     }
   };
 
-  const onPay = async (id: number) => {
+  const onPay = async (id: string) => {
     setSaving(true);
     setError(null);
     try {
@@ -692,7 +692,7 @@ export default function InstallmentsClient() {
     }
   };
 
-  const onDelete = async (id: number) => {
+  const onDelete = async (id: string) => {
     if (!(await confirmDialog("Delete this installment plan?"))) return;
     setSaving(true);
     setError(null);
@@ -708,7 +708,7 @@ export default function InstallmentsClient() {
   };
 
   const dueIds = useMemo(() => {
-    const s = new Set<number>();
+    const s = new Set<string>();
     for (const r of activeRows) {
       if (isDueThisMonth(r)) s.add(r.id);
     }
@@ -1137,7 +1137,7 @@ export default function InstallmentsClient() {
                                   e.preventDefault();
                                   return;
                                 }
-                                e.dataTransfer.setData("text/plain", String(ln.id));
+                                e.dataTransfer.setData("text/plain", ln.id);
                                 e.dataTransfer.effectAllowed = "move";
                               }}
                               onDragOver={(e) => {
@@ -1146,8 +1146,8 @@ export default function InstallmentsClient() {
                               }}
                               onDrop={(e) => {
                                 e.preventDefault();
-                                const fromId = Number(e.dataTransfer.getData("text/plain"));
-                                if (!Number.isFinite(fromId) || fromId === ln.id) return;
+                                const fromId = e.dataTransfer.getData("text/plain");
+                                if (!fromId || fromId === ln.id) return;
                                 setLineOrderIds((prev) => {
                                   const next = [...prev];
                                   const from = next.indexOf(fromId);

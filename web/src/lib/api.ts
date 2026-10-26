@@ -89,7 +89,7 @@ async function sendJson<T>(
 }
 
 export type PayslipRow = {
-  id: number;
+  id: string;
   company: string;
   total: number | null;
   commission: number | null;
@@ -143,15 +143,15 @@ export async function createPayslip(body: PayslipCreateBody) {
   return sendJson<PayslipRow>("POST", "/api/payslip", body);
 }
 
-export async function updatePayslip(id: number, body: PayslipCreateBody) {
+export async function updatePayslip(id: string, body: PayslipCreateBody) {
   return sendJson<PayslipRow>("PUT", `/api/payslip/${id}`, body);
 }
 
-export async function deletePayslip(id: number) {
+export async function deletePayslip(id: string) {
   return sendJson<{ ok: boolean }>("DELETE", `/api/payslip/${id}`);
 }
 
-export function payslipPdfUrl(id: number): string {
+export function payslipPdfUrl(id: string): string {
   return `${dataApiBase()}/api/payslip/${id}/pdf`;
 }
 
@@ -166,11 +166,11 @@ async function uploadPdf<T = { ok: boolean; has_pdf: boolean }>(path: string, fi
   );
 }
 
-export async function uploadPayslipPdf(id: number, file: File) {
+export async function uploadPayslipPdf(id: string, file: File) {
   return uploadPdf(`/api/payslip/${id}/pdf`, file);
 }
 
-export async function deletePayslipPdf(id: number) {
+export async function deletePayslipPdf(id: string) {
   return sendJson<{ ok: boolean; has_pdf: boolean }>(
     "DELETE",
     `/api/payslip/${id}/pdf`,
@@ -178,7 +178,7 @@ export async function deletePayslipPdf(id: number) {
 }
 
 export type InstallmentRow = {
-  id: number;
+  id: string;
   name: string;
   installment_current: number;
   installment_total: number;
@@ -189,13 +189,13 @@ export type InstallmentRow = {
   finish_date: string;
   remaining: number;
   original_total: number;
-  credit_card_id: number | null;
+  credit_card_id: string | null;
   created_at: string;
   due_payment?: number;
 };
 
 export type InstallmentLineRow = {
-  id: number;
+  id: string;
   seq: number;
   principal: number;
   interest: number | null;
@@ -224,7 +224,7 @@ export type InstallmentCreateBody = {
   finish_date: string;
   remaining?: number | null;
   original_total?: number | null;
-  credit_card_id?: number | null;
+  credit_card_id?: string | null;
 };
 
 export async function getInstallments(limit?: number) {
@@ -234,7 +234,7 @@ export async function getInstallments(limit?: number) {
   );
 }
 
-export async function getInstallment(id: number) {
+export async function getInstallment(id: string) {
   return getJson<InstallmentDetailResponse>(`/api/installment/${id}`);
 }
 
@@ -249,15 +249,15 @@ export async function createInstallment(body: InstallmentCreateBody) {
   return sendJson<InstallmentDetailResponse>("POST", "/api/installment", body);
 }
 
-export async function updateInstallment(id: number, body: InstallmentCreateBody) {
+export async function updateInstallment(id: string, body: InstallmentCreateBody) {
   return sendJson<InstallmentDetailResponse>("PUT", `/api/installment/${id}`, body);
 }
 
-export async function deleteInstallment(id: number) {
+export async function deleteInstallment(id: string) {
   return sendJson<{ ok: boolean }>("DELETE", `/api/installment/${id}`);
 }
 
-export async function recordInstallmentPayment(id: number) {
+export async function recordInstallmentPayment(id: string) {
   return sendJson<{ installment: InstallmentRow }>(
     "POST",
     `/api/installment/${id}/pay`,
@@ -265,7 +265,7 @@ export async function recordInstallmentPayment(id: number) {
 }
 
 export async function updateInstallmentLinesBulk(
-  installmentId: number,
+  installmentId: string,
   lines: { seq: number; principal: number; interest: number | null }[],
 ) {
   return sendJson<InstallmentDetailResponse>(
@@ -275,7 +275,7 @@ export async function updateInstallmentLinesBulk(
   );
 }
 
-export async function reorderInstallmentLines(installmentId: number, lineIds: number[]) {
+export async function reorderInstallmentLines(installmentId: string, lineIds: string[]) {
   return sendJson<InstallmentDetailResponse>(
     "PUT",
     `/api/installment/${installmentId}/lines/reorder`,
@@ -284,7 +284,7 @@ export async function reorderInstallmentLines(installmentId: number, lineIds: nu
 }
 
 export type HousePaymentRow = {
-  id: number;
+  id: string;
   name: string;
   notes: string | null;
   created_at: string;
@@ -294,7 +294,7 @@ export type HousePaymentRow = {
 };
 
 export type HousePaymentEntry = {
-  id: number;
+  id: string;
   paid_on: string;
   amount: number;
   created_at: string;
@@ -328,7 +328,7 @@ export async function getHousePayments(limit?: number) {
   );
 }
 
-export async function getHousePayment(id: number) {
+export async function getHousePayment(id: string) {
   return getJson<HousePaymentDetailResponse>(`/api/house-payment/${id}`);
 }
 
@@ -336,16 +336,16 @@ export async function createHousePayment(body: HousePaymentCreateBody) {
   return sendJson<HousePaymentRow>("POST", "/api/house-payment", body);
 }
 
-export async function updateHousePayment(id: number, body: HousePaymentCreateBody) {
+export async function updateHousePayment(id: string, body: HousePaymentCreateBody) {
   return sendJson<HousePaymentRow>("PUT", `/api/house-payment/${id}`, body);
 }
 
-export async function deleteHousePayment(id: number) {
+export async function deleteHousePayment(id: string) {
   return sendJson<{ ok: boolean }>("DELETE", `/api/house-payment/${id}`);
 }
 
 export async function createHousePaymentEntry(
-  housePaymentId: number,
+  housePaymentId: string,
   body: HousePaymentEntryBody,
 ) {
   return sendJson<HousePaymentDetailResponse>(
@@ -356,8 +356,8 @@ export async function createHousePaymentEntry(
 }
 
 export async function updateHousePaymentEntry(
-  housePaymentId: number,
-  entryId: number,
+  housePaymentId: string,
+  entryId: string,
   body: HousePaymentEntryBody,
 ) {
   return sendJson<HousePaymentDetailResponse>(
@@ -368,8 +368,8 @@ export async function updateHousePaymentEntry(
 }
 
 export async function deleteHousePaymentEntry(
-  housePaymentId: number,
-  entryId: number,
+  housePaymentId: string,
+  entryId: string,
 ) {
   return sendJson<HousePaymentDetailResponse>(
     "DELETE",
@@ -645,7 +645,7 @@ export async function generateMamboPuzzle(
 }
 
 export type BloodPressureRow = {
-  id: number;
+  id: string;
   systolic: number | null;
   diastolic: number | null;
   pulse: number | null;
@@ -681,7 +681,7 @@ export async function createBloodPressure(body: BloodPressureCreateBody) {
 }
 
 export async function updateBloodPressure(
-  id: number,
+  id: string,
   body: BloodPressureCreateBody,
 ) {
   return sendJson<{ reading: BloodPressureRow }>(
@@ -691,12 +691,12 @@ export async function updateBloodPressure(
   );
 }
 
-export async function deleteBloodPressure(id: number) {
+export async function deleteBloodPressure(id: string) {
   return sendJson<{ ok: boolean }>("DELETE", `/api/blood-pressure/${id}`);
 }
 
 export type FixedExpenseRow = {
-  id: number;
+  id: string;
   period_half: number;
   period_year: number;
   period_month: number;
@@ -729,16 +729,16 @@ export async function createFixedExpense(body: FixedExpenseCreateBody) {
   return sendJson<{ expense: FixedExpenseRow }>("POST", "/api/fixed-expense", body);
 }
 
-export async function updateFixedExpense(id: number, body: { amount: number; description?: string | null }) {
+export async function updateFixedExpense(id: string, body: { amount: number; description?: string | null }) {
   return sendJson<{ expense: FixedExpenseRow }>("PUT", `/api/fixed-expense/${id}`, body);
 }
 
-export async function deleteFixedExpense(id: number) {
+export async function deleteFixedExpense(id: string) {
   return sendJson<{ ok: boolean }>("DELETE", `/api/fixed-expense/${id}`);
 }
 
 export type MonthlyExpenseRow = {
-  id: number;
+  id: string;
   name: string;
   description: string | null;
   amount: number;
@@ -777,16 +777,16 @@ export async function createMonthlyExpense(body: MonthlyExpenseCreateBody) {
   return sendJson<{ expense: MonthlyExpenseRow }>("POST", "/api/monthly-expense", body);
 }
 
-export async function updateMonthlyExpense(id: number, body: MonthlyExpenseCreateBody) {
+export async function updateMonthlyExpense(id: string, body: MonthlyExpenseCreateBody) {
   return sendJson<{ expense: MonthlyExpenseRow }>("PUT", `/api/monthly-expense/${id}`, body);
 }
 
-export async function deleteMonthlyExpense(id: number) {
+export async function deleteMonthlyExpense(id: string) {
   return sendJson<{ ok: boolean }>("DELETE", `/api/monthly-expense/${id}`);
 }
 
 export type CalendarDayOverrideRow = {
-  id: number;
+  id: string;
   day: string;
   amount: number;
   saved: number | null;
@@ -808,7 +808,7 @@ export async function bulkUpsertCalendarDayOverrides(
 }
 
 export type PayPeriodStartOverrideRow = {
-  id: number;
+  id: string;
   period_year: number;
   period_month: number;
   period_half: 1 | 2;
@@ -888,7 +888,7 @@ export async function deletePayPeriodStartOverride(
 }
 
 export type CreditCardRow = {
-  id: number;
+  id: string;
   name: string;
   credit_limit: number;
   last_statement_balance: number;
@@ -898,14 +898,14 @@ export type CreditCardRow = {
   interest_rate: number;
   statement_date: string | null;
   due_date: string | null;
-  bill_category_id: number | null; // when set, the statement is that bill category's latest bill
+  bill_category_id: string | null; // when set, the statement is that bill category's latest bill
   monthly_dues: number;
   created_at: string;
 };
 
 export type CreditCardPaymentRow = {
-  id: number;
-  credit_card_id: number;
+  id: string;
+  credit_card_id: string;
   amount: number;
   payment_date: string;
   note: string | null;
@@ -920,7 +920,7 @@ export type CreditCardCreateBody = {
   interest_rate: number;
   statement_date?: string | null;
   due_date?: string | null;
-  bill_category_id?: number | null;
+  bill_category_id?: string | null;
 };
 
 export type CreditCardPaymentCreateBody = {
@@ -943,22 +943,22 @@ export async function createCreditCard(body: CreditCardCreateBody) {
   return sendJson<{ card: CreditCardRow }>("POST", "/api/credit-card", body);
 }
 
-export async function updateCreditCard(id: number, body: CreditCardCreateBody) {
+export async function updateCreditCard(id: string, body: CreditCardCreateBody) {
   return sendJson<{ card: CreditCardRow }>("PUT", `/api/credit-card/${id}`, body);
 }
 
-export async function deleteCreditCard(id: number) {
+export async function deleteCreditCard(id: string) {
   return sendJson<{ ok: boolean }>("DELETE", `/api/credit-card/${id}`);
 }
 
-export async function adjustCreditCardBalance(id: number, availableLimit: number) {
+export async function adjustCreditCardBalance(id: string, availableLimit: number) {
   return sendJson<{ card: CreditCardRow }>("PATCH", `/api/credit-card/${id}/balance`, {
     available_limit: availableLimit,
   });
 }
 
 export async function createCreditCardPayment(
-  cardId: number,
+  cardId: string,
   body: CreditCardPaymentCreateBody,
 ) {
   return sendJson<{ payment: CreditCardPaymentRow; card: CreditCardRow }>(
@@ -968,7 +968,7 @@ export async function createCreditCardPayment(
   );
 }
 
-export async function deleteCreditCardPayment(paymentId: number) {
+export async function deleteCreditCardPayment(paymentId: string) {
   return sendJson<{ ok: boolean; card: CreditCardRow | null }>(
     "DELETE",
     `/api/credit-card/payments/${paymentId}`,
@@ -976,7 +976,7 @@ export async function deleteCreditCardPayment(paymentId: number) {
 }
 
 export type LottoGame = {
-  id: number;
+  id: string;
   name: string;
   jackpot_prize: number | null;
   last_attempt_draw_date: string | null;
@@ -993,7 +993,7 @@ export async function getLottoGames() {
 }
 
 export type LottoDrawResult = NonNullable<LottoGame["latest_result"]> & {
-  game_id: number;
+  game_id: string;
   jackpot_prize: number | null;
   attempts: number[][];
 };
@@ -1010,7 +1010,7 @@ export function lottoGameSlug(name: string): string {
 }
 
 export type LottoDrawRow = {
-  id: number;
+  id: string;
   draw_date: string;
   numbers: number[];
   jackpot_prize: number | null;
@@ -1019,8 +1019,8 @@ export type LottoDrawRow = {
 };
 
 export type LottoAttemptRow = {
-  id: number;
-  draw_id: number;
+  id: string;
+  draw_id: string;
   ticket: number | null;
   numbers: number[];
   created_at: string;
@@ -1031,12 +1031,12 @@ export type LottoDrawDetail = {
   attempts: LottoAttemptRow[];
 };
 
-export async function getLottoDraws(gameId: number, limit?: number) {
+export async function getLottoDraws(gameId: string, limit?: number) {
   return getJson<{ draws: LottoDrawDetail[] }>("/api/lotto", { game_id: gameId, limit });
 }
 
 export async function setLottoDraw(
-  gameId: number,
+  gameId: string,
   drawDate: string,
   numbers: number[] | null,
   jackpotPrize?: number | null,
@@ -1052,8 +1052,8 @@ export async function setLottoDraw(
 }
 
 export async function updateLottoDraw(
-  gameId: number,
-  drawId: number,
+  gameId: string,
+  drawId: string,
   drawDate: string,
   numbers: number[] | null,
   jackpotPrize?: number | null,
@@ -1068,12 +1068,12 @@ export async function updateLottoDraw(
   });
 }
 
-export async function deleteLottoDraw(drawId: number) {
+export async function deleteLottoDraw(drawId: string) {
   return sendJson<{ ok: boolean }>("DELETE", `/api/lotto/${drawId}`);
 }
 
 export async function createLottoAttempt(
-  drawId: number,
+  drawId: string,
   numbers: number[],
   ticket?: number | null,
 ) {
@@ -1084,7 +1084,7 @@ export async function createLottoAttempt(
 }
 
 export async function createLottoAttemptsBulk(
-  drawId: number,
+  drawId: string,
   attempts: { numbers: number[]; ticket?: number | null }[],
 ) {
   return sendJson<LottoDrawDetail>("POST", `/api/lotto/${drawId}/attempts/bulk`, {
@@ -1093,8 +1093,8 @@ export async function createLottoAttemptsBulk(
 }
 
 export async function updateLottoAttempt(
-  drawId: number,
-  attemptId: number,
+  drawId: string,
+  attemptId: string,
   numbers: number[],
   ticket?: number | null,
 ) {
@@ -1105,14 +1105,14 @@ export async function updateLottoAttempt(
   );
 }
 
-export async function deleteLottoAttempt(drawId: number, attemptId: number) {
+export async function deleteLottoAttempt(drawId: string, attemptId: string) {
   return sendJson<LottoDrawDetail>(
     "DELETE",
     `/api/lotto/${drawId}/attempts/${attemptId}`,
   );
 }
 
-export async function importLottoDrawResultsText(gameId: number, text: string) {
+export async function importLottoDrawResultsText(gameId: string, text: string) {
   return sendJson<{
     inserted: number;
     updated: number;
@@ -1126,7 +1126,7 @@ export async function syncLottoResultsFromPcso() {
 }
 
 export type AppUserRow = {
-  id: number;
+  id: string;
   username: string;
   is_superuser: boolean;
   allowed_pages: string[] | null;
@@ -1156,15 +1156,15 @@ export async function createAppUser(body: AppUserCreateBody) {
   return sendJson<{ user: AppUserRow }>("POST", "/api/users", body);
 }
 
-export async function updateAppUser(id: number, body: AppUserUpdateBody) {
+export async function updateAppUser(id: string, body: AppUserUpdateBody) {
   return sendJson<{ user: AppUserRow }>("PUT", `/api/users/${id}`, body);
 }
 
-export async function updateAppUserAccess(id: number, body: AppUserAccessBody) {
+export async function updateAppUserAccess(id: string, body: AppUserAccessBody) {
   return sendJson<{ user: AppUserRow }>("PUT", `/api/users/${id}/access`, body);
 }
 
-export async function deleteAppUser(id: number) {
+export async function deleteAppUser(id: string) {
   return sendJson<{ ok: boolean }>("DELETE", `/api/users/${id}`);
 }
 
@@ -1176,7 +1176,7 @@ export async function verifyAppUserPassword(username: string, password: string) 
 }
 
 export type PasskeyRow = {
-  id: number;
+  id: string;
   name: string;
   created_at: string;
   last_used_at: string | null;
@@ -1202,7 +1202,7 @@ export async function addPasskey(name: string) {
   });
 }
 
-export async function deletePasskey(id: number) {
+export async function deletePasskey(id: string) {
   return sendJson<{ ok: boolean }>("DELETE", `/api/auth/passkeys/${id}`);
 }
 
@@ -1224,7 +1224,7 @@ export type CompanyColumnFlags = {
 };
 
 export type CompanyRow = CompanyColumnFlags & {
-  id: number;
+  id: string;
   name: string;
   created_at: string;
   sort_order: number;
@@ -1282,23 +1282,23 @@ export async function createCompany(name: string, flags: CompanyColumnFlags) {
   });
 }
 
-export async function updateCompany(id: number, name: string, flags: CompanyColumnFlags) {
+export async function updateCompany(id: string, name: string, flags: CompanyColumnFlags) {
   return sendJson<{ company: CompanyRow }>("PUT", `/api/companies/${id}`, {
     name,
     ...flags,
   });
 }
 
-export async function deleteCompany(id: number) {
+export async function deleteCompany(id: string) {
   return sendJson<{ ok: boolean }>("DELETE", `/api/companies/${id}`);
 }
 
-export async function reorderCompanies(ids: number[]) {
+export async function reorderCompanies(ids: string[]) {
   return sendJson<{ companies: CompanyRow[] }>("PUT", "/api/companies/reorder", { ids });
 }
 
 export type TravelTripRow = {
-  id: number;
+  id: string;
   title: string;
   start_date: string;
   end_date: string;
@@ -1307,8 +1307,8 @@ export type TravelTripRow = {
 };
 
 export type TravelCityRow = {
-  id: number;
-  trip_id: number;
+  id: string;
+  trip_id: string;
   name: string;
   start_date: string | null;
   end_date: string | null;
@@ -1317,8 +1317,8 @@ export type TravelCityRow = {
 };
 
 export type TravelFlightRow = {
-  id: number;
-  trip_id: number;
+  id: string;
+  trip_id: string;
   flight_number: string;
   flight_date: string | null;
   arrival_date: string | null;
@@ -1344,8 +1344,8 @@ export type TravelFlightRow = {
 };
 
 export type TravelTransportRow = {
-  id: number;
-  trip_id: number;
+  id: string;
+  trip_id: string;
   mode: "bus" | "train" | "ferry";
   number: string | null;
   travel_date: string | null;
@@ -1371,8 +1371,8 @@ export type TravelTransportRow = {
 };
 
 export type TravelItineraryRow = {
-  id: number;
-  trip_id: number;
+  id: string;
+  trip_id: string;
   item_date: string;
   item_end_date: string | null;
   start_time: string | null;
@@ -1388,8 +1388,8 @@ export type TravelItineraryRow = {
 };
 
 export type TravelAccommodationRow = {
-  id: number;
-  trip_id: number;
+  id: string;
+  trip_id: string;
   name: string;
   checkin_date: string;
   checkout_date: string;
@@ -1527,21 +1527,21 @@ export async function createTravelTrip(body: TravelTripCreateBody) {
   return sendJson<TravelTripDetail>("POST", "/api/travel", body);
 }
 
-export async function updateTravelTrip(tripId: number, body: TravelTripCreateBody) {
+export async function updateTravelTrip(tripId: string, body: TravelTripCreateBody) {
   return sendJson<TravelTripDetail>("PUT", `/api/travel/${tripId}`, body);
 }
 
-export async function deleteTravelTrip(tripId: number) {
+export async function deleteTravelTrip(tripId: string) {
   return sendJson<{ ok: boolean }>("DELETE", `/api/travel/${tripId}`);
 }
 
-export async function createTravelFlight(tripId: number, body: TravelFlightBody) {
+export async function createTravelFlight(tripId: string, body: TravelFlightBody) {
   return sendJson<TravelTripDetail>("POST", `/api/travel/${tripId}/flights`, body);
 }
 
 export async function updateTravelFlight(
-  tripId: number,
-  flightId: number,
+  tripId: string,
+  flightId: string,
   body: TravelFlightBody,
 ) {
   return sendJson<TravelTripDetail>(
@@ -1551,17 +1551,17 @@ export async function updateTravelFlight(
   );
 }
 
-export async function deleteTravelFlight(tripId: number, flightId: number) {
+export async function deleteTravelFlight(tripId: string, flightId: string) {
   return sendJson<TravelTripDetail>("DELETE", `/api/travel/${tripId}/flights/${flightId}`);
 }
 
-export async function createTravelTransport(tripId: number, body: TravelTransportBody) {
+export async function createTravelTransport(tripId: string, body: TravelTransportBody) {
   return sendJson<TravelTripDetail>("POST", `/api/travel/${tripId}/transport`, body);
 }
 
 export async function updateTravelTransport(
-  tripId: number,
-  transportId: number,
+  tripId: string,
+  transportId: string,
   body: TravelTransportBody,
 ) {
   return sendJson<TravelTripDetail>(
@@ -1571,20 +1571,20 @@ export async function updateTravelTransport(
   );
 }
 
-export async function deleteTravelTransport(tripId: number, transportId: number) {
+export async function deleteTravelTransport(tripId: string, transportId: string) {
   return sendJson<TravelTripDetail>(
     "DELETE",
     `/api/travel/${tripId}/transport/${transportId}`,
   );
 }
 
-export async function createTravelItinerary(tripId: number, body: TravelItineraryBody) {
+export async function createTravelItinerary(tripId: string, body: TravelItineraryBody) {
   return sendJson<TravelTripDetail>("POST", `/api/travel/${tripId}/itinerary`, body);
 }
 
 export async function updateTravelItinerary(
-  tripId: number,
-  itemId: number,
+  tripId: string,
+  itemId: string,
   body: TravelItineraryBody,
 ) {
   return sendJson<TravelTripDetail>(
@@ -1594,20 +1594,20 @@ export async function updateTravelItinerary(
   );
 }
 
-export async function deleteTravelItinerary(tripId: number, itemId: number) {
+export async function deleteTravelItinerary(tripId: string, itemId: string) {
   return sendJson<TravelTripDetail>("DELETE", `/api/travel/${tripId}/itinerary/${itemId}`);
 }
 
 export async function createTravelAccommodation(
-  tripId: number,
+  tripId: string,
   body: TravelAccommodationBody,
 ) {
   return sendJson<TravelTripDetail>("POST", `/api/travel/${tripId}/accommodations`, body);
 }
 
 export async function updateTravelAccommodation(
-  tripId: number,
-  accommodationId: number,
+  tripId: string,
+  accommodationId: string,
   body: TravelAccommodationBody,
 ) {
   return sendJson<TravelTripDetail>(
@@ -1617,22 +1617,22 @@ export async function updateTravelAccommodation(
   );
 }
 
-export async function deleteTravelAccommodation(tripId: number, accommodationId: number) {
+export async function deleteTravelAccommodation(tripId: string, accommodationId: string) {
   return sendJson<TravelTripDetail>(
     "DELETE",
     `/api/travel/${tripId}/accommodations/${accommodationId}`,
   );
 }
 
-export async function createTravelCity(tripId: number, body: TravelCityBody) {
+export async function createTravelCity(tripId: string, body: TravelCityBody) {
   return sendJson<TravelTripDetail>("POST", `/api/travel/${tripId}/cities`, body);
 }
 
-export async function updateTravelCity(tripId: number, cityId: number, body: TravelCityBody) {
+export async function updateTravelCity(tripId: string, cityId: string, body: TravelCityBody) {
   return sendJson<TravelTripDetail>("PUT", `/api/travel/${tripId}/cities/${cityId}`, body);
 }
 
-export async function deleteTravelCity(tripId: number, cityId: number) {
+export async function deleteTravelCity(tripId: string, cityId: string) {
   return sendJson<TravelTripDetail>("DELETE", `/api/travel/${tripId}/cities/${cityId}`);
 }
 
@@ -1648,7 +1648,7 @@ export type BillDefaults = {
 };
 
 export type BillCategoryRow = {
-  id: number;
+  id: string;
   name: string;
   is_credit_card?: boolean; // this and `defaults` are missing from a bill list cached before they existed
   defaults?: BillDefaults;
@@ -1658,8 +1658,8 @@ export type BillCategoryRow = {
 export type BillCategoryBody = Pick<BillCategoryRow, "name" | "is_credit_card" | "defaults">;
 
 export type BillRow = {
-  id: number;
-  category_id: number;
+  id: string;
+  category_id: string;
   bill_date: string;
   due_date: string;
   period_start: string;
@@ -1680,11 +1680,11 @@ export async function createBillCategory(body: BillCategoryBody) {
   return sendJson<{ category: BillCategoryRow }>("POST", "/api/bill-category", body);
 }
 
-export async function updateBillCategory(id: number, body: BillCategoryBody) {
+export async function updateBillCategory(id: string, body: BillCategoryBody) {
   return sendJson<{ category: BillCategoryRow }>("PUT", `/api/bill-category/${id}`, body);
 }
 
-export async function deleteBillCategory(id: number) {
+export async function deleteBillCategory(id: string) {
   return sendJson<{ ok: boolean }>("DELETE", `/api/bill-category/${id}`);
 }
 
@@ -1692,19 +1692,19 @@ export async function createBill(body: BillBody) {
   return sendJson<{ bill: BillRow }>("POST", "/api/bill", body);
 }
 
-export async function updateBill(id: number, body: BillBody) {
+export async function updateBill(id: string, body: BillBody) {
   return sendJson<{ bill: BillRow }>("PUT", `/api/bill/${id}`, body);
 }
 
-export async function deleteBill(id: number) {
+export async function deleteBill(id: string) {
   return sendJson<{ ok: boolean }>("DELETE", `/api/bill/${id}`);
 }
 
-export function billPdfUrl(id: number): string {
+export function billPdfUrl(id: string): string {
   return `${dataApiBase()}/api/bill/${id}/pdf`;
 }
 
-export async function uploadBillPdf(id: number, file: File) {
+export async function uploadBillPdf(id: string, file: File) {
   return uploadPdf(`/api/bill/${id}/pdf`, file);
 }
 
@@ -1716,6 +1716,6 @@ export type BillPdfFields = {
   amount: number | null;
 };
 
-export async function readBillPdf(file: File, categoryId: number) {
+export async function readBillPdf(file: File, categoryId: string) {
   return uploadPdf<BillPdfFields>(`/api/bill/extract?category_id=${categoryId}`, file);
 }

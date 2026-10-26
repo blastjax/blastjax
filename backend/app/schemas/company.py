@@ -1,4 +1,5 @@
 from __future__ import annotations
+from uuid import UUID
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -62,4 +63,4 @@ class CompanyUpdate(_CompanyColumnFlags):
 
 
 class CompanyReorder(BaseModel):
-    ids: list[int] = Field(..., min_length=1)
+    ids: list[UUID] = Field(..., min_length=1)

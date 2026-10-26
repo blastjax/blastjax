@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from contextlib import suppress
 from typing import Any
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile
 from sqlalchemy.exc import IntegrityError
@@ -48,7 +49,7 @@ def bill_category_create(body: BillCategoryCreate) -> dict[str, Any]:
 
 
 @router.put("/api/bill-category/{category_id}")
-def bill_category_update(category_id: int, body: BillCategoryCreate) -> dict[str, Any]:
+def bill_category_update(category_id: UUID, body: BillCategoryCreate) -> dict[str, Any]:
     try:
         row = update_bill_category(category_id, body.model_dump())
     except IntegrityError:
@@ -59,7 +60,7 @@ def bill_category_update(category_id: int, body: BillCategoryCreate) -> dict[str
 
 
 @router.delete("/api/bill-category/{category_id}")
-def bill_category_remove(category_id: int) -> dict[str, Any]:
+def bill_category_remove(category_id: UUID) -> dict[str, Any]:
     if not delete_bill_category(category_id):
         raise HTTPException(status_code=404, detail="Category not found.")
     return {"ok": True}
@@ -74,7 +75,7 @@ def bill_create(body: BillCreate) -> dict[str, Any]:
 
 
 @router.put("/api/bill/{bill_id}")
-def bill_replace(bill_id: int, body: BillCreate) -> dict[str, Any]:
+def bill_replace(bill_id: UUID, body: BillCreate) -> dict[str, Any]:
     try:
         row = update_bill(bill_id, body.model_dump())
     except IntegrityError:
@@ -85,7 +86,7 @@ def bill_replace(bill_id: int, body: BillCreate) -> dict[str, Any]:
 
 
 @router.delete("/api/bill/{bill_id}")
-def bill_remove(bill_id: int) -> dict[str, Any]:
+def bill_remove(bill_id: UUID) -> dict[str, Any]:
     if not delete_bill(bill_id):
         raise HTTPException(status_code=404, detail="Bill not found.")
     return {"ok": True}
@@ -93,7 +94,7 @@ def bill_remove(bill_id: int) -> dict[str, Any]:
 
 @router.post("/api/bill/extract")
 async def bill_extract(
-    file: UploadFile = File(...), category_id: int | None = Query(default=None)
+    file: UploadFile = File(...), category_id: UUID | None = Query(default=None)
 ) -> dict[str, Any]:
     data = await read_upload(file)
     try:
@@ -102,7 +103,7 @@ async def bill_extract(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-def _read_bill(data: bytes, category_id: int | None) -> dict[str, Any]:
+def _read_bill(data: bytes, category_id: UUID | None) -> dict[str, Any]:
     """Reads a bill's PDF using what the biller's saved bills teach about its layout."""
     text = pdf_text(data)
     examples = []
@@ -114,14 +115,14 @@ def _read_bill(data: bytes, category_id: int | None) -> dict[str, Any]:
 
 
 @router.post("/api/bill/{bill_id}/pdf")
-async def bill_upload_pdf(bill_id: int, file: UploadFile = File(...)) -> dict[str, Any]:
+async def bill_upload_pdf(bill_id: UUID, file: UploadFile = File(...)) -> dict[str, Any]:
     if not set_bill_pdf(bill_id, await read_upload(file, images=True)):
         raise HTTPException(status_code=404, detail="Bill not found.")
     return {"ok": True, "has_pdf": True}
 
 
 @router.get("/api/bill/{bill_id}/pdf")
-def bill_get_pdf(bill_id: int) -> Response:
+def bill_get_pdf(bill_id: UUID) -> Response:
     data = get_bill_pdf(bill_id)
     if data is None:
         raise HTTPException(status_code=404, detail="No file attached to this bill.")

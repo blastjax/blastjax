@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
@@ -57,7 +58,7 @@ def blood_pressure_create(body: BloodPressureCreate) -> dict[str, Any]:
 
 @router.put("/api/blood-pressure/{reading_id}")
 def blood_pressure_replace(
-    reading_id: int, body: BloodPressureCreate
+    reading_id: UUID, body: BloodPressureCreate
 ) -> dict[str, Any]:
     row = update_blood_pressure(
         reading_id,
@@ -75,7 +76,7 @@ def blood_pressure_replace(
 
 
 @router.delete("/api/blood-pressure/{reading_id}")
-def blood_pressure_remove(reading_id: int) -> dict[str, Any]:
+def blood_pressure_remove(reading_id: UUID) -> dict[str, Any]:
     if not delete_blood_pressure(reading_id):
         raise HTTPException(status_code=404, detail="Reading not found.")
     return {"ok": True}

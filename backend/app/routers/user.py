@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.exc import IntegrityError
@@ -50,7 +51,7 @@ def users_verify(body: AppUserVerify) -> dict[str, Any]:
 
 
 @router.put("/{user_id}")
-def users_update(user_id: int, body: AppUserUpdate) -> dict[str, Any]:
+def users_update(user_id: UUID, body: AppUserUpdate) -> dict[str, Any]:
     username = body.username.strip() if body.username is not None else None
     password_hash = hash_password(body.password) if body.password is not None else None
     try:
@@ -63,7 +64,7 @@ def users_update(user_id: int, body: AppUserUpdate) -> dict[str, Any]:
 
 
 @router.put("/{user_id}/access")
-def users_update_access(user_id: int, body: AppUserAccessUpdate) -> dict[str, Any]:
+def users_update_access(user_id: UUID, body: AppUserAccessUpdate) -> dict[str, Any]:
     row = update_app_user_access(user_id, body.is_superuser, body.allowed_pages)
     if row is None:
         raise HTTPException(status_code=404, detail="User not found.")
@@ -71,7 +72,7 @@ def users_update_access(user_id: int, body: AppUserAccessUpdate) -> dict[str, An
 
 
 @router.delete("/{user_id}")
-def users_remove(user_id: int) -> dict[str, Any]:
+def users_remove(user_id: UUID) -> dict[str, Any]:
     if not delete_app_user(user_id):
         raise HTTPException(status_code=404, detail="User not found.")
     return {"ok": True}

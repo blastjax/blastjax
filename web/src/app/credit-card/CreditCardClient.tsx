@@ -215,7 +215,7 @@ export default function CreditCardClient() {
         interest_rate: String(card.interest_rate),
         statement_date: card.statement_date ? card.statement_date.slice(0, 10) : "",
         due_date: card.due_date ? card.due_date.slice(0, 10) : "",
-        bill_category_id: card.bill_category_id == null ? "" : String(card.bill_category_id),
+        bill_category_id: card.bill_category_id ?? "",
       });
     } else {
       setCardForm(emptyCardForm());
@@ -268,7 +268,7 @@ export default function CreditCardClient() {
           interest_rate: interestRate,
           statement_date: cardForm.statement_date || null,
           due_date: cardForm.due_date || null,
-          bill_category_id: linked ? Number(cardForm.bill_category_id) : null,
+          bill_category_id: linked ? cardForm.bill_category_id : null,
         };
         if (card) {
           await updateCreditCard(card.id, body);
@@ -342,7 +342,7 @@ export default function CreditCardClient() {
   );
 
   const onDeletePayment = useCallback(
-    async (id: number) => {
+    async (id: string) => {
       if (!(await confirmDialog("Delete this payment? The card balance goes back up by its amount."))) return;
       setError(null);
       try {

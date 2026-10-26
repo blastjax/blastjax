@@ -8,6 +8,7 @@ import urllib.error
 import urllib.request
 from typing import Any
 from urllib.parse import unquote_plus, urlparse
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -134,7 +135,7 @@ _CHILD_LABELS: dict[str, str] = {
 }
 
 
-def _add_child(kind: str, trip_id: int, body: BaseModel) -> dict[str, Any]:
+def _add_child(kind: str, trip_id: UUID, body: BaseModel) -> dict[str, Any]:
     detail = insert_travel_child(kind, trip_id, body.model_dump())
     if detail is None:
         raise HTTPException(status_code=404, detail="Trip not found.")
@@ -142,7 +143,7 @@ def _add_child(kind: str, trip_id: int, body: BaseModel) -> dict[str, Any]:
 
 
 def _update_child(
-    kind: str, trip_id: int, child_id: int, body: BaseModel
+    kind: str, trip_id: UUID, child_id: UUID, body: BaseModel
 ) -> dict[str, Any]:
     detail = update_travel_child(kind, trip_id, child_id, body.model_dump())
     if detail is None:
@@ -150,7 +151,7 @@ def _update_child(
     return _serialize_detail(detail)
 
 
-def _remove_child(kind: str, trip_id: int, child_id: int) -> dict[str, Any]:
+def _remove_child(kind: str, trip_id: UUID, child_id: UUID) -> dict[str, Any]:
     detail = delete_travel_child(kind, trip_id, child_id)
     if detail is None:
         raise HTTPException(status_code=404, detail=f"{_CHILD_LABELS[kind]} not found.")
@@ -176,7 +177,7 @@ def travel_create_trip(body: TravelTripCreate) -> dict[str, Any]:
 
 
 @router.put("/api/travel/{trip_id}")
-def travel_update_trip(trip_id: int, body: TravelTripCreate) -> dict[str, Any]:
+def travel_update_trip(trip_id: UUID, body: TravelTripCreate) -> dict[str, Any]:
     detail = update_travel_trip(
         trip_id, body.title, body.start_date, body.end_date, body.notes
     )
@@ -186,94 +187,94 @@ def travel_update_trip(trip_id: int, body: TravelTripCreate) -> dict[str, Any]:
 
 
 @router.delete("/api/travel/{trip_id}")
-def travel_remove_trip(trip_id: int) -> dict[str, Any]:
+def travel_remove_trip(trip_id: UUID) -> dict[str, Any]:
     if not delete_travel_trip(trip_id):
         raise HTTPException(status_code=404, detail="Trip not found.")
     return {"ok": True}
 
 
 @router.post("/api/travel/{trip_id}/flights")
-def travel_add_flight(trip_id: int, body: TravelFlightCreate) -> dict[str, Any]:
+def travel_add_flight(trip_id: UUID, body: TravelFlightCreate) -> dict[str, Any]:
     return _add_child("flights", trip_id, body)
 
 
 @router.put("/api/travel/{trip_id}/flights/{flight_id}")
 def travel_update_flight(
-    trip_id: int, flight_id: int, body: TravelFlightCreate
+    trip_id: UUID, flight_id: UUID, body: TravelFlightCreate
 ) -> dict[str, Any]:
     return _update_child("flights", trip_id, flight_id, body)
 
 
 @router.delete("/api/travel/{trip_id}/flights/{flight_id}")
-def travel_remove_flight(trip_id: int, flight_id: int) -> dict[str, Any]:
+def travel_remove_flight(trip_id: UUID, flight_id: UUID) -> dict[str, Any]:
     return _remove_child("flights", trip_id, flight_id)
 
 
 @router.post("/api/travel/{trip_id}/transport")
-def travel_add_transport(trip_id: int, body: TravelTransportCreate) -> dict[str, Any]:
+def travel_add_transport(trip_id: UUID, body: TravelTransportCreate) -> dict[str, Any]:
     return _add_child("transport", trip_id, body)
 
 
 @router.put("/api/travel/{trip_id}/transport/{transport_id}")
 def travel_update_transport(
-    trip_id: int, transport_id: int, body: TravelTransportCreate
+    trip_id: UUID, transport_id: UUID, body: TravelTransportCreate
 ) -> dict[str, Any]:
     return _update_child("transport", trip_id, transport_id, body)
 
 
 @router.delete("/api/travel/{trip_id}/transport/{transport_id}")
-def travel_remove_transport(trip_id: int, transport_id: int) -> dict[str, Any]:
+def travel_remove_transport(trip_id: UUID, transport_id: UUID) -> dict[str, Any]:
     return _remove_child("transport", trip_id, transport_id)
 
 
 @router.post("/api/travel/{trip_id}/itinerary")
-def travel_add_itinerary(trip_id: int, body: TravelItineraryCreate) -> dict[str, Any]:
+def travel_add_itinerary(trip_id: UUID, body: TravelItineraryCreate) -> dict[str, Any]:
     return _add_child("itinerary", trip_id, body)
 
 
 @router.put("/api/travel/{trip_id}/itinerary/{item_id}")
 def travel_update_itinerary(
-    trip_id: int, item_id: int, body: TravelItineraryCreate
+    trip_id: UUID, item_id: UUID, body: TravelItineraryCreate
 ) -> dict[str, Any]:
     return _update_child("itinerary", trip_id, item_id, body)
 
 
 @router.delete("/api/travel/{trip_id}/itinerary/{item_id}")
-def travel_remove_itinerary(trip_id: int, item_id: int) -> dict[str, Any]:
+def travel_remove_itinerary(trip_id: UUID, item_id: UUID) -> dict[str, Any]:
     return _remove_child("itinerary", trip_id, item_id)
 
 
 @router.post("/api/travel/{trip_id}/accommodations")
 def travel_add_accommodation(
-    trip_id: int, body: TravelAccommodationCreate
+    trip_id: UUID, body: TravelAccommodationCreate
 ) -> dict[str, Any]:
     return _add_child("accommodations", trip_id, body)
 
 
 @router.put("/api/travel/{trip_id}/accommodations/{accommodation_id}")
 def travel_update_accommodation(
-    trip_id: int, accommodation_id: int, body: TravelAccommodationCreate
+    trip_id: UUID, accommodation_id: UUID, body: TravelAccommodationCreate
 ) -> dict[str, Any]:
     return _update_child("accommodations", trip_id, accommodation_id, body)
 
 
 @router.delete("/api/travel/{trip_id}/accommodations/{accommodation_id}")
-def travel_remove_accommodation(trip_id: int, accommodation_id: int) -> dict[str, Any]:
+def travel_remove_accommodation(trip_id: UUID, accommodation_id: UUID) -> dict[str, Any]:
     return _remove_child("accommodations", trip_id, accommodation_id)
 
 
 @router.post("/api/travel/{trip_id}/cities")
-def travel_add_city(trip_id: int, body: TravelCityCreate) -> dict[str, Any]:
+def travel_add_city(trip_id: UUID, body: TravelCityCreate) -> dict[str, Any]:
     return _add_child("cities", trip_id, body)
 
 
 @router.put("/api/travel/{trip_id}/cities/{city_id}")
 def travel_update_city(
-    trip_id: int, city_id: int, body: TravelCityCreate
+    trip_id: UUID, city_id: UUID, body: TravelCityCreate
 ) -> dict[str, Any]:
     return _update_child("cities", trip_id, city_id, body)
 
 
 @router.delete("/api/travel/{trip_id}/cities/{city_id}")
-def travel_remove_city(trip_id: int, city_id: int) -> dict[str, Any]:
+def travel_remove_city(trip_id: UUID, city_id: UUID) -> dict[str, Any]:
     return _remove_child("cities", trip_id, city_id)

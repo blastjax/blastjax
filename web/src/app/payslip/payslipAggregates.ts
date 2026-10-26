@@ -104,7 +104,7 @@ export function rowsForSlot(
 
 export function detailPayslipNeighbors(
   rows: PayslipRow[],
-  currentId: number,
+  currentId: string,
 ): { older: PayslipRow | null; newer: PayslipRow | null } {
   const ix = rows.findIndex((r) => r.id === currentId);
   const older = ix >= 0 && ix < rows.length - 1 ? (rows[ix + 1] ?? null) : null;

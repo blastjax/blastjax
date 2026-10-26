@@ -111,7 +111,7 @@ export function UsersSettingsPanel() {
   const [addError, setAddError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
 
-  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [editState, setEditState] = useState<EditState>(emptyEdit(""));
   const [editError, setEditError] = useState<string | null>(null);
   const [savingEdit, setSavingEdit] = useState(false);
@@ -184,7 +184,7 @@ export function UsersSettingsPanel() {
     setEditError(null);
   }
 
-  async function handleSaveEdit(userId: number) {
+  async function handleSaveEdit(userId: string) {
     const username = editState.username.trim();
     if (!username) {
       setEditError("Username can't be blank.");

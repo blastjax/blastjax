@@ -83,7 +83,7 @@ function routeRowsByGame(
   games: LottoGame[],
 ): { routed: RoutedRows[]; discarded: number } {
   const byName = new Map(games.map((g) => [g.name.trim().toLowerCase(), g]));
-  const routed = new Map<number, RoutedRows>();
+  const routed = new Map<string, RoutedRows>();
   let discarded = 0;
 
   for (const line of text.split("\n")) {

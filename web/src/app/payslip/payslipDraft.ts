@@ -9,7 +9,7 @@ function fmtOptAmount(n: number | null | undefined): string {
 const PAYSLIP_DRAFT_EDIT_PREFIX = "blastjax:payslip:draft:edit:";
 const PAYSLIP_DRAFT_ADD_PREFIX = "blastjax:payslip:draft:add:";
 
-export function payslipDraftKeyEdit(id: number): string {
+export function payslipDraftKeyEdit(id: string): string {
   return `${PAYSLIP_DRAFT_EDIT_PREFIX}${id}`;
 }
 

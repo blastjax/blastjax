@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
@@ -58,7 +59,7 @@ def fixed_expense_create(body: FixedExpenseCreate) -> dict[str, Any]:
 
 
 @router.put("/api/fixed-expense/{expense_id}")
-def fixed_expense_update(expense_id: int, body: FixedExpenseUpdate) -> dict[str, Any]:
+def fixed_expense_update(expense_id: UUID, body: FixedExpenseUpdate) -> dict[str, Any]:
     row = update_fixed_expense(expense_id, body.amount, _clean_description(body.description))
     if row is None:
         raise HTTPException(status_code=404, detail="Expense not found.")
@@ -66,7 +67,7 @@ def fixed_expense_update(expense_id: int, body: FixedExpenseUpdate) -> dict[str,
 
 
 @router.delete("/api/fixed-expense/{expense_id}")
-def fixed_expense_remove(expense_id: int) -> dict[str, Any]:
+def fixed_expense_remove(expense_id: UUID) -> dict[str, Any]:
     if not delete_fixed_expense(expense_id):
         raise HTTPException(status_code=404, detail="Expense not found.")
     return {"ok": True}

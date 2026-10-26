@@ -1,5 +1,6 @@
 from __future__ import annotations
 from typing import Any
+from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 import cache
@@ -121,7 +122,7 @@ def installment_create(body: InstallmentCreate) -> dict[str, Any]:
 
 
 @router.get("/api/installment/{installment_id}")
-def installment_one(installment_id: int) -> dict[str, Any]:
+def installment_one(installment_id: UUID) -> dict[str, Any]:
     key = f"installment:{installment_id}"
     hit = cache.get(key)
     if hit is not None:
@@ -136,7 +137,7 @@ def installment_one(installment_id: int) -> dict[str, Any]:
 
 @router.put("/api/installment/{installment_id}/line/{seq}")
 def installment_line_update(
-    installment_id: int,
+    installment_id: UUID,
     seq: int,
     body: InstallmentLineUpdate,
 ) -> dict[str, Any]:
@@ -160,7 +161,7 @@ def installment_line_update(
 
 @router.put("/api/installment/{installment_id}/lines")
 def installment_lines_bulk_update(
-    installment_id: int,
+    installment_id: UUID,
     body: InstallmentLinesBulkUpdate,
 ) -> dict[str, Any]:
     row = get_installment(installment_id)
@@ -183,7 +184,7 @@ def installment_lines_bulk_update(
 
 @router.put("/api/installment/{installment_id}/lines/reorder")
 def installment_lines_reorder(
-    installment_id: int,
+    installment_id: UUID,
     body: InstallmentLinesReorder,
 ) -> dict[str, Any]:
     if not get_installment(installment_id):
@@ -198,7 +199,7 @@ def installment_lines_reorder(
 
 
 @router.put("/api/installment/{installment_id}")
-def installment_replace(installment_id: int, body: InstallmentCreate) -> dict[str, Any]:
+def installment_replace(installment_id: UUID, body: InstallmentCreate) -> dict[str, Any]:
     rem, orig = _validate_installment_body(body)
     detail = update_installment(
         installment_id,
@@ -220,14 +221,14 @@ def installment_replace(installment_id: int, body: InstallmentCreate) -> dict[st
 
 
 @router.delete("/api/installment/{installment_id}")
-def installment_remove(installment_id: int) -> dict[str, Any]:
+def installment_remove(installment_id: UUID) -> dict[str, Any]:
     if not delete_installment(installment_id):
         raise HTTPException(status_code=404, detail="Installment not found.")
     return {"ok": True}
 
 
 @router.post("/api/installment/{installment_id}/pay")
-def installment_pay(installment_id: int) -> dict[str, Any]:
+def installment_pay(installment_id: UUID) -> dict[str, Any]:
     row = installment_apply_payment(installment_id)
     if not row:
         raise HTTPException(

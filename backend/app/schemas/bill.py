@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -38,7 +39,7 @@ class BillCategoryCreate(BaseModel):
 
 
 class BillCreate(BaseModel):
-    category_id: int
+    category_id: UUID
     bill_date: dt.date
     due_date: dt.date
     period_start: dt.date

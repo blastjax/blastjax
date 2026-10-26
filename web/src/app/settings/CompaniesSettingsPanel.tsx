@@ -122,7 +122,7 @@ export function CompaniesSettingsPanel() {
   const [addError, setAddError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
 
-  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
   const [editFlags, setEditFlags] = useState<CompanyColumnFlags>(
     DEFAULT_COMPANY_COLUMN_FLAGS,
@@ -187,7 +187,7 @@ export function CompaniesSettingsPanel() {
     setEditError(null);
   }
 
-  async function handleSaveEdit(companyId: number) {
+  async function handleSaveEdit(companyId: string) {
     const name = editName.trim();
     if (!name) {
       setEditError("Company name can't be blank.");
@@ -224,7 +224,7 @@ export function CompaniesSettingsPanel() {
       e.preventDefault();
       return;
     }
-    e.dataTransfer.setData("text/plain", String(company.id));
+    e.dataTransfer.setData("text/plain", company.id);
     e.dataTransfer.effectAllowed = "move";
   }
 
@@ -235,8 +235,8 @@ export function CompaniesSettingsPanel() {
 
   async function handleCardDrop(e: DragEvent<HTMLLIElement>, onto: CompanyRow) {
     e.preventDefault();
-    const fromId = Number(e.dataTransfer.getData("text/plain"));
-    if (!Number.isFinite(fromId) || fromId === onto.id) return;
+    const fromId = e.dataTransfer.getData("text/plain");
+    if (!fromId || fromId === onto.id) return;
 
     const previous = companies;
     const next = [...companies];

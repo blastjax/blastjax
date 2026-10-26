@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+from uuid import UUID
 
 from pydantic import BaseModel, Field
 
@@ -15,7 +16,7 @@ class CreditCardCreate(BaseModel):
     )
     statement_date: dt.date | None = None
     due_date: dt.date | None = None
-    bill_category_id: int | None = None  # take the statement from this bill category's latest bill
+    bill_category_id: UUID | None = None  # take the statement from this bill category's latest bill
 
 
 class CreditCardPaymentCreate(BaseModel):

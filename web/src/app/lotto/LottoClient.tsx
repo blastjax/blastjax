@@ -99,13 +99,13 @@ type WhatIfMatch = {
   key: string;
   attempt: LottoAttemptRow;
   numbers: number[];
-  loggedDrawId: number;
+  loggedDrawId: string;
   loggedDrawDate: string;
   matchedDrawDate: string;
 };
 
 function findWhatIfMatches(draws: LottoDrawDetail[]): WhatIfMatch[] {
-  const resultsByKey = new Map<string, { id: number; date: string }[]>();
+  const resultsByKey = new Map<string, { id: string; date: string }[]>();
   for (const detail of draws) {
     if (detail.draw.numbers.length !== 6) continue;
     const key = [...detail.draw.numbers].sort((a, b) => a - b).join("-");
@@ -579,7 +579,7 @@ function buildInsights(draws: LottoDrawDetail[], maxNumber: number): InsightsDat
 
 type DrawModalState = {
   open: boolean;
-  drawId: number | null;
+  drawId: string | null;
   drawDate: string;
   numbersText: string;
   jackpotText: string;
@@ -588,8 +588,8 @@ type DrawModalState = {
 };
 type AttemptsModalState = {
   open: boolean;
-  drawId: number | null;
-  editingIds: number[];
+  drawId: string | null;
+  editingIds: string[];
   attemptsText: string;
   ticketText: string;
   mode: "add" | "edit";
@@ -636,12 +636,12 @@ const SORT_OPTIONS: { value: AttemptSort; label: string }[] = [
 ];
 
 type RevealedActions =
-  | { type: "draw"; drawId: number }
-  | { type: "ticket"; drawId: number; ticket: number }
-  | { type: "attempt"; drawId: number; attemptId: number }
+  | { type: "draw"; drawId: string }
+  | { type: "ticket"; drawId: string; ticket: number }
+  | { type: "attempt"; drawId: string; attemptId: string }
   | null;
 
-export default function LottoClient({ gameId }: { gameId: number }) {
+export default function LottoClient({ gameId }: { gameId: string }) {
   const [gameName, setGameName] = useState<string | null>(null);
   const [draws, setDraws] = useState<LottoDrawDetail[]>([]);
   const [loading, setLoading] = useState(true);
@@ -659,7 +659,7 @@ export default function LottoClient({ gameId }: { gameId: number }) {
     setRevealedActions((cur) => (cur && JSON.stringify(cur) === JSON.stringify(target) ? null : target));
   };
 
-  const [historyModalDrawId, setHistoryModalDrawId] = useState<number | null>(null);
+  const [historyModalDrawId, setHistoryModalDrawId] = useState<string | null>(null);
 
   const [expandedYears, setExpandedYears] = useState<Set<string>>(new Set());
   const [historyFilter, setHistoryFilter] = useState<"all" | "played">("all");
@@ -842,7 +842,7 @@ export default function LottoClient({ gameId }: { gameId: number }) {
     }
   };
 
-  const onDeleteDraw = async (drawId: number) => {
+  const onDeleteDraw = async (drawId: string) => {
     if (!(await confirmDialog("Delete this result and all its attempts?"))) return;
     setSaving(true);
     setError(null);
@@ -856,7 +856,7 @@ export default function LottoClient({ gameId }: { gameId: number }) {
     }
   };
 
-  const openAddAttempts = (drawId: number) => {
+  const openAddAttempts = (drawId: string) => {
     setAttemptsFormError(null);
     setAttemptsModal({
       open: true,
@@ -869,7 +869,7 @@ export default function LottoClient({ gameId }: { gameId: number }) {
   };
 
   const openEditTicket = (
-    drawId: number,
+    drawId: string,
     ticket: number,
     items: { attempt: LottoAttemptRow }[],
   ) => {
@@ -884,7 +884,7 @@ export default function LottoClient({ gameId }: { gameId: number }) {
     });
   };
 
-  const openEditLooseAttempt = (drawId: number, attempt: LottoAttemptRow) => {
+  const openEditLooseAttempt = (drawId: string, attempt: LottoAttemptRow) => {
     setAttemptsFormError(null);
     setAttemptsModal({
       open: true,
@@ -902,7 +902,7 @@ export default function LottoClient({ gameId }: { gameId: number }) {
   };
 
   const createTicketBlocks = async (
-    drawId: number,
+    drawId: string,
     blocks: TicketBlock[],
     existingAttempts: LottoAttemptRow[],
   ): Promise<LottoDrawDetail | null> => {
@@ -980,7 +980,7 @@ export default function LottoClient({ gameId }: { gameId: number }) {
     }
   };
 
-  const onDeleteAttempt = async (drawId: number, attemptId: number) => {
+  const onDeleteAttempt = async (drawId: string, attemptId: string) => {
     if (!(await confirmDialog("Delete this attempt?"))) return;
     setSaving(true);
     setError(null);
@@ -994,7 +994,7 @@ export default function LottoClient({ gameId }: { gameId: number }) {
     }
   };
 
-  const onDeleteTicket = async (drawId: number, items: { attempt: LottoAttemptRow }[]) => {
+  const onDeleteTicket = async (drawId: string, items: { attempt: LottoAttemptRow }[]) => {
     if (
       !(await confirmDialog(`Delete this ticket and its ${items.length} attempt${items.length === 1 ? "" : "s"}?`))
     ) {
@@ -1048,7 +1048,7 @@ export default function LottoClient({ gameId }: { gameId: number }) {
     setError(null);
     try {
       const existing = draws.find((d) => d.draw.draw_date === drawDate);
-      let drawId: number;
+      let drawId: string;
       if (existing) {
         drawId = existing.draw.id;
       } else {

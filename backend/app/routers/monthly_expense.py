@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
@@ -66,7 +67,7 @@ def monthly_expense_create(body: MonthlyExpenseCreate) -> dict[str, Any]:
 
 
 @router.put("/api/monthly-expense/{expense_id}")
-def monthly_expense_replace(expense_id: int, body: MonthlyExpenseCreate) -> dict[str, Any]:
+def monthly_expense_replace(expense_id: UUID, body: MonthlyExpenseCreate) -> dict[str, Any]:
     row = update_monthly_expense(
         expense_id,
         body.name.strip(),
@@ -84,7 +85,7 @@ def monthly_expense_replace(expense_id: int, body: MonthlyExpenseCreate) -> dict
 
 
 @router.delete("/api/monthly-expense/{expense_id}")
-def monthly_expense_remove(expense_id: int) -> dict[str, Any]:
+def monthly_expense_remove(expense_id: UUID) -> dict[str, Any]:
     if not delete_monthly_expense(expense_id):
         raise HTTPException(status_code=404, detail="Expense not found.")
     return {"ok": True}

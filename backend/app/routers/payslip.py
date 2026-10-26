@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 from typing import Any
+from uuid import UUID
 
 from fastapi import (
     APIRouter,
@@ -98,7 +99,7 @@ def payslip_import_json(body: dict[str, Any] = Body(...)) -> dict[str, Any]:
 
 
 @router.get("/api/payslip/{payslip_id}")
-def payslip_one(payslip_id: int) -> dict[str, Any]:
+def payslip_one(payslip_id: UUID) -> dict[str, Any]:
     key = f"payslip:{payslip_id}"
     hit = cache.get(key)
     if hit is not None:
@@ -112,7 +113,7 @@ def payslip_one(payslip_id: int) -> dict[str, Any]:
 
 
 @router.put("/api/payslip/{payslip_id}")
-def payslip_replace(payslip_id: int, body: PayslipCreate) -> dict[str, Any]:
+def payslip_replace(payslip_id: UUID, body: PayslipCreate) -> dict[str, Any]:
     row = update_payslip(
         payslip_id,
         body.total,
@@ -141,7 +142,7 @@ def payslip_replace(payslip_id: int, body: PayslipCreate) -> dict[str, Any]:
 
 
 @router.delete("/api/payslip/{payslip_id}")
-def payslip_remove(payslip_id: int) -> dict[str, Any]:
+def payslip_remove(payslip_id: UUID) -> dict[str, Any]:
     if not delete_payslip(payslip_id):
         raise HTTPException(status_code=404, detail="Payslip not found.")
     return {"ok": True}
@@ -149,7 +150,7 @@ def payslip_remove(payslip_id: int) -> dict[str, Any]:
 
 @router.post("/api/payslip/{payslip_id}/pdf")
 async def payslip_upload_pdf(
-    payslip_id: int,
+    payslip_id: UUID,
     file: UploadFile = File(...),
 ) -> dict[str, Any]:
     if get_payslip(payslip_id) is None:
@@ -161,7 +162,7 @@ async def payslip_upload_pdf(
 
 
 @router.get("/api/payslip/{payslip_id}/pdf")
-def payslip_get_pdf(payslip_id: int) -> Response:
+def payslip_get_pdf(payslip_id: UUID) -> Response:
     key = f"payslip:pdf:{payslip_id}"
     cached = cache.get(key)
     if cached is not None:
@@ -180,7 +181,7 @@ def payslip_get_pdf(payslip_id: int) -> Response:
 
 
 @router.delete("/api/payslip/{payslip_id}/pdf")
-def payslip_delete_pdf(payslip_id: int) -> dict[str, Any]:
+def payslip_delete_pdf(payslip_id: UUID) -> dict[str, Any]:
     if not delete_payslip_pdf(payslip_id):
         raise HTTPException(status_code=404, detail="Payslip not found.")
     return {"ok": True, "has_pdf": False}

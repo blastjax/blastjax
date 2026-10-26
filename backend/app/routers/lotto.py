@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 from typing import Any
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
@@ -82,7 +83,7 @@ def lotto_games() -> dict[str, Any]:
 
 @router.get("/api/lotto")
 def lotto_list(
-    game_id: int = Query(..., gt=0), limit: int = Query(default=200, ge=1, le=2000)
+    game_id: UUID, limit: int = Query(default=200, ge=1, le=2000)
 ) -> dict[str, Any]:
     key = f"lotto:list:{game_id}:{limit}"
     hit = cache.get(key)
@@ -157,7 +158,7 @@ def lotto_sync_pcso() -> dict[str, Any]:
 
 
 @router.put("/api/lotto/{draw_id}")
-def lotto_update_draw(draw_id: int, body: LottoDrawCreate) -> dict[str, Any]:
+def lotto_update_draw(draw_id: UUID, body: LottoDrawCreate) -> dict[str, Any]:
     draw_date = body.draw_date.isoformat()
     existing_id = get_lotto_draw_id_by_date(body.game_id, draw_date)
     if existing_id is not None and existing_id != draw_id:
@@ -173,14 +174,14 @@ def lotto_update_draw(draw_id: int, body: LottoDrawCreate) -> dict[str, Any]:
 
 
 @router.delete("/api/lotto/{draw_id}")
-def lotto_remove_draw(draw_id: int) -> dict[str, Any]:
+def lotto_remove_draw(draw_id: UUID) -> dict[str, Any]:
     if not delete_lotto_draw(draw_id):
         raise HTTPException(status_code=404, detail="Draw not found.")
     return {"ok": True}
 
 
 @router.post("/api/lotto/{draw_id}/attempts")
-def lotto_add_attempt(draw_id: int, body: LottoAttemptCreate) -> dict[str, Any]:
+def lotto_add_attempt(draw_id: UUID, body: LottoAttemptCreate) -> dict[str, Any]:
     detail = insert_lotto_attempt(draw_id, body.numbers, body.ticket)
     if detail is None:
         raise HTTPException(status_code=404, detail="Draw not found.")
@@ -188,7 +189,7 @@ def lotto_add_attempt(draw_id: int, body: LottoAttemptCreate) -> dict[str, Any]:
 
 
 @router.post("/api/lotto/{draw_id}/attempts/bulk")
-def lotto_add_attempts_bulk(draw_id: int, body: LottoAttemptsBulkCreate) -> dict[str, Any]:
+def lotto_add_attempts_bulk(draw_id: UUID, body: LottoAttemptsBulkCreate) -> dict[str, Any]:
     detail = insert_lotto_attempts_bulk(
         draw_id, [(a.numbers, a.ticket) for a in body.attempts]
     )
@@ -199,7 +200,7 @@ def lotto_add_attempts_bulk(draw_id: int, body: LottoAttemptsBulkCreate) -> dict
 
 @router.put("/api/lotto/{draw_id}/attempts/{attempt_id}")
 def lotto_update_attempt(
-    draw_id: int, attempt_id: int, body: LottoAttemptCreate
+    draw_id: UUID, attempt_id: UUID, body: LottoAttemptCreate
 ) -> dict[str, Any]:
     detail = update_lotto_attempt(draw_id, attempt_id, body.numbers, body.ticket)
     if detail is None:
@@ -208,7 +209,7 @@ def lotto_update_attempt(
 
 
 @router.delete("/api/lotto/{draw_id}/attempts/{attempt_id}")
-def lotto_remove_attempt(draw_id: int, attempt_id: int) -> dict[str, Any]:
+def lotto_remove_attempt(draw_id: UUID, attempt_id: UUID) -> dict[str, Any]:
     detail = delete_lotto_attempt(draw_id, attempt_id)
     if detail is None:
         raise HTTPException(status_code=404, detail="Attempt not found.")

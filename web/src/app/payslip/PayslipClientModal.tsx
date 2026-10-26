@@ -82,8 +82,8 @@ export function PayslipClientModal({
   goBack: () => void;
   saveEdit: () => void | Promise<void>;
   saveAddInModal: () => void | Promise<void>;
-  handleDelete: (id: number) => void | Promise<void>;
-  onPdfChange: (id: number, hasPdf: boolean) => void;
+  handleDelete: (id: string) => void | Promise<void>;
+  onPdfChange: (id: string, hasPdf: boolean) => void;
 }) {
   const onCloseDialog = () => {
     if (nav.screen === "edit" || nav.screen === "add") {
@@ -430,9 +430,9 @@ function PayslipPdfPanel({
   initialHasPdf,
   onPdfChange,
 }: {
-  payslipId: number;
+  payslipId: string;
   initialHasPdf: boolean;
-  onPdfChange: (id: number, hasPdf: boolean) => void;
+  onPdfChange: (id: string, hasPdf: boolean) => void;
 }) {
   const [hasPdf, setHasPdf] = useState(initialHasPdf);
   const [showing, setShowing] = useState(false);

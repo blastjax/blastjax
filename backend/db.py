@@ -10,6 +10,7 @@ from datetime import date, datetime, time
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 
 import psycopg2
 from dotenv import load_dotenv
@@ -303,7 +304,7 @@ def insert_payslip(
         return _payslip(s.scalar(insert(Payslip).values(values).returning(Payslip)), False)
 
 
-def insert_payslips_bulk(records: list[dict[str, Any]]) -> list[int]:
+def insert_payslips_bulk(records: list[dict[str, Any]]) -> list[UUID]:
     if not records:
         return []
     rows = [{c: rec.get(c) for c in _PAYSLIP_INSERT_COLS} for rec in records]
@@ -329,14 +330,14 @@ def list_payslips(limit: int = 200, company: str | None = None) -> list[dict[str
         return [_payslip(p, p.has_pdf) for p in s.scalars(stmt)]
 
 
-def get_payslip(payslip_id: int) -> dict[str, Any] | None:
+def get_payslip(payslip_id: UUID) -> dict[str, Any] | None:
     with _session() as s:
         p = s.get(Payslip, payslip_id)
         return _payslip(p, p.has_pdf) if p else None
 
 
 def update_payslip(
-    payslip_id: int,
+    payslip_id: UUID,
     total: float | None,
     commission: float | None,
     reimbursement: float | None,
@@ -370,25 +371,25 @@ def update_payslip(
         return _payslip(*row) if row else None
 
 
-def delete_payslip(payslip_id: int) -> bool:
+def delete_payslip(payslip_id: UUID) -> bool:
     with _session(write=True) as s:
         return s.execute(delete(Payslip).where(Payslip.id == payslip_id)).rowcount > 0
 
 
-def _set_payslip_pdf_data(payslip_id: int, data: bytes | None) -> bool:
+def _set_payslip_pdf_data(payslip_id: UUID, data: bytes | None) -> bool:
     with _session(write=True) as s:
         return s.execute(update(Payslip).where(Payslip.id == payslip_id).values(pdf_data=data)).rowcount > 0
 
 
-def set_payslip_pdf(payslip_id: int, data: bytes) -> bool:
+def set_payslip_pdf(payslip_id: UUID, data: bytes) -> bool:
     return _set_payslip_pdf_data(payslip_id, data)
 
 
-def delete_payslip_pdf(payslip_id: int) -> bool:
+def delete_payslip_pdf(payslip_id: UUID) -> bool:
     return _set_payslip_pdf_data(payslip_id, None)
 
 
-def get_payslip_pdf(payslip_id: int) -> bytes | None:
+def get_payslip_pdf(payslip_id: UUID) -> bytes | None:
     with _session() as s:
         data = s.scalar(select(Payslip.pdf_data).where(Payslip.id == payslip_id))
         return bytes(data) if data is not None else None
@@ -418,18 +419,18 @@ def _installment_lines(inst: Installment) -> list[dict[str, Any]]:
     return [_row(line, "installment_id") for line in inst.lines]
 
 
-def _installment_list_select(limit: int, credit_card_id: int | None = None) -> Any:
+def _installment_list_select(limit: int, credit_card_id: UUID | None = None) -> Any:
     stmt = _installment_select().order_by(Installment.finish_date, Installment.name).limit(_limit(limit))
     if credit_card_id is not None:
         stmt = stmt.where(Installment.credit_card_id == credit_card_id)
     return stmt
 
 
-def _installment_rows(s: Session, limit: int, credit_card_id: int | None = None) -> list[dict[str, Any]]:
+def _installment_rows(s: Session, limit: int, credit_card_id: UUID | None = None) -> list[dict[str, Any]]:
     return [_installment(*row) for row in s.execute(_installment_list_select(limit, credit_card_id))]
 
 
-def list_installments(limit: int = 500, credit_card_id: int | None = None) -> list[dict[str, Any]]:
+def list_installments(limit: int = 500, credit_card_id: UUID | None = None) -> list[dict[str, Any]]:
     with _session() as s:
         return _installment_rows(s, limit, credit_card_id)
 
@@ -443,7 +444,7 @@ def list_installments_with_lines(limit: int = 500) -> list[dict[str, Any]]:
         ]
 
 
-def _installment_row_dict(s: Session, installment_id: int) -> dict[str, Any] | None:
+def _installment_row_dict(s: Session, installment_id: UUID) -> dict[str, Any] | None:
     row = s.execute(
         _installment_select()
         .where(Installment.id == installment_id)
@@ -452,7 +453,7 @@ def _installment_row_dict(s: Session, installment_id: int) -> dict[str, Any] | N
     return _installment(*row) if row else None
 
 
-def _installment_detail(s: Session, installment_id: int) -> dict[str, Any] | None:
+def _installment_detail(s: Session, installment_id: UUID) -> dict[str, Any] | None:
     row = s.execute(
         _installment_select()
         .where(Installment.id == installment_id)
@@ -464,12 +465,12 @@ def _installment_detail(s: Session, installment_id: int) -> dict[str, Any] | Non
     return {"installment": _installment(*row), "lines": _installment_lines(row[0])}
 
 
-def get_installment(installment_id: int) -> dict[str, Any] | None:
+def get_installment(installment_id: UUID) -> dict[str, Any] | None:
     with _session() as s:
         return _installment_row_dict(s, installment_id)
 
 
-def fetch_installment_with_lines(installment_id: int) -> dict[str, Any] | None:
+def fetch_installment_with_lines(installment_id: UUID) -> dict[str, Any] | None:
     with _session() as s:
         return _installment_detail(s, installment_id)
 
@@ -485,7 +486,7 @@ def insert_installment(
     finish_date: Any,
     remaining: float,
     original_total: float,
-    credit_card_id: int | None = None,
+    credit_card_id: UUID | None = None,
 ) -> dict[str, Any]:
     values = dict(locals())
     with _session(write=True) as s:
@@ -502,7 +503,7 @@ def _line_payment_total(principal: float, interest: float | None) -> float:
 
 
 def _line_values(
-    installment_id: int, count: int, principal: float, interest: float | None
+    installment_id: UUID, count: int, principal: float, interest: float | None
 ) -> list[dict[str, Any]]:
     ptot = _line_payment_total(principal, interest)
     return [
@@ -519,7 +520,7 @@ def _line_values(
 
 def _seed_installment_lines(
     s: Session,
-    installment_id: int,
+    installment_id: UUID,
     installment_total: int,
     principal: float,
     interest: float | None,
@@ -529,7 +530,7 @@ def _seed_installment_lines(
         s.execute(_bulk_insert(InstallmentLine), _line_values(installment_id, n, principal, interest))
 
 
-def _recompute_installment_aggregates(s: Session, installment_id: int) -> None:
+def _recompute_installment_aggregates(s: Session, installment_id: UUID) -> None:
     line, current = InstallmentLine, aliased(InstallmentLine)
     sum_principal = (
         select(func.coalesce(func.sum(line.principal), 0))
@@ -566,7 +567,7 @@ def _recompute_installment_aggregates(s: Session, installment_id: int) -> None:
     s.execute(update(Installment).where(Installment.id == installment_id).values(values))
 
 
-def _update_line(s: Session, installment_id: int, seq: int, principal: float, interest: float | None) -> bool:
+def _update_line(s: Session, installment_id: UUID, seq: int, principal: float, interest: float | None) -> bool:
     return (
         s.execute(
             update(InstallmentLine)
@@ -582,7 +583,7 @@ def _update_line(s: Session, installment_id: int, seq: int, principal: float, in
 
 
 def update_installment_line_and_fetch_detail(
-    installment_id: int,
+    installment_id: UUID,
     seq: int,
     principal: float,
     interest: float | None,
@@ -595,7 +596,7 @@ def update_installment_line_and_fetch_detail(
 
 
 def update_installment_lines_bulk(
-    installment_id: int,
+    installment_id: UUID,
     items: list[tuple[int, float, float | None]],
 ) -> dict[str, Any] | None:
     if not items:
@@ -609,8 +610,8 @@ def update_installment_lines_bulk(
 
 
 def reorder_installment_lines(
-    installment_id: int,
-    ordered_line_ids: list[int],
+    installment_id: UUID,
+    ordered_line_ids: list[UUID],
 ) -> dict[str, Any] | None:
     if not ordered_line_ids:
         return None
@@ -625,12 +626,12 @@ def reorder_installment_lines(
         s.execute(
             update(InstallmentLine)
             .where(InstallmentLine.installment_id == installment_id)
-            .values(seq=InstallmentLine.id + 1000000)
+            .values(seq=InstallmentLine.seq + 1000000)
         )
         for i, lid in enumerate(ordered_line_ids):
             s.execute(
                 update(InstallmentLine)
-                .where(InstallmentLine.installment_id == installment_id, InstallmentLine.id == int(lid))
+                .where(InstallmentLine.installment_id == installment_id, InstallmentLine.id == lid)
                 .values(seq=i + 1)
             )
         _recompute_installment_aggregates(s, installment_id)
@@ -639,7 +640,7 @@ def reorder_installment_lines(
 
 def _resync_installment_lines_on_total_change(
     s: Session,
-    installment_id: int,
+    installment_id: UUID,
     new_total: int,
     principal: float,
     interest: float | None,
@@ -660,7 +661,7 @@ def _resync_installment_lines_on_total_change(
 
 
 def update_installment(
-    installment_id: int,
+    installment_id: UUID,
     name: str,
     installment_current: int,
     installment_total: int,
@@ -671,7 +672,7 @@ def update_installment(
     finish_date: Any,
     remaining: float,
     original_total: float,
-    credit_card_id: int | None = None,
+    credit_card_id: UUID | None = None,
 ) -> dict[str, Any] | None:
     values = dict(locals())
     del values["installment_id"]
@@ -690,12 +691,12 @@ def update_installment(
         return _installment_detail(s, installment_id)
 
 
-def delete_installment(installment_id: int) -> bool:
+def delete_installment(installment_id: UUID) -> bool:
     with _session(write=True) as s:
         return s.execute(delete(Installment).where(Installment.id == installment_id)).rowcount > 0
 
 
-def installment_apply_payment(installment_id: int) -> dict[str, Any] | None:
+def installment_apply_payment(installment_id: UUID) -> dict[str, Any] | None:
     with _session(write=True) as s:
         row = s.execute(
             select(
@@ -755,12 +756,12 @@ def _house_payment(row: Row[Any]) -> dict[str, Any]:
     return _row(hp, entry_count=entry_count, total_paid=total_paid, last_paid_on=last_paid_on)
 
 
-def _house_payment_row_dict(s: Session, house_payment_id: int) -> dict[str, Any] | None:
+def _house_payment_row_dict(s: Session, house_payment_id: UUID) -> dict[str, Any] | None:
     row = s.execute(_house_payment_select().where(HousePayment.id == house_payment_id)).first()
     return _house_payment(row) if row else None
 
 
-def _house_payment_detail(s: Session, house_payment_id: int) -> dict[str, Any] | None:
+def _house_payment_detail(s: Session, house_payment_id: UUID) -> dict[str, Any] | None:
     row = s.execute(
         _house_payment_select()
         .where(HousePayment.id == house_payment_id)
@@ -781,7 +782,7 @@ def list_house_payments(limit: int = 500) -> list[dict[str, Any]]:
         return [_house_payment(row) for row in s.execute(stmt)]
 
 
-def fetch_house_payment_with_entries(house_payment_id: int) -> dict[str, Any] | None:
+def fetch_house_payment_with_entries(house_payment_id: UUID) -> dict[str, Any] | None:
     with _session() as s:
         return _house_payment_detail(s, house_payment_id)
 
@@ -792,7 +793,7 @@ def insert_house_payment(name: str, notes: str | None) -> dict[str, Any]:
         return _row(hp, entry_count=0, total_paid=0.0, last_paid_on=None)
 
 
-def update_house_payment(house_payment_id: int, name: str, notes: str | None) -> dict[str, Any] | None:
+def update_house_payment(house_payment_id: UUID, name: str, notes: str | None) -> dict[str, Any] | None:
     with _session(write=True) as s:
         updated = s.scalar(
             update(HousePayment)
@@ -803,12 +804,12 @@ def update_house_payment(house_payment_id: int, name: str, notes: str | None) ->
         return _house_payment_row_dict(s, house_payment_id) if updated else None
 
 
-def delete_house_payment(house_payment_id: int) -> bool:
+def delete_house_payment(house_payment_id: UUID) -> bool:
     with _session(write=True) as s:
         return s.execute(delete(HousePayment).where(HousePayment.id == house_payment_id)).rowcount > 0
 
 
-def insert_house_payment_entry(house_payment_id: int, paid_on: Any, amount: float) -> dict[str, Any] | None:
+def insert_house_payment_entry(house_payment_id: UUID, paid_on: Any, amount: float) -> dict[str, Any] | None:
     with _session(write=True) as s:
         if s.get(HousePayment, house_payment_id) is None:
             return None
@@ -819,7 +820,7 @@ def insert_house_payment_entry(house_payment_id: int, paid_on: Any, amount: floa
 
 
 def update_house_payment_entry(
-    house_payment_id: int, entry_id: int, paid_on: Any, amount: float
+    house_payment_id: UUID, entry_id: UUID, paid_on: Any, amount: float
 ) -> dict[str, Any] | None:
     with _session(write=True) as s:
         updated = s.scalar(
@@ -831,7 +832,7 @@ def update_house_payment_entry(
         return _house_payment_detail(s, house_payment_id) if updated else None
 
 
-def delete_house_payment_entry(house_payment_id: int, entry_id: int) -> dict[str, Any] | None:
+def delete_house_payment_entry(house_payment_id: UUID, entry_id: UUID) -> dict[str, Any] | None:
     with _session(write=True) as s:
         deleted = s.scalar(
             delete(HousePaymentEntry)
@@ -866,7 +867,7 @@ def insert_blood_pressure(
 
 
 def update_blood_pressure(
-    reading_id: int,
+    reading_id: UUID,
     systolic: int | None,
     diastolic: int | None,
     pulse: int | None,
@@ -884,7 +885,7 @@ def update_blood_pressure(
         return _row(bp) if bp else None
 
 
-def delete_blood_pressure(reading_id: int) -> bool:
+def delete_blood_pressure(reading_id: UUID) -> bool:
     with _session(write=True) as s:
         return s.execute(delete(BloodPressure).where(BloodPressure.id == reading_id)).rowcount > 0
 
@@ -923,7 +924,7 @@ def insert_fixed_expense(
         return _row(s.scalar(insert(FixedExpense).values(values).returning(FixedExpense)))
 
 
-def update_fixed_expense(expense_id: int, amount: float, description: str | None) -> dict[str, Any] | None:
+def update_fixed_expense(expense_id: UUID, amount: float, description: str | None) -> dict[str, Any] | None:
     with _session(write=True) as s:
         row = s.scalar(
             update(FixedExpense)
@@ -934,7 +935,7 @@ def update_fixed_expense(expense_id: int, amount: float, description: str | None
         return _row(row) if row else None
 
 
-def delete_fixed_expense(expense_id: int) -> bool:
+def delete_fixed_expense(expense_id: UUID) -> bool:
     with _session(write=True) as s:
         return s.execute(delete(FixedExpense).where(FixedExpense.id == expense_id)).rowcount > 0
 
@@ -979,7 +980,7 @@ def insert_monthly_expense(
 
 
 def update_monthly_expense(
-    expense_id: int,
+    expense_id: UUID,
     name: str,
     description: str | None,
     amount: float,
@@ -998,7 +999,7 @@ def update_monthly_expense(
         return _row(e) if e else None
 
 
-def delete_monthly_expense(expense_id: int) -> bool:
+def delete_monthly_expense(expense_id: UUID) -> bool:
     with _session(write=True) as s:
         return s.execute(delete(MonthlyExpense).where(MonthlyExpense.id == expense_id)).rowcount > 0
 
@@ -1020,7 +1021,7 @@ def insert_bill_category(values: dict[str, Any]) -> dict[str, Any]:
         return _row(s.scalar(insert(BillCategory).values(values).returning(BillCategory)))
 
 
-def update_bill_category(category_id: int, values: dict[str, Any]) -> dict[str, Any] | None:
+def update_bill_category(category_id: UUID, values: dict[str, Any]) -> dict[str, Any] | None:
     with _session(write=True) as s:
         c = s.scalar(
             update(BillCategory).where(BillCategory.id == category_id).values(values).returning(BillCategory)
@@ -1028,7 +1029,7 @@ def update_bill_category(category_id: int, values: dict[str, Any]) -> dict[str, 
         return _row(c) if c else None
 
 
-def delete_bill_category(category_id: int) -> bool:
+def delete_bill_category(category_id: UUID) -> bool:
     with _session(write=True) as s:
         return s.execute(delete(BillCategory).where(BillCategory.id == category_id)).rowcount > 0
 
@@ -1038,29 +1039,29 @@ def insert_bill(values: dict[str, Any]) -> dict[str, Any]:
         return _bill(s.scalar(insert(Bill).values(values).returning(Bill)), False)
 
 
-def update_bill(bill_id: int, values: dict[str, Any]) -> dict[str, Any] | None:
+def update_bill(bill_id: UUID, values: dict[str, Any]) -> dict[str, Any] | None:
     with _session(write=True) as s:
         row = s.execute(update(Bill).where(Bill.id == bill_id).values(values).returning(Bill, Bill.has_pdf)).first()
         return _bill(*row) if row else None
 
 
-def delete_bill(bill_id: int) -> bool:
+def delete_bill(bill_id: UUID) -> bool:
     with _session(write=True) as s:
         return s.execute(delete(Bill).where(Bill.id == bill_id)).rowcount > 0
 
 
-def set_bill_pdf(bill_id: int, data: bytes) -> bool:
+def set_bill_pdf(bill_id: UUID, data: bytes) -> bool:
     with _session(write=True) as s:
         return s.execute(update(Bill).where(Bill.id == bill_id).values(pdf_data=data)).rowcount > 0
 
 
-def get_bill_pdf(bill_id: int) -> bytes | None:
+def get_bill_pdf(bill_id: UUID) -> bytes | None:
     with _session() as s:
         data = s.scalar(select(Bill.pdf_data).where(Bill.id == bill_id))
         return bytes(data) if data is not None else None
 
 
-def bill_examples(category_id: int, limit: int = 6) -> list[tuple[dict[str, Any], bytes]]:
+def bill_examples(category_id: UUID, limit: int = 6) -> list[tuple[dict[str, Any], bytes]]:
     """A biller's latest bills that have a file, with the file: what PDF reading learns the layout from."""
     stmt = (
         select(Bill)
@@ -1124,7 +1125,7 @@ def insert_credit_card(
     interest_rate: float,
     statement_date: Any,
     due_date: Any,
-    bill_category_id: int | None = None,
+    bill_category_id: UUID | None = None,
 ) -> dict[str, Any]:
     values = dict(locals(), current_balance=last_statement_balance)
     with _session(write=True) as s:
@@ -1132,7 +1133,7 @@ def insert_credit_card(
 
 
 def update_credit_card(
-    card_id: int,
+    card_id: UUID,
     name: str,
     credit_limit: float,
     last_statement_balance: float,
@@ -1140,7 +1141,7 @@ def update_credit_card(
     interest_rate: float,
     statement_date: Any,
     due_date: Any,
-    bill_category_id: int | None = None,
+    bill_category_id: UUID | None = None,
 ) -> dict[str, Any] | None:
     values = dict(locals())
     del values["card_id"]
@@ -1152,7 +1153,7 @@ def update_credit_card(
         return _card_row(s, card) if card else None
 
 
-def adjust_credit_card_balance(card_id: int, current_balance: float) -> dict[str, Any] | None:
+def adjust_credit_card_balance(card_id: UUID, current_balance: float) -> dict[str, Any] | None:
     with _session(write=True) as s:
         card = s.scalar(
             update(CreditCard)
@@ -1163,12 +1164,12 @@ def adjust_credit_card_balance(card_id: int, current_balance: float) -> dict[str
         return _card_row(s, card) if card else None
 
 
-def delete_credit_card(card_id: int) -> bool:
+def delete_credit_card(card_id: UUID) -> bool:
     with _session(write=True) as s:
         return s.execute(delete(CreditCard).where(CreditCard.id == card_id)).rowcount > 0
 
 
-def _credit_card_payment_rows(s: Session, credit_card_id: int) -> list[dict[str, Any]]:
+def _credit_card_payment_rows(s: Session, credit_card_id: UUID) -> list[dict[str, Any]]:
     stmt = (
         select(CreditCardPayment)
         .where(CreditCardPayment.credit_card_id == credit_card_id)
@@ -1177,12 +1178,12 @@ def _credit_card_payment_rows(s: Session, credit_card_id: int) -> list[dict[str,
     return [_row(p) for p in s.scalars(stmt)]
 
 
-def list_credit_card_payments(credit_card_id: int) -> list[dict[str, Any]]:
+def list_credit_card_payments(credit_card_id: UUID) -> list[dict[str, Any]]:
     with _session() as s:
         return _credit_card_payment_rows(s, credit_card_id)
 
 
-def _shift_credit_card_balance(s: Session, credit_card_id: int, delta: float) -> None:
+def _shift_credit_card_balance(s: Session, credit_card_id: UUID, delta: float) -> None:
     s.execute(
         update(CreditCard)
         .where(CreditCard.id == credit_card_id)
@@ -1191,7 +1192,7 @@ def _shift_credit_card_balance(s: Session, credit_card_id: int, delta: float) ->
 
 
 def insert_credit_card_payment(
-    credit_card_id: int, amount: float, payment_date: Any, note: str | None
+    credit_card_id: UUID, amount: float, payment_date: Any, note: str | None
 ) -> dict[str, Any] | None:
     with _session(write=True) as s:
         if s.get(CreditCard, credit_card_id) is None:
@@ -1205,7 +1206,7 @@ def insert_credit_card_payment(
         return _row(payment)
 
 
-def delete_credit_card_payment(payment_id: int) -> bool:
+def delete_credit_card_payment(payment_id: UUID) -> bool:
     with _session(write=True) as s:
         row = s.execute(
             delete(CreditCardPayment)
@@ -1371,7 +1372,7 @@ def _numbers(numbers: list[int] | None) -> dict[str, int | None]:
 
 
 def _draw_values(
-    game_id: int, draw_date: Any, numbers: list[int] | None, jackpot_prize: float | None, winners: int
+    game_id: UUID, draw_date: Any, numbers: list[int] | None, jackpot_prize: float | None, winners: int
 ) -> dict[str, Any]:
     return {
         "draw_date": draw_date,
@@ -1440,7 +1441,7 @@ def _lotto_draw(draw: LottoDraw) -> dict[str, Any]:
     return {"draw": _row(draw), "attempts": [_row(a) for a in draw.attempts]}
 
 
-def _lotto_draw_detail(s: Session, draw_id: int) -> dict[str, Any] | None:
+def _lotto_draw_detail(s: Session, draw_id: UUID) -> dict[str, Any] | None:
     draw = s.scalar(
         select(LottoDraw)
         .where(LottoDraw.id == draw_id)
@@ -1450,7 +1451,7 @@ def _lotto_draw_detail(s: Session, draw_id: int) -> dict[str, Any] | None:
     return _lotto_draw(draw) if draw else None
 
 
-def list_lotto_draws(game_id: int, limit: int = 200) -> list[dict[str, Any]]:
+def list_lotto_draws(game_id: UUID, limit: int = 200) -> list[dict[str, Any]]:
     stmt = (
         select(LottoDraw)
         .where(LottoDraw.game_id == game_id)
@@ -1482,7 +1483,7 @@ def list_lotto_results_between(start: Any, end: Any) -> list[dict[str, Any]]:
 
 
 def upsert_lotto_draw(
-    game_id: int,
+    game_id: UUID,
     draw_date: Any,
     numbers: list[int] | None,
     jackpot_prize: float | None = None,
@@ -1494,7 +1495,7 @@ def upsert_lotto_draw(
         return _lotto_draw_detail(s, draw_id)
 
 
-def upsert_lotto_draws_bulk(game_id: int, rows: list[dict[str, Any]]) -> dict[str, Any]:
+def upsert_lotto_draws_bulk(game_id: UUID, rows: list[dict[str, Any]]) -> dict[str, Any]:
     if not rows:
         return {"inserted": 0, "updated": 0, "total": 0}
     with _session(write=True) as s:
@@ -1548,7 +1549,7 @@ def insert_lotto_results(rows: list[dict[str, Any]]) -> int:
         return s.execute(_upsert_draws(values, only_missing_numbers=True)).rowcount
 
 
-def get_lotto_draw_id_by_date(game_id: int, draw_date: Any) -> int | None:
+def get_lotto_draw_id_by_date(game_id: UUID, draw_date: Any) -> UUID | None:
     with _session() as s:
         return s.scalar(
             select(LottoDraw.id).where(LottoDraw.game_id == game_id, LottoDraw.draw_date == draw_date)
@@ -1556,7 +1557,7 @@ def get_lotto_draw_id_by_date(game_id: int, draw_date: Any) -> int | None:
 
 
 def update_lotto_draw(
-    draw_id: int,
+    draw_id: UUID,
     draw_date: Any,
     numbers: list[int] | None,
     jackpot_prize: float | None = None,
@@ -1572,17 +1573,17 @@ def update_lotto_draw(
         return _lotto_draw_detail(s, draw_id) if updated else None
 
 
-def delete_lotto_draw(draw_id: int) -> bool:
+def delete_lotto_draw(draw_id: UUID) -> bool:
     with _session(write=True) as s:
         return s.execute(delete(LottoDraw).where(LottoDraw.id == draw_id)).rowcount > 0
 
 
-def insert_lotto_attempt(draw_id: int, numbers: list[int], ticket: int | None = None) -> dict[str, Any] | None:
+def insert_lotto_attempt(draw_id: UUID, numbers: list[int], ticket: int | None = None) -> dict[str, Any] | None:
     return insert_lotto_attempts_bulk(draw_id, [(numbers, ticket)])
 
 
 def insert_lotto_attempts_bulk(
-    draw_id: int, attempts: list[tuple[list[int], int | None]]
+    draw_id: UUID, attempts: list[tuple[list[int], int | None]]
 ) -> dict[str, Any] | None:
     rows = [{"draw_id": draw_id, "ticket": ticket, **_numbers(numbers)} for numbers, ticket in attempts]
     with _session(write=True) as s:
@@ -1593,7 +1594,7 @@ def insert_lotto_attempts_bulk(
 
 
 def update_lotto_attempt(
-    draw_id: int, attempt_id: int, numbers: list[int], ticket: int | None = None
+    draw_id: UUID, attempt_id: UUID, numbers: list[int], ticket: int | None = None
 ) -> dict[str, Any] | None:
     with _session(write=True) as s:
         updated = s.scalar(
@@ -1605,7 +1606,7 @@ def update_lotto_attempt(
         return _lotto_draw_detail(s, draw_id) if updated else None
 
 
-def delete_lotto_attempt(draw_id: int, attempt_id: int) -> dict[str, Any] | None:
+def delete_lotto_attempt(draw_id: UUID, attempt_id: UUID) -> dict[str, Any] | None:
     with _session(write=True) as s:
         deleted = s.scalar(
             delete(LottoAttempt)
@@ -1648,13 +1649,13 @@ def get_app_user_by_username(username: str) -> dict[str, Any] | None:
         return _app_user(u) if u else None
 
 
-def get_app_user_by_id(user_id: int) -> dict[str, Any] | None:
+def get_app_user_by_id(user_id: UUID) -> dict[str, Any] | None:
     with _session() as s:
         return _public_user(s.get(AppUser, user_id))
 
 
 def update_app_user(
-    user_id: int,
+    user_id: UUID,
     username: str | None,
     password_hash: str | None,
 ) -> dict[str, Any] | None:
@@ -1666,7 +1667,7 @@ def update_app_user(
 
 
 def update_app_user_access(
-    user_id: int,
+    user_id: UUID,
     is_superuser: bool,
     allowed_pages: list[str] | None,
 ) -> dict[str, Any] | None:
@@ -1684,12 +1685,12 @@ def update_app_user_access(
         )
 
 
-def delete_app_user(user_id: int) -> bool:
+def delete_app_user(user_id: UUID) -> bool:
     with _session(write=True) as s:
         return s.execute(delete(AppUser).where(AppUser.id == user_id)).rowcount > 0
 
 
-def list_app_user_passkeys(user_id: int) -> list[dict[str, Any]]:
+def list_app_user_passkeys(user_id: UUID) -> list[dict[str, Any]]:
     stmt = select(AppUserPasskey).where(AppUserPasskey.user_id == user_id).order_by(AppUserPasskey.created_at)
     with _session() as s:
         return [_row(p) for p in s.scalars(stmt)]
@@ -1702,7 +1703,7 @@ def get_app_user_passkey(credential_id: bytes) -> dict[str, Any] | None:
 
 
 def insert_app_user_passkey(
-    user_id: int,
+    user_id: UUID,
     credential_id: bytes,
     public_key: bytes,
     sign_count: int,
@@ -1719,7 +1720,7 @@ def insert_app_user_passkey(
         return _row(s.scalar(insert(AppUserPasskey).values(values).returning(AppUserPasskey)))
 
 
-def mark_app_user_passkey_used(passkey_id: int, sign_count: int) -> None:
+def mark_app_user_passkey_used(passkey_id: UUID, sign_count: int) -> None:
     with _session(write=True) as s:
         s.execute(
             update(AppUserPasskey)
@@ -1728,18 +1729,18 @@ def mark_app_user_passkey_used(passkey_id: int, sign_count: int) -> None:
         )
 
 
-def delete_app_user_passkey(user_id: int, passkey_id: int) -> bool:
+def delete_app_user_passkey(user_id: UUID, passkey_id: UUID) -> bool:
     stmt = delete(AppUserPasskey).where(AppUserPasskey.id == passkey_id, AppUserPasskey.user_id == user_id)
     with _session(write=True) as s:
         return s.execute(stmt).rowcount > 0
 
 
-def insert_app_user_session(user_id: int, token_hash: bytes) -> None:
+def insert_app_user_session(user_id: UUID, token_hash: bytes) -> None:
     with _session(write=True) as s:
         s.execute(insert(AppUserSession).values(user_id=user_id, token_hash=token_hash))
 
 
-def get_app_user_session_user_id(token_hash: bytes) -> int | None:
+def get_app_user_session_user_id(token_hash: bytes) -> UUID | None:
     with _session() as s:
         return s.scalar(select(AppUserSession.user_id).where(AppUserSession.token_hash == token_hash))
 
@@ -1796,20 +1797,20 @@ def insert_company(name: str, flags: dict[str, bool] | None = None) -> dict[str,
         return _row(company)
 
 
-def reorder_companies(ordered_ids: list[int]) -> list[dict[str, Any]] | None:
+def reorder_companies(ordered_ids: list[UUID]) -> list[dict[str, Any]] | None:
     if not ordered_ids:
         return None
     with _session(write=True) as s:
         existing_ids = set(s.scalars(select(Company.id)))
         if set(ordered_ids) != existing_ids or len(ordered_ids) != len(existing_ids):
             return None
-        s.execute(update(Company).values(sort_order=Company.id + 1000000))
+        s.execute(update(Company).values(sort_order=Company.sort_order + 1000000))
         for i, cid in enumerate(ordered_ids):
-            s.execute(update(Company).where(Company.id == int(cid)).values(sort_order=i))
+            s.execute(update(Company).where(Company.id == cid).values(sort_order=i))
         return _companies(s)
 
 
-def update_company(company_id: int, name: str, flags: dict[str, bool] | None = None) -> dict[str, Any] | None:
+def update_company(company_id: UUID, name: str, flags: dict[str, bool] | None = None) -> dict[str, Any] | None:
     with _session(write=True) as s:
         company = s.scalar(
             update(Company)
@@ -1820,7 +1821,7 @@ def update_company(company_id: int, name: str, flags: dict[str, bool] | None = N
         return _row(company) if company else None
 
 
-def delete_company(company_id: int) -> bool:
+def delete_company(company_id: UUID) -> bool:
     with _session(write=True) as s:
         name = s.scalar(select(Company.name).where(Company.id == company_id))
         if name is None:
@@ -1872,7 +1873,7 @@ def _trip(trip: TravelTrip) -> dict[str, Any]:
     }
 
 
-def _travel_trip_detail(s: Session, trip_id: int) -> dict[str, Any] | None:
+def _travel_trip_detail(s: Session, trip_id: UUID) -> dict[str, Any] | None:
     trip = s.scalar(
         _trip_select().where(TravelTrip.id == trip_id).execution_options(populate_existing=True)
     )
@@ -1898,7 +1899,7 @@ def insert_travel_trip(title: str, start_date: Any, end_date: Any, notes: str | 
 
 
 def update_travel_trip(
-    trip_id: int, title: str, start_date: Any, end_date: Any, notes: str | None
+    trip_id: UUID, title: str, start_date: Any, end_date: Any, notes: str | None
 ) -> dict[str, Any] | None:
     with _session(write=True) as s:
         updated = s.scalar(
@@ -1910,12 +1911,12 @@ def update_travel_trip(
         return _travel_trip_detail(s, trip_id) if updated else None
 
 
-def delete_travel_trip(trip_id: int) -> bool:
+def delete_travel_trip(trip_id: UUID) -> bool:
     with _session(write=True) as s:
         return s.execute(delete(TravelTrip).where(TravelTrip.id == trip_id)).rowcount > 0
 
 
-def insert_travel_child(kind: str, trip_id: int, values: dict[str, Any]) -> dict[str, Any] | None:
+def insert_travel_child(kind: str, trip_id: UUID, values: dict[str, Any]) -> dict[str, Any] | None:
     model = _TRAVEL_CHILDREN[kind]
     row = {c: values[c] for c in _travel_write_values(kind, values)}
     if model is TravelCity:
@@ -1932,7 +1933,7 @@ def insert_travel_child(kind: str, trip_id: int, values: dict[str, Any]) -> dict
 
 
 def update_travel_child(
-    kind: str, trip_id: int, child_id: int, values: dict[str, Any]
+    kind: str, trip_id: UUID, child_id: UUID, values: dict[str, Any]
 ) -> dict[str, Any] | None:
     model = _TRAVEL_CHILDREN[kind]
     row = {c: values[c] for c in _travel_write_values(kind, values)}
@@ -1946,7 +1947,7 @@ def update_travel_child(
         return _travel_trip_detail(s, trip_id) if updated else None
 
 
-def delete_travel_child(kind: str, trip_id: int, child_id: int) -> dict[str, Any] | None:
+def delete_travel_child(kind: str, trip_id: UUID, child_id: UUID) -> dict[str, Any] | None:
     model = _TRAVEL_CHILDREN[kind]
     with _session(write=True) as s:
         deleted = s.scalar(
