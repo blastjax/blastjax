@@ -163,6 +163,64 @@ def _payslip_json_month_has_pair_arrays(year_data: dict[str, Any], month: str) -
     return False
 
 
+_SLIP_PERIOD = re.compile(r"PAY\s+SLIP\s+FOR\s+THE\s+PERIOD:\s*(\d{4})-(\d{2})-(\d{2})")
+# A label (words split by single spaces) and the amount after it; one line can hold an earning and a deduction.
+_SLIP_ITEM = re.compile(r"([A-Za-z0-9][\w/&().'-]*(?: [\w/&().'-]+)*)\s+(-?\d{1,3}(?:,\d{3})*\.\d{2})(?!\d)")
+_SLIP_FIELDS = {
+    "BASIC SALARY": "basic_salary",
+    "COMMISSION": "commission",
+    "EXPENSES REIMBURSEMENT": "reimbursement",
+    "MEDICAL REIMBURSEMENT": "medical_reimbursement",
+    "MP2": "mp2",
+    "WITHHOLDING TAX": "withholding_tax",
+    "SSS CONTRIBUTION": "sss_contribution",
+    "PHILHEALTH": "philhealth",
+    "EMPLOYEE HDMF": "pag_ibig",
+    "PAG-IBIG": "pag_ibig",
+    "NET SALARY": "total",
+}
+
+
+def payslip_from_text(text: str) -> dict[str, Any] | None:
+    """A Sophos payslip in the layout it has used since the first half of August 2025 ("PAY SLIP FOR THE PERIOD:
+    2025-08-01 to 2025-08-15"), read from this period's table, not the year-to-date one under it. Allowances and
+    subsidies add up into allowances, 13th month pay (taxable or not) into thirteenth_month, and any other
+    earning into others, named in the notes. None for any other layout."""
+    period = _SLIP_PERIOD.search(text)
+    if period is None:
+        return None
+    year, month, day = map(int, period.groups())
+    rec = {**_payslip_empty_rec(), **dict.fromkeys(("withholding_tax", "sss_contribution", "philhealth", "pag_ibig", "bereavement_asst"))}
+    rec.update(period_year=year, period_month=month, period_half=1 if day <= 15 else 2)
+    others: list[str] = []
+    earnings_end = 0  # earnings sit left of where the first AMOUNT heading ends, deductions right of it
+    for line in text[period.end() :].split("YEAR TO DATE")[0].splitlines():
+        if not earnings_end and (heading := re.search(r"\bEARNING\s+AMOUNT\b", line)):
+            earnings_end = heading.end()
+        for m in _SLIP_ITEM.finditer(line):
+            label, amount = m[1].strip(), float(m[2].replace(",", ""))
+            key = label.upper()
+            if key in ("GROSS EARNING", "TOTAL DEDUCTION"):
+                continue
+            if key in _SLIP_FIELDS:
+                field = _SLIP_FIELDS[key]
+            elif "ALLOWANCE" in key or "SUBSIDY" in key:
+                field = "allowances"
+            elif key.startswith("13TH MONTH"):
+                field = "thirteenth_month"
+            elif key.startswith("BEREAVEMENT"):
+                field = "bereavement_asst"
+            elif m.start() < earnings_end:
+                field = "others"
+                others.append(label)
+            else:
+                continue  # a deduction with no column of its own, e.g. a loan
+            rec[field] = round((rec[field] or 0) + amount, 2)
+    if others:
+        rec["notes"] = ", ".join(others)
+    return rec
+
+
 def _payslip_records_from_nested_json(data: dict[str, Any]) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for year_str, year_obj in data.items():

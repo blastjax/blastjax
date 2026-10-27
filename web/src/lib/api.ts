@@ -170,6 +170,13 @@ export async function uploadPayslipPdf(id: string, file: File) {
   return uploadPdf(`/api/payslip/${id}/pdf`, file);
 }
 
+export type PayslipPdfFields = Omit<PayslipRow, "id" | "company" | "has_pdf" | "created_at">;
+
+// Reads a Sophos payslip PDF (the layout used since August 2025) without saving anything.
+export async function readPayslipPdf(file: File) {
+  return uploadPdf<PayslipPdfFields>("/api/payslip/extract", file);
+}
+
 export async function deletePayslipPdf(id: string) {
   return sendJson<{ ok: boolean; has_pdf: boolean }>(
     "DELETE",
@@ -1714,8 +1721,10 @@ export type BillPdfFields = {
   period_start: string | null;
   period_end: string | null;
   amount: number | null;
+  minimum_due: number | null;
 };
 
+// Reads a PDF, or a PNG or JPG photo, of a bill.
 export async function readBillPdf(file: File, categoryId: string) {
   return uploadPdf<BillPdfFields>(`/api/bill/extract?category_id=${categoryId}`, file);
 }

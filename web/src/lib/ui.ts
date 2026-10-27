@@ -84,3 +84,5 @@ export const TABLE_HEAD_CELL_CLASSES = `px-3 py-2.5 font-medium ${TABLE_EDGE_PAD
 export const TABLE_ROW_CLASSES =
   "border-b border-line-soft text-sm tabular-nums text-ink-2 last:border-0 transition-colors duration-150 hover:bg-surface-2/50";
 export const TABLE_CELL_CLASSES = `px-3 py-3 ${TABLE_EDGE_PADDING}`;
+export const FILE_INPUT_CLASSES =
+  "block w-full text-sm text-ink-3 file:mr-3 file:h-9 file:cursor-pointer file:rounded-lg file:border file:border-solid file:border-line-strong file:bg-surface file:px-3 file:text-sm file:font-medium file:text-ink-2 hover:file:bg-surface-2 disabled:opacity-60";

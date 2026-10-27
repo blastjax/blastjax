@@ -47,6 +47,7 @@ import { addMonths, formatMonthYear, parseDateOnlyLocal, toIsoDateLocal } from "
 import { fmtCount } from "@/lib/formatNumber";
 import { formatAmountNumber, parseFormNumber } from "@/lib/parseFormNumber";
 import {
+  FILE_INPUT_CLASSES,
   INPUT_CLASSES,
   PAGE_CONTAINER_CLASSES,
   PRIMARY_BUTTON_CLASSES,
@@ -80,9 +81,6 @@ type BillDraft = {
   preset: Partial<BillForm>;
   anchor?: Date; // the month a new bill's defaults are counted from
 };
-
-const FILE_INPUT_CLASSES =
-  "block w-full text-sm text-ink-3 file:mr-3 file:h-9 file:cursor-pointer file:rounded-lg file:border file:border-solid file:border-line-strong file:bg-surface file:px-3 file:text-sm file:font-medium file:text-ink-2 hover:file:bg-surface-2 disabled:opacity-60";
 
 const plural = (n: number, word: string) => `${fmtCount(n)} ${word}${n === 1 ? "" : "s"}`;
 
@@ -316,6 +314,8 @@ function fillFromPdf(d: BillDraft, found: BillPdfFields): BillDraft {
     bill_date: (free("bill_date") && found.bill_date) || f.bill_date,
     due_date: (free("due_date") && found.due_date) || f.due_date,
     amount: free("amount") && found.amount != null ? formatAmountNumber(found.amount) : f.amount,
+    minimum_due:
+      free("minimum_due") && found.minimum_due != null ? formatAmountNumber(found.minimum_due) : f.minimum_due,
   };
   const read = {
     bill_date: !!found.bill_date,
@@ -323,14 +323,17 @@ function fillFromPdf(d: BillDraft, found: BillPdfFields): BillDraft {
     period_start: "period_start" in period,
     amount: found.amount != null,
   };
-  const filled = PDF_FIELDS.filter(([key]) => free(key) && read[key]).map(([, label]) => label);
+  const filled: string[] = PDF_FIELDS.filter(([key]) => free(key) && read[key]).map(([, label]) => label);
+  // Only card statements print a minimum due, so it's never reported missing.
+  if (free("minimum_due") && found.minimum_due != null) filled.push("minimum amount due");
   const missing = PDF_FIELDS.filter(([key]) => free(key) && !read[key]).map(([, label]) => label);
+  const kind = d.file && !isPdf(d.file) ? "photo" : "PDF";
   let note: string | null = null;
   if (filled.length > 0) {
     const gaps = missing.length > 0 ? `, but couldn't find the ${OR_LIST.format(missing)}` : "";
-    note = `Filled in the ${AND_LIST.format(filled)} from the PDF${gaps}. Check before saving.`;
+    note = `Filled in the ${AND_LIST.format(filled)} from the ${kind}${gaps}. Check before saving.`;
   } else if (missing.length > 0) {
-    note = `Couldn't find the ${OR_LIST.format(missing)} in this PDF.`;
+    note = `Couldn't find the ${OR_LIST.format(missing)} in this ${kind}.`;
   }
   return { ...d, form, note };
 }
@@ -512,13 +515,13 @@ export default function BillsClient() {
     setBillDraft((d) => d && { ...d, form: { ...d.form, ...patch } });
 
   const readPdf = async (file: File, categoryId: string) => {
-    setBillDraft((d) => d && { ...d, note: "Reading the PDF…" });
+    setBillDraft((d) => d && { ...d, note: isPdf(file) ? "Reading the PDF…" : "Reading the photo…" });
     let apply: (d: BillDraft) => BillDraft;
     try {
       const found = await readBillPdf(file, categoryId);
       apply = (d) => fillFromPdf(d, found);
     } catch (e) {
-      const note = errorText(e, "Couldn't read this PDF.");
+      const note = errorText(e, "Couldn't read this file.");
       apply = (d) => ({ ...d, note });
     }
     // Ignore the result if the form was closed or another file was picked meanwhile.
@@ -782,7 +785,7 @@ export default function BillsClient() {
                     billDraft.note ??
                     (billDraft.hasPdf
                       ? "A file is attached. Choose another only to replace it."
-                      : "Optional. A PDF fills in the dates and amount it can read; a PNG or JPG is just attached.")
+                      : "Optional. Fills in the dates and amount it can read from a PDF, PNG or JPG.")
                   }
                 >
                   <input
@@ -792,7 +795,7 @@ export default function BillsClient() {
                     onChange={(e) => {
                       const file = e.target.files?.[0] ?? null;
                       setBillDraft((d) => d && { ...d, file, note: null });
-                      if (file && isPdf(file)) void readPdf(file, billDraft.form.category_id);
+                      if (file) void readPdf(file, billDraft.form.category_id);
                     }}
                     disabled={saving}
                   />

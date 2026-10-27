@@ -6,6 +6,11 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
+# Tesseract reads the text of bills uploaded as photos (app/services/bill_extract.py).
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends tesseract-ocr \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN groupadd --system --gid 1000 app \
     && useradd --system --uid 1000 --gid app app \
     && mkdir -p /app/data \

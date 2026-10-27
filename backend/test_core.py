@@ -566,6 +566,116 @@ def check_bill_extraction() -> None:
         raise AssertionError("read a PDF it should have refused")
 
 
+def check_biller_layouts() -> None:
+    from app.services.bill_extract import biller_fields, start_after
+
+    fields = ("bill_date", "due_date", "period_start", "period_end", "amount")
+    unionbank = [
+        "Statement Date: October 07, 2026                    1,234 PTS",
+        "                                                    Go Rewards app for your earned and",
+        "   Due Date                 Minimum Amount Due      Total Amount Due",
+        "   October 28, 2026         PHP 1,000.00            PHP -2,500.50",
+        "Oct 01, 2026        Meralco Online                  PHP 900.00",
+    ]
+    got = biller_fields("\n".join(unionbank))
+    assert got is not None and got["minimum_due"] == 1000.0, got
+    assert tuple(got[f] for f in fields) == ("2026-10-07", "2026-10-28", None, "2026-10-07", -2500.5), got
+    meralco = [
+        "Meralco",
+        "Your electric bill      Customer  Account  Number  (CAN)      Due  Date",
+        "Billing  Period         Bill  Date      0000000000            03 Oct 2026",
+        "22 Aug 2026 to 21 Sep 2026      21 Sep 2026",
+        "Date  of  Meter  Reading                Please  Pay",
+        "21 Sep 2026             �  2,224.  55",
+        "  Total Amount Due  �  2,224.55",
+        "Bill Reference No.: 1  Billing Period: 22 Aug 2026 to 21 Sep 2026  Print Seq. 1",
+    ]
+    globe = [
+        "Hi Juan! Welcome to the Wonderful World of Globe.",
+        "            Amount to Pay    (Total Amount Due)Php 2,599.00",
+        "Pio del Pilar             Customer TIN            Invoice Date",
+        "Makati                                            06/17/26",
+        "                          Billing Period (mm/dd/yy)       Due Date",
+        "                          05/18/26 to  06/17/26           07/08/26",
+    ]
+    # The Beacon's bills come as photos: a faded scan loses the billing date and the month, OCR misreads digits.
+    beacon_faded = [
+        "THE BEACON CONDOMINIUM CORP.",
+        "Billing Dat 110112026 Due Date: 07/31/2026 Bus. Style",
+        "Total Amount Due: 3,479.07",
+    ]
+    beacon_screenshot = [
+        "BEACON THE BEACON CONDOMINIUM CORP.",
+        "Biling Date: 09/01/2028 Due Date: 09/80/2028) Bus. Ste",
+        "FOR THE MONTH OF September 2026",
+        "Total Amount Due: 3512.84]",
+        "Remaining Advance Payment: 1,072.26",
+    ]
+    for lines, want in (
+        (meralco, ("2026-09-21", "2026-10-03", "2026-08-22", "2026-09-21", 2224.55)),
+        (globe, ("2026-06-17", "2026-07-08", "2026-05-18", "2026-06-17", 2599.0)),
+        (beacon_faded, ("2026-07-01", "2026-07-31", "2026-07-01", "2026-07-31", 3479.07)),
+        (beacon_screenshot, ("2026-09-01", "2026-09-30", "2026-09-01", "2026-09-30", 3512.84)),
+    ):
+        got = biller_fields("\n".join(lines))
+        assert got is not None and tuple(got[f] for f in fields) == want, (lines[0], got)
+    assert biller_fields("ACME ELECTRIC\nDue Date: Oct 25, 2026") is None
+    assert biller_fields("Welcome to Globe\nnothing else") is None  # its layout changed: the generic rules try
+    assert start_after("2026-09-07", "2026-10-07") == "2026-09-08"
+    assert start_after(None, "2026-10-07") is None
+    assert start_after("2026-05-07", "2026-10-07") is None  # months back: a statement in between is missing
+
+
+def check_payslip_reading() -> None:
+    from app.services.payslip_parse import payslip_from_text
+
+    def row(earning: str = "", amount: str = "", deduction: str = "", taken: str = "") -> str:
+        return f"{earning:<48}{amount:>9} {deduction:<30}{taken:>9}".rstrip()
+
+    slip = [
+        "SOPHOS COMPUTER SECURITY PTE LTD, PHILIPPINES BRANCH",
+        "PAY SLIP FOR THE PERIOD: 2026-07-16 to 2026-07-31",
+        f"{'EARNING':>28}{'AMOUNT':>29} {'DEDUCTION':>20}{'AMOUNT':>19}",
+        "TAXABLE EARNING",
+        row("BASIC SALARY", "46,207.45", "WITHHOLDING TAX", "28,600.96"),
+        row("COMMISSION", "81,765.75", "MP2", "5,000.00"),
+        row("LONG SERVICE AWARD-TX", "6,405.00", "SSS CONTRIBUTION", "1,750.00"),
+        row("", "", "PHILHEALTH", "2,203.33"),
+        row("NON TAXABLE EARNING", "", "EMPLOYEE HDMF", "200.00"),
+        row("MEDICAL REIMBURSEMENT", "1,864.00", "SALARY LOAN", "1,000.00"),
+        row("CLOTHING ALLOWANCE", "458.33"),
+        row("RICE SUBSIDY", "1,750.00"),
+        row("13TH MONTH-NTX", "1,000.00"),
+        row("GROSS EARNING", "138,450.53", "TOTAL DEDUCTION", "38,754.29"),
+        row("NET SALARY", "", "", "99,696.24"),
+        "YEAR TO DATE",
+        row("BASIC SALARY", "591,243.50", "WITHHOLDING TAX", "172,603.72"),
+    ]
+    got = payslip_from_text("\n".join(slip))
+    assert got == {
+        "total": 99696.24,
+        "commission": 81765.75,
+        "reimbursement": None,
+        "medical_reimbursement": 1864.0,
+        "others": 6405.0,
+        "mp2": 5000.0,
+        "allowances": 2208.33,
+        "thirteenth_month": 1000.0,
+        "basic_salary": 46207.45,
+        "period_year": 2026,
+        "period_month": 7,
+        "period_half": 2,
+        "notes": "LONG SERVICE AWARD-TX",
+        "withholding_tax": 28600.96,
+        "sss_contribution": 1750.0,
+        "philhealth": 2203.33,
+        "pag_ibig": 200.0,
+        "bereavement_asst": None,
+    }, got
+    # Before August 2025 the payslip had another layout, which this doesn't read.
+    assert payslip_from_text("ELECTRONIC PAYSLIP OF : JUAN\nFOR PAYDATE : July 31, 2025\nNet Pay 72,438.53") is None
+
+
 def check_db_against_postgres() -> None:
     url = os.environ.get("TEST_DATABASE_URL", "")
     if not url:
@@ -690,6 +800,8 @@ def check_db_against_postgres() -> None:
         older = {**card_bill, "bill_date": dt.date(2026, 9, 5), "amount": 9.0, "category_id": visa["id"]}
         db.insert_bill(older)
         assert db.get_credit_card()["last_statement_balance"] == 15000.0, "an older bill became the statement"
+        assert db.last_bill_date_before(visa["id"], "2026-10-05") == "2026-09-05"
+        assert db.last_bill_date_before(visa["id"], "2026-09-05") is None
         assert db.delete_bill_category(visa["id"])
         unlinked = db.get_credit_card()
         assert unlinked["bill_category_id"] is None and unlinked["last_statement_balance"] == 1000.0, unlinked

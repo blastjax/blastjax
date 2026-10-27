@@ -15,6 +15,7 @@ import {
   getPayslips,
   payslipPdfUrl,
   updatePayslip,
+  uploadPayslipPdf,
   type CompanyRow,
   type PayslipRow,
 } from "@/lib/api";
@@ -93,6 +94,13 @@ function EyeOffIcon({ className = "h-4 w-4" }: { className?: string }) {
       <line x1="2" y1="2" x2="22" y2="22" />
     </svg>
   );
+}
+
+// A payslip filled in from a PDF keeps that PDF.
+async function withPdf(row: PayslipRow, pdf: File | null): Promise<PayslipRow> {
+  if (!pdf) return row;
+  await uploadPayslipPdf(row.id, pdf);
+  return { ...row, has_pdf: true };
 }
 
 export default function PayslipClient({ company = "Sophos" }: { company?: string }) {
@@ -237,13 +245,13 @@ export default function PayslipClient({ company = "Sophos" }: { company?: string
     }
   };
 
-  const saveEdit = async () => {
+  const saveEdit = async (pdf: File | null) => {
     if (nav?.screen !== "edit") return;
     const id = nav.row.id;
     setSaving(true);
     setError(null);
     try {
-      const updated = await updatePayslip(id, formToCreateBody(modalForm));
+      const updated = await withPdf(await updatePayslip(id, formToCreateBody(modalForm)), pdf);
       upsertRow(updated);
       clearPayslipModalDraft(nav);
       setNav({ screen: "detail", row: updated });
@@ -254,7 +262,7 @@ export default function PayslipClient({ company = "Sophos" }: { company?: string
     }
   };
 
-  const saveAddInModal = async () => {
+  const saveAddInModal = async (pdf: File | null) => {
     if (nav?.screen !== "add") return;
     setSaving(true);
     setError(null);
@@ -265,13 +273,13 @@ export default function PayslipClient({ company = "Sophos" }: { company?: string
       const half = (body.period_half ?? nav.half) as 1 | 2;
       const existing = rowsForSlot(rows, year, month, half)[0];
       if (existing) {
-        const updated = await updatePayslip(existing.id, body);
+        const updated = await withPdf(await updatePayslip(existing.id, body), pdf);
         upsertRow(updated);
         clearPayslipModalDraft(nav);
         setNav({ screen: "detail", row: updated });
         return;
       }
-      const fresh = await createPayslip(body);
+      const fresh = await withPdf(await createPayslip(body), pdf);
       upsertRow(fresh);
       clearPayslipModalDraft(nav);
       setNav({ screen: "detail", row: fresh });

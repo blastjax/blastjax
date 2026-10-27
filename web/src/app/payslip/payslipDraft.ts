@@ -72,7 +72,7 @@ export function parseOptYear(s: string): number | null {
   return y;
 }
 
-export function formFromRow(r: PayslipRow): FormState {
+export function formFromRow(r: Omit<PayslipRow, "id" | "has_pdf" | "created_at">): FormState {
   return {
     company: r.company,
     period_year:

@@ -15,8 +15,10 @@ import {
   companyColumnFlags,
   deletePayslipPdf,
   payslipPdfUrl,
+  readPayslipPdf,
   uploadPayslipPdf,
   type CompanyRow,
+  type PayslipPdfFields,
   type PayslipRow,
 } from "@/lib/api";
 import { PayslipFormFields } from "./PayslipFormFields";
@@ -40,12 +42,14 @@ import {
   DIALOG_BODY_CLASSES,
   DIALOG_CLASSES,
   DIALOG_FOOTER_CLASSES,
+  Field,
   ModalHeader,
   TEXT_BUTTON_CLASSES,
 } from "@/components/FinanceUI";
 import { ChevronLeftIcon, ChevronRightIcon } from "@/components/Icons";
 import {
   DELETE_BUTTON_CLASSES,
+  FILE_INPUT_CLASSES,
   ICON_BUTTON_CLASSES,
   PRIMARY_BUTTON_CLASSES,
   SECONDARY_BUTTON_CLASSES,
@@ -80,11 +84,24 @@ export function PayslipClientModal({
   error: string | null;
   modalFormRef: MutableRefObject<FormState>;
   goBack: () => void;
-  saveEdit: () => void | Promise<void>;
-  saveAddInModal: () => void | Promise<void>;
+  saveEdit: (pdf: File | null) => void | Promise<void>;
+  saveAddInModal: (pdf: File | null) => void | Promise<void>;
   handleDelete: (id: string) => void | Promise<void>;
   onPdfChange: (id: string, hasPdf: boolean) => void;
 }) {
+  // The PDF picked on this screen; another screen (a new nav) starts without one.
+  const [picked, setPicked] = useState<{ nav: Nav; file: File } | null>(null);
+  const pdf = picked?.nav === nav ? picked.file : null;
+  const pdfReader = (
+    <PayslipPdfReader
+      disabled={saving}
+      slot={nav.screen === "add" && !nav.freeform ? nav : null}
+      onFile={(file) => setPicked(file && { nav, file })}
+      onRead={(found) =>
+        setModalForm((f) => ({ ...formFromRow({ ...found, company: f.company }), notes: found.notes ?? f.notes }))
+      }
+    />
+  );
   const onCloseDialog = () => {
     if (nav.screen === "edit" || nav.screen === "add") {
       stashPayslipModalDraft(nav, modalFormRef.current);
@@ -346,10 +363,11 @@ export function PayslipClientModal({
                   className="flex min-h-0 flex-1 flex-col"
                   onSubmit={(e) => {
                     e.preventDefault();
-                    void saveEdit();
+                    void saveEdit(pdf);
                   }}
                 >
                   <div className={DIALOG_BODY_CLASSES}>
+                    {pdfReader}
                     <PayslipFormFields
                       form={modalForm}
                       setForm={setModalForm}
@@ -394,10 +412,11 @@ export function PayslipClientModal({
                   className="flex min-h-0 flex-1 flex-col"
                   onSubmit={(e) => {
                     e.preventDefault();
-                    void saveAddInModal();
+                    void saveAddInModal(pdf);
                   }}
                 >
                   <div className={DIALOG_BODY_CLASSES}>
+                    {pdfReader}
                     <PayslipFormFields
                       form={modalForm}
                       setForm={setModalForm}
@@ -422,6 +441,62 @@ export function PayslipClientModal({
             )}
 
     </Modal>
+  );
+}
+
+// Picking a payslip PDF fills the form with what it shows; the PDF is attached when the payslip is saved.
+// Opened for one pay period (`slot`), a PDF for another is turned away rather than saved under the wrong one.
+function PayslipPdfReader({
+  disabled,
+  slot,
+  onFile,
+  onRead,
+}: {
+  disabled: boolean;
+  slot: { year: number; month: number; half: 1 | 2 } | null;
+  onFile: (file: File | null) => void;
+  onRead: (found: PayslipPdfFields) => void;
+}) {
+  const [note, setNote] = useState<string | null>(null);
+  const latest = useRef<File | null>(null);
+  const read = async (input: HTMLInputElement) => {
+    const file = input.files?.[0] ?? null;
+    latest.current = file;
+    onFile(file);
+    if (!file) return setNote(null);
+    setNote("Reading the PDF…");
+    let next: string;
+    try {
+      const found = await readPayslipPdf(file);
+      if (latest.current !== file) return; // another file was picked meanwhile
+      const period = fmtPayPeriod(found.period_year, found.period_month, found.period_half);
+      if (slot && (found.period_year !== slot.year || found.period_month !== slot.month || found.period_half !== slot.half)) {
+        onFile(null);
+        input.value = "";
+        next = `That's the payslip for ${period}, not ${fmtPayPeriod(slot.year, slot.month, slot.half)}.`;
+      } else {
+        onRead(found);
+        next = `Filled in from the payslip for ${period}. Check before saving.`;
+      }
+    } catch (e) {
+      next = e instanceof Error ? e.message : "Couldn't read this PDF.";
+    }
+    if (latest.current === file) setNote(next);
+  };
+  return (
+    <Field
+      className="mb-4"
+      label="Payslip PDF"
+      hint={note ?? "Optional. A Sophos payslip from August 2025 on fills in the form; the PDF is attached on save."}
+    >
+      <input
+        type="file"
+        accept="application/pdf,.pdf"
+        className={FILE_INPUT_CLASSES}
+        disabled={disabled}
+        onChange={(e) => void read(e.currentTarget)}
+      />
+    </Field>
   );
 }
 

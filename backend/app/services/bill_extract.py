@@ -1,23 +1,28 @@
-"""Reads a bill's dates and amount out of a text PDF: pypdf plus label rules, no AI and no OCR.
+"""Reads a bill's dates and amount out of a text PDF (pypdf) or a photo of one (Tesseract OCR), no AI.
 
-Generic rules cover the usual wording. learn() adds what a biller's saved bills teach: the labels next to the
-values that were saved, how many days its due date and billing period sit from its bill date, and whether it
-writes dates day-first. Try the generic rules on a PDF with
+Billers this knows (UnionBank, Meralco, Globe, The Beacon) are read by their own layout: biller_fields().
+Anyone else gets the generic rules, which cover the usual wording, plus what learn() takes from the biller's
+saved bills: the labels next to the values that were saved, how many days its due date and billing period sit
+from its bill date, and whether it writes dates day-first. Try it on a PDF or photo with
 
     python backend/app/services/bill_extract.py path/to/bill.pdf [--text]
 """
 
 from __future__ import annotations
 
+import calendar
 import datetime as dt
 import io
 import re
+import shutil
 import statistics
+import subprocess
 from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from PIL import Image, ImageOps
 from pypdf import PdfReader
 
 try:
@@ -35,6 +40,8 @@ for _digit in "0123456789":
 _PAGES = 3  # the summary is on the first page or two; later pages are mostly line items
 _CLOSE = 3  # days: how near a printed date must be to where a biller's usual gap puts it
 _WAY_OFF = 7  # days: a date this far from where the usual gap puts it was picked from the wrong place
+_OCR_WIDTH = 2400  # px: narrower photos are scaled up to this first, or Tesseract reads 6 as 8 in small print
+_CYCLE = 45  # days: a statement that prints no period starts the day after a previous one at most this far back
 
 _LABELS: dict[str, list[str]] = {
     "bill_date": [
@@ -128,6 +135,28 @@ def pdf_text(data: bytes) -> str:
     return text
 
 
+def image_text(data: bytes) -> str:
+    """The text of a PNG or JPEG of a bill, by Tesseract on a grayscale copy scaled up so small print reads."""
+    if shutil.which("tesseract") is None:
+        raise UnreadablePdf("Reading photos needs Tesseract OCR, which isn't installed on this server.")
+    try:
+        img = ImageOps.grayscale(ImageOps.exif_transpose(Image.open(io.BytesIO(data))))
+        if img.width < _OCR_WIDTH:
+            img = img.resize((_OCR_WIDTH, round(img.height * _OCR_WIDTH / img.width)), Image.Resampling.LANCZOS)
+        png = io.BytesIO()
+        img.save(png, "PNG")
+        # --psm 6: one block of text, which keeps a label and its value on one line.
+        run = subprocess.run(
+            ["tesseract", "-", "-", "--psm", "6"], input=png.getvalue(), capture_output=True, check=True, timeout=60
+        )
+    except (OSError, subprocess.SubprocessError) as exc:  # a broken image raises an OSError too
+        raise UnreadablePdf("Couldn't read this photo.") from exc
+    text = run.stdout.decode("utf-8", "replace")
+    if not text.strip():
+        raise UnreadablePdf("No text could be read from this photo.")
+    return text
+
+
 def _opens_without_password(reader: PdfReader) -> bool:
     try:
         return bool(reader.decrypt(""))
@@ -166,6 +195,119 @@ def fields_from_text(text: str, hints: Hints | None = None) -> dict[str, Any]:
         **{f: d.isoformat() if d else None for f, d in found.items()},
         "amount": _find(lines, labels("amount"), _AMOUNT_RE, _amount),
     }
+
+
+def biller_fields(text: str) -> dict[str, Any] | None:
+    """A known biller's bill read by its own layout, or None when the text is no known biller's (or its layout
+    changed so that nothing could be read), for the generic rules to try."""
+    for mark, read in _BILLERS:
+        if mark.search(text):
+            found = read(text)
+            return found if any(v is not None for v in found.values()) else None
+    return None
+
+
+def start_after(previous: str | None, end: str) -> str | None:
+    """Where a statement that prints no period starts: the day after the previous statement, if there's one recent."""
+    if previous is None:
+        return None
+    start = dt.date.fromisoformat(previous) + dt.timedelta(days=1)
+    return start.isoformat() if 0 < (dt.date.fromisoformat(end) - start).days < _CYCLE else None
+
+
+_NAMED_DATE = rf"{_MONTH}\s*\d{{1,2}},?\s*\d{{4}}|\d{{1,2}}\s+{_MONTH}\s*\d{{4}}"  # October 28, 2026 / 22 Aug 2026
+_MONEY = r"-?(?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2}(?!\d)"
+
+
+def _iso(m: re.Match[str] | None, group: int = 1) -> str | None:
+    day = _to_date(m[group]) if m else None
+    return day.isoformat() if day else None
+
+
+def _money(m: re.Match[str] | None, group: int = 1) -> float | None:
+    return float(m[group].replace(",", "")) if m else None
+
+
+def _unionbank(text: str) -> dict[str, Any]:
+    """Statement Date on top, then Due Date, Minimum Amount Due and Total Amount Due as one row of a table. No
+    period is printed: it ends on the statement date and starts the day after the last one (see start_after)."""
+    bill = re.search(rf"Statement\s+Date:\s*({_NAMED_DATE})", text, re.I)
+    row = re.search(
+        rf"Due\s+Date\s+Minimum\s+Amount\s+Due\s+Total\s+Amount\s+Due\s+({_NAMED_DATE})"
+        rf"\s+PHP\s+({_MONEY})\s+PHP\s+({_MONEY})",
+        text,
+        re.I,
+    )
+    return {
+        "bill_date": _iso(bill),
+        "due_date": _iso(row),
+        "period_start": None,
+        "period_end": _iso(bill),
+        "amount": _money(row, 3),
+        "minimum_due": _money(row, 2),
+    }
+
+
+def _meralco(text: str) -> dict[str, Any]:
+    """Labels and values on alternating rows: the due date ends the row under "Due Date", and the bill date
+    follows the billing period on the row under "Billing Period  Bill Date"."""
+    due = re.search(rf"Due\s+Date[ \t]*\n.*?({_NAMED_DATE})", text, re.I)
+    period = re.search(rf"({_NAMED_DATE})\s+to\s+({_NAMED_DATE})[ \t]+({_NAMED_DATE})", text, re.I)
+    return {
+        "bill_date": _iso(period, 3),
+        "due_date": _iso(due),
+        "period_start": _iso(period, 1),
+        "period_end": _iso(period, 2),
+        "amount": _money(re.search(rf"Total\s+Amount\s+Due[^\d\n-]*({_MONEY})", text, re.I)),
+    }
+
+
+def _globe(text: str) -> dict[str, Any]:
+    """mm/dd/yy dates: the invoice date is the first on the row under its label, the due date follows the period."""
+    bill = re.search(r"Invoice\s+Date[ \t]*\n.*?(\d\d/\d\d/\d\d)\b", text, re.I)
+    period = re.search(r"(\d\d/\d\d/\d\d)\s+to\s+(\d\d/\d\d/\d\d)[ \t]+(\d\d/\d\d/\d\d)\b", text, re.I)
+    return {
+        "bill_date": _iso(bill),
+        "due_date": _iso(period, 3),
+        "period_start": _iso(period, 1),
+        "period_end": _iso(period, 2),
+        "amount": _money(re.search(rf"Total\s+Amount\s+Due\)\s*Php\s*({_MONEY})", text, re.I)),
+    }
+
+
+def _beacon(text: str) -> dict[str, Any]:
+    """The Beacon's statement of account, usually a photo or a screenshot: always "FOR THE MONTH OF" one calendar
+    month, billed on its first day and due on its last. OCR gets words right more often than digits (a faded scan
+    loses the billing date; 2026 comes out as 2028), so a printed date only counts if it falls in that month."""
+
+    def printed(label: str) -> dt.date | None:
+        m = re.search(rf"{label}\W*(\d{{1,2}}/\d{{1,2}}/\d{{4}})", text, re.I)
+        return _to_date(m[1]) if m else None
+
+    billed, due = printed(r"Bil+ing\s+Date"), printed(r"Due\s+Date")
+    named = re.search(r"MONTH\s+OF\s+([a-z]+\s+\d{4})", text, re.I)
+    first = (_to_date(f"1 {named[1]}") if named else None) or next((d.replace(day=1) for d in (due, billed) if d), None)
+    amount = _money(re.search(rf"Total\s+Amount\s+Due\W*({_MONEY})", text, re.I))
+    if first is None:
+        return {"bill_date": None, "due_date": None, "period_start": None, "period_end": None, "amount": amount}
+    last = first.replace(day=calendar.monthrange(first.year, first.month)[1])
+    in_month = [d for d in (billed, due) if d and first <= d <= last]
+    return {
+        "bill_date": (billed if billed in in_month else first).isoformat(),
+        "due_date": (due if due in in_month else last).isoformat(),
+        "period_start": first.isoformat(),
+        "period_end": last.isoformat(),
+        "amount": amount,
+    }
+
+
+# What tells each biller's text apart, checked in this order: a card statement can list a Meralco payment.
+_BILLERS: list[tuple[re.Pattern[str], Callable[[str], dict[str, Any]]]] = [
+    (re.compile(r"Go Rewards"), _unionbank),
+    (re.compile(r"\bMeralco\b"), _meralco),
+    (re.compile(r"\bGlobe\b"), _globe),
+    (re.compile(r"BEACON\s+CONDOMINIUM", re.I), _beacon),
+]
 
 
 def learn(examples: list[tuple[str, dict[str, Any]]]) -> Hints:
@@ -357,12 +499,13 @@ if __name__ == "__main__":
 
     for path in [arg for arg in sys.argv[1:] if arg != "--text"]:
         print(f"== {path}")
+        data = Path(path).read_bytes()
         try:
-            text = pdf_text(Path(path).read_bytes())
+            text = pdf_text(data) if data.startswith(b"%PDF") else image_text(data)
         except UnreadablePdf as exc:
             print(f"   {exc}")
             continue
-        for key, value in fields_from_text(text).items():
+        for key, value in (biller_fields(text) or fields_from_text(text)).items():
             print(f"   {key:<13}{value}")
         if "--text" in sys.argv:
             print(text)

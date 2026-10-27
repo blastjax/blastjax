@@ -15,10 +15,13 @@ from fastapi import (
     UploadFile,
 )
 
+from starlette.concurrency import run_in_threadpool
+
 import cache
 from app.deps import read_upload, require_db
 from app.schemas.payslip import PayslipCreate
-from app.services.payslip_parse import _payslip_records_from_nested_json
+from app.services.bill_extract import UnreadablePdf, pdf_text
+from app.services.payslip_parse import _payslip_records_from_nested_json, payslip_from_text
 from db import (
     delete_payslip,
     delete_payslip_pdf,
@@ -96,6 +99,21 @@ def payslip_import_json(body: dict[str, Any] = Body(...)) -> dict[str, Any]:
         )
     ids = insert_payslips_bulk(recs)
     return {"filename": "payslip-import.json", "inserted": len(ids), "ids": ids}
+
+
+@router.post("/api/payslip/extract")
+async def payslip_extract(file: UploadFile = File(...)) -> dict[str, Any]:
+    data = await read_upload(file)
+    try:
+        found = payslip_from_text(await run_in_threadpool(pdf_text, data))
+    except UnreadablePdf as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if found is None:
+        raise HTTPException(
+            status_code=422,
+            detail="This doesn't look like a Sophos payslip from August 2025 on, so nothing could be read from it.",
+        )
+    return found
 
 
 @router.get("/api/payslip/{payslip_id}")

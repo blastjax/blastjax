@@ -1074,6 +1074,18 @@ def bill_examples(category_id: UUID, limit: int = 6) -> list[tuple[dict[str, Any
         return [(_bill(b, True), bytes(b.pdf_data)) for b in s.scalars(stmt)]
 
 
+def last_bill_date_before(category_id: UUID, day: str) -> str | None:
+    """A biller's latest bill date before `day`: where a statement that prints no billing period starts from."""
+    with _session() as s:
+        return _normalize(
+            s.scalar(
+                select(func.max(Bill.bill_date)).where(
+                    Bill.category_id == category_id, Bill.bill_date < date.fromisoformat(day)
+                )
+            )
+        )
+
+
 def _first_credit_card(s: Session) -> CreditCard | None:
     return s.scalar(select(CreditCard).order_by(CreditCard.id).limit(1))
 
