@@ -1,0 +1,727 @@
+{
+  "schemaVersion": 1,
+  "ok": false,
+  "command": "finalize",
+  "status": "fail",
+  "type": "architecture",
+  "quality": "showcase",
+  "startedAt": "2026-10-28T04:01:36.321Z",
+  "specification": {
+    "path": "C:\\Users\\blastjax\\blastjax\\.archify\\architecture-runtime-apis-20261028-120011\\candidate.json",
+    "sha256": "8c79bca7cc1ff003908ce20b63a388c54a2102e4214da0334175e101b6100fde",
+    "bytes": 12375
+  },
+  "artifact": {
+    "path": "C:\\Users\\blastjax\\blastjax\\.archify\\architecture-runtime-apis-20261028-120011\\software-architecture.html"
+  },
+  "stages": {
+    "validate": {
+      "status": "fail",
+      "exitCode": 1,
+      "durationMs": null,
+      "command": [
+        "C:\\Program Files\\nodejs\\node.exe",
+        "C:\\Users\\blastjax\\.agents\\skills\\archify\\bin\\archify.mjs",
+        "deliver",
+        "architecture",
+        "C:\\Users\\blastjax\\blastjax\\.archify\\architecture-runtime-apis-20261028-120011\\candidate.json",
+        "C:\\Users\\blastjax\\blastjax\\.archify\\architecture-runtime-apis-20261028-120011\\software-architecture.html",
+        "--quality",
+        "showcase",
+        "--repo-root",
+        "C:\\Users\\blastjax\\blastjax",
+        "--json"
+      ],
+      "receipt": {
+        "schemaVersion": 1,
+        "ok": false,
+        "command": "deliver",
+        "receiptId": "5eb5ffdc-eaa6-4881-bd52-5d7cfd3a5558",
+        "stage": "render",
+        "type": "architecture",
+        "input": "C:\\Users\\blastjax\\blastjax\\.archify\\architecture-runtime-apis-20261028-120011\\candidate.json",
+        "output": "C:\\Users\\blastjax\\blastjax\\.archify\\architecture-runtime-apis-20261028-120011\\software-architecture.html",
+        "error": "Architecture layout validation failed:\n- Boundary label \"AWS EC2 instance · docker compose\" extends outside the viewBox — move wrapped components away from the canvas edge, shorten the label, or increase the viewBox.\n- Boundary label \"Session required\" extends outside the viewBox — move wrapped components away from the canvas edge, shorten the label, or increase the viewBox.\n- Boundary \"AWS EC2 instance · docker compose\" extends outside the viewBox (top by 10px) — preserve wraps membership and repair the measured canvas side.\n- Boundary \"Session required\" extends outside the viewBox (top by 10px) — preserve wraps membership and repair the measured canvas side.",
+        "diagnostics": [
+          {
+            "code": "layout/constraint",
+            "severity": "error",
+            "message": "Boundary label \"AWS EC2 instance · docker compose\" extends outside the viewBox — move wrapped components away from the canvas edge, shorten the label, or increase the viewBox.",
+            "subject": {
+              "diagramType": "architecture"
+            },
+            "evidence": {},
+            "supportedFixes": []
+          },
+          {
+            "code": "layout/constraint",
+            "severity": "error",
+            "message": "Boundary label \"Session required\" extends outside the viewBox — move wrapped components away from the canvas edge, shorten the label, or increase the viewBox.",
+            "subject": {
+              "diagramType": "architecture"
+            },
+            "evidence": {},
+            "supportedFixes": []
+          },
+          {
+            "code": "layout/boundary-out-of-bounds",
+            "severity": "error",
+            "message": "Boundary \"AWS EC2 instance · docker compose\" extends outside the viewBox (top by 10px) — preserve wraps membership and repair the measured canvas side.",
+            "subject": {
+              "diagramType": "architecture",
+              "boundary": {
+                "kind": "region",
+                "label": "AWS EC2 instance · docker compose",
+                "wraps": [
+                  "caddy",
+                  "web",
+                  "gate",
+                  "public",
+                  "api",
+                  "redis",
+                  "settingsApi",
+                  "healthApi",
+                  "financeApi",
+                  "travelApi",
+                  "gamesApi"
+                ]
+              }
+            },
+            "evidence": {
+              "bounds": {
+                "x": 250,
+                "y": -10,
+                "width": 940,
+                "height": 474
+              },
+              "viewBox": [
+                1460,
+                652
+              ],
+              "overflow": {
+                "left": 0,
+                "top": 10,
+                "right": 0,
+                "bottom": 0
+              },
+              "members": [
+                {
+                  "id": "caddy",
+                  "type": "cloud",
+                  "label": "Edge Caddy",
+                  "x": 280,
+                  "y": 200,
+                  "width": 140,
+                  "height": 64,
+                  "pos": [
+                    280,
+                    200
+                  ]
+                },
+                {
+                  "id": "web",
+                  "type": "frontend",
+                  "label": "Next.js web",
+                  "x": 280,
+                  "y": 30,
+                  "width": 140,
+                  "height": 64,
+                  "pos": [
+                    280,
+                    30
+                  ]
+                },
+                {
+                  "id": "gate",
+                  "type": "security",
+                  "label": "Session gate",
+                  "x": 500,
+                  "y": 200,
+                  "width": 140,
+                  "height": 64,
+                  "pos": [
+                    500,
+                    200
+                  ]
+                },
+                {
+                  "id": "public",
+                  "type": "backend",
+                  "label": "Public API",
+                  "x": 500,
+                  "y": 370,
+                  "width": 150,
+                  "height": 64,
+                  "pos": [
+                    500,
+                    370
+                  ]
+                },
+                {
+                  "id": "api",
+                  "type": "backend",
+                  "label": "FastAPI app",
+                  "x": 760,
+                  "y": 182,
+                  "width": 150,
+                  "height": 100,
+                  "pos": [
+                    760,
+                    182
+                  ]
+                },
+                {
+                  "id": "redis",
+                  "type": "database",
+                  "label": "Redis cache",
+                  "x": 760,
+                  "y": 30,
+                  "width": 150,
+                  "height": 64,
+                  "pos": [
+                    760,
+                    30
+                  ]
+                },
+                {
+                  "id": "settingsApi",
+                  "type": "backend",
+                  "label": "Settings API",
+                  "x": 1010,
+                  "y": 20,
+                  "width": 150,
+                  "height": 64,
+                  "pos": [
+                    1010,
+                    20
+                  ]
+                },
+                {
+                  "id": "healthApi",
+                  "type": "backend",
+                  "label": "Health API",
+                  "x": 1010,
+                  "y": 110,
+                  "width": 150,
+                  "height": 64,
+                  "pos": [
+                    1010,
+                    110
+                  ]
+                },
+                {
+                  "id": "financeApi",
+                  "type": "backend",
+                  "label": "Finance API",
+                  "x": 1010,
+                  "y": 200,
+                  "width": 150,
+                  "height": 64,
+                  "pos": [
+                    1010,
+                    200
+                  ]
+                },
+                {
+                  "id": "travelApi",
+                  "type": "backend",
+                  "label": "Travel API",
+                  "x": 1010,
+                  "y": 290,
+                  "width": 150,
+                  "height": 64,
+                  "pos": [
+                    1010,
+                    290
+                  ]
+                },
+                {
+                  "id": "gamesApi",
+                  "type": "backend",
+                  "label": "Games API",
+                  "x": 1010,
+                  "y": 380,
+                  "width": 150,
+                  "height": 64,
+                  "pos": [
+                    1010,
+                    380
+                  ]
+                }
+              ]
+            },
+            "supportedFixes": [
+              "move the wrapped components right by at least 0px and down by at least 10px, then revalidate connected routes and the opposite canvas sides; enlarging meta.viewBox cannot fix left/top overflow"
+            ]
+          },
+          {
+            "code": "layout/boundary-out-of-bounds",
+            "severity": "error",
+            "message": "Boundary \"Session required\" extends outside the viewBox (top by 10px) — preserve wraps membership and repair the measured canvas side.",
+            "subject": {
+              "diagramType": "architecture",
+              "boundary": {
+                "kind": "security-group",
+                "label": "Session required",
+                "wraps": [
+                  "settingsApi",
+                  "healthApi",
+                  "financeApi",
+                  "travelApi",
+                  "gamesApi"
+                ]
+              }
+            },
+            "evidence": {
+              "bounds": {
+                "x": 980,
+                "y": -10,
+                "width": 210,
+                "height": 474
+              },
+              "viewBox": [
+                1460,
+                652
+              ],
+              "overflow": {
+                "left": 0,
+                "top": 10,
+                "right": 0,
+                "bottom": 0
+              },
+              "members": [
+                {
+                  "id": "settingsApi",
+                  "type": "backend",
+                  "label": "Settings API",
+                  "x": 1010,
+                  "y": 20,
+                  "width": 150,
+                  "height": 64,
+                  "pos": [
+                    1010,
+                    20
+                  ]
+                },
+                {
+                  "id": "healthApi",
+                  "type": "backend",
+                  "label": "Health API",
+                  "x": 1010,
+                  "y": 110,
+                  "width": 150,
+                  "height": 64,
+                  "pos": [
+                    1010,
+                    110
+                  ]
+                },
+                {
+                  "id": "financeApi",
+                  "type": "backend",
+                  "label": "Finance API",
+                  "x": 1010,
+                  "y": 200,
+                  "width": 150,
+                  "height": 64,
+                  "pos": [
+                    1010,
+                    200
+                  ]
+                },
+                {
+                  "id": "travelApi",
+                  "type": "backend",
+                  "label": "Travel API",
+                  "x": 1010,
+                  "y": 290,
+                  "width": 150,
+                  "height": 64,
+                  "pos": [
+                    1010,
+                    290
+                  ]
+                },
+                {
+                  "id": "gamesApi",
+                  "type": "backend",
+                  "label": "Games API",
+                  "x": 1010,
+                  "y": 380,
+                  "width": 150,
+                  "height": 64,
+                  "pos": [
+                    1010,
+                    380
+                  ]
+                }
+              ]
+            },
+            "supportedFixes": [
+              "move the wrapped components right by at least 0px and down by at least 10px, then revalidate connected routes and the opposite canvas sides; enlarging meta.viewBox cannot fix left/top overflow"
+            ]
+          }
+        ],
+        "provenance": "absent",
+        "update": {
+          "status": "unavailable",
+          "installedVersion": null,
+          "availableVersion": null,
+          "releaseNotes": null,
+          "checkedAt": null,
+          "source": null,
+          "noticeRequired": false,
+          "noticeText": null,
+          "reason": "disabled"
+        }
+      },
+      "execution": "embedded-in-deliver"
+    },
+    "deliver": {
+      "status": "not-run",
+      "execution": "blocked-by-validate"
+    }
+  },
+  "browserCheck": {
+    "requested": true,
+    "ran": false
+  },
+  "diagnostics": [
+    {
+      "code": "layout/constraint",
+      "severity": "error",
+      "message": "Boundary label \"AWS EC2 instance · docker compose\" extends outside the viewBox — move wrapped components away from the canvas edge, shorten the label, or increase the viewBox.",
+      "subject": {
+        "diagramType": "architecture"
+      },
+      "evidence": {},
+      "supportedFixes": []
+    },
+    {
+      "code": "layout/constraint",
+      "severity": "error",
+      "message": "Boundary label \"Session required\" extends outside the viewBox — move wrapped components away from the canvas edge, shorten the label, or increase the viewBox.",
+      "subject": {
+        "diagramType": "architecture"
+      },
+      "evidence": {},
+      "supportedFixes": []
+    },
+    {
+      "code": "layout/boundary-out-of-bounds",
+      "severity": "error",
+      "message": "Boundary \"AWS EC2 instance · docker compose\" extends outside the viewBox (top by 10px) — preserve wraps membership and repair the measured canvas side.",
+      "subject": {
+        "diagramType": "architecture",
+        "boundary": {
+          "kind": "region",
+          "label": "AWS EC2 instance · docker compose",
+          "wraps": [
+            "caddy",
+            "web",
+            "gate",
+            "public",
+            "api",
+            "redis",
+            "settingsApi",
+            "healthApi",
+            "financeApi",
+            "travelApi",
+            "gamesApi"
+          ]
+        }
+      },
+      "evidence": {
+        "bounds": {
+          "x": 250,
+          "y": -10,
+          "width": 940,
+          "height": 474
+        },
+        "viewBox": [
+          1460,
+          652
+        ],
+        "overflow": {
+          "left": 0,
+          "top": 10,
+          "right": 0,
+          "bottom": 0
+        },
+        "members": [
+          {
+            "id": "caddy",
+            "type": "cloud",
+            "label": "Edge Caddy",
+            "x": 280,
+            "y": 200,
+            "width": 140,
+            "height": 64,
+            "pos": [
+              280,
+              200
+            ]
+          },
+          {
+            "id": "web",
+            "type": "frontend",
+            "label": "Next.js web",
+            "x": 280,
+            "y": 30,
+            "width": 140,
+            "height": 64,
+            "pos": [
+              280,
+              30
+            ]
+          },
+          {
+            "id": "gate",
+            "type": "security",
+            "label": "Session gate",
+            "x": 500,
+            "y": 200,
+            "width": 140,
+            "height": 64,
+            "pos": [
+              500,
+              200
+            ]
+          },
+          {
+            "id": "public",
+            "type": "backend",
+            "label": "Public API",
+            "x": 500,
+            "y": 370,
+            "width": 150,
+            "height": 64,
+            "pos": [
+              500,
+              370
+            ]
+          },
+          {
+            "id": "api",
+            "type": "backend",
+            "label": "FastAPI app",
+            "x": 760,
+            "y": 182,
+            "width": 150,
+            "height": 100,
+            "pos": [
+              760,
+              182
+            ]
+          },
+          {
+            "id": "redis",
+            "type": "database",
+            "label": "Redis cache",
+            "x": 760,
+            "y": 30,
+            "width": 150,
+            "height": 64,
+            "pos": [
+              760,
+              30
+            ]
+          },
+          {
+            "id": "settingsApi",
+            "type": "backend",
+            "label": "Settings API",
+            "x": 1010,
+            "y": 20,
+            "width": 150,
+            "height": 64,
+            "pos": [
+              1010,
+              20
+            ]
+          },
+          {
+            "id": "healthApi",
+            "type": "backend",
+            "label": "Health API",
+            "x": 1010,
+            "y": 110,
+            "width": 150,
+            "height": 64,
+            "pos": [
+              1010,
+              110
+            ]
+          },
+          {
+            "id": "financeApi",
+            "type": "backend",
+            "label": "Finance API",
+            "x": 1010,
+            "y": 200,
+            "width": 150,
+            "height": 64,
+            "pos": [
+              1010,
+              200
+            ]
+          },
+          {
+            "id": "travelApi",
+            "type": "backend",
+            "label": "Travel API",
+            "x": 1010,
+            "y": 290,
+            "width": 150,
+            "height": 64,
+            "pos": [
+              1010,
+              290
+            ]
+          },
+          {
+            "id": "gamesApi",
+            "type": "backend",
+            "label": "Games API",
+            "x": 1010,
+            "y": 380,
+            "width": 150,
+            "height": 64,
+            "pos": [
+              1010,
+              380
+            ]
+          }
+        ]
+      },
+      "supportedFixes": [
+        "move the wrapped components right by at least 0px and down by at least 10px, then revalidate connected routes and the opposite canvas sides; enlarging meta.viewBox cannot fix left/top overflow"
+      ]
+    },
+    {
+      "code": "layout/boundary-out-of-bounds",
+      "severity": "error",
+      "message": "Boundary \"Session required\" extends outside the viewBox (top by 10px) — preserve wraps membership and repair the measured canvas side.",
+      "subject": {
+        "diagramType": "architecture",
+        "boundary": {
+          "kind": "security-group",
+          "label": "Session required",
+          "wraps": [
+            "settingsApi",
+            "healthApi",
+            "financeApi",
+            "travelApi",
+            "gamesApi"
+          ]
+        }
+      },
+      "evidence": {
+        "bounds": {
+          "x": 980,
+          "y": -10,
+          "width": 210,
+          "height": 474
+        },
+        "viewBox": [
+          1460,
+          652
+        ],
+        "overflow": {
+          "left": 0,
+          "top": 10,
+          "right": 0,
+          "bottom": 0
+        },
+        "members": [
+          {
+            "id": "settingsApi",
+            "type": "backend",
+            "label": "Settings API",
+            "x": 1010,
+            "y": 20,
+            "width": 150,
+            "height": 64,
+            "pos": [
+              1010,
+              20
+            ]
+          },
+          {
+            "id": "healthApi",
+            "type": "backend",
+            "label": "Health API",
+            "x": 1010,
+            "y": 110,
+            "width": 150,
+            "height": 64,
+            "pos": [
+              1010,
+              110
+            ]
+          },
+          {
+            "id": "financeApi",
+            "type": "backend",
+            "label": "Finance API",
+            "x": 1010,
+            "y": 200,
+            "width": 150,
+            "height": 64,
+            "pos": [
+              1010,
+              200
+            ]
+          },
+          {
+            "id": "travelApi",
+            "type": "backend",
+            "label": "Travel API",
+            "x": 1010,
+            "y": 290,
+            "width": 150,
+            "height": 64,
+            "pos": [
+              1010,
+              290
+            ]
+          },
+          {
+            "id": "gamesApi",
+            "type": "backend",
+            "label": "Games API",
+            "x": 1010,
+            "y": 380,
+            "width": 150,
+            "height": 64,
+            "pos": [
+              1010,
+              380
+            ]
+          }
+        ]
+      },
+      "supportedFixes": [
+        "move the wrapped components right by at least 0px and down by at least 10px, then revalidate connected routes and the opposite canvas sides; enlarging meta.viewBox cannot fix left/top overflow"
+      ]
+    }
+  ],
+  "evidence": {
+    "receipt": "C:\\Users\\blastjax\\blastjax\\.archify\\architecture-runtime-apis-20261028-120011\\review-1\\software-architecture.finalize.json",
+    "summaryReceipt": "C:\\Users\\blastjax\\blastjax\\.archify\\architecture-runtime-apis-20261028-120011\\review-1\\software-architecture.finalize-summary.json"
+  },
+  "visualReview": "not-requested",
+  "failedStage": "validate",
+  "finishedAt": "2026-10-28T04:01:36.936Z",
+  "durationMs": 615,
+  "update": {
+    "status": "current",
+    "installedVersion": "3.2.0",
+    "availableVersion": "3.2.0",
+    "releaseNotes": null,
+    "checkedAt": "2026-10-28T02:46:35.378Z",
+    "source": "cache",
+    "noticeRequired": false,
+    "noticeText": null
+  }
+}

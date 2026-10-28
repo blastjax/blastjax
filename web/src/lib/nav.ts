@@ -2,6 +2,7 @@ import {
   CalendarIcon,
   ChartBarIcon,
   CreditCardIcon,
+  DiagramIcon,
   DiceIcon,
   DocumentIcon,
   GridIcon,
@@ -77,7 +78,10 @@ export const NAV_SECTIONS: readonly NavSection[] = [
   },
   {
     title: null,
-    items: [{ href: "/settings", label: "Settings", icon: SettingsIcon }],
+    items: [
+      { href: "/software-architecture", label: "Software Architecture", icon: DiagramIcon },
+      { href: "/settings", label: "Settings", icon: SettingsIcon },
+    ],
   },
 ];
 

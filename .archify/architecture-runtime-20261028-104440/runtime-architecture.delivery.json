@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "4280e8a5-40d3-407d-aa9d-d8e8af3ee2d8",
+  "status": "current",
+  "command": "deliver",
+  "type": "architecture",
+  "input": "C:\\Users\\blastjax\\blastjax\\.archify\\architecture-runtime-20261028-104440\\candidate.json",
+  "output": "C:\\Users\\blastjax\\blastjax\\.archify\\architecture-runtime-20261028-104440\\runtime-architecture.html",
+  "specification": {
+    "sha256": "84b0ea8b7ab072e619a53f335b9cb714efae5adcfedebef45ad8d918d78dbbf6",
+    "bytes": 8878
+  },
+  "artifact": {
+    "sha256": "d5b2169ff071370a6473ca32a3b290322d99909ef6242ced490c3d9482bad965",
+    "bytes": 852447
+  }
+}

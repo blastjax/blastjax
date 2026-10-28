@@ -1,0 +1,69 @@
+{
+  "schemaVersion": 1,
+  "ok": false,
+  "command": "finalize",
+  "status": "fail",
+  "type": "architecture",
+  "quality": "showcase",
+  "specification": {
+    "path": "C:\\Users\\blastjax\\blastjax\\.archify\\architecture-runtime-apis-20261028-120011\\candidate.json"
+  },
+  "artifact": {
+    "path": "C:\\Users\\blastjax\\blastjax\\.archify\\architecture-runtime-apis-20261028-120011\\software-architecture.html"
+  },
+  "gates": {
+    "validate": "fail",
+    "deliver": "not-run",
+    "check": "not-run",
+    "browser-check": "not-run"
+  },
+  "failedStage": "validate",
+  "diagnostics": [
+    {
+      "code": "input/read",
+      "severity": "error",
+      "message": "Input could not be read: ENOENT: no such file or directory, open 'C:\\Users\\blastjax\\blastjax\\.archify\\architecture-runtime-apis-20261028-120011\\candidate.json'",
+      "subject": {
+        "input": "C:\\Users\\blastjax\\blastjax\\.archify\\architecture-runtime-apis-20261028-120011\\candidate.json"
+      },
+      "evidence": {
+        "systemCode": "ENOENT",
+        "reason": "ENOENT: no such file or directory, open 'C:\\Users\\blastjax\\blastjax\\.archify\\architecture-runtime-apis-20261028-120011\\candidate.json'"
+      },
+      "supportedFixes": [
+        "provide one readable JSON input file"
+      ]
+    }
+  ],
+  "diagnosticSummary": {
+    "total": 1,
+    "shown": 1,
+    "truncated": false
+  },
+  "evidence": {
+    "receipt": "C:\\Users\\blastjax\\blastjax\\.archify\\architecture-runtime-apis-20261028-120011\\software-architecture.finalize.json",
+    "summaryReceipt": "C:\\Users\\blastjax\\blastjax\\.archify\\architecture-runtime-apis-20261028-120011\\software-architecture.finalize-summary.json"
+  },
+  "update": {
+    "status": "current",
+    "installedVersion": "3.2.0",
+    "availableVersion": "3.2.0",
+    "releaseNotes": null,
+    "checkedAt": "2026-10-28T02:46:35.378Z",
+    "source": "cache",
+    "noticeRequired": false,
+    "noticeText": null
+  },
+  "visualReview": "not-requested",
+  "durationMs": 278,
+  "browserCheck": {
+    "requested": true,
+    "ran": false
+  },
+  "nextAction": {
+    "action": "edit-in-place",
+    "candidate": "C:\\Users\\blastjax\\blastjax\\.archify\\architecture-runtime-apis-20261028-120011\\candidate.json",
+    "constraint": "Preserve unaffected semantics and geometry; apply each diagnostic's supportedFixes, or the fix its message names, and do not replace the whole candidate.",
+    "then": "finalize-once"
+  }
+}

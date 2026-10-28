@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "command": "finalize",
+  "status": "pass",
+  "type": "architecture",
+  "quality": "showcase",
+  "specification": {
+    "path": "C:\\Users\\blastjax\\blastjax\\.archify\\architecture-runtime-apis-20261028-120011\\candidate.json",
+    "sha256": "ec716a47b1f8f7c0ad0944e506f6f9f762b4b75c525bc0e6895a9542ce3873d8",
+    "bytes": 16072
+  },
+  "artifact": {
+    "path": "C:\\Users\\blastjax\\blastjax\\.archify\\architecture-runtime-apis-20261028-120011\\software-architecture.html",
+    "sha256": "a2f973d0b2729c95bd1006be25e5636bfcd143963f347b2c46af485068f16911",
+    "bytes": 866605
+  },
+  "gates": {
+    "validate": "pass",
+    "deliver": "pass",
+    "check": "pass",
+    "browser-check": "pass"
+  },
+  "diagnostics": [],
+  "diagnosticSummary": {
+    "total": 0,
+    "shown": 0,
+    "truncated": false
+  },
+  "evidence": {
+    "receipt": "C:\\Users\\blastjax\\blastjax\\.archify\\architecture-runtime-apis-20261028-120011\\review-2\\software-architecture.finalize.json",
+    "summaryReceipt": "C:\\Users\\blastjax\\blastjax\\.archify\\architecture-runtime-apis-20261028-120011\\review-2\\software-architecture.finalize-summary.json",
+    "browserCheckReceipt": "C:\\Users\\blastjax\\blastjax\\.archify\\architecture-runtime-apis-20261028-120011\\review-2\\software-architecture.browser-check.json"
+  },
+  "update": {
+    "status": "current",
+    "installedVersion": "3.2.0",
+    "availableVersion": "3.2.0",
+    "releaseNotes": null,
+    "checkedAt": "2026-10-28T02:46:35.378Z",
+    "source": "cache",
+    "noticeRequired": false,
+    "noticeText": null
+  },
+  "visualReview": "not-requested",
+  "durationMs": 3051,
+  "browserCheck": {
+    "requested": true,
+    "ran": true
+  }
+}

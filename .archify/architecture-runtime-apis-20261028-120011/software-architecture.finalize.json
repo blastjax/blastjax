@@ -1,0 +1,108 @@
+{
+  "schemaVersion": 1,
+  "ok": false,
+  "command": "finalize",
+  "status": "fail",
+  "type": "architecture",
+  "quality": "showcase",
+  "startedAt": "2026-10-28T04:00:53.066Z",
+  "specification": {
+    "path": "C:\\Users\\blastjax\\blastjax\\.archify\\architecture-runtime-apis-20261028-120011\\candidate.json"
+  },
+  "artifact": {
+    "path": "C:\\Users\\blastjax\\blastjax\\.archify\\architecture-runtime-apis-20261028-120011\\software-architecture.html"
+  },
+  "stages": {
+    "validate": {
+      "status": "fail",
+      "exitCode": 1,
+      "durationMs": null,
+      "command": [
+        "C:\\Program Files\\nodejs\\node.exe",
+        "C:\\Users\\blastjax\\.agents\\skills\\archify\\bin\\archify.mjs",
+        "deliver",
+        "architecture",
+        "C:\\Users\\blastjax\\blastjax\\.archify\\architecture-runtime-apis-20261028-120011\\candidate.json",
+        "C:\\Users\\blastjax\\blastjax\\.archify\\architecture-runtime-apis-20261028-120011\\software-architecture.html",
+        "--quality",
+        "showcase",
+        "--repo-root",
+        "C:\\Users\\blastjax\\blastjax",
+        "--json"
+      ],
+      "receipt": {
+        "schemaVersion": 1,
+        "ok": false,
+        "command": "deliver",
+        "receiptId": "d2d84e53-f5a3-4bfb-98c0-b668f779f11d",
+        "stage": "input",
+        "type": "architecture",
+        "input": "C:\\Users\\blastjax\\blastjax\\.archify\\architecture-runtime-apis-20261028-120011\\candidate.json",
+        "output": "C:\\Users\\blastjax\\blastjax\\.archify\\architecture-runtime-apis-20261028-120011\\software-architecture.html",
+        "error": "Could not read delivery input \"C:\\Users\\blastjax\\blastjax\\.archify\\architecture-runtime-apis-20261028-120011\\candidate.json\": ENOENT: no such file or directory, open 'C:\\Users\\blastjax\\blastjax\\.archify\\architecture-runtime-apis-20261028-120011\\candidate.json'",
+        "diagnostics": [
+          {
+            "code": "input/read",
+            "severity": "error",
+            "message": "Input could not be read: ENOENT: no such file or directory, open 'C:\\Users\\blastjax\\blastjax\\.archify\\architecture-runtime-apis-20261028-120011\\candidate.json'",
+            "subject": {
+              "input": "C:\\Users\\blastjax\\blastjax\\.archify\\architecture-runtime-apis-20261028-120011\\candidate.json"
+            },
+            "evidence": {
+              "systemCode": "ENOENT",
+              "reason": "ENOENT: no such file or directory, open 'C:\\Users\\blastjax\\blastjax\\.archify\\architecture-runtime-apis-20261028-120011\\candidate.json'"
+            },
+            "supportedFixes": [
+              "provide one readable JSON input file"
+            ]
+          }
+        ],
+        "provenance": "absent"
+      },
+      "execution": "embedded-in-deliver"
+    },
+    "deliver": {
+      "status": "not-run",
+      "execution": "blocked-by-validate"
+    }
+  },
+  "browserCheck": {
+    "requested": true,
+    "ran": false
+  },
+  "diagnostics": [
+    {
+      "code": "input/read",
+      "severity": "error",
+      "message": "Input could not be read: ENOENT: no such file or directory, open 'C:\\Users\\blastjax\\blastjax\\.archify\\architecture-runtime-apis-20261028-120011\\candidate.json'",
+      "subject": {
+        "input": "C:\\Users\\blastjax\\blastjax\\.archify\\architecture-runtime-apis-20261028-120011\\candidate.json"
+      },
+      "evidence": {
+        "systemCode": "ENOENT",
+        "reason": "ENOENT: no such file or directory, open 'C:\\Users\\blastjax\\blastjax\\.archify\\architecture-runtime-apis-20261028-120011\\candidate.json'"
+      },
+      "supportedFixes": [
+        "provide one readable JSON input file"
+      ]
+    }
+  ],
+  "evidence": {
+    "receipt": "C:\\Users\\blastjax\\blastjax\\.archify\\architecture-runtime-apis-20261028-120011\\software-architecture.finalize.json",
+    "summaryReceipt": "C:\\Users\\blastjax\\blastjax\\.archify\\architecture-runtime-apis-20261028-120011\\software-architecture.finalize-summary.json"
+  },
+  "visualReview": "not-requested",
+  "failedStage": "validate",
+  "finishedAt": "2026-10-28T04:00:53.344Z",
+  "durationMs": 278,
+  "update": {
+    "status": "current",
+    "installedVersion": "3.2.0",
+    "availableVersion": "3.2.0",
+    "releaseNotes": null,
+    "checkedAt": "2026-10-28T02:46:35.378Z",
+    "source": "cache",
+    "noticeRequired": false,
+    "noticeText": null
+  }
+}

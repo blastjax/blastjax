@@ -1,0 +1,168 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "blastjax runtime architecture",
+    "locale": "en",
+    "output": ".archify/architecture-runtime-20261028-104440/runtime-architecture.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "git@github.com:blastjax/budget-manager.git",
+      "provider": "github",
+      "link_mode": "local-only",
+      "revision": "21ae805f5744004bcb54f8d17215b26ad614ecb9"
+    }
+  },
+  "components": [
+    {
+      "id": "browser", "type": "external", "label": "Browser", "sublabel": "React client · Bearer",
+      "pos": [40, 200], "size": [130, 64],
+      "sources": [
+        { "path": "web/src/lib/api.ts", "line": 8, "end_line": 23, "label": "apiFetch adds Bearer token" },
+        { "path": "web/src/lib/auth.ts", "line": 1, "end_line": 20, "label": "session token in localStorage" },
+        { "path": "web/src/components/AuthGate.tsx", "line": 61, "end_line": 71, "label": "AuthGate status check" }
+      ]
+    },
+    {
+      "id": "caddy", "type": "cloud", "label": "Edge Caddy", "sublabel": "TLS :443 · auto-HTTPS", "tag": "only public port",
+      "pos": [290, 200], "size": [140, 64],
+      "sources": [
+        { "path": "docker/Caddyfile", "line": 1, "end_line": 11, "label": "/api/* to api, rest to web" },
+        { "path": "docker/edge/docker-compose.yml", "line": 3, "end_line": 20, "label": "edge-caddy publishes 80/443" },
+        { "path": "docker-compose.edge.yml", "line": 1, "end_line": 11, "label": "edge network aliases" }
+      ]
+    },
+    {
+      "id": "web", "type": "frontend", "label": "Next.js web", "sublabel": "UI shell · :3000",
+      "pos": [510, 40], "size": [140, 64],
+      "sources": [
+        { "path": "web/next.config.ts", "line": 7, "end_line": 16, "label": "standalone output" },
+        { "path": "web/src/app/layout.tsx", "line": 40, "end_line": 60, "label": "AuthGate wraps every page" },
+        { "path": "docker-compose.yml", "line": 58, "end_line": 64, "label": "web service" }
+      ]
+    },
+    {
+      "id": "gate", "type": "security", "label": "Session gate", "sublabel": "require_session", "tag": "SHA-256 token",
+      "pos": [510, 200], "size": [140, 64],
+      "sources": [
+        { "path": "backend/app/deps.py", "line": 17, "end_line": 23, "label": "Bearer check, 401 on miss" },
+        { "path": "backend/app/security.py", "line": 80, "end_line": 94, "label": "opt-in: only once users exist" },
+        { "path": "backend/app/security.py", "line": 114, "end_line": 130, "label": "Redis then Neon session lookup" }
+      ]
+    },
+    {
+      "id": "api", "type": "backend", "label": "FastAPI", "sublabel": "17 routers · :8000",
+      "pos": [770, 200], "size": [150, 64],
+      "sources": [
+        { "path": "backend/app/factory.py", "line": 89, "end_line": 114, "label": "CORS + write invalidation" },
+        { "path": "backend/app/factory.py", "line": 138, "end_line": 160, "label": "routers behind the gate" },
+        { "path": "backend/app/routers/payslip.py", "line": 47, "end_line": 60, "label": "read-through example" }
+      ]
+    },
+    {
+      "id": "redis", "type": "database", "label": "Redis cache", "sublabel": "optional · TTL 1 day",
+      "pos": [770, 40], "size": [150, 64],
+      "sources": [
+        { "path": "docker-compose.yml", "line": 2, "end_line": 15, "label": "loopback-only port" },
+        { "path": "backend/cache.py", "line": 35, "end_line": 51, "label": "uncached if PING fails" },
+        { "path": "backend/app/factory.py", "line": 76, "end_line": 87, "label": "flushed on API start" }
+      ]
+    },
+    {
+      "id": "neon", "type": "database", "label": "Neon Postgres", "sublabel": "pooled endpoint · TLS", "tag": "managed SaaS",
+      "pos": [770, 380], "size": [150, 64],
+      "sources": [
+        { "path": "backend/db.py", "line": 72, "end_line": 77, "label": "DATABASE_URL" },
+        { "path": "backend/db.py", "line": 112, "end_line": 141, "label": "pooled SQLAlchemy engine" },
+        { "path": "backend/db.py", "line": 240, "end_line": 251, "label": "startup table check" }
+      ]
+    },
+    {
+      "id": "pcso", "type": "external", "label": "pcso.gov.ph", "sublabel": "lotto results page",
+      "pos": [1010, 40], "size": [160, 64],
+      "sources": [
+        { "path": "backend/app/services/pcso_results.py", "line": 1, "end_line": 32, "label": "Chrome-like scrape client" },
+        { "path": "backend/app/services/pcso_results.py", "line": 106, "end_line": 167, "label": "reuse window + backoff" },
+        { "path": "backend/app/routers/lotto.py", "line": 135, "end_line": 157, "label": "POST /api/lotto/sync-pcso" }
+      ]
+    },
+    {
+      "id": "maps", "type": "external", "label": "Maps services", "sublabel": "Google Maps · Nominatim",
+      "pos": [1010, 380], "size": [160, 64],
+      "sources": [
+        { "path": "backend/app/routers/travel.py", "line": 38, "end_line": 38, "label": "allowed Google hosts" },
+        { "path": "backend/app/routers/travel.py", "line": 51, "end_line": 66, "label": "Nominatim reverse geocode" },
+        { "path": "backend/app/routers/travel.py", "line": 69, "end_line": 107, "label": "resolve Maps link" }
+      ]
+    }
+  ],
+  "boundaries": [
+    { "kind": "region", "label": "AWS EC2 instance · docker compose", "wraps": ["caddy", "web", "gate", "api", "redis"] },
+    { "kind": "security-group", "label": "Private networks · no public ports", "wraps": ["web", "gate", "api", "redis"] }
+  ],
+  "connections": [
+    { "id": "browser-to-caddy", "from": "browser", "to": "caddy", "label": "HTTPS + Bearer", "variant": "emphasis" },
+    { "id": "caddy-to-web", "from": "caddy", "to": "web", "label": "pages", "fromSide": "top", "toSide": "left" },
+    { "id": "caddy-to-gate", "from": "caddy", "to": "gate", "label": "/api/*", "variant": "emphasis" },
+    { "id": "gate-to-api", "from": "gate", "to": "api", "label": "valid session", "variant": "emphasis" },
+    { "id": "api-to-redis", "from": "api", "to": "redis", "label": "read-through" },
+    { "id": "api-to-neon", "from": "api", "to": "neon", "label": "SQL · TLS", "variant": "emphasis" },
+    { "id": "api-to-pcso", "from": "api", "to": "pcso", "label": "lotto sync", "fromSide": "right", "toSide": "bottom" },
+    { "id": "api-to-maps", "from": "api", "to": "maps", "label": "resolve link", "fromSide": "right", "toSide": "top" }
+  ],
+  "cards": [
+    {
+      "dot": "emerald", "title": "Primary path",
+      "items": [
+        "Browser loads the UI shell from Next.js, then calls /api/* on the same origin",
+        "Caddy proxies /api/* to blastjax-api:8000 and everything else to blastjax-web:3000",
+        "Routers read Redis first, fall back to Neon SQL, then fill the cache",
+        "Successful POST/PUT/PATCH/DELETE invalidate the route's cache namespaces"
+      ]
+    },
+    {
+      "dot": "rose", "title": "Trust boundaries",
+      "items": [
+        "Internet to EC2: only Caddy publishes :80/:443 and terminates TLS",
+        "api and web publish no host ports; Redis binds 127.0.0.1 only",
+        "Auth is opt-in: open until the first user exists, then gated routes need a Bearer session",
+        "/api/auth/* and /api/health skip the gate; only SHA-256(token) is stored in Neon",
+        "Login lockout keys on request.client.host, which behind Caddy is the proxy's IP",
+        "BUDGET_DISABLE_AUTH=1 is set only by the local compose override"
+      ]
+    },
+    {
+      "dot": "cyan", "title": "Data and cache",
+      "items": [
+        "Neon pool keeps 6, max 10, with a SELECT 1 probe after 20 s idle",
+        "API refuses to start if expected tables are missing",
+        "Redis is optional: the API runs uncached if PING fails; the 1-day TTL is a backstop",
+        "Session lookups are cached 5 min in Redis; the cache is flushed on API start and on deploy"
+      ]
+    },
+    {
+      "dot": "violet", "title": "In-process work",
+      "items": [
+        "Bill extraction: pypdf for text PDFs, a Tesseract subprocess for photos, no AI",
+        "Uploads capped at 10 MB and checked by magic bytes (PDF, PNG, JPEG)",
+        "Payslip parsing and the Mosaic and Mambo puzzle solvers run inside the API"
+      ]
+    },
+    {
+      "dot": "amber", "title": "Outbound calls",
+      "items": [
+        "PCSO: curl_cffi Chrome impersonation, 15-min reuse window, backoff up to 6 h; failure returns 502",
+        "Maps: https Google hosts only, 6 s timeout, 64 KB read; failures return empty fields"
+      ]
+    },
+    {
+      "dot": "slate", "title": "Deploy (not runtime)",
+      "items": [
+        "Push to main: GitHub Actions builds api and web images to GHCR",
+        "AWS SSM on EC2: git pull, migration scripts, compose up --wait, Redis flush",
+        "Installs this site into the shared edge Caddy, which also serves two other sites",
+        "NEXT_PUBLIC_API_URL is baked into the web image at build time"
+      ]
+    }
+  ]
+}
