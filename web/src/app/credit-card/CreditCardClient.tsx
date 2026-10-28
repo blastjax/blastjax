@@ -14,7 +14,6 @@ import {
   DIALOG_FOOTER_CLASSES,
   EmptyState,
   Field,
-  IconAction,
   LoadingBlocks,
   Metric,
   Meter,
@@ -34,6 +33,7 @@ import {
   getBills,
   getCreditCard,
   updateCreditCard,
+  updateCreditCardPayment,
   type BillCategoryRow,
   type CreditCardPaymentRow,
   type CreditCardRow,
@@ -168,6 +168,7 @@ export default function CreditCardClient() {
   const [cardFormError, setCardFormError] = useState<string | null>(null);
 
   const [paymentModalOpen, setPaymentModalOpen] = useState(false);
+  const [editingPaymentId, setEditingPaymentId] = useState<string | null>(null);
   const [paymentForm, setPaymentForm] = useState<PaymentForm>(emptyPaymentForm());
   const [paymentSaving, setPaymentSaving] = useState(false);
   const [paymentFormError, setPaymentFormError] = useState<string | null>(null);
@@ -301,7 +302,19 @@ export default function CreditCardClient() {
 
   const openPaymentModal = useCallback(() => {
     setPaymentFormError(null);
+    setEditingPaymentId(null);
     setPaymentForm(emptyPaymentForm());
+    setPaymentModalOpen(true);
+  }, []);
+
+  const openEditPayment = useCallback((p: CreditCardPaymentRow) => {
+    setPaymentFormError(null);
+    setEditingPaymentId(p.id);
+    setPaymentForm({
+      amount: formatAmountNumber(p.amount),
+      payment_date: p.payment_date.slice(0, 10),
+      note: p.note ?? "",
+    });
     setPaymentModalOpen(true);
   }, []);
 
@@ -325,31 +338,40 @@ export default function CreditCardClient() {
       setPaymentFormError(null);
       setPaymentSaving(true);
       try {
-        await createCreditCardPayment(card.id, {
+        const body = {
           amount,
           payment_date: paymentForm.payment_date,
           note: paymentForm.note.trim() || null,
-        });
+        };
+        if (editingPaymentId != null) {
+          await updateCreditCardPayment(editingPaymentId, body);
+        } else {
+          await createCreditCardPayment(card.id, body);
+        }
         setPaymentModalOpen(false);
         await load();
       } catch (err) {
-        setPaymentFormError(err instanceof Error ? err.message : "Failed to record payment");
+        setPaymentFormError(err instanceof Error ? err.message : "Failed to save payment");
       } finally {
         setPaymentSaving(false);
       }
     },
-    [card, paymentForm, load],
+    [card, paymentForm, editingPaymentId, load],
   );
 
   const onDeletePayment = useCallback(
     async (id: string) => {
       if (!(await confirmDialog("Delete this payment? The card balance goes back up by its amount."))) return;
-      setError(null);
+      setPaymentFormError(null);
+      setPaymentSaving(true);
       try {
         await deleteCreditCardPayment(id);
+        setPaymentModalOpen(false);
         await load();
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to delete payment");
+        setPaymentFormError(err instanceof Error ? err.message : "Failed to delete payment");
+      } finally {
+        setPaymentSaving(false);
       }
     },
     [load],
@@ -773,7 +795,20 @@ export default function CreditCardClient() {
               ) : (
                 <ul className="divide-y divide-line-soft border-t border-line-soft">
                   {payments.map((p) => (
-                    <li key={p.id} className="flex items-center gap-3 px-5 py-3 sm:px-6">
+                    <li
+                      key={p.id}
+                      role="button"
+                      tabIndex={0}
+                      data-tooltip="Double-click to edit or delete"
+                      onDoubleClick={() => openEditPayment(p)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          openEditPayment(p);
+                        }
+                      }}
+                      className="flex cursor-pointer select-none items-center gap-3 px-5 py-3 transition-colors duration-150 hover:bg-surface-2/60 sm:px-6"
+                    >
                       <div className="min-w-0 flex-1">
                         <p className="text-sm font-medium text-ink">{fmtDate(p.payment_date)}</p>
                         {p.note && <p className="mt-0.5 truncate text-xs text-ink-3">{p.note}</p>}
@@ -781,7 +816,6 @@ export default function CreditCardClient() {
                       <span className="shrink-0 text-sm font-semibold tabular-nums text-success-text">
                         −{fmtMoney(p.amount)}
                       </span>
-                      <IconAction kind="delete" label="Delete payment" onClick={() => void onDeletePayment(p.id)} />
                     </li>
                   ))}
                 </ul>
@@ -931,7 +965,7 @@ export default function CreditCardClient() {
       >
         <ModalHeader
           id="credit-card-payment-title"
-          title="Record payment"
+          title={editingPaymentId != null ? "Edit payment" : "Record payment"}
           subtitle={card ? `Current balance ${fmtMoney(card.current_balance)}` : undefined}
           onClose={closePaymentModal}
         />
@@ -996,11 +1030,21 @@ export default function CreditCardClient() {
             )}
           </div>
           <div className={DIALOG_FOOTER_CLASSES}>
+            {editingPaymentId != null && (
+              <button
+                type="button"
+                disabled={paymentSaving}
+                className={DANGER_TEXT_BUTTON_CLASSES}
+                onClick={() => void onDeletePayment(editingPaymentId)}
+              >
+                Delete
+              </button>
+            )}
             <button type="button" disabled={paymentSaving} className={SECONDARY_BUTTON_CLASSES} onClick={closePaymentModal}>
               Cancel
             </button>
             <button type="submit" disabled={paymentSaving} className={PRIMARY_BUTTON_CLASSES}>
-              {paymentSaving ? "Saving…" : "Record payment"}
+              {paymentSaving ? "Saving…" : editingPaymentId != null ? "Save changes" : "Record payment"}
             </button>
           </div>
         </form>

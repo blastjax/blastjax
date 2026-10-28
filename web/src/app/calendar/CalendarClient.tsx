@@ -17,11 +17,11 @@ import {
 import Link from "next/link";
 import { Modal } from "@/components/Modal";
 import {
+  DANGER_TEXT_BUTTON_CLASSES,
   DIALOG_BODY_CLASSES,
   DIALOG_CLASSES,
   DIALOG_FOOTER_CLASSES,
   Field,
-  IconAction,
   LoadingBlocks,
   Metric,
   Meter,
@@ -38,7 +38,6 @@ import {
   createFixedExpense,
   deleteFixedExpense,
   updateFixedExpense,
-  deleteMonthlyExpense,
   deletePayPeriodStartOverride,
   getCalendarDayOverrides,
   getFixedExpenses,
@@ -51,7 +50,13 @@ import {
   type MonthlyExpenseRow,
   type PayslipRow,
 } from "@/lib/api";
-import { MONTH_NAMES_SHORT, formatMonthDayShort, formatMonthYear, formatWeekdayMonthDay } from "@/lib/dateFormat";
+import {
+  MONTH_NAMES_SHORT,
+  formatMonthDayShort,
+  formatMonthYear,
+  formatWeekdayMonthDay,
+  monthKey,
+} from "@/lib/dateFormat";
 import { fmtAmount, fmtCompactMoney } from "@/lib/formatNumber";
 import {
   evaluateAmountExpression,
@@ -418,7 +423,7 @@ export default function CalendarClient() {
     expense: emptyExpenseForm(),
   });
   const [savingEntry, setSavingEntry] = useState<EntryKind | null>(null);
-  const [editingEntry, setEditingEntry] = useState<{ id: string; form: ExpenseForm } | null>(null);
+  const [editingEntry, setEditingEntry] = useState<{ row: FixedExpenseRow; form: ExpenseForm } | null>(null);
   const [expenseError, setExpenseError] = useState<string | null>(null);
 
   const [payDateModalHalf, setPayDateModalHalf] = useState<PeriodHalf | null>(null);
@@ -675,16 +680,21 @@ export default function CalendarClient() {
     const add = (map: Map<string, BillRow[]>, key: string, row: BillRow) =>
       map.set(key, [...(map.get(key) ?? []), row]);
     const seen = new Set<string>();
+    // Skipped months are pay-period months, as the Monthly Expenses page shows them.
+    const skips = (e: MonthlyExpenseRow, y: number, m: number) => e.skipped_months.includes(monthKey(y, m));
     const addRows = (y: number, m: number, rows: MonthlyExpenseRow[]) => {
       for (const e of rows) {
         const due = billDayIso(e, y, m);
         if (due == null) {
-          if (e.period_half === 1 || e.period_half === 2) add(byPeriod, periodKey(y, m, e.period_half), { ...e, due });
+          if ((e.period_half === 1 || e.period_half === 2) && !skips(e, y, m)) {
+            add(byPeriod, periodKey(y, m, e.period_half), { ...e, due });
+          }
           continue;
         }
         if (seen.has(`${e.id}:${due}`)) continue;
         seen.add(`${e.id}:${due}`);
         const p = periodForDate(payPeriodOverrides, due);
+        if (skips(e, p.year, p.month)) continue;
         add(byPeriod, periodKey(p.year, p.month, p.half), { ...e, due });
         add(byDay, due, { ...e, due });
       }
@@ -1291,11 +1301,26 @@ export default function CalendarClient() {
     [expenseModalHalf, entryForms, changeBudget, viewedYear, viewedMonth],
   );
 
+  const openEditEntry = useCallback((row: FixedExpenseRow) => {
+    setExpenseError(null);
+    setEditingEntry({
+      row,
+      form: { description: row.description ?? "", amount: formatAmountNumber(Math.abs(row.amount)) },
+    });
+  }, []);
+
+  const closeEditEntry = useCallback(() => {
+    setEditingEntry(null);
+  }, []);
+
+  const editingKind: EntryKind | null = editingEntry ? (editingEntry.row.amount < 0 ? "income" : "expense") : null;
+
   const saveEditedEntry = useCallback(
-    async (e: FormEvent, row: FixedExpenseRow) => {
+    async (e: FormEvent) => {
       e.preventDefault();
       if (!editingEntry) return;
-      const amount = parseFormNumber(editingEntry.form.amount);
+      const { row, form } = editingEntry;
+      const amount = parseFormNumber(form.amount);
       if (amount == null || amount <= 0) {
         setExpenseError("Enter a valid amount greater than zero.");
         return;
@@ -1305,7 +1330,7 @@ export default function CalendarClient() {
       setSavingEntry(row.amount < 0 ? "income" : "expense");
       try {
         await changeBudget(row.amount - signed, () =>
-          updateFixedExpense(row.id, { amount: signed, description: editingEntry.form.description.trim() || null }),
+          updateFixedExpense(row.id, { amount: signed, description: form.description.trim() || null }),
         );
         setEditingEntry(null);
       } catch (err) {
@@ -1317,18 +1342,22 @@ export default function CalendarClient() {
     [editingEntry, changeBudget],
   );
 
-  const onDeleteEntry = useCallback(
-    async (amount: number, confirmText: string, remove: () => Promise<unknown>) => {
-      if (!(await confirmDialog(confirmText))) return;
-      setExpenseError(null);
-      try {
-        await changeBudget(amount, remove);
-      } catch (err) {
-        setExpenseError(err instanceof Error ? err.message : "Failed to delete");
-      }
-    },
-    [changeBudget],
-  );
+  const deleteEditedEntry = useCallback(async () => {
+    if (!editingEntry) return;
+    const { row } = editingEntry;
+    const kind: EntryKind = row.amount < 0 ? "income" : "expense";
+    if (!(await confirmDialog(ENTRY_COPY[kind].remove))) return;
+    setExpenseError(null);
+    setSavingEntry(kind);
+    try {
+      await changeBudget(row.amount, () => deleteFixedExpense(row.id));
+      setEditingEntry(null);
+    } catch (err) {
+      setExpenseError(err instanceof Error ? err.message : "Failed to delete");
+    } finally {
+      setSavingEntry(null);
+    }
+  }, [editingEntry, changeBudget]);
 
   const modalEntries = splitEntries(
     expenseModalHalf != null ? expensesForPeriod(viewedYear, viewedMonth, expenseModalHalf) : [],
@@ -1756,7 +1785,8 @@ export default function CalendarClient() {
 
       <Modal
         open={expenseModalHalf != null}
-        onClose={closeExpenseModal}
+        // Escape reaches every open modal; leave this one open under an edit on top of it.
+        onClose={editingEntry ? () => {} : closeExpenseModal}
         ariaLabelledBy="fixed-expense-title"
         dialogClassName={`${DIALOG_CLASSES} max-w-2xl`}
       >
@@ -1846,47 +1876,22 @@ export default function CalendarClient() {
                 {rows.length === 0 ? (
                   <p className="mt-3 text-sm text-ink-3">{copy.empty}</p>
                 ) : (
-                  <ul className="mt-3 divide-y divide-line-soft rounded-xl border border-line">
-                    {rows.map((exp) =>
-                      editingEntry?.id === exp.id ? (
-                        <li key={exp.id} className="p-2">
-                          <form
-                            onSubmit={(e) => void saveEditedEntry(e, exp)}
-                            className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_8rem_auto_auto]"
-                          >
-                            <input
-                              type="text"
-                              aria-label={`${copy.title} description`}
-                              className={INPUT_CLASSES}
-                              value={editingEntry.form.description}
-                              onChange={(e) =>
-                                setEditingEntry({ id: exp.id, form: { ...editingEntry.form, description: e.target.value } })
-                              }
-                              disabled={savingEntry != null}
-                            />
-                            <AmountInput
-                              autoFocus
-                              required
-                              aria-label={`${copy.title} amount`}
-                              value={editingEntry.form.amount}
-                              onChange={(v) => setEditingEntry({ id: exp.id, form: { ...editingEntry.form, amount: v } })}
-                              disabled={savingEntry != null}
-                            />
-                            <button type="submit" disabled={savingEntry != null} className={PRIMARY_BUTTON_CLASSES}>
-                              {savingEntry === kind ? "Saving…" : "Save"}
-                            </button>
-                            <button
-                              type="button"
-                              disabled={savingEntry != null}
-                              onClick={() => setEditingEntry(null)}
-                              className={SECONDARY_BUTTON_CLASSES}
-                            >
-                              Cancel
-                            </button>
-                          </form>
-                        </li>
-                      ) : (
-                      <li key={exp.id} className="flex items-center gap-3 py-1.5 pl-4 pr-2">
+                  <ul className="mt-3 divide-y divide-line-soft overflow-hidden rounded-xl border border-line">
+                    {rows.map((exp) => (
+                      <li
+                        key={exp.id}
+                        role="button"
+                        tabIndex={0}
+                        data-tooltip="Double-click to edit or delete"
+                        onDoubleClick={() => openEditEntry(exp)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            openEditEntry(exp);
+                          }
+                        }}
+                        className="flex cursor-pointer select-none items-center gap-3 px-4 py-2.5 transition-colors duration-150 hover:bg-surface-2/60"
+                      >
                         <span className="min-w-0 flex-1 truncate text-sm text-ink">{exp.description || "Untitled"}</span>
                         <span
                           className={`text-sm font-semibold tabular-nums ${kind === "income" ? "text-success-text" : "text-ink"}`}
@@ -1894,24 +1899,8 @@ export default function CalendarClient() {
                           {kind === "income" ? "+" : ""}
                           {fmtMoney(Math.abs(exp.amount))}
                         </span>
-                        <IconAction
-                          kind="edit"
-                          label={kind === "income" ? "Edit income" : "Edit expense"}
-                          onClick={() =>
-                            setEditingEntry({
-                              id: exp.id,
-                              form: { description: exp.description ?? "", amount: String(Math.abs(exp.amount)) },
-                            })
-                          }
-                        />
-                        <IconAction
-                          kind="delete"
-                          label={kind === "income" ? "Delete income" : "Delete expense"}
-                          onClick={() => void onDeleteEntry(exp.amount, copy.remove, () => deleteFixedExpense(exp.id))}
-                        />
                       </li>
-                      ),
-                    )}
+                    ))}
                   </ul>
                 )}
               </section>
@@ -1930,7 +1919,7 @@ export default function CalendarClient() {
             ) : (
               <ul className="divide-y divide-line-soft rounded-xl border border-line">
                 {modalMonthlyExpenses.map((exp) => (
-                  <li key={`${exp.id}:${exp.due}`} className="flex items-center gap-3 py-1.5 pl-4 pr-2">
+                  <li key={`${exp.id}:${exp.due}`} className="flex items-center gap-3 px-4 py-2">
                     <div className="min-w-0 flex-1">
                       <div className="flex min-w-0 items-center gap-2">
                         <span className="truncate text-sm text-ink">{exp.name}</span>
@@ -1940,21 +1929,78 @@ export default function CalendarClient() {
                       {exp.description && <p className="truncate text-xs text-ink-3">{exp.description}</p>}
                     </div>
                     <span className="text-sm font-semibold tabular-nums text-ink">{fmtMoney(exp.amount)}</span>
-                    <IconAction
-                      kind="delete"
-                      label={`Delete ${exp.name}`}
-                      onClick={() =>
-                        void onDeleteEntry(exp.amount, "Delete this monthly expense?", () =>
-                          deleteMonthlyExpense(exp.id),
-                        )
-                      }
-                    />
                   </li>
                 ))}
               </ul>
             )}
           </section>
         </div>
+      </Modal>
+
+      <Modal
+        open={editingEntry != null}
+        onClose={closeEditEntry}
+        ariaLabelledBy="edit-entry-title"
+        dialogClassName={`${DIALOG_CLASSES} max-w-md`}
+      >
+        {editingEntry && editingKind && (
+          <>
+            <ModalHeader
+              id="edit-entry-title"
+              title={editingKind === "income" ? "Edit income" : "Edit expense"}
+              subtitle={modalRange}
+              onClose={closeEditEntry}
+            />
+            <form onSubmit={(e) => void saveEditedEntry(e)} className="flex min-h-0 flex-1 flex-col">
+              <div className={`${DIALOG_BODY_CLASSES} grid gap-4`}>
+                <Field label="Description" hint="Optional">
+                  <input
+                    type="text"
+                    placeholder={ENTRY_COPY[editingKind].placeholder}
+                    className={INPUT_CLASSES}
+                    value={editingEntry.form.description}
+                    onChange={(e) =>
+                      setEditingEntry({ ...editingEntry, form: { ...editingEntry.form, description: e.target.value } })
+                    }
+                    disabled={savingEntry != null}
+                  />
+                </Field>
+                <Field label="Amount">
+                  <AmountInput
+                    autoFocus
+                    required
+                    placeholder="0.00"
+                    value={editingEntry.form.amount}
+                    onChange={(v) => setEditingEntry({ ...editingEntry, form: { ...editingEntry.form, amount: v } })}
+                    disabled={savingEntry != null}
+                  />
+                </Field>
+                {expenseError && <ErrorAlert>{expenseError}</ErrorAlert>}
+              </div>
+              <div className={DIALOG_FOOTER_CLASSES}>
+                <button
+                  type="button"
+                  disabled={savingEntry != null}
+                  className={DANGER_TEXT_BUTTON_CLASSES}
+                  onClick={() => void deleteEditedEntry()}
+                >
+                  Delete
+                </button>
+                <button
+                  type="button"
+                  disabled={savingEntry != null}
+                  className={SECONDARY_BUTTON_CLASSES}
+                  onClick={closeEditEntry}
+                >
+                  Cancel
+                </button>
+                <button type="submit" disabled={savingEntry != null} className={PRIMARY_BUTTON_CLASSES}>
+                  {savingEntry != null ? "Saving…" : "Save changes"}
+                </button>
+              </div>
+            </form>
+          </>
+        )}
       </Modal>
 
       <Modal
@@ -2096,7 +2142,7 @@ export default function CalendarClient() {
                     </ul>
                   </div>
                 )}
-                <Field label="Amount spent" hint="Works like a calculator, e.g. 120+45.50 or 3×85">
+                <Field label="Amount spent">
                   <AmountInput
                     required
                     mode="expression"

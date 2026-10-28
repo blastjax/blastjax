@@ -973,8 +973,9 @@ def insert_monthly_expense(
     period_month: int,
     is_recurring: bool = False,
     expense_date: date | None = None,
+    skipped_months: list[str] | None = None,
 ) -> dict[str, Any]:
-    values = dict(locals())
+    values = dict(locals(), skipped_months=skipped_months or [])
     with _session(write=True) as s:
         return _row(s.scalar(insert(MonthlyExpense).values(values).returning(MonthlyExpense)))
 
@@ -989,8 +990,9 @@ def update_monthly_expense(
     period_month: int,
     is_recurring: bool = False,
     expense_date: date | None = None,
+    skipped_months: list[str] | None = None,
 ) -> dict[str, Any] | None:
-    values = dict(locals())
+    values = dict(locals(), skipped_months=skipped_months or [])
     del values["expense_id"]
     with _session(write=True) as s:
         e = s.scalar(
@@ -1215,6 +1217,23 @@ def insert_credit_card_payment(
             .returning(CreditCardPayment)
         )
         _shift_credit_card_balance(s, credit_card_id, -amount)
+        return _row(payment)
+
+
+def update_credit_card_payment(
+    payment_id: UUID, amount: float, payment_date: Any, note: str | None
+) -> dict[str, Any] | None:
+    with _session(write=True) as s:
+        old = s.scalar(select(CreditCardPayment.amount).where(CreditCardPayment.id == payment_id))
+        if old is None:
+            return None
+        payment = s.scalar(
+            update(CreditCardPayment)
+            .where(CreditCardPayment.id == payment_id)
+            .values(amount=amount, payment_date=payment_date, note=note)
+            .returning(CreditCardPayment)
+        )
+        _shift_credit_card_balance(s, payment.credit_card_id, old - amount)
         return _row(payment)
 
 

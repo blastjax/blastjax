@@ -641,9 +641,13 @@ export default function TravelsClient() {
       setDrawerKey(null);
     });
   };
-  const removePlace = (id: string) => {
-    if (!trip) return;
-    void run(async () => upsert(await deleteTravelCity(trip.trip.id, id)));
+  const removePlace = async (id: string) => {
+    if (!trip || !(await confirmDialog("Delete this place?"))) return;
+    void run(async () => {
+      upsert(await deleteTravelCity(trip.trip.id, id));
+      setModal(null);
+      setPlaceId(null);
+    });
   };
 
   const on = (k: Field) => (ev: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
@@ -936,16 +940,6 @@ export default function TravelsClient() {
                   ✎
                 </button>
               )}
-              <button
-                type="button"
-                data-tooltip="Remove"
-                aria-label={`Remove ${p.name}`}
-                disabled={saving}
-                onClick={() => removePlace(p.id)}
-                className="flex size-[18px] cursor-pointer items-center justify-center rounded-full opacity-60 hover:bg-current/10 hover:opacity-100"
-              >
-                ×
-              </button>
             </div>
           ))}
         <button
@@ -1092,8 +1086,18 @@ export default function TravelsClient() {
   const fl = f.kind === "flight";
   const startCap = route ? "Departure" : f.kind === "stay" ? "Check-in" : "Start";
   const endCap = route ? "Arrival" : f.kind === "stay" ? "Check-out" : "End";
-  const buttons = (cta: string) => (
+  const buttons = (cta: string, onDelete?: () => void) => (
     <div className="mt-1 flex justify-end gap-2.5">
+      {onDelete && (
+        <button
+          type="button"
+          disabled={saving}
+          onClick={onDelete}
+          className="mr-auto cursor-pointer rounded-lg border border-tv-danger-line px-3.5 py-[9px] text-[13px] font-semibold text-tv-danger"
+        >
+          Delete
+        </button>
+      )}
       <button type="button" onClick={closeAll} className={GHOST}>
         Cancel
       </button>
@@ -1290,7 +1294,11 @@ export default function TravelsClient() {
             <FormField label="To">{dateTime("endDate", "date")}</FormField>
           </div>
           {errorLine}
-          {buttons(modal === "trip" ? "Create trip" : placeId ? "Save" : "Add place")}
+          {modal === "trip"
+            ? buttons("Create trip")
+            : placeId
+              ? buttons("Save", () => void removePlace(placeId))
+              : buttons("Add place")}
         </form>
       </Modal>
     </div>

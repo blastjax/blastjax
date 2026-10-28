@@ -26,6 +26,7 @@ from db import (
     insert_credit_card,
     insert_credit_card_payment,
     update_credit_card,
+    update_credit_card_payment,
 )
 
 router = APIRouter(tags=["credit_card"], dependencies=[Depends(require_db)])
@@ -164,6 +165,16 @@ def credit_card_payment_create(
     )
     if payment is None:
         raise HTTPException(status_code=404, detail="Credit card not found.")
+    card = get_credit_card()
+    assert card is not None
+    return {"payment": _serialize_payment(payment), "card": _serialize_card(card)}
+
+
+@router.put("/api/credit-card/payments/{payment_id}")
+def credit_card_payment_replace(payment_id: UUID, body: CreditCardPaymentCreate) -> dict[str, Any]:
+    payment = update_credit_card_payment(payment_id, body.amount, body.payment_date, _clean_note(body.note))
+    if payment is None:
+        raise HTTPException(status_code=404, detail="Payment not found.")
     card = get_credit_card()
     assert card is not None
     return {"payment": _serialize_payment(payment), "card": _serialize_card(card)}

@@ -781,6 +781,9 @@ def check_db_against_postgres() -> None:
         bill = db.insert_monthly_expense("Internet", None, 1500.0, 2, 2026, 10, True, dt.date(2026, 10, 20))
         assert bill["expense_date"] == "2026-10-20", bill
         assert db.list_monthly_expenses(period_year=2026, period_month=11)[0]["expense_date"] == "2026-10-20"
+        assert bill["skipped_months"] == [], bill
+        skip = (bill["id"], "Internet", None, 1500.0, 2, 2026, 10, True, dt.date(2026, 10, 20), ["2026-11"])
+        assert db.update_monthly_expense(*skip)["skipped_months"] == ["2026-11"]
 
         power = db.insert_bill_category({"name": "Electricity"})
         assert power["defaults"] == {}, power
@@ -805,6 +808,11 @@ def check_db_against_postgres() -> None:
         assert db.delete_bill_category(visa["id"])
         unlinked = db.get_credit_card()
         assert unlinked["bill_category_id"] is None and unlinked["last_statement_balance"] == 1000.0, unlinked
+        paid = db.insert_credit_card_payment(card["id"], 300.0, dt.date(2026, 10, 10), None)
+        before = db.get_credit_card()["current_balance"]
+        edited = db.update_credit_card_payment(paid["id"], 500.0, dt.date(2026, 10, 11), "fixed")
+        assert (edited["amount"], edited["payment_date"], edited["note"]) == (500.0, "2026-10-11", "fixed"), edited
+        assert db.get_credit_card()["current_balance"] == before - 200.0, "editing a payment didn't move the balance"
         assert db.delete_credit_card(card["id"])
         db.insert_bill_category({"name": "Internet"})
         try:

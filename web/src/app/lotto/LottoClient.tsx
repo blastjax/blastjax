@@ -1457,6 +1457,10 @@ export default function LottoClient({ gameId }: { gameId: string }) {
                     revealedActions?.type === "ticket" &&
                     revealedActions.drawId === detail.draw.id &&
                     revealedActions.ticket === cluster.ticket;
+                  // The whole ticket, not just the attempts the match filter shows.
+                  const ticketItems = detail.attempts
+                    .filter((attempt) => attempt.ticket === cluster.ticket)
+                    .map((attempt) => ({ attempt }));
                   return (
                   <div
                     key={`ticket-${cluster.ticket}`}
@@ -1491,7 +1495,7 @@ export default function LottoClient({ gameId }: { gameId: string }) {
                                 aria-label="Edit ticket"
                                 data-tooltip="Edit ticket"
                                 className={ICON_BUTTON_CLASSES}
-                                onClick={() => openEditTicket(detail.draw.id, cluster.ticket, cluster.items)}
+                                onClick={() => openEditTicket(detail.draw.id, cluster.ticket, ticketItems)}
                               >
                                 <PencilIcon className="size-5" />
                               </button>
@@ -1501,7 +1505,7 @@ export default function LottoClient({ gameId }: { gameId: string }) {
                                 aria-label="Delete ticket"
                                 data-tooltip="Delete ticket"
                                 className={ICON_BUTTON_CLASSES}
-                                onClick={() => void onDeleteTicket(detail.draw.id, cluster.items)}
+                                onClick={() => void onDeleteTicket(detail.draw.id, ticketItems)}
                               >
                                 <TrashIcon className="size-5" />
                               </button>
@@ -2041,6 +2045,26 @@ export default function LottoClient({ gameId }: { gameId: string }) {
         </>
       )}
 
+      {/* Before the edit modals, so they open on top of it. */}
+      {historyModalDrawId != null &&
+        (() => {
+          const detail = draws.find((d) => d.draw.id === historyModalDrawId);
+          if (!detail) return null;
+          const close = () => setHistoryModalDrawId(null);
+          return (
+            <Modal
+              open
+              // Escape reaches every open modal; leave this one open under an edit on top of it.
+              onClose={drawModal.open || attemptsModal.open ? () => {} : close}
+              ariaLabelledBy="lotto-history-draw-title"
+              dialogClassName={`${DIALOG_CLASSES} max-w-5xl`}
+            >
+              <ModalHeader id="lotto-history-draw-title" title={`${gameName ?? "Lotto"} draw`} onClose={close} />
+              <div className={DIALOG_BODY_CLASSES}>{renderDrawCard(detail)}</div>
+            </Modal>
+          );
+        })()}
+
       <Modal
         open={drawModal.open}
         onClose={closeDrawModal}
@@ -2327,27 +2351,6 @@ export default function LottoClient({ gameId }: { gameId: string }) {
           </div>
         </form>
       </Modal>
-
-      {historyModalDrawId != null &&
-        (() => {
-          const detail = draws.find((d) => d.draw.id === historyModalDrawId);
-          if (!detail) return null;
-          return (
-            <Modal
-              open
-              onClose={() => setHistoryModalDrawId(null)}
-              ariaLabelledBy="lotto-history-draw-title"
-              dialogClassName={`${DIALOG_CLASSES} max-w-5xl`}
-            >
-              <ModalHeader
-                id="lotto-history-draw-title"
-                title={`${gameName ?? "Lotto"} draw`}
-                onClose={() => setHistoryModalDrawId(null)}
-              />
-              <div className={DIALOG_BODY_CLASSES}>{renderDrawCard(detail)}</div>
-            </Modal>
-          );
-        })()}
     </div>
   );
 }

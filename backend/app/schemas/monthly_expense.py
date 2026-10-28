@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+from typing import Annotated
 
 from pydantic import BaseModel, Field
 
@@ -17,4 +18,7 @@ class MonthlyExpenseCreate(BaseModel):
     )
     expense_date: dt.date | None = Field(
         default=None, description="Day it shows on the calendar (that day of every month if recurring)"
+    )
+    skipped_months: list[Annotated[str, Field(pattern=r"^\d{4}-(0[1-9]|1[0-2])$")]] = Field(
+        default_factory=list, description='"YYYY-MM" pay-period months it isn\'t deducted in'
     )

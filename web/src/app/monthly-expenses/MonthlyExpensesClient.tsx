@@ -13,7 +13,6 @@ import {
   DIALOG_CLASSES,
   DIALOG_FOOTER_CLASSES,
   Field,
-  IconAction,
   LoadingBlocks,
   Metric,
   ModalHeader,
@@ -73,6 +72,7 @@ type ExpenseForm = {
   month: string;
   is_recurring: boolean;
   date: string;
+  skipped_months: string[];
 };
 const emptyForm = (defaultMonth: string, half: PeriodHalf = 1): ExpenseForm => ({
   name: "",
@@ -82,6 +82,7 @@ const emptyForm = (defaultMonth: string, half: PeriodHalf = 1): ExpenseForm => (
   month: defaultMonth,
   is_recurring: false,
   date: "",
+  skipped_months: [],
 });
 
 export default function MonthlyExpensesClient() {
@@ -152,8 +153,10 @@ export default function MonthlyExpensesClient() {
 
   const visible = useMemo(() => [...new Set([...byHalf[1], ...byHalf[2]])], [byHalf]);
 
-  const totalFor = (half: PeriodHalf) => byHalf[half].reduce((s, e) => s + e.amount, 0);
-  const recurring = visible.filter((e) => e.is_recurring);
+  const viewedMonthKey = monthKey(month.y, month.m);
+  const isSkipped = (e: MonthlyExpenseRow) => !showAll && e.skipped_months.includes(viewedMonthKey);
+  const totalFor = (half: PeriodHalf) => byHalf[half].reduce((s, e) => s + (isSkipped(e) ? 0 : e.amount), 0);
+  const recurring = visible.filter((e) => e.is_recurring && !isSkipped(e));
 
   const openModal = useCallback(
     (half: PeriodHalf = 1) => {
@@ -178,6 +181,7 @@ export default function MonthlyExpensesClient() {
         month: dated ? monthKey(dated.year, dated.month) : monthKey(exp.period_year, exp.period_month),
         is_recurring: exp.is_recurring,
         date: exp.expense_date ?? "",
+        skipped_months: exp.skipped_months,
       });
       setModalOpen(true);
     },
@@ -219,6 +223,7 @@ export default function MonthlyExpensesClient() {
           period_month: period.m,
           is_recurring: form.is_recurring,
           expense_date: form.date || null,
+          skipped_months: form.skipped_months,
         };
         if (editingId != null) {
           await updateMonthlyExpense(editingId, body);
@@ -352,11 +357,14 @@ export default function MonthlyExpensesClient() {
                                 openEditModal(exp);
                               }
                             }}
-                            className="flex cursor-pointer items-center gap-3 px-5 py-3 transition-colors duration-150 hover:bg-surface-2/60 sm:px-6"
+                            className={`flex cursor-pointer items-center gap-3 px-5 py-3 transition-colors duration-150 hover:bg-surface-2/60 sm:px-6 ${
+                              isSkipped(exp) ? "opacity-60" : ""
+                            }`}
                           >
                             <div className="min-w-0 flex-1">
                               <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
                                 <p className="truncate text-sm font-medium text-ink">{exp.name}</p>
+                                {isSkipped(exp) && <Pill tone="warning">Skipped this month</Pill>}
                                 {exp.is_recurring ? (
                                   <Pill tone="brand">
                                     {exp.expense_date ? `Every ${ordinal(Number(exp.expense_date.slice(8, 10)))}` : "Recurring"}
@@ -371,10 +379,13 @@ export default function MonthlyExpensesClient() {
                                 <p className="mt-0.5 truncate text-xs text-ink-3">{exp.description}</p>
                               )}
                             </div>
-                            <span className="shrink-0 text-sm font-semibold tabular-nums text-ink">
+                            <span
+                              className={`shrink-0 text-sm font-semibold tabular-nums text-ink ${
+                                isSkipped(exp) ? "line-through" : ""
+                              }`}
+                            >
                               {fmtMoney(exp.amount)}
                             </span>
-                            <IconAction kind="delete" label={`Delete ${exp.name}`} onClick={() => void onDelete(exp.id)} />
                           </div>
                         </li>
                       ))}
@@ -495,6 +506,31 @@ export default function MonthlyExpensesClient() {
                 <span className="text-ink-3">Deducted in every month on the calendar.</span>
               </span>
             </label>
+
+            {editingId != null && !showAll && (
+              <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-line p-3.5 transition-colors duration-150 hover:bg-surface-2/60">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 size-4"
+                  checked={form.skipped_months.includes(viewedMonthKey)}
+                  onChange={(e) =>
+                    setForm((f) => ({
+                      ...f,
+                      skipped_months: e.target.checked
+                        ? [...f.skipped_months, viewedMonthKey]
+                        : f.skipped_months.filter((k) => k !== viewedMonthKey),
+                    }))
+                  }
+                  disabled={saving}
+                />
+                <span className="text-sm">
+                  <span className="block font-medium text-ink">Skip this month</span>
+                  <span className="text-ink-3">
+                    Not deducted in {formatMonthYear(month.y, month.m)}. Other months stay as they are.
+                  </span>
+                </span>
+              </label>
+            )}
 
             {!form.is_recurring && !form.date && (
               <Field label="Month">

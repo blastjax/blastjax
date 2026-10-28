@@ -298,6 +298,8 @@ class MonthlyExpense(Base):
     is_recurring: Mapped[bool | None] = mapped_column(server_default=text("false"))
     created_at: Mapped[Stamp]
     expense_date: Mapped[dt.date | None]
+    # "YYYY-MM" pay-period months a recurring expense isn't deducted in.
+    skipped_months: Mapped[list[str]] = mapped_column(JSONB, server_default=text("'[]'"))
 
 
 class PayPeriodStartOverride(Base):

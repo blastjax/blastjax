@@ -13,7 +13,6 @@ import {
   DIALOG_FOOTER_CLASSES,
   EmptyState,
   Field,
-  IconAction,
   LoadingBlocks,
   ModalHeader,
   Panel,
@@ -589,11 +588,6 @@ export default function BillsClient() {
                       <PlusIcon className="size-4" />
                       Add
                     </button>
-                    <IconAction
-                      kind="edit"
-                      label={`Edit ${c.name}`}
-                      onClick={() => openCategory(toCategoryDraft(c))}
-                    />
                   </div>
                 }
               >
@@ -609,7 +603,7 @@ export default function BillsClient() {
       <Modal
         open={listCategory != null}
         // Escape reaches every open modal; leave this one open under an edit or PDF on top of it.
-        onClose={billDraft || pdfBill ? () => {} : closeList}
+        onClose={billDraft || pdfBill || categoryDraft ? () => {} : closeList}
         ariaLabelledBy="bill-list-title"
         dialogClassName={`${DIALOG_CLASSES} max-w-5xl`}
       >
@@ -649,6 +643,13 @@ export default function BillsClient() {
               ))}
             </div>
             <div className={DIALOG_FOOTER_CLASSES}>
+              <button
+                type="button"
+                className={`mr-auto ${SECONDARY_BUTTON_CLASSES}`}
+                onClick={() => openCategory(toCategoryDraft(listCategory))}
+              >
+                Edit category
+              </button>
               <button
                 type="button"
                 className={PRIMARY_BUTTON_CLASSES}

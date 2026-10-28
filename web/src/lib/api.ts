@@ -754,6 +754,7 @@ export type MonthlyExpenseRow = {
   period_month: number;
   is_recurring: boolean;
   expense_date: string | null;
+  skipped_months: string[]; // "YYYY-MM" pay-period months it isn't deducted in
   created_at: string;
 };
 
@@ -766,6 +767,7 @@ export type MonthlyExpenseCreateBody = {
   period_month: number;
   is_recurring?: boolean;
   expense_date?: string | null;
+  skipped_months?: string[];
 };
 
 export async function getMonthlyExpenses(
@@ -971,6 +973,14 @@ export async function createCreditCardPayment(
   return sendJson<{ payment: CreditCardPaymentRow; card: CreditCardRow }>(
     "POST",
     `/api/credit-card/${cardId}/payments`,
+    body,
+  );
+}
+
+export async function updateCreditCardPayment(paymentId: string, body: CreditCardPaymentCreateBody) {
+  return sendJson<{ payment: CreditCardPaymentRow; card: CreditCardRow }>(
+    "PUT",
+    `/api/credit-card/payments/${paymentId}`,
     body,
   );
 }

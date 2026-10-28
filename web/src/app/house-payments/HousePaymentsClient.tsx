@@ -7,12 +7,12 @@ import { PageHeader } from "@/components/PageHeader";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Modal } from "@/components/Modal";
 import {
+  DANGER_TEXT_BUTTON_CLASSES,
   DIALOG_BODY_CLASSES,
   DIALOG_CLASSES,
   DIALOG_FOOTER_CLASSES,
   EmptyState,
   Field,
-  IconAction,
   LoadingBlocks,
   Metric,
   ModalHeader,
@@ -227,6 +227,7 @@ export default function HousePaymentsClient() {
     try {
       await deleteHousePayment(id);
       if (entriesModalId === id) closeEntriesModal();
+      closePlanModal();
       removeRow(id);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Delete failed");
@@ -452,15 +453,6 @@ export default function HousePaymentsClient() {
                         <h3 className="truncate font-semibold text-ink">{r.name}</h3>
                         <p className="mt-0.5 text-xs text-ink-3">{plural(r.entry_count, "payment")}</p>
                       </div>
-                      <div className="-mr-2 -mt-1 flex">
-                        <IconAction kind="edit" label={`Edit ${r.name}`} disabled={saving} onClick={() => startEditPlan(r)} />
-                        <IconAction
-                          kind="delete"
-                          label={`Delete ${r.name}`}
-                          disabled={saving}
-                          onClick={() => void onDeletePlan(r.id)}
-                        />
-                      </div>
                     </div>
                     {r.notes && <p className="mt-3 line-clamp-2 whitespace-pre-line text-sm text-ink-3">{r.notes}</p>}
                     <div className="mt-auto pt-5">
@@ -524,6 +516,16 @@ export default function HousePaymentsClient() {
             )}
           </div>
           <div className={DIALOG_FOOTER_CLASSES}>
+            {editingPlanId != null && (
+              <button
+                type="button"
+                disabled={saving}
+                className={DANGER_TEXT_BUTTON_CLASSES}
+                onClick={() => void onDeletePlan(editingPlanId)}
+              >
+                Delete
+              </button>
+            )}
             <button type="button" disabled={saving} className={SECONDARY_BUTTON_CLASSES} onClick={closePlanModal}>
               Cancel
             </button>
@@ -598,6 +600,14 @@ export default function HousePaymentsClient() {
                                   <button
                                     type="button"
                                     disabled={savingEntry}
+                                    className={DANGER_TEXT_BUTTON_CLASSES}
+                                    onClick={() => void onDeleteEntry(entry.id)}
+                                  >
+                                    Delete
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={savingEntry}
                                     className={`flex-1 ${SECONDARY_BUTTON_CLASSES}`}
                                     onClick={cancelEntryEdit}
                                   >
@@ -610,23 +620,22 @@ export default function HousePaymentsClient() {
                               </form>
                             </li>
                           ) : (
-                            <li key={entry.id} className="flex items-center gap-3 py-1.5 pl-4 pr-2">
+                            <li
+                              key={entry.id}
+                              role="button"
+                              tabIndex={0}
+                              data-tooltip="Double-click to edit or delete"
+                              onDoubleClick={() => !savingEntry && startEditEntry(entry)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter" && !savingEntry) {
+                                  e.preventDefault();
+                                  startEditEntry(entry);
+                                }
+                              }}
+                              className="flex cursor-pointer select-none items-center gap-3 px-4 py-2.5 transition-colors duration-150 hover:bg-surface-2/60"
+                            >
                               <span className="flex-1 text-sm text-ink-2">{fmtDate(entry.paid_on)}</span>
                               <span className="text-sm font-semibold tabular-nums text-ink">{fmtMoney(entry.amount)}</span>
-                              <div className="flex">
-                                <IconAction
-                                  kind="edit"
-                                  label="Edit payment"
-                                  disabled={savingEntry || editingEntryId != null}
-                                  onClick={() => startEditEntry(entry)}
-                                />
-                                <IconAction
-                                  kind="delete"
-                                  label="Delete payment"
-                                  disabled={savingEntry}
-                                  onClick={() => void onDeleteEntry(entry.id)}
-                                />
-                              </div>
                             </li>
                           ),
                         )}
@@ -638,6 +647,21 @@ export default function HousePaymentsClient() {
             </div>
           )}
         </div>
+        {detail && (
+          <div className={DIALOG_FOOTER_CLASSES}>
+            <button
+              type="button"
+              disabled={saving || savingEntry}
+              className={SECONDARY_BUTTON_CLASSES}
+              onClick={() => {
+                closeEntriesModal();
+                startEditPlan(detail.house_payment);
+              }}
+            >
+              Edit plan
+            </button>
+          </div>
+        )}
       </Modal>
     </div>
   );
