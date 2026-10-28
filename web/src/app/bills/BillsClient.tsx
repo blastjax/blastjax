@@ -17,6 +17,7 @@ import {
   LoadingBlocks,
   ModalHeader,
   Panel,
+  Segmented,
   TEXT_BUTTON_CLASSES,
 } from "@/components/FinanceUI";
 import { PlusIcon, ReceiptIcon } from "@/components/Icons";
@@ -52,8 +53,6 @@ import {
   PAGE_CONTAINER_CLASSES,
   PRIMARY_BUTTON_CLASSES,
   SECONDARY_BUTTON_CLASSES,
-  TOGGLE_ACTIVE_BUTTON_CLASSES,
-  TOGGLE_INACTIVE_BUTTON_CLASSES,
 } from "@/lib/ui";
 
 type BillForm = {
@@ -573,10 +572,19 @@ export default function BillsClient() {
             return (
               <Panel
                 key={c.id}
-                title={c.name}
-                subtitle={list.length > 0 ? `${plural(list.length, "bill")} · latest ${billMonth(list[0])}` : undefined}
+                className="relative transition-colors duration-150 hover:bg-surface-2/60"
+                title={
+                  // Its overlay makes the whole card open the bills; the actions sit above it.
+                  <button
+                    type="button"
+                    className="text-left after:absolute after:inset-0 after:rounded-2xl focus-visible:outline-none focus-visible:after:outline-2 focus-visible:after:outline-brand"
+                    onClick={() => setListView({ categoryId: c.id, year: null })}
+                  >
+                    {c.name}
+                  </button>
+                }
                 actions={
-                  <>
+                  <div className="relative flex items-center gap-2">
                     <button type="button" className={TEXT_BUTTON_CLASSES} onClick={() => openBill(newBillDraft(c))}>
                       <PlusIcon className="size-4" />
                       Add
@@ -586,34 +594,12 @@ export default function BillsClient() {
                       label={`Edit ${c.name}`}
                       onClick={() => openCategory(toCategoryDraft(c))}
                     />
-                  </>
+                  </div>
                 }
               >
-                {list.length === 0 ? (
-                  <p className="text-sm text-ink-3">No bills yet.</p>
-                ) : (
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      className={TOGGLE_INACTIVE_BUTTON_CLASSES}
-                      onClick={() => setListView({ categoryId: c.id, year: null })}
-                    >
-                      All bills
-                    </button>
-                    {yearCounts(list).map(([y, n]) => (
-                      <button
-                        key={y}
-                        type="button"
-                        aria-label={`${y}, ${plural(n, "bill")}`}
-                        className={TOGGLE_INACTIVE_BUTTON_CLASSES}
-                        onClick={() => setListView({ categoryId: c.id, year: y })}
-                      >
-                        {y}
-                        <span className="tabular-nums opacity-60">{n}</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
+                <p className="text-sm text-ink-3">
+                  {list.length === 0 ? "No bills yet." : `${plural(list.length, "bill")} · latest ${billMonth(list[0])}`}
+                </p>
               </Panel>
             );
           })}
@@ -636,20 +622,21 @@ export default function BillsClient() {
               onClose={closeList}
             />
             <div className={`${DIALOG_BODY_CLASSES} grid gap-5`}>
-              <div role="group" aria-label="Year" className="flex flex-wrap gap-2">
-                {[[null, listBills.length] as const, ...listYears].map(([y, n]) => (
-                  <button
-                    key={y ?? "all"}
-                    type="button"
-                    aria-pressed={y === listYear}
-                    className={y === listYear ? TOGGLE_ACTIVE_BUTTON_CLASSES : TOGGLE_INACTIVE_BUTTON_CLASSES}
-                    onClick={() => setListView({ categoryId: listCategory.id, year: y })}
-                  >
-                    {y ?? "All"}
-                    <span className="tabular-nums opacity-70">{n}</span>
-                  </button>
-                ))}
-              </div>
+              <Segmented
+                label="Year"
+                className="max-w-full self-start overflow-x-auto"
+                value={listYear ?? "all"}
+                onChange={(y) => setListView({ categoryId: listCategory.id, year: y === "all" ? null : y })}
+                options={[["all", listBills.length] as const, ...listYears].map(([y, n]) => ({
+                  value: y,
+                  label: (
+                    <>
+                      {y === "all" ? "All" : y}
+                      <span className="tabular-nums opacity-70">{n}</span>
+                    </>
+                  ),
+                }))}
+              />
               {(listYear == null ? listYears.map(([y]) => y) : [listYear]).map((y) => (
                 <BillYearBlock
                   key={y}

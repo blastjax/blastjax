@@ -21,6 +21,7 @@ import {
   getTravelTrips,
   resolveMapLink,
   updateTravelAccommodation,
+  updateTravelCity,
   updateTravelFlight,
   updateTravelItinerary,
   updateTravelTransport,
@@ -452,6 +453,8 @@ export default function TravelsClient() {
   const [modal, setModal] = useState<"entry" | "trip" | "place" | null>(null);
   const [f, setF] = useState<Form>(BLANK);
   const [addMenu, setAddMenu] = useState(false);
+  // Place chip showing its pencil (double-click), and the place being edited once the pencil is clicked.
+  const [placeId, setPlaceId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -464,7 +467,9 @@ export default function TravelsClient() {
 
   useEffect(() => {
     const k = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setAddMenu(false);
+      if (e.key !== "Escape") return;
+      setAddMenu(false);
+      setPlaceId(null);
     };
     window.addEventListener("keydown", k);
     return () => window.removeEventListener("keydown", k);
@@ -474,6 +479,7 @@ export default function TravelsClient() {
     setDrawerKey(null);
     setModal(null);
     setAddMenu(false);
+    setPlaceId(null);
     setError(null);
   };
 
@@ -533,10 +539,15 @@ export default function TravelsClient() {
     );
     setModal("entry");
   };
-  const openSmall = (which: "trip" | "place") => {
+  const openSmall = (which: "trip" | "place", p?: Place) => {
     setError(null);
     setAddMenu(false);
-    setF(trip && which === "place" ? { ...BLANK, startDate: trip.trip.start_date, endDate: trip.trip.end_date } : BLANK);
+    setPlaceId(p?.id ?? null);
+    setF(
+      p ? { ...BLANK, name: p.name, startDate: p.startDate, endDate: p.endDate }
+      : trip && which === "place" ? { ...BLANK, startDate: trip.trip.start_date, endDate: trip.trip.end_date }
+      : BLANK,
+    );
     setModal(which);
   };
 
@@ -615,10 +626,12 @@ export default function TravelsClient() {
         upsert(d);
         openTrip(d.trip.id);
       } else if (trip) {
-        const d = await createTravelCity(trip.trip.id, { name, start_date: f.startDate, end_date: endDate });
+        const body = { name, start_date: f.startDate, end_date: endDate };
+        const d = placeId ? await updateTravelCity(trip.trip.id, placeId, body) : await createTravelCity(trip.trip.id, body);
         await commit(d, f.startDate, endDate);
       }
       setModal(null);
+      setPlaceId(null);
     });
 
   const deleteEntry = async (e: Entry) => {
@@ -906,11 +919,23 @@ export default function TravelsClient() {
           .map((p) => (
             <div
               key={p.id}
-              className="flex items-center gap-2 whitespace-nowrap rounded-[20px] py-[5px] pl-3 pr-2 text-[12.5px]"
+              onDoubleClick={() => setPlaceId((id) => (id === p.id ? null : p.id))}
+              className="flex select-none items-center gap-2 whitespace-nowrap rounded-[20px] py-[5px] pl-3 pr-2 text-[12.5px]"
               style={{ background: p.c.bg, color: p.c.fg }}
             >
               <span className="font-semibold">{p.name}</span>
               {p.startDate && <span className="opacity-75">{placeRange(p.startDate, p.endDate)}</span>}
+              {placeId === p.id && (
+                <button
+                  type="button"
+                  data-tooltip="Edit"
+                  aria-label={`Edit ${p.name}`}
+                  onClick={() => openSmall("place", p)}
+                  className="flex size-[18px] cursor-pointer items-center justify-center rounded-full opacity-60 hover:bg-current/10 hover:opacity-100"
+                >
+                  ✎
+                </button>
+              )}
               <button
                 type="button"
                 data-tooltip="Remove"
@@ -1255,7 +1280,7 @@ export default function TravelsClient() {
           }}
         >
           <h2 id="tv-small-title" className="text-lg font-semibold">
-            {modal === "trip" ? "New trip" : "Add place"}
+            {modal === "trip" ? "New trip" : placeId ? "Edit place" : "Add place"}
           </h2>
           <FormField label={modal === "trip" ? "Trip name" : "Place or country"}>
             {txt("name", modal === "trip" ? "e.g. Japan in spring" : "e.g. Kyoto, Japan")}
@@ -1265,7 +1290,7 @@ export default function TravelsClient() {
             <FormField label="To">{dateTime("endDate", "date")}</FormField>
           </div>
           {errorLine}
-          {buttons(modal === "trip" ? "Create trip" : "Add place")}
+          {buttons(modal === "trip" ? "Create trip" : placeId ? "Save" : "Add place")}
         </form>
       </Modal>
     </div>
