@@ -33,6 +33,10 @@ def _clean_description(description: str | None) -> str | None:
     return trimmed or None
 
 
+def _charged_months(body: MonthlyExpenseCreate) -> dict[str, str]:
+    return {month: str(card_id) for month, card_id in body.charged_months.items()}
+
+
 @router.get("/api/monthly-expense")
 def monthly_expense_list(
     period_half: int | None = Query(default=None, ge=1, le=2),
@@ -63,6 +67,7 @@ def monthly_expense_create(body: MonthlyExpenseCreate) -> dict[str, Any]:
         body.is_recurring,
         body.expense_date,
         sorted(set(body.skipped_months)),
+        _charged_months(body),
     )
     return {"expense": _serialize(row)}
 
@@ -80,6 +85,7 @@ def monthly_expense_replace(expense_id: UUID, body: MonthlyExpenseCreate) -> dic
         body.is_recurring,
         body.expense_date,
         sorted(set(body.skipped_months)),
+        _charged_months(body),
     )
     if row is None:
         raise HTTPException(status_code=404, detail="Expense not found.")

@@ -8,6 +8,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { Modal } from "@/components/Modal";
 import {
+  ChargedToField,
   DANGER_TEXT_BUTTON_CLASSES,
   DIALOG_BODY_CLASSES,
   DIALOG_CLASSES,
@@ -27,9 +28,11 @@ import { PlusIcon } from "@/components/Icons";
 import {
   createMonthlyExpense,
   deleteMonthlyExpense,
+  getCreditCards,
   getMonthlyExpenses,
   getPayPeriodStartOverrides,
   updateMonthlyExpense,
+  type CreditCardRow,
   type MonthlyExpenseRow,
 } from "@/lib/api";
 import { addMonths, formatDate, formatMonthYear, formatMonthYearShort, monthKey, parseMonthKey } from "@/lib/dateFormat";
@@ -41,6 +44,7 @@ import {
   periodForDate,
   periodKey,
   periodRangeLabel,
+  spreadBudgetChanges,
   type PeriodHalf,
 } from "@/lib/payPeriods";
 import { ErrorAlert } from "@/components/ErrorAlert";
@@ -73,6 +77,7 @@ type ExpenseForm = {
   is_recurring: boolean;
   date: string;
   skipped_months: string[];
+  charged_months: Record<string, string>;
 };
 const emptyForm = (defaultMonth: string, half: PeriodHalf = 1): ExpenseForm => ({
   name: "",
@@ -83,6 +88,7 @@ const emptyForm = (defaultMonth: string, half: PeriodHalf = 1): ExpenseForm => (
   is_recurring: false,
   date: "",
   skipped_months: [],
+  charged_months: {},
 });
 
 export default function MonthlyExpensesClient() {
@@ -93,6 +99,7 @@ export default function MonthlyExpensesClient() {
   );
 
   const [expenses, setExpenses] = useState<MonthlyExpenseRow[]>([]);
+  const [cards, setCards] = useState<CreditCardRow[]>([]);
   const [payPeriodStarts, setPayPeriodStarts] = useState<Map<string, string>>(new Map());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -109,11 +116,13 @@ export default function MonthlyExpensesClient() {
   const load = useCallback(async () => {
     setError(null);
     try {
-      const [r, starts] = await Promise.all([
+      const [r, starts, onCards] = await Promise.all([
         getMonthlyExpenses(),
         getPayPeriodStartOverrides().catch(() => ({ overrides: [] })),
+        getCreditCards().catch(() => ({ cards: [] })),
       ]);
       setExpenses(r.expenses);
+      setCards(onCards.cards.map((b) => b.card));
       setPayPeriodStarts(
         new Map(starts.overrides.map((o) => [periodKey(o.period_year, o.period_month, o.period_half), o.start_date])),
       );
@@ -155,8 +164,14 @@ export default function MonthlyExpensesClient() {
 
   const viewedMonthKey = monthKey(month.y, month.m);
   const isSkipped = (e: MonthlyExpenseRow) => !showAll && e.skipped_months.includes(viewedMonthKey);
-  const totalFor = (half: PeriodHalf) => byHalf[half].reduce((s, e) => s + (isSkipped(e) ? 0 : e.amount), 0);
-  const recurring = visible.filter((e) => e.is_recurring && !isSkipped(e));
+  const chargedCard = (e: MonthlyExpenseRow) => (showAll ? undefined : e.charged_months[viewedMonthKey]);
+  const offBudget = (e: MonthlyExpenseRow) => isSkipped(e) || chargedCard(e) != null;
+  const totalFor = (half: PeriodHalf) => byHalf[half].reduce((s, e) => s + (offBudget(e) ? 0 : e.amount), 0);
+  const recurring = visible.filter((e) => e.is_recurring && !offBudget(e));
+
+  // A saved recurring expense is charged one month at a time, the one being viewed; anything else has only its own.
+  const chargeMonth = form.is_recurring && editingId != null ? viewedMonthKey : form.month;
+  const chargePeriod = parseMonthKey(chargeMonth);
 
   const openModal = useCallback(
     (half: PeriodHalf = 1) => {
@@ -182,6 +197,7 @@ export default function MonthlyExpensesClient() {
         is_recurring: exp.is_recurring,
         date: exp.expense_date ?? "",
         skipped_months: exp.skipped_months,
+        charged_months: exp.charged_months,
       });
       setModalOpen(true);
     },
@@ -224,6 +240,7 @@ export default function MonthlyExpensesClient() {
           is_recurring: form.is_recurring,
           expense_date: form.date || null,
           skipped_months: form.skipped_months,
+          charged_months: form.charged_months,
         };
         if (editingId != null) {
           await updateMonthlyExpense(editingId, body);
@@ -233,13 +250,30 @@ export default function MonthlyExpensesClient() {
         setModalOpen(false);
         setEditingId(null);
         await load();
+
+        // Going on or off a card moves that month's budget; a new expense never was in it, a skipped one isn't.
+        const wasCharged = expenses.find((x) => x.id === editingId)?.charged_months[chargeMonth] != null;
+        const isCharged = form.charged_months[chargeMonth] != null;
+        if (editingId != null && wasCharged !== isCharged && chargePeriod && !form.skipped_months.includes(chargeMonth)) {
+          const listedIn = byHalf[1].some((x) => x.id === editingId) ? 1 : 2;
+          await spreadBudgetChanges(payPeriodStarts, [
+            {
+              year: chargePeriod.y,
+              month: chargePeriod.m,
+              half: form.is_recurring ? listedIn : form.period_half,
+              delta: isCharged ? amount : -amount,
+            },
+          ]).catch(() =>
+            setError("The expense is saved, but the calendar's daily amounts didn't update. Use Even out on the calendar."),
+          );
+        }
       } catch (err) {
         setFormError(err instanceof Error ? err.message : "Failed to save expense");
       } finally {
         setSaving(false);
       }
     },
-    [form, editingId, load],
+    [form, editingId, load, expenses, chargeMonth, chargePeriod, byHalf, payPeriodStarts],
   );
 
   const onDelete = useCallback(
@@ -358,13 +392,16 @@ export default function MonthlyExpensesClient() {
                               }
                             }}
                             className={`flex cursor-pointer items-center gap-3 px-5 py-3 transition-colors duration-150 hover:bg-surface-2/60 sm:px-6 ${
-                              isSkipped(exp) ? "opacity-60" : ""
+                              offBudget(exp) ? "opacity-60" : ""
                             }`}
                           >
                             <div className="min-w-0 flex-1">
                               <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
                                 <p className="truncate text-sm font-medium text-ink">{exp.name}</p>
                                 {isSkipped(exp) && <Pill tone="warning">Skipped this month</Pill>}
+                                {chargedCard(exp) != null && (
+                                  <Pill>On {cards.find((c) => c.id === chargedCard(exp))?.name ?? "a card"}</Pill>
+                                )}
                                 {exp.is_recurring ? (
                                   <Pill tone="brand">
                                     {exp.expense_date ? `Every ${ordinal(Number(exp.expense_date.slice(8, 10)))}` : "Recurring"}
@@ -381,7 +418,7 @@ export default function MonthlyExpensesClient() {
                             </div>
                             <span
                               className={`shrink-0 text-sm font-semibold tabular-nums text-ink ${
-                                isSkipped(exp) ? "line-through" : ""
+                                offBudget(exp) ? "line-through" : ""
                               }`}
                             >
                               {fmtMoney(exp.amount)}
@@ -540,6 +577,23 @@ export default function MonthlyExpensesClient() {
                   disabled={saving}
                 />
               </Field>
+            )}
+
+            {cards.length > 0 && !(showAll && editingId != null && form.is_recurring) && (
+              <ChargedToField
+                cards={cards}
+                value={form.charged_months[chargeMonth] ?? ""}
+                onChange={(cardId) =>
+                  setForm((f) => ({
+                    ...f,
+                    charged_months: Object.fromEntries(
+                      Object.entries({ ...f.charged_months, [chargeMonth]: cardId }).filter(([, id]) => id),
+                    ),
+                  }))
+                }
+                hint={`${chargePeriod ? formatMonthYear(chargePeriod.y, chargePeriod.m) : "This month"} only: stays out of that month's calendar budget.`}
+                disabled={saving}
+              />
             )}
 
             {formError && (

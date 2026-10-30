@@ -784,6 +784,10 @@ def check_db_against_postgres() -> None:
         assert bill["skipped_months"] == [], bill
         skip = (bill["id"], "Internet", None, 1500.0, 2, 2026, 10, True, dt.date(2026, 10, 20), ["2026-11"])
         assert db.update_monthly_expense(*skip)["skipped_months"] == ["2026-11"]
+        assert bill["charged_months"] == {}, bill
+        charges = {"2026-12": str(uuid.uuid4())}
+        assert db.update_monthly_expense(*skip, charges)["charged_months"] == charges
+        assert db.list_monthly_expenses(period_year=2026, period_month=12)[0]["charged_months"] == charges
 
         power = db.insert_bill_category({"name": "Electricity"})
         assert power["defaults"] == {}, power
@@ -802,17 +806,53 @@ def check_db_against_postgres() -> None:
         assert linked["current_balance"] == 20000.0, "linking reset the adjusted balance"
         older = {**card_bill, "bill_date": dt.date(2026, 9, 5), "amount": 9.0, "category_id": visa["id"]}
         db.insert_bill(older)
-        assert db.get_credit_card()["last_statement_balance"] == 15000.0, "an older bill became the statement"
+        assert db.get_credit_card(card["id"])["last_statement_balance"] == 15000.0, "an older bill became the statement"
         assert db.last_bill_date_before(visa["id"], "2026-10-05") == "2026-09-05"
         assert db.last_bill_date_before(visa["id"], "2026-09-05") is None
         assert db.delete_bill_category(visa["id"])
-        unlinked = db.get_credit_card()
+        unlinked = db.get_credit_card(card["id"])
         assert unlinked["bill_category_id"] is None and unlinked["last_statement_balance"] == 1000.0, unlinked
-        paid = db.insert_credit_card_payment(card["id"], 300.0, dt.date(2026, 10, 10), None)
-        before = db.get_credit_card()["current_balance"]
-        edited = db.update_credit_card_payment(paid["id"], 500.0, dt.date(2026, 10, 11), "fixed")
+        moved = lambda half, delta: {"period_year": 2026, "period_month": 10, "period_half": half, "delta": delta}  # noqa: E731
+        spent_in = lambda half: [(e["amount"], e["description"]) for e in db.list_fixed_expenses(half, 2026, 10)]  # noqa: E731
+        paid = db.insert_credit_card_payment(card["id"], 300.0, dt.date(2026, 10, 10), None, 2, 2026, 10)
+        assert paid["budget_changes"] == [moved(2, -300.0)], paid
+        assert spent_in(2) == [(300.0, "Visa payment")], "a payment didn't become a fixed expense"
+        before = db.get_credit_card(card["id"])["current_balance"]
+        edited = db.update_credit_card_payment(paid["id"], 500.0, dt.date(2026, 10, 11), "fixed", 2, 2026, 10)
         assert (edited["amount"], edited["payment_date"], edited["note"]) == (500.0, "2026-10-11", "fixed"), edited
-        assert db.get_credit_card()["current_balance"] == before - 200.0, "editing a payment didn't move the balance"
+        assert edited["budget_changes"] == [moved(2, -200.0)], edited
+        after = db.get_credit_card(card["id"])["current_balance"]
+        assert after == before - 200.0, "editing a payment didn't move the balance"
+
+        shifted = db.update_credit_card_payment(paid["id"], 500.0, dt.date(2026, 10, 20), "fixed", 1, 2026, 10)
+        assert shifted["budget_changes"] == [moved(2, 500.0), moved(1, -500.0)], shifted
+        assert (spent_in(2), spent_in(1)) == ([], [(500.0, "Visa payment")]), "the expense stayed in the old pay period"
+        spare = db.insert_credit_card_payment(card["id"], 40.0, dt.date(2026, 10, 21), None, 2, 2026, 10)
+        assert db.delete_credit_card_payment(spare["id"]) == [moved(2, 40.0)]
+        assert spent_in(2) == [], "deleting a payment left its fixed expense"
+        assert db.delete_credit_card_payment(uuid.uuid4()) is None
+
+        unlinked_pay = db.insert_credit_card_payment(card["id"], 60.0, dt.date(2026, 10, 22), None, 2, 2026, 10)
+        assert db.delete_fixed_expense(db.list_fixed_expenses(2, 2026, 10)[0]["id"])
+        reedited = db.update_credit_card_payment(unlinked_pay["id"], 70.0, dt.date(2026, 10, 22), None, 2, 2026, 10)
+        assert reedited["budget_changes"] == [] and spent_in(2) == [], "a payment off the budget went back on it"
+        assert db.delete_credit_card_payment(unlinked_pay["id"]) == []
+        assert db.get_credit_card(card["id"])["current_balance"] == after, "those payments left the balance moved"
+
+        renamed = db.update_credit_card(card["id"], "Visa Gold", 50000.0, 1000.0, 100.0, 3.5, None, None)
+        assert (renamed["name"], renamed["current_balance"]) == ("Visa Gold", after), "renaming moved the balance"
+        restated = db.update_credit_card(card["id"], "Visa Gold", 50000.0, 2000.0, 100.0, 3.5, None, None)
+        assert restated["current_balance"] == 2000.0, "a new typed-in statement didn't reset the balance"
+
+        amex = db.insert_credit_card("Amex", 9000.0, 500.0, 50.0, 3.0, None, None)
+        amex_paid = db.insert_credit_card_payment(amex["id"], 75.0, dt.date(2026, 10, 12), None, 2, 2026, 10)
+        bundles = db.fetch_credit_card_bundles()
+        assert [b["card"]["name"] for b in bundles] == ["Visa Gold", "Amex"], bundles
+        assert [p["id"] for p in bundles[1]["payments"]] == [amex_paid["id"]], "a payment landed on the wrong card"
+        assert db.get_credit_card(amex["id"])["current_balance"] == 425.0, "the other card's balance moved"
+        assert db.get_credit_card(card["id"])["current_balance"] == 2000.0, "the other card's balance moved"
+        assert db.delete_credit_card(amex["id"]) and db.get_credit_card(amex["id"]) is None
+        assert spent_in(2) == [(75.0, "Amex payment")], "removing a card took back what it already cost the budget"
         assert db.delete_credit_card(card["id"])
         db.insert_bill_category({"name": "Internet"})
         try:

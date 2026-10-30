@@ -6,6 +6,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Modal } from "@/components/Modal";
 import {
+  ChargedToField,
   DANGER_TEXT_BUTTON_CLASSES,
   DIALOG_BODY_CLASSES,
   DIALOG_CLASSES,
@@ -24,7 +25,7 @@ import { CheckIcon, ChevronDownIcon, LayersIcon, PlusIcon } from "@/components/I
 import {
   createInstallment,
   deleteInstallment,
-  getCreditCard,
+  getCreditCards,
   getInstallment,
   getInstallments,
   getInstallmentSchedules,
@@ -32,6 +33,7 @@ import {
   reorderInstallmentLines,
   updateInstallment,
   updateInstallmentLinesBulk,
+  type CreditCardRow,
   type InstallmentCreateBody,
   type InstallmentDetailResponse,
   type InstallmentLineRow,
@@ -194,8 +196,8 @@ export default function InstallmentsClient() {
   >([]);
   const [showArchived, setShowArchived] = useState(false);
   const [detailTab, setDetailTab] = useState<"schedule" | "details">("schedule");
-  const [cardId, setCardId] = useState<string | null>(null);
-  const [linkToCard, setLinkToCard] = useState(false);
+  const [cards, setCards] = useState<CreditCardRow[]>([]);
+  const [cardId, setCardId] = useState(""); // "" when it isn't on a card
   const [lineDrafts, setLineDrafts] = useState<
     Record<number, { principal: string; interest: string }>
   >({});
@@ -236,10 +238,10 @@ export default function InstallmentsClient() {
   useEffect(() => {
     void (async () => {
       try {
-        const r = await getCreditCard();
-        setCardId(r.card?.id ?? null);
+        const r = await getCreditCards();
+        setCards(r.cards.map((b) => b.card));
       } catch {
-        setCardId(null);
+        setCards([]);
       }
     })();
   }, []);
@@ -289,7 +291,7 @@ export default function InstallmentsClient() {
   const closeAddModal = useCallback(() => {
     setAddModalOpen(false);
     setForm(emptyForm);
-    setLinkToCard(false);
+    setCardId("");
     setLineDrafts({});
   }, []);
 
@@ -446,7 +448,7 @@ export default function InstallmentsClient() {
     setScheduleModalId(null);
     setDetail(null);
     setForm(emptyForm);
-    setLinkToCard(false);
+    setCardId("");
   }, []);
 
   const openPayments = async () => {
@@ -553,7 +555,7 @@ export default function InstallmentsClient() {
     const row = rows.find((r) => r.id === id);
     if (row) {
       setForm(formFromRow(row));
-      setLinkToCard(row.credit_card_id != null);
+      setCardId(row.credit_card_id ?? "");
     }
     try {
       const d = await getInstallment(id);
@@ -624,7 +626,7 @@ export default function InstallmentsClient() {
           finish_date: fd,
           remaining: null,
           original_total: null,
-          credit_card_id: linkToCard && cardId != null ? cardId : null,
+          credit_card_id: cardId || null,
         };
         const created = await createInstallment(body);
         const fresh = await updateInstallmentLinesBulk(
@@ -633,7 +635,7 @@ export default function InstallmentsClient() {
         );
         setAddModalOpen(false);
         setForm(emptyForm);
-        setLinkToCard(false);
+        setCardId("");
         setLineDrafts({});
         upsertRow(fresh.installment);
       } else {
@@ -664,11 +666,11 @@ export default function InstallmentsClient() {
             form.original_total.trim() === ""
               ? null
               : parseFormNumber(form.original_total),
-          credit_card_id: linkToCard && cardId != null ? cardId : null,
+          credit_card_id: cardId || null,
         };
         const fresh = await updateInstallment(scheduleModalId, body);
         setForm(formFromRow(fresh.installment));
-        setLinkToCard(fresh.installment.credit_card_id != null);
+        setCardId(fresh.installment.credit_card_id ?? "");
         setDetail(fresh);
         upsertRow(fresh.installment);
       }
@@ -729,7 +731,7 @@ export default function InstallmentsClient() {
   const openAdd = () => {
     setError(null);
     setForm(emptyForm);
-    setLinkToCard(false);
+    setCardId("");
     setLineDrafts({});
     setAddModalOpen(true);
   };
@@ -742,20 +744,15 @@ export default function InstallmentsClient() {
     </ErrorAlert>
   );
 
-  const linkToCardToggle = cardId != null && (
-    <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-line p-3.5 transition-colors duration-150 hover:bg-surface-2/60 sm:col-span-2">
-      <input
-        type="checkbox"
-        className="mt-0.5 size-4"
-        checked={linkToCard}
-        onChange={(e) => setLinkToCard(e.target.checked)}
-        disabled={saving}
-      />
-      <span className="text-sm">
-        <span className="block font-medium text-ink">Charged to my credit card</span>
-        <span className="text-ink-3">Counts toward the card&apos;s monthly dues.</span>
-      </span>
-    </label>
+  const cardField = cards.length > 0 && (
+    <ChargedToField
+      cards={cards}
+      value={cardId}
+      onChange={setCardId}
+      hint="Counts toward the card's monthly dues."
+      disabled={saving}
+      className="sm:col-span-2"
+    />
   );
 
   const deletePlanButton = scheduleModalId != null && (
@@ -856,7 +853,9 @@ export default function InstallmentsClient() {
                           </p>
                         </div>
                         <div className="flex shrink-0 flex-wrap justify-end gap-1.5">
-                          {r.credit_card_id != null && <Pill>Card</Pill>}
+                          {r.credit_card_id != null && (
+                            <Pill>{cards.find((c) => c.id === r.credit_card_id)?.name ?? "Card"}</Pill>
+                          )}
                           {due && <Pill tone="brand">Due this month</Pill>}
                         </div>
                       </div>
@@ -959,7 +958,7 @@ export default function InstallmentsClient() {
         <form onSubmit={submitCreate} className="flex min-h-0 flex-1 flex-col">
           <div className={`${DIALOG_BODY_CLASSES} grid gap-4 sm:grid-cols-2`}>
             <InstallmentFieldGrid form={form} setForm={setForm} saving={saving} hideAmounts />
-            {linkToCardToggle}
+            {cardField}
             {draftTotal > 0 && (
               <div className="sm:col-span-2">
                 <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
@@ -1230,7 +1229,7 @@ export default function InstallmentsClient() {
           <form onSubmit={submitCreate} className="flex min-h-0 flex-1 flex-col">
             <div className={`${DIALOG_BODY_CLASSES} grid gap-4 sm:grid-cols-2`}>
               <InstallmentFieldGrid form={form} setForm={setForm} saving={saving} />
-              {linkToCardToggle}
+              {cardField}
               {errorBox}
             </div>
             <div className={DIALOG_FOOTER_CLASSES}>

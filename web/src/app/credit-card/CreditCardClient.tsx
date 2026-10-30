@@ -22,6 +22,7 @@ import {
   Pill,
   Segmented,
   TEXT_BUTTON_CLASSES,
+  TILE_BUTTON_CLASSES,
 } from "@/components/FinanceUI";
 import { CreditCardIcon, PlusIcon } from "@/components/Icons";
 import {
@@ -31,17 +32,27 @@ import {
   deleteCreditCard,
   deleteCreditCardPayment,
   getBills,
-  getCreditCard,
+  getCreditCards,
+  getPayPeriodStartOverrides,
   updateCreditCard,
   updateCreditCardPayment,
   type BillCategoryRow,
+  type BudgetChange,
+  type CreditCardBundle,
   type CreditCardPaymentRow,
   type CreditCardRow,
-  type InstallmentRow,
 } from "@/lib/api";
 import { formatAmountNumber, parseFormNumber } from "@/lib/parseFormNumber";
 import { formatDate, parseDateOnlyLocal, toIsoDateLocal } from "@/lib/dateFormat";
 import { fmtAmountOrDash } from "@/lib/formatNumber";
+import {
+  payslipHalfFor,
+  periodForDate,
+  periodKey,
+  periodRangeLabel,
+  spreadBudgetChanges,
+  type PeriodHalf,
+} from "@/lib/payPeriods";
 import { ErrorAlert } from "@/components/ErrorAlert";
 import {
   INPUT_CLASSES,
@@ -154,13 +165,392 @@ function Row({ label, children }: { label: ReactNode; children: ReactNode }) {
   );
 }
 
+function CardDetails({
+  bundle: { card, installments, payments },
+  linkedCategory,
+  onAdjustBalance,
+  onRecordPayment,
+  onEditPayment,
+}: {
+  bundle: CreditCardBundle;
+  linkedCategory: BillCategoryRow | undefined;
+  onAdjustBalance: () => void;
+  onRecordPayment: () => void;
+  onEditPayment: (p: CreditCardPaymentRow) => void;
+}) {
+  const [calcMode, setCalcMode] = useState<"payment" | "months">("payment");
+  const [calcPaymentInput, setCalcPaymentInput] = useState("");
+  const [calcMonthsInput, setCalcMonthsInput] = useState("");
+
+  const scenarios = useMemo(() => {
+    const rate = card.interest_rate / 100;
+    const row = (label: string, remaining: number) => {
+      const interest = remaining * rate;
+      return {
+        label,
+        pay: card.current_balance - remaining,
+        remaining,
+        interest,
+        nextStatement: remaining + interest,
+      };
+    };
+    return [
+      row("Pay in full", 0),
+      row("Pay half", Math.max(card.current_balance / 2, 0)),
+      row("Pay the minimum", Math.max(card.current_balance - card.minimum_due, 0)),
+    ];
+  }, [card]);
+
+  const payoffByPayment = useMemo(() => {
+    const payment = parseFormNumber(calcPaymentInput);
+    if (payment == null || payment <= 0) return null;
+    return payoffMonthsForPayment(card.current_balance, card.interest_rate / 100, payment);
+  }, [card, calcPaymentInput]);
+
+  const payoffByMonths = useMemo(() => {
+    const months = parseFormNumber(calcMonthsInput);
+    if (months == null || months < 1) return null;
+    return paymentForMonths(card.current_balance, card.interest_rate / 100, Math.round(months));
+  }, [card, calcMonthsInput]);
+
+  const installmentDues = Math.max(card.monthly_dues - card.minimum_due, 0);
+  const used = card.credit_limit > 0 ? card.current_balance / card.credit_limit : 0;
+  const due = dueCountdown(card.due_date);
+
+  const calcInput = calcMode === "payment" ? calcPaymentInput : calcMonthsInput;
+  let calcResult: { error: string } | { cells: [string, string][] } | null = null;
+  if (calcInput.trim() !== "") {
+    if (calcMode === "payment") {
+      calcResult =
+        payoffByPayment == null
+          ? { error: "Enter an amount greater than zero." }
+          : !payoffByPayment.reachable
+            ? { error: "That doesn't cover the monthly interest, so the balance never clears. Try more." }
+            : {
+                cells: [
+                  ["Paid off in", `${payoffByPayment.months} month${payoffByPayment.months === 1 ? "" : "s"}`],
+                  ["Total interest", fmtMoney(payoffByPayment.totalInterest)],
+                  ["Total paid", fmtMoney(payoffByPayment.totalPaid)],
+                ],
+              };
+    } else {
+      calcResult =
+        payoffByMonths == null
+          ? { error: "Enter a number of months greater than zero." }
+          : {
+              cells: [
+                ["Pay each month", fmtMoney(payoffByMonths.payment)],
+                ["Total interest", fmtMoney(payoffByMonths.totalInterest)],
+                ["Total paid", fmtMoney(payoffByMonths.totalPaid)],
+              ],
+            };
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-5">
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
+        <div className="relative flex min-h-[15rem] flex-col justify-between overflow-hidden rounded-2xl bg-linear-to-br from-indigo-600 via-indigo-700 to-indigo-950 p-6 text-white shadow-md sm:p-7">
+          <span aria-hidden className="pointer-events-none absolute -right-20 -top-24 size-72 rounded-full bg-white/10" />
+          <span aria-hidden className="pointer-events-none absolute -bottom-28 right-16 size-60 rounded-full bg-white/5" />
+          <div className="relative flex items-start justify-between gap-3">
+            <p className="truncate text-sm font-semibold tracking-wide text-white/85">{card.name}</p>
+            <CreditCardIcon className="size-7 shrink-0 text-white/70" />
+          </div>
+          <div className="relative mt-6">
+            <p className="text-xs font-medium uppercase tracking-wider text-white/60">Current balance</p>
+            <p className="mt-1 text-4xl font-semibold tabular-nums tracking-tight">
+              {fmtMoney(card.current_balance)}
+            </p>
+          </div>
+          <div className="relative mt-6">
+            <div className="h-1.5 overflow-hidden rounded-full bg-white/20">
+              <div
+                className="h-full rounded-full bg-white transition-[width] duration-500"
+                style={{ width: `${Math.max(0, Math.min(1, used)) * 100}%` }}
+              />
+            </div>
+            <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 text-xs text-white/75">
+              <span>
+                <span className="font-semibold text-white">{Math.round(used * 100)}%</span> of{" "}
+                {fmtMoney(card.credit_limit)} limit used
+              </span>
+              <button
+                type="button"
+                onClick={onAdjustBalance}
+                className="rounded-md px-1.5 py-0.5 font-medium text-white transition-colors hover:bg-white/15"
+                data-tooltip="Match what your bank shows"
+              >
+                {fmtMoney(card.available_limit)} available · Adjust
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <Panel
+          title="Statement"
+          subtitle={
+            linkedCategory && (
+              <>
+                Latest{" "}
+                <Link href="/bills" className="font-medium text-brand-text hover:underline">
+                  {linkedCategory.name}
+                </Link>{" "}
+                bill
+              </>
+            )
+          }
+          actions={due && <Pill tone={due.tone}>{due.text}</Pill>}
+        >
+          <dl className="-my-2.5 divide-y divide-line-soft">
+            <Row label="Statement balance">{fmtMoney(card.last_statement_balance)}</Row>
+            <Row label="Minimum due">{fmtMoney(card.minimum_due)}</Row>
+            <Row label="Statement date">{fmtDate(card.statement_date)}</Row>
+            <Row label="Due date">{fmtDate(card.due_date)}</Row>
+            <Row label="Interest">{card.interest_rate}% / month</Row>
+          </dl>
+        </Panel>
+      </div>
+
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)]">
+        <Panel title="Due this month" subtitle="What to set aside for this card.">
+          <dl className="-my-2.5 divide-y divide-line-soft">
+            <Row label="Minimum due">{fmtMoney(card.minimum_due)}</Row>
+            <Row label={`Installments (${installments.length})`}>{fmtMoney(installmentDues)}</Row>
+          </dl>
+          <div className="mt-4 flex items-end justify-between gap-3 rounded-xl bg-brand-soft px-4 py-3.5">
+            <span className="text-sm font-medium text-brand-text">Total this month</span>
+            <span className="text-2xl font-semibold tabular-nums text-brand-text">
+              {fmtMoney(card.monthly_dues)}
+            </span>
+          </div>
+        </Panel>
+
+        <Panel
+          flush
+          title="If you don't pay in full"
+          subtitle="Estimate at a flat monthly rate, no new purchases. Your bank's average-daily-balance charge may differ."
+        >
+          {/* Phones: stacked rows, since 5 amount columns can't fit. */}
+          <ul className="divide-y divide-line-soft border-t border-line-soft text-sm tabular-nums sm:hidden">
+            {scenarios.map((s) => (
+              <li key={s.label} className="px-5 py-3">
+                <p className="font-medium text-ink">{s.label}</p>
+                <dl className="mt-1.5 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">
+                  <dt className="text-ink-3">Pay now</dt>
+                  <dd className="text-right text-ink-2">{fmtMoney(s.pay)}</dd>
+                  <dt className="text-ink-3">Carried over</dt>
+                  <dd className="text-right text-ink-2">{fmtMoney(s.remaining)}</dd>
+                  <dt className="text-ink-3">Interest</dt>
+                  <dd className={`text-right font-medium ${s.interest > 0 ? "text-danger-text" : "text-success-text"}`}>
+                    {s.interest > 0 ? `+${fmtMoney(s.interest)}` : "None"}
+                  </dd>
+                  <dt className="text-ink-3">Next statement</dt>
+                  <dd className="text-right font-semibold text-ink">{fmtMoney(s.nextStatement)}</dd>
+                </dl>
+              </li>
+            ))}
+          </ul>
+          <div className="overflow-x-auto max-sm:hidden">
+            <table className="w-full min-w-[34rem] text-sm">
+              <thead>
+                <tr className={TABLE_HEAD_ROW_CLASSES}>
+                  <th className={`${TABLE_HEAD_CELL_CLASSES} text-left`}>If you…</th>
+                  <th className={`${TABLE_HEAD_CELL_CLASSES} text-right`}>Pay now</th>
+                  <th className={`${TABLE_HEAD_CELL_CLASSES} text-right`}>Carried over</th>
+                  <th className={`${TABLE_HEAD_CELL_CLASSES} text-right`}>Interest</th>
+                  <th className={`${TABLE_HEAD_CELL_CLASSES} text-right`}>Next statement</th>
+                </tr>
+              </thead>
+              <tbody>
+                {scenarios.map((s) => (
+                  <tr key={s.label} className={TABLE_ROW_CLASSES}>
+                    <td className={`${TABLE_CELL_CLASSES} font-medium text-ink`}>{s.label}</td>
+                    <td className={`${TABLE_CELL_CLASSES} text-right`}>{fmtMoney(s.pay)}</td>
+                    <td className={`${TABLE_CELL_CLASSES} text-right`}>{fmtMoney(s.remaining)}</td>
+                    <td
+                      className={`${TABLE_CELL_CLASSES} text-right font-medium ${s.interest > 0 ? "text-danger-text" : "text-success-text"}`}
+                    >
+                      {s.interest > 0 ? `+${fmtMoney(s.interest)}` : "None"}
+                    </td>
+                    <td className={`${TABLE_CELL_CLASSES} text-right font-semibold text-ink`}>
+                      {fmtMoney(s.nextStatement)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Panel>
+      </div>
+
+      <Panel
+        title="Payoff calculator"
+        subtitle={`From your ${fmtMoney(card.current_balance)} balance at ${card.interest_rate}% a month, no new purchases.`}
+      >
+        {card.current_balance <= 0 ? (
+          <p className="rounded-xl bg-success-soft px-4 py-3 text-sm font-medium text-success-text">
+            Nothing to pay off. Your balance is clear.
+          </p>
+        ) : (
+          <div className="grid gap-5 md:grid-cols-[minmax(0,20rem)_minmax(0,1fr)] md:items-start">
+            <div className="flex flex-col gap-3">
+              <Segmented
+                label="Calculate by"
+                options={[
+                  { value: "payment", label: "By payment" },
+                  { value: "months", label: "By months" },
+                ]}
+                value={calcMode}
+                onChange={setCalcMode}
+                fill
+              />
+              {calcMode === "payment" ? (
+                <Field label="I can pay each month">
+                  <AmountInput placeholder="0.00" value={calcPaymentInput} onChange={setCalcPaymentInput} />
+                </Field>
+              ) : (
+                <Field label="Paid off in (months)">
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    placeholder="12"
+                    className={INPUT_CLASSES}
+                    value={calcMonthsInput}
+                    onChange={(e) => setCalcMonthsInput(e.target.value)}
+                  />
+                </Field>
+              )}
+            </div>
+            <div
+              className="flex min-h-[6.5rem] items-center rounded-xl border border-line bg-surface-2/50 p-4"
+              aria-live="polite"
+            >
+              {calcResult == null ? (
+                <p className="text-sm text-ink-3">
+                  {calcMode === "payment"
+                    ? "Enter a monthly amount to see how long payoff takes."
+                    : "Enter a number of months to see the payment needed."}
+                </p>
+              ) : "error" in calcResult ? (
+                <p className="text-sm font-medium text-danger-text">{calcResult.error}</p>
+              ) : (
+                <div className="grid w-full gap-4 sm:grid-cols-3">
+                  {calcResult.cells.map(([label, value], i) => (
+                    <Metric
+                      key={label}
+                      label={label}
+                      value={value}
+                      tone={i === 0 ? "brand" : i === 1 ? "danger" : "neutral"}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </Panel>
+
+      <div className="grid gap-5 lg:grid-cols-2">
+        <Panel
+          flush
+          title="Installments on this card"
+          actions={
+            <Link href="/installments" className={TEXT_BUTTON_CLASSES}>
+              Manage →
+            </Link>
+          }
+        >
+          {installments.length === 0 ? (
+            <p className="px-5 pb-6 text-sm text-ink-3 sm:px-6">No installments are linked to this card.</p>
+          ) : (
+            <ul className="divide-y divide-line-soft border-t border-line-soft">
+              {installments.map((ins) => {
+                const done = Math.max(0, Math.min(ins.installment_current - 1, ins.installment_total));
+                return (
+                  <li key={ins.id} className="px-5 py-3.5 sm:px-6">
+                    <div className="flex items-baseline justify-between gap-3">
+                      <p className="truncate text-sm font-medium text-ink">{ins.name}</p>
+                      <span className="shrink-0 text-sm font-semibold tabular-nums text-ink">
+                        {fmtMoney(ins.remaining)}
+                        <span className="ml-1 text-xs font-normal text-ink-4">left</span>
+                      </span>
+                    </div>
+                    <div className="mt-2 flex items-center gap-3">
+                      <Meter
+                        className="flex-1"
+                        value={ins.installment_total > 0 ? done / ins.installment_total : 0}
+                        label={`${ins.name} progress`}
+                      />
+                      <span className="shrink-0 text-xs tabular-nums text-ink-3">
+                        {done}/{ins.installment_total} paid
+                      </span>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </Panel>
+
+        <Panel
+          flush
+          title="Payments"
+          actions={
+            <button type="button" className={TEXT_BUTTON_CLASSES} onClick={onRecordPayment}>
+              <PlusIcon className="size-4" />
+              Record
+            </button>
+          }
+        >
+          {payments.length === 0 ? (
+            <p className="px-5 pb-6 text-sm text-ink-3 sm:px-6">No payments recorded yet.</p>
+          ) : (
+            <ul className="divide-y divide-line-soft border-t border-line-soft">
+              {payments.map((p) => (
+                <li
+                  key={p.id}
+                  role="button"
+                  tabIndex={0}
+                  data-tooltip="Double-click to edit or delete"
+                  onDoubleClick={() => onEditPayment(p)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      onEditPayment(p);
+                    }
+                  }}
+                  className="flex cursor-pointer select-none items-center gap-3 px-5 py-3 transition-colors duration-150 hover:bg-surface-2/60 sm:px-6"
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-ink">{fmtDate(p.payment_date)}</p>
+                    {p.note && <p className="mt-0.5 truncate text-xs text-ink-3">{p.note}</p>}
+                  </div>
+                  <span className="shrink-0 text-sm font-semibold tabular-nums text-success-text">
+                    −{fmtMoney(p.amount)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Panel>
+      </div>
+    </div>
+  );
+}
+
 export default function CreditCardClient() {
-  const [card, setCard] = useState<CreditCardRow | null>(null);
-  const [installments, setInstallments] = useState<InstallmentRow[]>([]);
-  const [payments, setPayments] = useState<CreditCardPaymentRow[]>([]);
+  const [cards, setCards] = useState<CreditCardBundle[]>([]);
   const [billCategories, setBillCategories] = useState<BillCategoryRow[]>([]);
+  const [payPeriodStarts, setPayPeriodStarts] = useState<Map<string, string>>(new Map());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // The card the details, edit, payment and balance modals act on.
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const selected = cards.find((b) => b.card.id === selectedId);
+  const card = selected?.card ?? null;
 
   const [cardModalOpen, setCardModalOpen] = useState(false);
   const [cardForm, setCardForm] = useState<CardForm>(emptyCardForm());
@@ -178,24 +568,24 @@ export default function CreditCardClient() {
   const [balanceSaving, setBalanceSaving] = useState(false);
   const [balanceFormError, setBalanceFormError] = useState<string | null>(null);
 
-  const [calcMode, setCalcMode] = useState<"payment" | "months">("payment");
-  const [calcPaymentInput, setCalcPaymentInput] = useState("");
-  const [calcMonthsInput, setCalcMonthsInput] = useState("");
 
   const load = useCallback(async () => {
     setError(null);
     try {
-      // Bills only name where a linked statement comes from; the card page works without them.
-      const [r, bills] = await Promise.all([getCreditCard(), getBills().catch(() => null)]);
-      setCard(r.card);
-      setInstallments(r.installments);
-      setPayments(r.payments);
+      // Bills only name where a linked statement comes from; the cards work without them.
+      const [r, bills, starts] = await Promise.all([
+        getCreditCards(),
+        getBills().catch(() => null),
+        getPayPeriodStartOverrides().catch(() => ({ overrides: [] })),
+      ]);
+      setCards(r.cards);
       setBillCategories(bills?.categories ?? []);
+      setPayPeriodStarts(
+        new Map(starts.overrides.map((o) => [periodKey(o.period_year, o.period_month, o.period_half), o.start_date])),
+      );
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load credit card");
-      setCard(null);
-      setInstallments([]);
-      setPayments([]);
+      setError(e instanceof Error ? e.message : "Failed to load credit cards");
+      setCards([]);
     } finally {
       setLoading(false);
     }
@@ -205,24 +595,34 @@ export default function CreditCardClient() {
     void load();
   }, [load]);
 
-  const openCardModal = useCallback(() => {
+  const openDetails = useCallback((id: string) => {
+    setSelectedId(id);
+    setDetailsOpen(true);
+  }, []);
+
+  const closeDetails = useCallback(() => {
+    setDetailsOpen(false);
+  }, []);
+
+  const openCardModal = useCallback((target: CreditCardRow | null) => {
     setCardFormError(null);
-    if (card) {
+    setSelectedId(target?.id ?? null);
+    if (target) {
       setCardForm({
-        name: card.name,
-        credit_limit: formatAmountNumber(card.credit_limit),
-        last_statement_balance: formatAmountNumber(card.last_statement_balance),
-        minimum_due: formatAmountNumber(card.minimum_due),
-        interest_rate: String(card.interest_rate),
-        statement_date: card.statement_date ? card.statement_date.slice(0, 10) : "",
-        due_date: card.due_date ? card.due_date.slice(0, 10) : "",
-        bill_category_id: card.bill_category_id ?? "",
+        name: target.name,
+        credit_limit: formatAmountNumber(target.credit_limit),
+        last_statement_balance: formatAmountNumber(target.last_statement_balance),
+        minimum_due: formatAmountNumber(target.minimum_due),
+        interest_rate: String(target.interest_rate),
+        statement_date: target.statement_date ? target.statement_date.slice(0, 10) : "",
+        due_date: target.due_date ? target.due_date.slice(0, 10) : "",
+        bill_category_id: target.bill_category_id ?? "",
       });
     } else {
       setCardForm(emptyCardForm());
     }
     setCardModalOpen(true);
-  }, [card]);
+  }, []);
 
   const closeCardModal = useCallback(() => {
     setCardModalOpen(false);
@@ -289,19 +689,22 @@ export default function CreditCardClient() {
 
   const onRemoveCard = useCallback(async () => {
     if (!card) return;
-    if (!(await confirmDialog("Remove this credit card? Linked installments will be unlinked.", "Remove"))) return;
+    const prompt = `Remove ${card.name} and its payments? Linked installments will be unlinked.`;
+    if (!(await confirmDialog(prompt, "Remove"))) return;
     setCardFormError(null);
     try {
       await deleteCreditCard(card.id);
       setCardModalOpen(false);
+      setDetailsOpen(false);
       await load();
     } catch (err) {
       setCardFormError(err instanceof Error ? err.message : "Failed to remove credit card");
     }
   }, [card, load]);
 
-  const openPaymentModal = useCallback(() => {
+  const openPaymentModal = useCallback((target: CreditCardRow) => {
     setPaymentFormError(null);
+    setSelectedId(target.id);
     setEditingPaymentId(null);
     setPaymentForm(emptyPaymentForm());
     setPaymentModalOpen(true);
@@ -322,6 +725,25 @@ export default function CreditCardClient() {
     setPaymentModalOpen(false);
   }, []);
 
+  const spreadOverCalendar = useCallback(
+    async (changes: BudgetChange[]) => {
+      try {
+        await spreadBudgetChanges(
+          payPeriodStarts,
+          changes.map((c) => ({
+            year: c.period_year,
+            month: c.period_month,
+            half: payslipHalfFor(c.period_half as PeriodHalf),
+            delta: c.delta,
+          })),
+        );
+      } catch {
+        setError("The payment is saved, but the calendar's daily amounts didn't update. Use Even out on the calendar.");
+      }
+    },
+    [payPeriodStarts],
+  );
+
   const submitPaymentForm = useCallback(
     async (e: FormEvent) => {
       e.preventDefault();
@@ -338,43 +760,47 @@ export default function CreditCardClient() {
       setPaymentFormError(null);
       setPaymentSaving(true);
       try {
+        const period = periodForDate(payPeriodStarts, paymentForm.payment_date);
         const body = {
           amount,
           payment_date: paymentForm.payment_date,
           note: paymentForm.note.trim() || null,
+          period_half: payslipHalfFor(period.half),
+          period_year: period.year,
+          period_month: period.month,
         };
-        if (editingPaymentId != null) {
-          await updateCreditCardPayment(editingPaymentId, body);
-        } else {
-          await createCreditCardPayment(card.id, body);
-        }
+        const { payment } = await (editingPaymentId != null
+          ? updateCreditCardPayment(editingPaymentId, body)
+          : createCreditCardPayment(card.id, body));
         setPaymentModalOpen(false);
         await load();
+        await spreadOverCalendar(payment.budget_changes);
       } catch (err) {
         setPaymentFormError(err instanceof Error ? err.message : "Failed to save payment");
       } finally {
         setPaymentSaving(false);
       }
     },
-    [card, paymentForm, editingPaymentId, load],
+    [card, paymentForm, editingPaymentId, load, payPeriodStarts, spreadOverCalendar],
   );
 
   const onDeletePayment = useCallback(
     async (id: string) => {
-      if (!(await confirmDialog("Delete this payment? The card balance goes back up by its amount."))) return;
+      if (!(await confirmDialog("Delete this payment? The card balance and your calendar budget both go back."))) return;
       setPaymentFormError(null);
       setPaymentSaving(true);
       try {
-        await deleteCreditCardPayment(id);
+        const { budget_changes } = await deleteCreditCardPayment(id);
         setPaymentModalOpen(false);
         await load();
+        await spreadOverCalendar(budget_changes);
       } catch (err) {
         setPaymentFormError(err instanceof Error ? err.message : "Failed to delete payment");
       } finally {
         setPaymentSaving(false);
       }
     },
-    [load],
+    [load, spreadOverCalendar],
   );
 
   const openBalanceModal = useCallback(() => {
@@ -412,85 +838,27 @@ export default function CreditCardClient() {
     [card, balanceForm, load],
   );
 
-  const scenarios = useMemo(() => {
-    if (!card) return [];
-    const rate = card.interest_rate / 100;
-    const row = (label: string, remaining: number) => {
-      const interest = remaining * rate;
-      return {
-        label,
-        pay: card.current_balance - remaining,
-        remaining,
-        interest,
-        nextStatement: remaining + interest,
-      };
-    };
-    return [
-      row("Pay in full", 0),
-      row("Pay half", Math.max(card.current_balance / 2, 0)),
-      row("Pay the minimum", Math.max(card.current_balance - card.minimum_due, 0)),
-    ];
-  }, [card]);
 
-  const payoffByPayment = useMemo(() => {
-    if (!card) return null;
-    const payment = parseFormNumber(calcPaymentInput);
-    if (payment == null || payment <= 0) return null;
-    return payoffMonthsForPayment(card.current_balance, card.interest_rate / 100, payment);
-  }, [card, calcPaymentInput]);
-
-  const payoffByMonths = useMemo(() => {
-    if (!card) return null;
-    const months = parseFormNumber(calcMonthsInput);
-    if (months == null || months < 1) return null;
-    return paymentForMonths(card.current_balance, card.interest_rate / 100, Math.round(months));
-  }, [card, calcMonthsInput]);
-
-  const installmentDues = card ? Math.max(card.monthly_dues - card.minimum_due, 0) : 0;
-  const used = card && card.credit_limit > 0 ? card.current_balance / card.credit_limit : 0;
-  const due = card ? dueCountdown(card.due_date) : null;
-
-  const calcInput = calcMode === "payment" ? calcPaymentInput : calcMonthsInput;
-  let calcResult: { error: string } | { cells: [string, string][] } | null = null;
-  if (calcInput.trim() !== "") {
-    if (calcMode === "payment") {
-      calcResult =
-        payoffByPayment == null
-          ? { error: "Enter an amount greater than zero." }
-          : !payoffByPayment.reachable
-            ? { error: "That doesn't cover the monthly interest, so the balance never clears. Try more." }
-            : {
-                cells: [
-                  ["Paid off in", `${payoffByPayment.months} month${payoffByPayment.months === 1 ? "" : "s"}`],
-                  ["Total interest", fmtMoney(payoffByPayment.totalInterest)],
-                  ["Total paid", fmtMoney(payoffByPayment.totalPaid)],
-                ],
-              };
-    } else {
-      calcResult =
-        payoffByMonths == null
-          ? { error: "Enter a number of months greater than zero." }
-          : {
-              cells: [
-                ["Pay each month", fmtMoney(payoffByMonths.payment)],
-                ["Total interest", fmtMoney(payoffByMonths.totalInterest)],
-                ["Total paid", fmtMoney(payoffByMonths.totalPaid)],
-              ],
-            };
-    }
-  }
-
-  const linkedCategory = card ? billCategories.find((c) => c.id === card.bill_category_id) : undefined;
-  const statementSources = billCategories.filter((c) => c.is_credit_card || c === linkedCategory);
+  const linkedCategory = billCategories.find((c) => c.id === card?.bill_category_id);
+  // A bill category feeds one card, so those other cards already read from aren't offered.
+  const statementSources = billCategories.filter(
+    (c) =>
+      (c.is_credit_card || c === linkedCategory) &&
+      !cards.some((b) => b.card.id !== card?.id && b.card.bill_category_id === c.id),
+  );
   const formLinked = cardForm.bill_category_id !== "";
+
+  const paidIn = paymentForm.payment_date ? periodForDate(payPeriodStarts, paymentForm.payment_date) : null;
+  const paymentPeriod =
+    editingPaymentId == null && paidIn && periodRangeLabel(payPeriodStarts, paidIn.year, paidIn.month, paidIn.half);
 
   return (
     <div className={PAGE_CONTAINER_CLASSES}>
       <PageHeader
-        title="Credit Card"
+        title="Credit Cards"
         description={
           <>
-            Balance, statement and payments. Installments on the card live on the{" "}
+            Each card&apos;s balance, statement and payments. Installments on a card live on the{" "}
             <Link href="/installments" className="font-medium text-brand-text hover:underline">
               Installments
             </Link>{" "}
@@ -498,16 +866,11 @@ export default function CreditCardClient() {
           </>
         }
         actions={
-          card && (
-            <>
-              <button type="button" className={SECONDARY_BUTTON_CLASSES} onClick={openCardModal}>
-                {card.bill_category_id != null ? "Edit card" : "Update statement"}
-              </button>
-              <button type="button" className={PRIMARY_BUTTON_CLASSES} onClick={openPaymentModal}>
-                <PlusIcon className="size-4" />
-                Record payment
-              </button>
-            </>
+          cards.length > 0 && (
+            <button type="button" className={PRIMARY_BUTTON_CLASSES} onClick={() => openCardModal(null)}>
+              <PlusIcon className="size-4" />
+              Add card
+            </button>
           )
         }
       />
@@ -519,311 +882,90 @@ export default function CreditCardClient() {
       )}
 
       {loading ? (
-        <LoadingBlocks label="Loading credit card…" />
-      ) : !card ? (
+        <LoadingBlocks label="Loading credit cards…" rows={2} />
+      ) : cards.length === 0 ? (
         <EmptyState
           icon={<CreditCardIcon className="size-6" />}
-          title="No credit card yet"
+          title="No credit cards yet"
           action={
-            <button type="button" className={PRIMARY_BUTTON_CLASSES} onClick={openCardModal}>
+            <button type="button" className={PRIMARY_BUTTON_CLASSES} onClick={() => openCardModal(null)}>
               <PlusIcon className="size-4" />
               Add credit card
             </button>
           }
         >
-          Add your card&apos;s limit and latest statement to track your balance, what&apos;s due, and how long it
-          takes to pay off.
+          Add a card&apos;s limit and latest statement to track its balance, what&apos;s due, and how long it takes
+          to pay off.
         </EmptyState>
       ) : (
-        <>
-          <div className="grid gap-5 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
-            <div className="relative flex min-h-[15rem] flex-col justify-between overflow-hidden rounded-2xl bg-linear-to-br from-indigo-600 via-indigo-700 to-indigo-950 p-6 text-white shadow-md sm:p-7">
-              <span aria-hidden className="pointer-events-none absolute -right-20 -top-24 size-72 rounded-full bg-white/10" />
-              <span aria-hidden className="pointer-events-none absolute -bottom-28 right-16 size-60 rounded-full bg-white/5" />
-              <div className="relative flex items-start justify-between gap-3">
-                <p className="truncate text-sm font-semibold tracking-wide text-white/85">{card.name}</p>
-                <CreditCardIcon className="size-7 shrink-0 text-white/70" />
-              </div>
-              <div className="relative mt-6">
-                <p className="text-xs font-medium uppercase tracking-wider text-white/60">Current balance</p>
-                <p className="mt-1 text-4xl font-semibold tabular-nums tracking-tight">
-                  {fmtMoney(card.current_balance)}
-                </p>
-              </div>
-              <div className="relative mt-6">
-                <div className="h-1.5 overflow-hidden rounded-full bg-white/20">
-                  <div
-                    className="h-full rounded-full bg-white transition-[width] duration-500"
-                    style={{ width: `${Math.max(0, Math.min(1, used)) * 100}%` }}
-                  />
-                </div>
-                <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 text-xs text-white/75">
-                  <span>
-                    <span className="font-semibold text-white">{Math.round(used * 100)}%</span> of{" "}
-                    {fmtMoney(card.credit_limit)} limit used
-                  </span>
-                  <button
-                    type="button"
-                    onClick={openBalanceModal}
-                    className="rounded-md px-1.5 py-0.5 font-medium text-white transition-colors hover:bg-white/15"
-                    data-tooltip="Match what your bank shows"
-                  >
-                    {fmtMoney(card.available_limit)} available · Adjust
-                  </button>
-                </div>
-              </div>
-            </div>
-
+        <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
+          {cards.map(({ card: c }) => (
             <Panel
-              title="Statement"
-              subtitle={
-                linkedCategory && (
-                  <>
-                    Latest{" "}
-                    <Link href="/bills" className="font-medium text-brand-text hover:underline">
-                      {linkedCategory.name}
-                    </Link>{" "}
-                    bill
-                  </>
-                )
-              }
-              actions={due && <Pill tone={due.tone}>{due.text}</Pill>}
-            >
-              <dl className="-my-2.5 divide-y divide-line-soft">
-                <Row label="Statement balance">{fmtMoney(card.last_statement_balance)}</Row>
-                <Row label="Minimum due">{fmtMoney(card.minimum_due)}</Row>
-                <Row label="Statement date">{fmtDate(card.statement_date)}</Row>
-                <Row label="Due date">{fmtDate(card.due_date)}</Row>
-                <Row label="Interest">{card.interest_rate}% / month</Row>
-              </dl>
-            </Panel>
-          </div>
-
-          <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)]">
-            <Panel title="Due this month" subtitle="What to set aside for this card.">
-              <dl className="-my-2.5 divide-y divide-line-soft">
-                <Row label="Minimum due">{fmtMoney(card.minimum_due)}</Row>
-                <Row label={`Installments (${installments.length})`}>{fmtMoney(installmentDues)}</Row>
-              </dl>
-              <div className="mt-4 flex items-end justify-between gap-3 rounded-xl bg-brand-soft px-4 py-3.5">
-                <span className="text-sm font-medium text-brand-text">Total this month</span>
-                <span className="text-2xl font-semibold tabular-nums text-brand-text">
-                  {fmtMoney(card.monthly_dues)}
-                </span>
-              </div>
-            </Panel>
-
-            <Panel
-              flush
-              title="If you don't pay in full"
-              subtitle="Estimate at a flat monthly rate, no new purchases. Your bank's average-daily-balance charge may differ."
-            >
-              {/* Phones: stacked rows, since 5 amount columns can't fit. */}
-              <ul className="divide-y divide-line-soft border-t border-line-soft text-sm tabular-nums sm:hidden">
-                {scenarios.map((s) => (
-                  <li key={s.label} className="px-5 py-3">
-                    <p className="font-medium text-ink">{s.label}</p>
-                    <dl className="mt-1.5 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">
-                      <dt className="text-ink-3">Pay now</dt>
-                      <dd className="text-right text-ink-2">{fmtMoney(s.pay)}</dd>
-                      <dt className="text-ink-3">Carried over</dt>
-                      <dd className="text-right text-ink-2">{fmtMoney(s.remaining)}</dd>
-                      <dt className="text-ink-3">Interest</dt>
-                      <dd className={`text-right font-medium ${s.interest > 0 ? "text-danger-text" : "text-success-text"}`}>
-                        {s.interest > 0 ? `+${fmtMoney(s.interest)}` : "None"}
-                      </dd>
-                      <dt className="text-ink-3">Next statement</dt>
-                      <dd className="text-right font-semibold text-ink">{fmtMoney(s.nextStatement)}</dd>
-                    </dl>
-                  </li>
-                ))}
-              </ul>
-              <div className="overflow-x-auto max-sm:hidden">
-                <table className="w-full min-w-[34rem] text-sm">
-                  <thead>
-                    <tr className={TABLE_HEAD_ROW_CLASSES}>
-                      <th className={`${TABLE_HEAD_CELL_CLASSES} text-left`}>If you…</th>
-                      <th className={`${TABLE_HEAD_CELL_CLASSES} text-right`}>Pay now</th>
-                      <th className={`${TABLE_HEAD_CELL_CLASSES} text-right`}>Carried over</th>
-                      <th className={`${TABLE_HEAD_CELL_CLASSES} text-right`}>Interest</th>
-                      <th className={`${TABLE_HEAD_CELL_CLASSES} text-right`}>Next statement</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {scenarios.map((s) => (
-                      <tr key={s.label} className={TABLE_ROW_CLASSES}>
-                        <td className={`${TABLE_CELL_CLASSES} font-medium text-ink`}>{s.label}</td>
-                        <td className={`${TABLE_CELL_CLASSES} text-right`}>{fmtMoney(s.pay)}</td>
-                        <td className={`${TABLE_CELL_CLASSES} text-right`}>{fmtMoney(s.remaining)}</td>
-                        <td
-                          className={`${TABLE_CELL_CLASSES} text-right font-medium ${s.interest > 0 ? "text-danger-text" : "text-success-text"}`}
-                        >
-                          {s.interest > 0 ? `+${fmtMoney(s.interest)}` : "None"}
-                        </td>
-                        <td className={`${TABLE_CELL_CLASSES} text-right font-semibold text-ink`}>
-                          {fmtMoney(s.nextStatement)}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </Panel>
-          </div>
-
-          <Panel
-            title="Payoff calculator"
-            subtitle={`From your ${fmtMoney(card.current_balance)} balance at ${card.interest_rate}% a month, no new purchases.`}
-          >
-            {card.current_balance <= 0 ? (
-              <p className="rounded-xl bg-success-soft px-4 py-3 text-sm font-medium text-success-text">
-                Nothing to pay off. Your balance is clear.
-              </p>
-            ) : (
-              <div className="grid gap-5 md:grid-cols-[minmax(0,20rem)_minmax(0,1fr)] md:items-start">
-                <div className="flex flex-col gap-3">
-                  <Segmented
-                    label="Calculate by"
-                    options={[
-                      { value: "payment", label: "By payment" },
-                      { value: "months", label: "By months" },
-                    ]}
-                    value={calcMode}
-                    onChange={setCalcMode}
-                    fill
-                  />
-                  {calcMode === "payment" ? (
-                    <Field label="I can pay each month">
-                      <AmountInput placeholder="0.00" value={calcPaymentInput} onChange={setCalcPaymentInput} />
-                    </Field>
-                  ) : (
-                    <Field label="Paid off in (months)">
-                      <input
-                        type="text"
-                        inputMode="numeric"
-                        placeholder="12"
-                        className={INPUT_CLASSES}
-                        value={calcMonthsInput}
-                        onChange={(e) => setCalcMonthsInput(e.target.value)}
-                      />
-                    </Field>
-                  )}
-                </div>
-                <div
-                  className="flex min-h-[6.5rem] items-center rounded-xl border border-line bg-surface-2/50 p-4"
-                  aria-live="polite"
-                >
-                  {calcResult == null ? (
-                    <p className="text-sm text-ink-3">
-                      {calcMode === "payment"
-                        ? "Enter a monthly amount to see how long payoff takes."
-                        : "Enter a number of months to see the payment needed."}
-                    </p>
-                  ) : "error" in calcResult ? (
-                    <p className="text-sm font-medium text-danger-text">{calcResult.error}</p>
-                  ) : (
-                    <div className="grid w-full gap-4 sm:grid-cols-3">
-                      {calcResult.cells.map(([label, value], i) => (
-                        <Metric
-                          key={label}
-                          label={label}
-                          value={value}
-                          tone={i === 0 ? "brand" : i === 1 ? "danger" : "neutral"}
-                        />
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-          </Panel>
-
-          <div className="grid gap-5 lg:grid-cols-2">
-            <Panel
-              flush
-              title="Installments on this card"
-              actions={
-                <Link href="/installments" className={TEXT_BUTTON_CLASSES}>
-                  Manage →
-                </Link>
-              }
-            >
-              {installments.length === 0 ? (
-                <p className="px-5 pb-6 text-sm text-ink-3 sm:px-6">No installments are linked to this card.</p>
-              ) : (
-                <ul className="divide-y divide-line-soft border-t border-line-soft">
-                  {installments.map((ins) => {
-                    const done = Math.max(0, Math.min(ins.installment_current - 1, ins.installment_total));
-                    return (
-                      <li key={ins.id} className="px-5 py-3.5 sm:px-6">
-                        <div className="flex items-baseline justify-between gap-3">
-                          <p className="truncate text-sm font-medium text-ink">{ins.name}</p>
-                          <span className="shrink-0 text-sm font-semibold tabular-nums text-ink">
-                            {fmtMoney(ins.remaining)}
-                            <span className="ml-1 text-xs font-normal text-ink-4">left</span>
-                          </span>
-                        </div>
-                        <div className="mt-2 flex items-center gap-3">
-                          <Meter
-                            className="flex-1"
-                            value={ins.installment_total > 0 ? done / ins.installment_total : 0}
-                            label={`${ins.name} progress`}
-                          />
-                          <span className="shrink-0 text-xs tabular-nums text-ink-3">
-                            {done}/{ins.installment_total} paid
-                          </span>
-                        </div>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-            </Panel>
-
-            <Panel
-              flush
-              title="Payments"
-              actions={
-                <button type="button" className={TEXT_BUTTON_CLASSES} onClick={openPaymentModal}>
-                  <PlusIcon className="size-4" />
-                  Record
+              key={c.id}
+              className="relative transition-colors duration-150 hover:bg-surface-2/60"
+              title={
+                // Its overlay makes the whole tile open the card; the action sits above it.
+                <button type="button" className={TILE_BUTTON_CLASSES} onClick={() => openDetails(c.id)}>
+                  {c.name}
                 </button>
               }
+              actions={
+                <div className="relative flex items-center gap-2">
+                  <button type="button" className={TEXT_BUTTON_CLASSES} onClick={() => openPaymentModal(c)}>
+                    <PlusIcon className="size-4" />
+                    Payment
+                  </button>
+                </div>
+              }
             >
-              {payments.length === 0 ? (
-                <p className="px-5 pb-6 text-sm text-ink-3 sm:px-6">No payments recorded yet.</p>
-              ) : (
-                <ul className="divide-y divide-line-soft border-t border-line-soft">
-                  {payments.map((p) => (
-                    <li
-                      key={p.id}
-                      role="button"
-                      tabIndex={0}
-                      data-tooltip="Double-click to edit or delete"
-                      onDoubleClick={() => openEditPayment(p)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          e.preventDefault();
-                          openEditPayment(p);
-                        }
-                      }}
-                      className="flex cursor-pointer select-none items-center gap-3 px-5 py-3 transition-colors duration-150 hover:bg-surface-2/60 sm:px-6"
-                    >
-                      <div className="min-w-0 flex-1">
-                        <p className="text-sm font-medium text-ink">{fmtDate(p.payment_date)}</p>
-                        {p.note && <p className="mt-0.5 truncate text-xs text-ink-3">{p.note}</p>}
-                      </div>
-                      <span className="shrink-0 text-sm font-semibold tabular-nums text-success-text">
-                        −{fmtMoney(p.amount)}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              )}
+              <p className="text-sm text-ink-3">
+                {fmtMoney(c.current_balance)} balance
+                {c.due_date && ` · due ${fmtDate(c.due_date)}`}
+              </p>
             </Panel>
-          </div>
-        </>
+          ))}
+        </div>
       )}
+
+      <Modal
+        open={detailsOpen && selected != null}
+        // Escape reaches every open modal; leave this one open under a form on top of it.
+        onClose={cardModalOpen || paymentModalOpen || balanceModalOpen ? () => {} : closeDetails}
+        ariaLabelledBy="credit-card-details-title"
+        dialogClassName={`${DIALOG_CLASSES} max-w-5xl`}
+      >
+        {selected && (
+          <>
+            <ModalHeader id="credit-card-details-title" title={selected.card.name} onClose={closeDetails} />
+            <div className={DIALOG_BODY_CLASSES}>
+              <CardDetails
+                bundle={selected}
+                linkedCategory={linkedCategory}
+                onAdjustBalance={openBalanceModal}
+                onRecordPayment={() => openPaymentModal(selected.card)}
+                onEditPayment={openEditPayment}
+              />
+            </div>
+            <div className={DIALOG_FOOTER_CLASSES}>
+              <button
+                type="button"
+                className={`mr-auto ${SECONDARY_BUTTON_CLASSES}`}
+                onClick={() => openCardModal(selected.card)}
+              >
+                Edit card
+              </button>
+              <button
+                type="button"
+                className={PRIMARY_BUTTON_CLASSES}
+                onClick={() => openPaymentModal(selected.card)}
+              >
+                <PlusIcon className="size-4" />
+                Record payment
+              </button>
+            </div>
+          </>
+        )}
+      </Modal>
 
       <Modal
         open={cardModalOpen}
@@ -833,8 +975,8 @@ export default function CreditCardClient() {
       >
         <ModalHeader
           id="credit-card-title"
-          title={card ? (card.bill_category_id != null ? "Edit card" : "Update statement") : "Add credit card"}
-          subtitle={card && !formLinked ? "Saving resets the current balance to the new statement balance." : undefined}
+          title={card ? "Edit card" : "Add credit card"}
+          subtitle={card && !formLinked ? "Changing the statement balance resets the current balance to it." : undefined}
           onClose={closeCardModal}
         />
         <form onSubmit={submitCardForm} className="flex min-h-0 flex-1 flex-col">
@@ -951,7 +1093,7 @@ export default function CreditCardClient() {
               Cancel
             </button>
             <button type="submit" disabled={cardSaving} className={PRIMARY_BUTTON_CLASSES}>
-              {cardSaving ? "Saving…" : !card ? "Add card" : formLinked ? "Save card" : "Save statement"}
+              {cardSaving ? "Saving…" : card ? "Save changes" : "Add card"}
             </button>
           </div>
         </form>
@@ -966,7 +1108,7 @@ export default function CreditCardClient() {
         <ModalHeader
           id="credit-card-payment-title"
           title={editingPaymentId != null ? "Edit payment" : "Record payment"}
-          subtitle={card ? `Current balance ${fmtMoney(card.current_balance)}` : undefined}
+          subtitle={card ? `${card.name} · current balance ${fmtMoney(card.current_balance)}` : undefined}
           onClose={closePaymentModal}
         />
         <form onSubmit={submitPaymentForm} className="flex min-h-0 flex-1 flex-col">
@@ -1006,7 +1148,10 @@ export default function CreditCardClient() {
                 </div>
               )}
             </div>
-            <Field label="Date">
+            <Field
+              label="Date"
+              hint={paymentPeriod && `Comes out of the ${paymentPeriod} budget on the calendar.`}
+            >
               <DatePickerField
                 value={paymentForm.payment_date}
                 onChange={(v) => setPaymentForm((f) => ({ ...f, payment_date: v }))}

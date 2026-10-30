@@ -974,8 +974,9 @@ def insert_monthly_expense(
     is_recurring: bool = False,
     expense_date: date | None = None,
     skipped_months: list[str] | None = None,
+    charged_months: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    values = dict(locals(), skipped_months=skipped_months or [])
+    values = dict(locals(), skipped_months=skipped_months or [], charged_months=charged_months or {})
     with _session(write=True) as s:
         return _row(s.scalar(insert(MonthlyExpense).values(values).returning(MonthlyExpense)))
 
@@ -991,8 +992,9 @@ def update_monthly_expense(
     is_recurring: bool = False,
     expense_date: date | None = None,
     skipped_months: list[str] | None = None,
+    charged_months: dict[str, str] | None = None,
 ) -> dict[str, Any] | None:
-    values = dict(locals(), skipped_months=skipped_months or [])
+    values = dict(locals(), skipped_months=skipped_months or [], charged_months=charged_months or {})
     del values["expense_id"]
     with _session(write=True) as s:
         e = s.scalar(
@@ -1088,10 +1090,6 @@ def last_bill_date_before(category_id: UUID, day: str) -> str | None:
         )
 
 
-def _first_credit_card(s: Session) -> CreditCard | None:
-    return s.scalar(select(CreditCard).order_by(CreditCard.id).limit(1))
-
-
 def _card_row(s: Session, card: CreditCard) -> dict[str, Any]:
     """The card, its statement read from the latest bill of the bill category it is linked to."""
     row = _row(card)
@@ -1113,22 +1111,23 @@ def _card_row(s: Session, card: CreditCard) -> dict[str, Any]:
     return row
 
 
-def get_credit_card() -> dict[str, Any] | None:
+def get_credit_card(card_id: UUID) -> dict[str, Any] | None:
     with _session() as s:
-        card = _first_credit_card(s)
+        card = s.get(CreditCard, card_id)
         return _card_row(s, card) if card else None
 
 
-def fetch_credit_card_bundle(installment_limit: int = 2000) -> dict[str, Any]:
+def fetch_credit_card_bundles(installment_limit: int = 2000) -> list[dict[str, Any]]:
     with _session() as s:
-        card = _first_credit_card(s)
-        if card is None:
-            return {"card": None, "installments": [], "payments": []}
-        return {
-            "card": _card_row(s, card),
-            "installments": _installment_rows(s, installment_limit, card.id),
-            "payments": _credit_card_payment_rows(s, card.id),
-        }
+        cards = s.scalars(select(CreditCard).order_by(CreditCard.id)).all()
+        return [
+            {
+                "card": _card_row(s, card),
+                "installments": _installment_rows(s, installment_limit, card.id),
+                "payments": _credit_card_payment_rows(s, card.id),
+            }
+            for card in cards
+        ]
 
 
 def insert_credit_card(
@@ -1159,10 +1158,11 @@ def update_credit_card(
 ) -> dict[str, Any] | None:
     values = dict(locals())
     del values["card_id"]
-    # A statement typed in starts the balance over; one read from bills leaves the adjusted balance alone.
-    if bill_category_id is None:
-        values["current_balance"] = last_statement_balance
     with _session(write=True) as s:
+        stored = s.scalar(select(CreditCard.last_statement_balance).where(CreditCard.id == card_id))
+        # A new statement typed in starts the balance over; a rename, or one read from bills, leaves it alone.
+        if bill_category_id is None and last_statement_balance != stored:
+            values["current_balance"] = last_statement_balance
         card = s.scalar(update(CreditCard).where(CreditCard.id == card_id).values(values).returning(CreditCard))
         return _card_row(s, card) if card else None
 
@@ -1205,11 +1205,25 @@ def _shift_credit_card_balance(s: Session, credit_card_id: UUID, delta: float) -
     )
 
 
+def _budget_change(period: tuple[int, int, int], delta: float) -> dict[str, Any]:
+    """What a pay period's budget just moved by, for the calendar's days to follow."""
+    year, month, half = period
+    return {"period_year": year, "period_month": month, "period_half": half, "delta": delta}
+
+
 def insert_credit_card_payment(
-    credit_card_id: UUID, amount: float, payment_date: Any, note: str | None
+    credit_card_id: UUID,
+    amount: float,
+    payment_date: Any,
+    note: str | None,
+    period_half: int,
+    period_year: int,
+    period_month: int,
 ) -> dict[str, Any] | None:
+    period = {"period_half": period_half, "period_year": period_year, "period_month": period_month}
     with _session(write=True) as s:
-        if s.get(CreditCard, credit_card_id) is None:
+        card = s.get(CreditCard, credit_card_id)
+        if card is None:
             return None
         payment = s.scalar(
             insert(CreditCardPayment)
@@ -1217,11 +1231,22 @@ def insert_credit_card_payment(
             .returning(CreditCardPayment)
         )
         _shift_credit_card_balance(s, credit_card_id, -amount)
-        return _row(payment)
+        s.execute(
+            insert(FixedExpense).values(
+                credit_card_payment_id=payment.id, description=f"{card.name} payment", amount=amount, **period
+            )
+        )
+        return _row(payment, budget_changes=[_budget_change((period_year, period_month, period_half), -amount)])
 
 
 def update_credit_card_payment(
-    payment_id: UUID, amount: float, payment_date: Any, note: str | None
+    payment_id: UUID,
+    amount: float,
+    payment_date: Any,
+    note: str | None,
+    period_half: int,
+    period_year: int,
+    period_month: int,
 ) -> dict[str, Any] | None:
     with _session(write=True) as s:
         old = s.scalar(select(CreditCardPayment.amount).where(CreditCardPayment.id == payment_id))
@@ -1234,20 +1259,41 @@ def update_credit_card_payment(
             .returning(CreditCardPayment)
         )
         _shift_credit_card_balance(s, payment.credit_card_id, old - amount)
-        return _row(payment)
+        spent = s.scalar(select(FixedExpense).where(FixedExpense.credit_card_payment_id == payment_id))
+        # None for a payment from before they reached the budget, or whose expense was deleted on the calendar.
+        if spent is None:
+            return _row(payment, budget_changes=[])
+        was, now = (spent.period_year, spent.period_month, spent.period_half), (period_year, period_month, period_half)
+        changes = (
+            [_budget_change(now, spent.amount - amount)]
+            if was == now
+            else [_budget_change(was, spent.amount), _budget_change(now, -amount)]
+        )
+        s.execute(
+            update(FixedExpense)
+            .where(FixedExpense.id == spent.id)
+            .values(amount=amount, period_half=period_half, period_year=period_year, period_month=period_month)
+        )
+        return _row(payment, budget_changes=changes)
 
 
-def delete_credit_card_payment(payment_id: UUID) -> bool:
+def delete_credit_card_payment(payment_id: UUID) -> list[dict[str, Any]] | None:
     with _session(write=True) as s:
+        # First: deleting the payment would clear this link.
+        spent = s.execute(
+            delete(FixedExpense)
+            .where(FixedExpense.credit_card_payment_id == payment_id)
+            .returning(FixedExpense.period_year, FixedExpense.period_month, FixedExpense.period_half, FixedExpense.amount)
+        ).first()
         row = s.execute(
             delete(CreditCardPayment)
             .where(CreditCardPayment.id == payment_id)
             .returning(CreditCardPayment.credit_card_id, CreditCardPayment.amount)
         ).first()
         if row is None:
-            return False
+            return None
         _shift_credit_card_balance(s, row.credit_card_id, row.amount)
-        return True
+        return [_budget_change((spent[0], spent[1], spent[2]), spent.amount)] if spent else []
 
 
 def _calendar_day_overrides(s: Session) -> list[dict[str, Any]]:

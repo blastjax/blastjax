@@ -177,6 +177,10 @@ class FixedExpense(Base):
     amount: Mapped[float | None]
     description: Mapped[str | None]
     created_at: Mapped[Stamp]
+    # The card payment this was recorded for. Removing the card keeps the expense: that money did leave the budget.
+    credit_card_payment_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("credit_card_payment.id", ondelete="SET NULL")
+    )
 
 
 class HousePayment(Base):
@@ -300,6 +304,8 @@ class MonthlyExpense(Base):
     expense_date: Mapped[dt.date | None]
     # "YYYY-MM" pay-period months a recurring expense isn't deducted in.
     skipped_months: Mapped[list[str]] = mapped_column(JSONB, server_default=text("'[]'"))
+    # "YYYY-MM" pay-period month -> id of the credit card it went on that month instead of the budget.
+    charged_months: Mapped[dict[str, str]] = mapped_column(JSONB, server_default=text("'{}'"))
 
 
 class PayPeriodStartOverride(Base):

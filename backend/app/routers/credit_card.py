@@ -21,7 +21,7 @@ from db import (
     adjust_credit_card_balance,
     delete_credit_card,
     delete_credit_card_payment,
-    fetch_credit_card_bundle,
+    fetch_credit_card_bundles,
     get_credit_card,
     insert_credit_card,
     insert_credit_card_payment,
@@ -68,26 +68,22 @@ def _monthly_dues(card: dict[str, Any], installments: list[dict[str, Any]]) -> f
     return total
 
 
-@router.get("/api/credit-card")
-def credit_card_get() -> dict[str, Any]:
-    key = "credit_card:get"
-    hit = cache.get(key)
-    if hit is not None:
-        return hit
-    bundle = fetch_credit_card_bundle()
-    card = bundle["card"]
-    if not card:
-        result = {"card": None, "installments": [], "payments": []}
-        cache.set(key, result)
-        return result
-    installments = bundle["installments"]
-    serialized_card = _serialize_card(card)
-    serialized_card["monthly_dues"] = _monthly_dues(card, installments)
-    result = {
-        "card": serialized_card,
+def _serialize_bundle(bundle: dict[str, Any]) -> dict[str, Any]:
+    card, installments = bundle["card"], bundle["installments"]
+    return {
+        "card": {**_serialize_card(card), "monthly_dues": _monthly_dues(card, installments)},
         "installments": [serialize_installment_row(r) for r in installments],
         "payments": [_serialize_payment(p) for p in bundle["payments"]],
     }
+
+
+@router.get("/api/credit-card")
+def credit_card_list() -> dict[str, Any]:
+    key = "credit_card:list"
+    hit = cache.get(key)
+    if hit is not None:
+        return hit
+    result = {"cards": [_serialize_bundle(b) for b in fetch_credit_card_bundles()]}
     cache.set(key, result)
     return result
 
@@ -97,8 +93,6 @@ _NO_BILL_CATEGORY = "That bill category doesn't exist."
 
 @router.post("/api/credit-card")
 def credit_card_create(body: CreditCardCreate) -> dict[str, Any]:
-    if get_credit_card() is not None:
-        raise HTTPException(status_code=409, detail="A credit card already exists.")
     try:
         row = insert_credit_card(
             body.name.strip(),
@@ -140,8 +134,8 @@ def credit_card_replace(card_id: UUID, body: CreditCardCreate) -> dict[str, Any]
 def credit_card_adjust_balance(
     card_id: UUID, body: CreditCardBalanceAdjust
 ) -> dict[str, Any]:
-    card = get_credit_card()
-    if not card or card["id"] != card_id:
+    card = get_credit_card(card_id)
+    if not card:
         raise HTTPException(status_code=404, detail="Credit card not found.")
     credit_limit = float(card.get("credit_limit") or 0)
     row = adjust_credit_card_balance(card_id, credit_limit - body.available_limit)
@@ -161,28 +155,42 @@ def credit_card_payment_create(
     card_id: UUID, body: CreditCardPaymentCreate
 ) -> dict[str, Any]:
     payment = insert_credit_card_payment(
-        card_id, body.amount, body.payment_date, _clean_note(body.note)
+        card_id,
+        body.amount,
+        body.payment_date,
+        _clean_note(body.note),
+        body.period_half,
+        body.period_year,
+        body.period_month,
     )
     if payment is None:
         raise HTTPException(status_code=404, detail="Credit card not found.")
-    card = get_credit_card()
+    card = get_credit_card(card_id)
     assert card is not None
     return {"payment": _serialize_payment(payment), "card": _serialize_card(card)}
 
 
 @router.put("/api/credit-card/payments/{payment_id}")
 def credit_card_payment_replace(payment_id: UUID, body: CreditCardPaymentCreate) -> dict[str, Any]:
-    payment = update_credit_card_payment(payment_id, body.amount, body.payment_date, _clean_note(body.note))
+    payment = update_credit_card_payment(
+        payment_id,
+        body.amount,
+        body.payment_date,
+        _clean_note(body.note),
+        body.period_half,
+        body.period_year,
+        body.period_month,
+    )
     if payment is None:
         raise HTTPException(status_code=404, detail="Payment not found.")
-    card = get_credit_card()
+    card = get_credit_card(payment["credit_card_id"])
     assert card is not None
     return {"payment": _serialize_payment(payment), "card": _serialize_card(card)}
 
 
 @router.delete("/api/credit-card/payments/{payment_id}")
 def credit_card_payment_remove(payment_id: UUID) -> dict[str, Any]:
-    if not delete_credit_card_payment(payment_id):
+    changes = delete_credit_card_payment(payment_id)
+    if changes is None:
         raise HTTPException(status_code=404, detail="Payment not found.")
-    card = get_credit_card()
-    return {"ok": True, "card": _serialize_card(card) if card else None}
+    return {"ok": True, "budget_changes": changes}

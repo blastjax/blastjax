@@ -23,6 +23,10 @@ class CreditCardPaymentCreate(BaseModel):
     amount: float = Field(gt=0)
     payment_date: dt.date
     note: str | None = None
+    # The pay period it comes out of, as fixed expenses file one: by the payslip half funding it.
+    period_half: int = Field(ge=1, le=2)
+    period_year: int
+    period_month: int = Field(ge=1, le=12)
 
 
 class CreditCardBalanceAdjust(BaseModel):

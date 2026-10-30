@@ -755,6 +755,7 @@ export type MonthlyExpenseRow = {
   is_recurring: boolean;
   expense_date: string | null;
   skipped_months: string[]; // "YYYY-MM" pay-period months it isn't deducted in
+  charged_months: Record<string, string>; // "YYYY-MM" pay-period month -> card it went on instead of the budget
   created_at: string;
 };
 
@@ -768,6 +769,7 @@ export type MonthlyExpenseCreateBody = {
   is_recurring?: boolean;
   expense_date?: string | null;
   skipped_months?: string[];
+  charged_months?: Record<string, string>;
 };
 
 export async function getMonthlyExpenses(
@@ -936,16 +938,23 @@ export type CreditCardPaymentCreateBody = {
   amount: number;
   payment_date: string;
   note?: string | null;
+  // The pay period it comes out of, filed by the payslip half funding it, like a fixed expense.
+  period_half: 1 | 2;
+  period_year: number;
+  period_month: number;
 };
 
-export type CreditCardResponse = {
-  card: CreditCardRow | null;
+// What a pay period's budget moved by, for the calendar's days to follow.
+export type BudgetChange = { period_year: number; period_month: number; period_half: number; delta: number };
+
+export type CreditCardBundle = {
+  card: CreditCardRow;
   installments: InstallmentRow[];
   payments: CreditCardPaymentRow[];
 };
 
-export async function getCreditCard() {
-  return getJson<CreditCardResponse>("/api/credit-card");
+export async function getCreditCards() {
+  return getJson<{ cards: CreditCardBundle[] }>("/api/credit-card");
 }
 
 export async function createCreditCard(body: CreditCardCreateBody) {
@@ -970,7 +979,7 @@ export async function createCreditCardPayment(
   cardId: string,
   body: CreditCardPaymentCreateBody,
 ) {
-  return sendJson<{ payment: CreditCardPaymentRow; card: CreditCardRow }>(
+  return sendJson<{ payment: CreditCardPaymentRow & { budget_changes: BudgetChange[] }; card: CreditCardRow }>(
     "POST",
     `/api/credit-card/${cardId}/payments`,
     body,
@@ -978,7 +987,7 @@ export async function createCreditCardPayment(
 }
 
 export async function updateCreditCardPayment(paymentId: string, body: CreditCardPaymentCreateBody) {
-  return sendJson<{ payment: CreditCardPaymentRow; card: CreditCardRow }>(
+  return sendJson<{ payment: CreditCardPaymentRow & { budget_changes: BudgetChange[] }; card: CreditCardRow }>(
     "PUT",
     `/api/credit-card/payments/${paymentId}`,
     body,
@@ -986,7 +995,7 @@ export async function updateCreditCardPayment(paymentId: string, body: CreditCar
 }
 
 export async function deleteCreditCardPayment(paymentId: string) {
-  return sendJson<{ ok: boolean; card: CreditCardRow | null }>(
+  return sendJson<{ ok: boolean; budget_changes: BudgetChange[] }>(
     "DELETE",
     `/api/credit-card/payments/${paymentId}`,
   );

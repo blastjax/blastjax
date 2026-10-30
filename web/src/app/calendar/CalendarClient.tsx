@@ -81,6 +81,9 @@ import {
   periodEndIso,
   periodForDate,
   periodKey,
+  payslipHalfFor,
+  spreadCentsEvenly,
+  type OverrideWrite,
   type PeriodHalf,
 } from "@/lib/payPeriods";
 
@@ -92,10 +95,6 @@ const CARRY_OVER_LABEL = "Carry over";
 
 const NOTHING_TO_EVEN_OUT =
   "Nothing to even out: these pay periods have no days left, or no payslip yet";
-
-function payslipHalfFor(calendarHalf: PeriodHalf): PeriodHalf {
-  return calendarHalf === 1 ? 2 : 1;
-}
 
 function fundingPeriodFor(
   calendarHalf: PeriodHalf,
@@ -148,52 +147,6 @@ function roundCents(n: number): number {
 }
 
 const fmtMoney = fmtAmount;
-
-function spreadCentsEvenly(
-  order: string[],
-  balances: Map<string, number>,
-  deltaCents: number,
-): Map<string, number> {
-  const result = new Map(balances);
-  if (deltaCents === 0 || order.length === 0) return result;
-  if (deltaCents > 0) {
-    const n = order.length;
-    const base = Math.trunc(deltaCents / n);
-    let leftover = deltaCents - base * n;
-    for (const iso of order) {
-      let share = base;
-      if (leftover > 0) {
-        share += 1;
-        leftover -= 1;
-      }
-      result.set(iso, (result.get(iso) ?? 0) + share);
-    }
-    return result;
-  }
-  let remaining = -deltaCents;
-  let pool = order.filter((iso) => (result.get(iso) ?? 0) > 0);
-  while (remaining > 0 && pool.length > 0) {
-    const share = Math.floor(remaining / pool.length);
-    if (share === 0) {
-      for (const iso of pool) {
-        if (remaining <= 0) break;
-        result.set(iso, (result.get(iso) ?? 0) - 1);
-        remaining -= 1;
-      }
-      break;
-    }
-    const nextPool: string[] = [];
-    for (const iso of pool) {
-      const cur = result.get(iso) ?? 0;
-      const take = Math.min(cur, share);
-      result.set(iso, cur - take);
-      remaining -= take;
-      if (cur - take > 0) nextPool.push(iso);
-    }
-    pool = nextPool;
-  }
-  return result;
-}
 
 function spreadOverDays(days: DayCell[], deltaCents: number) {
   const before = new Map(days.map((d) => [d.iso, Math.round((d.dailyBudget ?? 0) * 100)]));
@@ -253,8 +206,6 @@ type BillRow = MonthlyExpenseRow & { due: string | null };
 function monthCacheKey(year: number, month: number): string {
   return `${year}-${month}`;
 }
-
-type OverrideWrite = { day: string; amount: number; saved?: number };
 
 type TransferState = {
   fromDay: number;
@@ -680,8 +631,9 @@ export default function CalendarClient() {
     const add = (map: Map<string, BillRow[]>, key: string, row: BillRow) =>
       map.set(key, [...(map.get(key) ?? []), row]);
     const seen = new Set<string>();
-    // Skipped months are pay-period months, as the Monthly Expenses page shows them.
-    const skips = (e: MonthlyExpenseRow, y: number, m: number) => e.skipped_months.includes(monthKey(y, m));
+    // Skipped and card-charged months are pay-period months, as the Monthly Expenses page shows them.
+    const skips = (e: MonthlyExpenseRow, y: number, m: number) =>
+      e.skipped_months.includes(monthKey(y, m)) || monthKey(y, m) in e.charged_months;
     const addRows = (y: number, m: number, rows: MonthlyExpenseRow[]) => {
       for (const e of rows) {
         const due = billDayIso(e, y, m);

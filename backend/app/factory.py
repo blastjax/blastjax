@@ -47,6 +47,8 @@ _CACHE_PREFIXES: dict[str, str] = {
 _CACHE_ALSO_INVALIDATES: dict[str, tuple[str, ...]] = {
     "installment": ("credit_card",),
     "bill": ("credit_card",),  # a linked card reads its statement from the latest bill
+    # Removing a card unlinks its installments; a payment is also a fixed expense.
+    "credit_card": ("installment", "fixed_expense"),
 }
 
 

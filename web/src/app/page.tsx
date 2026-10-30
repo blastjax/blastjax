@@ -44,7 +44,7 @@ const AREAS: readonly Area[] = [
     tone: "bg-brand-soft text-brand-text",
     shortcuts: [
       { href: "/monthly-expenses", label: "Monthly Expenses", icon: DocumentIcon },
-      { href: "/credit-card", label: "Credit Card", icon: CreditCardIcon },
+      { href: "/credit-card", label: "Credit Cards", icon: CreditCardIcon },
       { href: "/installments", label: "Installments", icon: LayersIcon },
       { href: "/house-payments", label: "House Payments", icon: HomeIcon },
       { href: "/bills", label: "Bills", icon: ReceiptIcon },

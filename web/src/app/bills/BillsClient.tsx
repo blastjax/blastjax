@@ -18,6 +18,7 @@ import {
   Panel,
   Segmented,
   TEXT_BUTTON_CLASSES,
+  TILE_BUTTON_CLASSES,
 } from "@/components/FinanceUI";
 import { PlusIcon, ReceiptIcon } from "@/components/Icons";
 import { Modal } from "@/components/Modal";
@@ -576,7 +577,7 @@ export default function BillsClient() {
                   // Its overlay makes the whole card open the bills; the actions sit above it.
                   <button
                     type="button"
-                    className="text-left after:absolute after:inset-0 after:rounded-2xl focus-visible:outline-none focus-visible:after:outline-2 focus-visible:after:outline-brand"
+                    className={TILE_BUTTON_CLASSES}
                     onClick={() => setListView({ categoryId: c.id, year: null })}
                   >
                     {c.name}

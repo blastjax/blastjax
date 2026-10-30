@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import datetime as dt
 from typing import Annotated
+from uuid import UUID
 
 from pydantic import BaseModel, Field
+
+MonthKey = Annotated[str, Field(pattern=r"^\d{4}-(0[1-9]|1[0-2])$")]
 
 
 class MonthlyExpenseCreate(BaseModel):
@@ -19,6 +22,9 @@ class MonthlyExpenseCreate(BaseModel):
     expense_date: dt.date | None = Field(
         default=None, description="Day it shows on the calendar (that day of every month if recurring)"
     )
-    skipped_months: list[Annotated[str, Field(pattern=r"^\d{4}-(0[1-9]|1[0-2])$")]] = Field(
+    skipped_months: list[MonthKey] = Field(
         default_factory=list, description='"YYYY-MM" pay-period months it isn\'t deducted in'
+    )
+    charged_months: dict[MonthKey, UUID] = Field(
+        default_factory=dict, description='"YYYY-MM" pay-period month -> credit card it went on instead of the budget'
     )

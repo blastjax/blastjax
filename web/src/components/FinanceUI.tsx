@@ -7,6 +7,7 @@ import {
   TrashIcon,
 } from "@/components/Icons";
 import { formatMonthYear } from "@/lib/dateFormat";
+import { INPUT_CLASSES } from "@/lib/ui";
 
 type Tone = "neutral" | "brand" | "success" | "warning" | "danger";
 
@@ -297,10 +298,48 @@ export function Field({
   );
 }
 
+export function ChargedToField({
+  cards,
+  value,
+  onChange,
+  hint,
+  disabled,
+  className,
+}: {
+  cards: readonly { id: string; name: string }[];
+  value: string; // "" when it isn't on a card
+  onChange: (cardId: string) => void;
+  hint: ReactNode;
+  disabled?: boolean;
+  className?: string;
+}) {
+  return (
+    <Field label="Charged to" hint={hint} className={className}>
+      <select
+        className={INPUT_CLASSES}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        disabled={disabled}
+      >
+        <option value="">Not on a credit card</option>
+        {cards.map((c) => (
+          <option key={c.id} value={c.id}>
+            {c.name}
+          </option>
+        ))}
+        {value && !cards.some((c) => c.id === value) && <option value={value}>A removed card</option>}
+      </select>
+    </Field>
+  );
+}
+
 export const TEXT_BUTTON_CLASSES =
   "inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm font-medium text-brand-text transition-colors duration-150 hover:bg-brand-soft disabled:opacity-50";
 export const DANGER_TEXT_BUTTON_CLASSES =
   "mr-auto rounded-lg px-2 py-1.5 text-sm font-medium text-danger-text transition-colors duration-150 hover:bg-danger-soft disabled:opacity-50";
+// A tile's title button: in a `relative` Panel, its overlay makes the whole tile clickable.
+export const TILE_BUTTON_CLASSES =
+  "text-left after:absolute after:inset-0 after:rounded-2xl focus-visible:outline-none focus-visible:after:outline-2 focus-visible:after:outline-brand";
 
 export const DIALOG_CLASSES =
   "flex max-h-[90dvh] w-full flex-col overflow-hidden rounded-2xl border border-line bg-surface shadow-pop";

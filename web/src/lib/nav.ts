@@ -44,7 +44,7 @@ export const NAV_SECTIONS: readonly NavSection[] = [
             label: "Monthly Expenses",
             icon: WalletIcon,
           },
-          { href: "/credit-card", label: "Credit Card", icon: CreditCardIcon },
+          { href: "/credit-card", label: "Credit Cards", icon: CreditCardIcon },
           { href: "/installments", label: "Installments", icon: LayersIcon },
           { href: "/house-payments", label: "House Payments", icon: HomeIcon },
           { href: "/bills", label: "Bills", icon: ReceiptIcon },
