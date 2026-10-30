@@ -33,19 +33,25 @@ import {
   deleteCreditCardPayment,
   getBills,
   getCreditCards,
+  getMonthlyExpenses,
   getPayPeriodStartOverrides,
+  recordInstallmentPayment,
   updateCreditCard,
   updateCreditCardPayment,
   type BillCategoryRow,
+  type BillRow,
   type BudgetChange,
   type CreditCardBundle,
   type CreditCardPaymentRow,
   type CreditCardRow,
+  type MonthlyExpenseRow,
 } from "@/lib/api";
 import { formatAmountNumber, parseFormNumber } from "@/lib/parseFormNumber";
-import { formatDate, parseDateOnlyLocal, toIsoDateLocal } from "@/lib/dateFormat";
+import { formatDate, formatMonthYear, monthKey, parseDateOnlyLocal, toIsoDateLocal } from "@/lib/dateFormat";
 import { fmtAmountOrDash } from "@/lib/formatNumber";
 import {
+  chargedCardIn,
+  expenseDuesIn,
   payslipHalfFor,
   periodForDate,
   periodKey,
@@ -168,12 +174,16 @@ function Row({ label, children }: { label: ReactNode; children: ReactNode }) {
 function CardDetails({
   bundle: { card, installments, payments },
   linkedCategory,
+  charges,
+  chargesMonth,
   onAdjustBalance,
   onRecordPayment,
   onEditPayment,
 }: {
   bundle: CreditCardBundle;
   linkedCategory: BillCategoryRow | undefined;
+  charges: { key: string; name: string; amount: number }[];
+  chargesMonth: string;
   onAdjustBalance: () => void;
   onRecordPayment: () => void;
   onEditPayment: (p: CreditCardPaymentRow) => void;
@@ -300,7 +310,7 @@ function CardDetails({
               </>
             )
           }
-          actions={due && <Pill tone={due.tone}>{due.text}</Pill>}
+          actions={card.statement_paid ? <Pill tone="success">Paid</Pill> : due && <Pill tone={due.tone}>{due.text}</Pill>}
         >
           <dl className="-my-2.5 divide-y divide-line-soft">
             <Row label="Statement balance">{fmtMoney(card.last_statement_balance)}</Row>
@@ -451,6 +461,23 @@ function CardDetails({
         )}
       </Panel>
 
+      {charges.length > 0 && (
+        <Panel
+          flush
+          title="Charged to this card"
+          subtitle={`Monthly expenses in ${chargesMonth}. They reach this card instead of your calendar budget.`}
+        >
+          <ul className="divide-y divide-line-soft border-t border-line-soft">
+            {charges.map((c) => (
+              <li key={c.key} className="flex items-baseline justify-between gap-3 px-5 py-3 sm:px-6">
+                <p className="truncate text-sm font-medium text-ink">{c.name}</p>
+                <span className="shrink-0 text-sm font-semibold tabular-nums text-ink">{fmtMoney(c.amount)}</span>
+              </li>
+            ))}
+          </ul>
+        </Panel>
+      )}
+
       <div className="grid gap-5 lg:grid-cols-2">
         <Panel
           flush
@@ -542,6 +569,8 @@ function CardDetails({
 export default function CreditCardClient() {
   const [cards, setCards] = useState<CreditCardBundle[]>([]);
   const [billCategories, setBillCategories] = useState<BillCategoryRow[]>([]);
+  const [bills, setBills] = useState<BillRow[]>([]);
+  const [expenses, setExpenses] = useState<MonthlyExpenseRow[]>([]);
   const [payPeriodStarts, setPayPeriodStarts] = useState<Map<string, string>>(new Map());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -551,6 +580,7 @@ export default function CreditCardClient() {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const selected = cards.find((b) => b.card.id === selectedId);
   const card = selected?.card ?? null;
+  const dueInstallments = useMemo(() => selected?.installments.filter((i) => i.due_this_month) ?? [], [selected]);
 
   const [cardModalOpen, setCardModalOpen] = useState(false);
   const [cardForm, setCardForm] = useState<CardForm>(emptyCardForm());
@@ -562,6 +592,8 @@ export default function CreditCardClient() {
   const [paymentForm, setPaymentForm] = useState<PaymentForm>(emptyPaymentForm());
   const [paymentSaving, setPaymentSaving] = useState(false);
   const [paymentFormError, setPaymentFormError] = useState<string | null>(null);
+  // Installments ticked or unticked by hand; the rest follow whether the payment covers the month's dues.
+  const [markPaid, setMarkPaid] = useState<Record<string, boolean>>({});
 
   const [balanceModalOpen, setBalanceModalOpen] = useState(false);
   const [balanceForm, setBalanceForm] = useState("");
@@ -573,13 +605,16 @@ export default function CreditCardClient() {
     setError(null);
     try {
       // Bills only name where a linked statement comes from; the cards work without them.
-      const [r, bills, starts] = await Promise.all([
+      const [r, billData, starts, monthly] = await Promise.all([
         getCreditCards(),
         getBills().catch(() => null),
         getPayPeriodStartOverrides().catch(() => ({ overrides: [] })),
+        getMonthlyExpenses().catch(() => ({ expenses: [] })),
       ]);
       setCards(r.cards);
-      setBillCategories(bills?.categories ?? []);
+      setBillCategories(billData?.categories ?? []);
+      setBills(billData?.bills ?? []);
+      setExpenses(monthly.expenses);
       setPayPeriodStarts(
         new Map(starts.overrides.map((o) => [periodKey(o.period_year, o.period_month, o.period_half), o.start_date])),
       );
@@ -705,6 +740,7 @@ export default function CreditCardClient() {
   const openPaymentModal = useCallback((target: CreditCardRow) => {
     setPaymentFormError(null);
     setSelectedId(target.id);
+    setMarkPaid({});
     setEditingPaymentId(null);
     setPaymentForm(emptyPaymentForm());
     setPaymentModalOpen(true);
@@ -772,8 +808,14 @@ export default function CreditCardClient() {
         const { payment } = await (editingPaymentId != null
           ? updateCreditCardPayment(editingPaymentId, body)
           : createCreditCardPayment(card.id, body));
+        const covers = amount >= card.monthly_dues;
+        const toMark = editingPaymentId == null ? dueInstallments.filter((i) => markPaid[i.id] ?? covers) : [];
+        const marked = await Promise.allSettled(toMark.map((i) => recordInstallmentPayment(i.id)));
         setPaymentModalOpen(false);
         await load();
+        if (marked.some((r) => r.status === "rejected")) {
+          setError("The payment is saved, but not every installment was marked paid. Mark them on the Installments page.");
+        }
         await spreadOverCalendar(payment.budget_changes);
       } catch (err) {
         setPaymentFormError(err instanceof Error ? err.message : "Failed to save payment");
@@ -781,7 +823,7 @@ export default function CreditCardClient() {
         setPaymentSaving(false);
       }
     },
-    [card, paymentForm, editingPaymentId, load, payPeriodStarts, spreadOverCalendar],
+    [card, paymentForm, editingPaymentId, load, payPeriodStarts, spreadOverCalendar, dueInstallments, markPaid],
   );
 
   const onDeletePayment = useCallback(
@@ -847,6 +889,19 @@ export default function CreditCardClient() {
       !cards.some((b) => b.card.id !== card?.id && b.card.bill_category_id === c.id),
   );
   const formLinked = cardForm.bill_category_id !== "";
+
+  const now = periodForDate(payPeriodStarts, todayInputDate());
+  const nowKey = monthKey(now.year, now.month);
+  const charges = expenses
+    .filter((e) => card && chargedCardIn(e.charged_months, nowKey) === card.id && !e.skipped_months.includes(nowKey))
+    .flatMap((e) =>
+      expenseDuesIn(e, payPeriodStarts, now.year, now.month, bills).map((d) => ({
+        key: `${e.id}:${d.half}:${d.due}`,
+        name: e.name,
+        amount: d.amount,
+      })),
+    );
+  const coversDues = card != null && (parseFormNumber(paymentForm.amount) ?? 0) >= card.monthly_dues;
 
   const paidIn = paymentForm.payment_date ? periodForDate(payPeriodStarts, paymentForm.payment_date) : null;
   const paymentPeriod =
@@ -920,7 +975,7 @@ export default function CreditCardClient() {
             >
               <p className="text-sm text-ink-3">
                 {fmtMoney(c.current_balance)} balance
-                {c.due_date && ` · due ${fmtDate(c.due_date)}`}
+                {c.statement_paid ? " · statement paid" : c.due_date && ` · due ${fmtDate(c.due_date)}`}
               </p>
             </Panel>
           ))}
@@ -941,6 +996,8 @@ export default function CreditCardClient() {
               <CardDetails
                 bundle={selected}
                 linkedCategory={linkedCategory}
+                charges={charges}
+                chargesMonth={formatMonthYear(now.year, now.month)}
                 onAdjustBalance={openBalanceModal}
                 onRecordPayment={() => openPaymentModal(selected.card)}
                 onEditPayment={openEditPayment}
@@ -1158,6 +1215,35 @@ export default function CreditCardClient() {
                 disabled={paymentSaving}
               />
             </Field>
+            {editingPaymentId == null && dueInstallments.length > 0 && (
+              <fieldset className="grid gap-2 text-sm">
+                <legend className="mb-1.5 font-medium text-ink-2">Also mark paid this month</legend>
+                {dueInstallments.map((i) => (
+                  <label
+                    key={i.id}
+                    className="flex cursor-pointer items-center gap-3 rounded-xl border border-line px-3.5 py-2.5 transition-colors duration-150 hover:bg-surface-2/60"
+                  >
+                    <input
+                      type="checkbox"
+                      className="size-4"
+                      checked={markPaid[i.id] ?? coversDues}
+                      onChange={(e) => setMarkPaid((m) => ({ ...m, [i.id]: e.target.checked }))}
+                      disabled={paymentSaving}
+                    />
+                    <span className="min-w-0 flex-1 truncate text-ink">
+                      {i.name} <span className="text-ink-3">#{i.installment_current}</span>
+                    </span>
+                    <span className="shrink-0 tabular-nums text-ink-2">
+                      {fmtMoney(i.due_payment ?? i.payment_total)}
+                    </span>
+                  </label>
+                ))}
+                <span className="text-xs text-ink-3">
+                  Ticked once the payment covers this month&apos;s {fmtMoney(card?.monthly_dues ?? 0)}. Deleting the
+                  payment later won&apos;t untick them.
+                </span>
+              </fieldset>
+            )}
             <Field label="Note" hint="Optional">
               <input
                 type="text"

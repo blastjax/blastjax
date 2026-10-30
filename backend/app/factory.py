@@ -46,7 +46,9 @@ _CACHE_PREFIXES: dict[str, str] = {
 
 _CACHE_ALSO_INVALIDATES: dict[str, tuple[str, ...]] = {
     "installment": ("credit_card",),
-    "bill": ("credit_card",),  # a linked card reads its statement from the latest bill
+    # A linked card reads its statement from the latest bill; removing a category unlinks its monthly expenses.
+    "bill": ("credit_card", "monthly_expense"),
+    "house_payment": ("monthly_expense",),  # removing one unlinks its monthly expenses
     # Removing a card unlinks its installments; a payment is also a fixed expense.
     "credit_card": ("installment", "fixed_expense"),
 }
@@ -133,6 +135,7 @@ def create_app() -> FastAPI:
         pay_period_start_override,
         payslip,
         payslip_default,
+        search,
         travel,
         user,
     )
@@ -158,6 +161,7 @@ def create_app() -> FastAPI:
         travel.router,
         bill.router,
         user.router,
+        search.router,
     ):
         app.include_router(router, dependencies=[Depends(require_session)])
 

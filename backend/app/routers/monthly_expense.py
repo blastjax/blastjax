@@ -4,6 +4,7 @@ from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.exc import IntegrityError
 
 import cache
 from app.deps import require_db
@@ -33,8 +34,8 @@ def _clean_description(description: str | None) -> str | None:
     return trimmed or None
 
 
-def _charged_months(body: MonthlyExpenseCreate) -> dict[str, str]:
-    return {month: str(card_id) for month, card_id in body.charged_months.items()}
+def _charged_months(body: MonthlyExpenseCreate) -> dict[str, str | None]:
+    return {month: str(card_id) if card_id else None for month, card_id in body.charged_months.items()}
 
 
 @router.get("/api/monthly-expense")
@@ -55,38 +56,51 @@ def monthly_expense_list(
     return result
 
 
+_NO_LINK = "That bill category or house payment doesn't exist."
+
+
 @router.post("/api/monthly-expense")
 def monthly_expense_create(body: MonthlyExpenseCreate) -> dict[str, Any]:
-    row = insert_monthly_expense(
-        body.name.strip(),
-        _clean_description(body.description),
-        body.amount,
-        body.period_half,
-        body.period_year,
-        body.period_month,
-        body.is_recurring,
-        body.expense_date,
-        sorted(set(body.skipped_months)),
-        _charged_months(body),
-    )
+    try:
+        row = insert_monthly_expense(
+            body.name.strip(),
+            _clean_description(body.description),
+            body.amount,
+            body.period_half,
+            body.period_year,
+            body.period_month,
+            body.is_recurring,
+            body.expense_date,
+            sorted(set(body.skipped_months)),
+            _charged_months(body),
+            body.bill_category_id,
+            body.house_payment_id,
+        )
+    except IntegrityError:
+        raise HTTPException(status_code=404, detail=_NO_LINK)
     return {"expense": _serialize(row)}
 
 
 @router.put("/api/monthly-expense/{expense_id}")
 def monthly_expense_replace(expense_id: UUID, body: MonthlyExpenseCreate) -> dict[str, Any]:
-    row = update_monthly_expense(
-        expense_id,
-        body.name.strip(),
-        _clean_description(body.description),
-        body.amount,
-        body.period_half,
-        body.period_year,
-        body.period_month,
-        body.is_recurring,
-        body.expense_date,
-        sorted(set(body.skipped_months)),
-        _charged_months(body),
-    )
+    try:
+        row = update_monthly_expense(
+            expense_id,
+            body.name.strip(),
+            _clean_description(body.description),
+            body.amount,
+            body.period_half,
+            body.period_year,
+            body.period_month,
+            body.is_recurring,
+            body.expense_date,
+            sorted(set(body.skipped_months)),
+            _charged_months(body),
+            body.bill_category_id,
+            body.house_payment_id,
+        )
+    except IntegrityError:
+        raise HTTPException(status_code=404, detail=_NO_LINK)
     if row is None:
         raise HTTPException(status_code=404, detail="Expense not found.")
     return {"expense": _serialize(row)}

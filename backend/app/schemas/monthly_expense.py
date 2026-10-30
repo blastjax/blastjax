@@ -25,6 +25,9 @@ class MonthlyExpenseCreate(BaseModel):
     skipped_months: list[MonthKey] = Field(
         default_factory=list, description='"YYYY-MM" pay-period months it isn\'t deducted in'
     )
-    charged_months: dict[MonthKey, UUID] = Field(
-        default_factory=dict, description='"YYYY-MM" pay-period month -> credit card it went on instead of the budget'
+    charged_months: dict[MonthKey, UUID | None] = Field(
+        default_factory=dict,
+        description='"YYYY-MM" pay-period month -> credit card it\'s on from then until the next entry, null for none',
     )
+    bill_category_id: UUID | None = None
+    house_payment_id: UUID | None = None

@@ -304,8 +304,13 @@ class MonthlyExpense(Base):
     expense_date: Mapped[dt.date | None]
     # "YYYY-MM" pay-period months a recurring expense isn't deducted in.
     skipped_months: Mapped[list[str]] = mapped_column(JSONB, server_default=text("'[]'"))
-    # "YYYY-MM" pay-period month -> id of the credit card it went on that month instead of the budget.
-    charged_months: Mapped[dict[str, str]] = mapped_column(JSONB, server_default=text("'{}'"))
+    # "YYYY-MM" pay-period month -> id of the credit card it's on, instead of the budget, from then until the
+    # next entry; null takes it off a card from that month.
+    charged_months: Mapped[dict[str, str | None]] = mapped_column(JSONB, server_default=text("'{}'"))
+    # A month's real bills from this category replace `amount` and the date as they come in.
+    bill_category_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("bill_category.id", ondelete="SET NULL"))
+    # Where a month marked paid gets logged.
+    house_payment_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("house_payment.id", ondelete="SET NULL"))
 
 
 class PayPeriodStartOverride(Base):

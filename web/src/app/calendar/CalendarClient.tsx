@@ -39,16 +39,23 @@ import {
   deleteFixedExpense,
   updateFixedExpense,
   deletePayPeriodStartOverride,
+  getBills,
   getCalendarDayOverrides,
+  getCreditCards,
   getFixedExpenses,
   getMonthlyExpenses,
   getPayPeriodStartOverrides,
   getPayslips,
+  getTravelTrips,
   upsertPayPeriodStartOverride,
+  type BillCategoryRow,
+  type BillRow as RealBill,
   type CalendarDayOverrideRow,
+  type CreditCardRow,
   type FixedExpenseRow,
   type MonthlyExpenseRow,
   type PayslipRow,
+  type TravelTripRow,
 } from "@/lib/api";
 import {
   MONTH_NAMES_SHORT,
@@ -73,18 +80,23 @@ import {
 import { useWheelStep } from "@/lib/useWheelStep";
 import {
   addDaysIso,
-  billDayIso,
   compareDue,
   dateIso,
+  dueReminders,
   effectiveHalfStartIso,
+  expenseDuesIn,
+  fundingPeriodFor,
+  isOffBudget,
   latestHalfStartIso,
   periodEndIso,
   periodForDate,
   periodKey,
   payslipHalfFor,
   spreadCentsEvenly,
+  tripReminders,
   type OverrideWrite,
   type PeriodHalf,
+  type Reminder,
 } from "@/lib/payPeriods";
 
 const WEEKDAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
@@ -95,15 +107,6 @@ const CARRY_OVER_LABEL = "Carry over";
 
 const NOTHING_TO_EVEN_OUT =
   "Nothing to even out: these pay periods have no days left, or no payslip yet";
-
-function fundingPeriodFor(
-  calendarHalf: PeriodHalf,
-  year: number,
-  month: number,
-): { year: number; month: number } {
-  if (calendarHalf === 2) return { year, month };
-  return month === 1 ? { year: year - 1, month: 12 } : { year, month: month - 1 };
-}
 
 function addMonths(year: number, month: number, delta: number): { year: number; month: number } {
   const zeroBased = month - 1 + delta;
@@ -219,6 +222,7 @@ type TransferState = {
 type DayGridCellProps = {
   cell: DayCell;
   bills?: MonthlyExpenseRow[];
+  reminders?: Reminder[];
   isDragSource: boolean;
   isDragOverTarget: boolean;
   onOpenSpend: (cell: DayCell) => void;
@@ -246,9 +250,12 @@ const HALF_STYLE: Record<PeriodHalf, { label: string; dot: string; bar: string; 
 
 const fmtDay = (iso: string, long = false) => (long ? formatWeekdayMonthDay : formatMonthDayShort)(iso);
 
+const reminderLine = (r: Reminder) => (r.amount == null ? r.name : `${r.name} · ${fmtMoney(r.amount)}`);
+
 const DayGridCell = memo(function DayGridCell({
   cell,
   bills,
+  reminders,
   isDragSource,
   isDragOverTarget,
   onOpenSpend,
@@ -271,7 +278,7 @@ const DayGridCell = memo(function DayGridCell({
         draggable
           ? `${fmtDay(iso, true)}, ${fmtMoney(dailyBudget)}${
               bills ? `, ${bills.map((b) => `${b.name} ${fmtMoney(b.amount)}`).join(", ")} due` : ""
-            }${isToday ? ", today" : ""}`
+            }${reminders ? `, ${reminders.map((r) => r.name).join(", ")}` : ""}${isToday ? ", today" : ""}`
           : undefined
       }
       draggable={draggable}
@@ -336,6 +343,16 @@ const DayGridCell = memo(function DayGridCell({
           {bills.length === 1 ? bills[0].name : `${bills.length} bills`}
         </span>
       )}
+      {reminders && (
+        <span
+          data-tooltip={reminders.map(reminderLine).join("\n")}
+          className={`max-w-full self-start truncate rounded bg-surface-2 px-1 text-[10px] font-medium leading-4 text-ink-3 ring-1 ring-inset ring-line sm:text-[11px] ${
+            isPast ? "opacity-50" : ""
+          }`}
+        >
+          {reminders.length === 1 ? reminders[0].name : `${reminders.length} reminders`}
+        </span>
+      )}
       <span
         data-tooltip={dailyBudget != null ? fmtMoney(dailyBudget) : undefined}
         className={`block w-full min-w-0 truncate text-right text-[11px] tabular-nums leading-tight sm:text-sm ${
@@ -363,6 +380,10 @@ export default function CalendarClient() {
   const [monthlyExpenses, setMonthlyExpenses] = useState<MonthlyExpenseRow[]>([]);
   const [nextMonthlyExpenses, setNextMonthlyExpenses] = useState<MonthlyExpenseRow[]>([]);
   const [payPeriodOverrides, setPayPeriodOverrides] = useState<Map<string, string>>(new Map());
+  const [bills, setBills] = useState<RealBill[]>([]);
+  const [billCategories, setBillCategories] = useState<BillCategoryRow[]>([]);
+  const [cards, setCards] = useState<CreditCardRow[]>([]);
+  const [trips, setTrips] = useState<TravelTripRow[]>([]);
   const [sharedLoaded, setSharedLoaded] = useState(false);
   const [monthLoaded, setMonthLoaded] = useState(false);
   const loading = !sharedLoaded || !monthLoaded;
@@ -474,11 +495,25 @@ export default function CalendarClient() {
     );
   }, []);
 
+  // Bills set what linked expenses cost; cards and trips only add reminders, so the calendar works without them.
+  const loadLinkedPages = useCallback(async () => {
+    const [b, c, t] = await Promise.all([
+      getBills(),
+      getCreditCards().catch(() => null),
+      getTravelTrips().catch(() => null),
+    ]);
+    setBills(b.bills);
+    setBillCategories(b.categories);
+    setCards(c?.cards.map((x) => x.card) ?? []);
+    setTrips(t?.trips.map((x) => x.trip) ?? []);
+  }, []);
+
   const loadSharedData = useCallback(async () => {
-    const [payslipResult, overridesResult, payPeriodResult] = await Promise.allSettled([
+    const [payslipResult, overridesResult, payPeriodResult, linkedResult] = await Promise.allSettled([
       getPayslips(12),
       loadOverrides(),
       loadPayPeriodOverrides(),
+      loadLinkedPages(),
     ]);
     let firstError: string | null = null;
     if (payslipResult.status === "fulfilled") {
@@ -498,8 +533,12 @@ export default function CalendarClient() {
       firstError ??= e instanceof Error ? e.message : "Failed to load pay period overrides";
       setPayPeriodOverrides(new Map());
     }
+    if (linkedResult.status === "rejected") {
+      const e = linkedResult.reason;
+      firstError ??= e instanceof Error ? e.message : "Failed to load bills";
+    }
     return firstError;
-  }, [loadOverrides, loadPayPeriodOverrides, applyOverrideRows]);
+  }, [loadOverrides, loadPayPeriodOverrides, loadLinkedPages, applyOverrideRows]);
 
   useEffect(() => {
     let cancelled = false;
@@ -624,41 +663,34 @@ export default function CalendarClient() {
     [expensesForPeriod],
   );
 
-  // Dated bills count in the pay period their date lands in; undated ones in the half they were filed under.
+  // Each expense in the pay periods its date or real bill lands in; undated ones in the half they were filed under.
   const monthlyExpenseIndex = useMemo(() => {
     const byPeriod = new Map<string, BillRow[]>();
     const byDay = new Map<string, BillRow[]>();
     const add = (map: Map<string, BillRow[]>, key: string, row: BillRow) =>
       map.set(key, [...(map.get(key) ?? []), row]);
-    const seen = new Set<string>();
-    // Skipped and card-charged months are pay-period months, as the Monthly Expenses page shows them.
-    const skips = (e: MonthlyExpenseRow, y: number, m: number) =>
-      e.skipped_months.includes(monthKey(y, m)) || monthKey(y, m) in e.charged_months;
-    const addRows = (y: number, m: number, rows: MonthlyExpenseRow[]) => {
-      for (const e of rows) {
-        const due = billDayIso(e, y, m);
-        if (due == null) {
-          if ((e.period_half === 1 || e.period_half === 2) && !skips(e, y, m)) {
-            add(byPeriod, periodKey(y, m, e.period_half), { ...e, due });
-          }
-          continue;
+    const rows = new Map([...prevMonthlyExpenses, ...monthlyExpenses, ...nextMonthlyExpenses].map((e) => [e.id, e]));
+    const months = [addMonths(viewedYear, viewedMonth, -1), { year: viewedYear, month: viewedMonth }, addMonths(viewedYear, viewedMonth, 1)];
+    for (const { year: y, month: m } of months) {
+      for (const e of rows.values()) {
+        if (isOffBudget(e, monthKey(y, m))) continue;
+        for (const { half, due, amount } of expenseDuesIn(e, payPeriodOverrides, y, m, bills)) {
+          add(byPeriod, periodKey(y, m, half), { ...e, amount, due });
+          if (due) add(byDay, due, { ...e, amount, due });
         }
-        if (seen.has(`${e.id}:${due}`)) continue;
-        seen.add(`${e.id}:${due}`);
-        const p = periodForDate(payPeriodOverrides, due);
-        if (skips(e, p.year, p.month)) continue;
-        add(byPeriod, periodKey(p.year, p.month, p.half), { ...e, due });
-        add(byDay, due, { ...e, due });
       }
-    };
-    const prev = addMonths(viewedYear, viewedMonth, -1);
-    const next = addMonths(viewedYear, viewedMonth, 1);
-    addRows(prev.year, prev.month, prevMonthlyExpenses);
-    addRows(viewedYear, viewedMonth, monthlyExpenses);
-    addRows(next.year, next.month, nextMonthlyExpenses);
-    for (const rows of byPeriod.values()) rows.sort((a, b) => compareDue(a.due, b.due));
+    }
+    for (const list of byPeriod.values()) list.sort((a, b) => compareDue(a.due, b.due));
     return { byPeriod, byDay };
-  }, [prevMonthlyExpenses, monthlyExpenses, nextMonthlyExpenses, viewedYear, viewedMonth, payPeriodOverrides]);
+  }, [prevMonthlyExpenses, monthlyExpenses, nextMonthlyExpenses, viewedYear, viewedMonth, payPeriodOverrides, bills]);
+
+  const remindersByDay = useMemo(() => {
+    const byDay = new Map<string, Reminder[]>();
+    for (const r of [...dueReminders(billCategories, bills, cards, monthlyExpenses), ...tripReminders(trips)]) {
+      byDay.set(r.day, [...(byDay.get(r.day) ?? []), r]);
+    }
+    return byDay;
+  }, [billCategories, bills, cards, monthlyExpenses, trips]);
 
   const monthlyExpensesForPeriod = useCallback(
     (periodYear: number, periodMonth: number, periodHalf: PeriodHalf) =>
@@ -1457,6 +1489,7 @@ export default function CalendarClient() {
   }, [spendDay, spendAmount, daySavings, periodDayCells, isPeriodLastDay, isClosedLastDay]);
 
   const spendBills = spendDay ? monthlyExpenseIndex.byDay.get(spendDay.iso) : undefined;
+  const spendReminders = spendDay ? remindersByDay.get(spendDay.iso) : undefined;
 
   const transferMove = transfer ? parseFormNumber(transferAmount) : null;
   const payDateRange =
@@ -1697,6 +1730,7 @@ export default function CalendarClient() {
                     key={cell.iso}
                     cell={cell}
                     bills={monthlyExpenseIndex.byDay.get(cell.iso)}
+                    reminders={remindersByDay.get(cell.iso)}
                     isDragSource={dragSourceIso === cell.iso}
                     isDragOverTarget={dragOverIso === cell.iso && dragSourceIso !== cell.iso}
                     onOpenSpend={openSpendModal}
@@ -1729,6 +1763,10 @@ export default function CalendarClient() {
               <span className="flex items-center gap-2">
                 <span className="h-3 w-4 rounded bg-danger-soft ring-1 ring-inset ring-danger/20" />
                 Monthly expense due
+              </span>
+              <span className="flex items-center gap-2">
+                <span className="h-3 w-4 rounded bg-surface-2 ring-1 ring-inset ring-line" />
+                Reminder, nothing deducted
               </span>
             </div>
           </Panel>
@@ -2089,6 +2127,21 @@ export default function CalendarClient() {
                         <li key={b.id} className="flex items-center justify-between gap-3">
                           <span className="truncate text-ink">{b.name}</span>
                           <span className="shrink-0 font-medium tabular-nums text-danger-text">−{fmtMoney(b.amount)}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {spendReminders && (
+                  <div className="rounded-xl border border-line px-4 py-3">
+                    <p className="text-xs font-medium text-ink-3">Also this day · nothing deducted</p>
+                    <ul className="mt-1.5 space-y-1 text-sm">
+                      {spendReminders.map((r) => (
+                        <li key={`${r.href}:${r.name}`} className="flex items-center justify-between gap-3">
+                          <span className="truncate text-ink">{r.name}</span>
+                          {r.amount != null && (
+                            <span className="shrink-0 font-medium tabular-nums text-ink-2">{fmtMoney(r.amount)}</span>
+                          )}
                         </li>
                       ))}
                     </ul>

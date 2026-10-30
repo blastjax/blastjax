@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useCurrentUser } from "@/components/AuthGate";
+import { HomeOverview } from "@/components/HomeOverview";
 import {
   CalendarIcon,
   ChartBarIcon,
@@ -108,6 +109,8 @@ export default function Home() {
           Pick up where you left off, or jump straight to a section.
         </p>
       </div>
+
+      <HomeOverview />
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {areas.map(({ href, title, description, icon: Icon, tone, shortcuts }) => (

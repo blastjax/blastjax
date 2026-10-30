@@ -26,25 +26,45 @@ import {
 } from "@/components/FinanceUI";
 import { PlusIcon } from "@/components/Icons";
 import {
+  createHousePaymentEntry,
   createMonthlyExpense,
+  deleteHousePaymentEntry,
   deleteMonthlyExpense,
+  getBills,
   getCreditCards,
+  getHousePayment,
+  getHousePayments,
   getMonthlyExpenses,
   getPayPeriodStartOverrides,
   updateMonthlyExpense,
+  type BillCategoryRow,
+  type BillRow,
   type CreditCardRow,
+  type HousePaymentEntry,
+  type HousePaymentRow,
   type MonthlyExpenseRow,
 } from "@/lib/api";
-import { addMonths, formatDate, formatMonthYear, formatMonthYearShort, monthKey, parseMonthKey } from "@/lib/dateFormat";
+import {
+  addMonths,
+  formatDate,
+  formatMonthYear,
+  formatMonthYearShort,
+  monthKey,
+  parseMonthKey,
+  toIsoDateLocal,
+} from "@/lib/dateFormat";
 import { fmtAmount } from "@/lib/formatNumber";
 import { formatAmountNumber, parseFormNumber } from "@/lib/parseFormNumber";
 import {
-  billDayIso,
+  chargedCardIn,
+  chargeFrom,
   compareDue,
+  effectiveHalfStartIso,
+  expenseDuesIn,
   periodForDate,
   periodKey,
   periodRangeLabel,
-  spreadBudgetChanges,
+  spreadExpenseChanges,
   type PeriodHalf,
 } from "@/lib/payPeriods";
 import { ErrorAlert } from "@/components/ErrorAlert";
@@ -68,6 +88,11 @@ const ORDINAL = new Intl.PluralRules("en-US", { type: "ordinal" });
 const ORDINAL_SUFFIX: Record<string, string> = { one: "st", two: "nd", few: "rd", other: "th" };
 const ordinal = (n: number) => `${n}${ORDINAL_SUFFIX[ORDINAL.select(n)]}`;
 
+const SPREAD_FAILED = "The expense is saved, but the calendar's daily amounts didn't update. Use Even out on the calendar.";
+
+// An expense as the viewed month has it: `amount` stays the estimate, and `shown` is a real bill's when there is one.
+type Listed = MonthlyExpenseRow & { shown: number; fromBill: boolean };
+
 type ExpenseForm = {
   name: string;
   description: string;
@@ -77,7 +102,10 @@ type ExpenseForm = {
   is_recurring: boolean;
   date: string;
   skipped_months: string[];
-  charged_months: Record<string, string>;
+  charged_months: MonthlyExpenseRow["charged_months"];
+  bill_category_id: string; // "" when it has no bills to read
+  house_payment_id: string; // "" when it isn't one
+  paid: boolean;
 };
 const emptyForm = (defaultMonth: string, half: PeriodHalf = 1): ExpenseForm => ({
   name: "",
@@ -89,6 +117,9 @@ const emptyForm = (defaultMonth: string, half: PeriodHalf = 1): ExpenseForm => (
   date: "",
   skipped_months: [],
   charged_months: {},
+  bill_category_id: "",
+  house_payment_id: "",
+  paid: false,
 });
 
 export default function MonthlyExpensesClient() {
@@ -100,6 +131,10 @@ export default function MonthlyExpensesClient() {
 
   const [expenses, setExpenses] = useState<MonthlyExpenseRow[]>([]);
   const [cards, setCards] = useState<CreditCardRow[]>([]);
+  const [bills, setBills] = useState<BillRow[]>([]);
+  const [billCategories, setBillCategories] = useState<BillCategoryRow[]>([]);
+  const [houses, setHouses] = useState<HousePaymentRow[]>([]);
+  const [houseEntries, setHouseEntries] = useState<Map<string, HousePaymentEntry[]>>(new Map());
   const [payPeriodStarts, setPayPeriodStarts] = useState<Map<string, string>>(new Map());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -116,13 +151,20 @@ export default function MonthlyExpensesClient() {
   const load = useCallback(async () => {
     setError(null);
     try {
-      const [r, starts, onCards] = await Promise.all([
+      const [r, starts, onCards, billData, houseData] = await Promise.all([
         getMonthlyExpenses(),
         getPayPeriodStartOverrides().catch(() => ({ overrides: [] })),
         getCreditCards().catch(() => ({ cards: [] })),
+        getBills().catch(() => ({ categories: [], bills: [] })),
+        getHousePayments().catch(() => ({ house_payments: [] })),
       ]);
+      const details = await Promise.all(houseData.house_payments.map((h) => getHousePayment(h.id).catch(() => null)));
       setExpenses(r.expenses);
       setCards(onCards.cards.map((b) => b.card));
+      setBills(billData.bills);
+      setBillCategories(billData.categories);
+      setHouses(houseData.house_payments);
+      setHouseEntries(new Map(details.flatMap((d) => (d ? [[d.house_payment.id, d.entries] as const] : []))));
       setPayPeriodStarts(
         new Map(starts.overrides.map((o) => [periodKey(o.period_year, o.period_month, o.period_half), o.start_date])),
       );
@@ -139,39 +181,41 @@ export default function MonthlyExpensesClient() {
   }, [load]);
 
   const byHalf = useMemo(() => {
-    const dated: Record<PeriodHalf, [string | null, MonthlyExpenseRow][]> = { 1: [], 2: [] };
-    const prev = addMonths(month.y, month.m, -1);
+    const dated: Record<PeriodHalf, [string | null, Listed][]> = { 1: [], 2: [] };
     for (const e of expenses) {
-      if (e.expense_date && !showAll) {
-        // Dated bills count in whichever of this month's pay periods their date lands in.
-        const days = e.is_recurring ? [billDayIso(e, prev.y, prev.m), billDayIso(e, month.y, month.m)] : [e.expense_date];
-        for (const iso of days) {
-          const p = iso ? periodForDate(payPeriodStarts, iso) : null;
-          if (p && p.year === month.y && p.month === month.m) dated[p.half].push([iso, e]);
+      if (!showAll) {
+        for (const { half, due, amount, fromBill } of expenseDuesIn(e, payPeriodStarts, month.y, month.m, bills)) {
+          dated[half].push([due, { ...e, shown: amount, fromBill }]);
         }
-      } else if (
-        (showAll || e.is_recurring || (e.period_year === month.y && e.period_month === month.m)) &&
-        (e.period_half === 1 || e.period_half === 2)
-      ) {
-        dated[e.period_half].push([e.expense_date, e]);
+      } else if (e.period_half === 1 || e.period_half === 2) {
+        dated[e.period_half].push([e.expense_date, { ...e, shown: e.amount, fromBill: false }]);
       }
     }
     const byDate = (half: PeriodHalf) => dated[half].sort(([a], [b]) => compareDue(a, b)).map(([, e]) => e);
     return { 1: byDate(1), 2: byDate(2) };
-  }, [expenses, month, showAll, payPeriodStarts]);
+  }, [expenses, month, showAll, payPeriodStarts, bills]);
 
-  const visible = useMemo(() => [...new Set([...byHalf[1], ...byHalf[2]])], [byHalf]);
+  const visible = useMemo(() => [...new Map([...byHalf[1], ...byHalf[2]].map((e) => [e.id, e])).values()], [byHalf]);
 
   const viewedMonthKey = monthKey(month.y, month.m);
   const isSkipped = (e: MonthlyExpenseRow) => !showAll && e.skipped_months.includes(viewedMonthKey);
-  const chargedCard = (e: MonthlyExpenseRow) => (showAll ? undefined : e.charged_months[viewedMonthKey]);
+  const chargedCard = (e: MonthlyExpenseRow) => (showAll ? null : chargedCardIn(e.charged_months, viewedMonthKey));
   const offBudget = (e: MonthlyExpenseRow) => isSkipped(e) || chargedCard(e) != null;
-  const totalFor = (half: PeriodHalf) => byHalf[half].reduce((s, e) => s + (offBudget(e) ? 0 : e.amount), 0);
+  const totalFor = (half: PeriodHalf) => byHalf[half].reduce((s, e) => s + (offBudget(e) ? 0 : e.shown), 0);
   const recurring = visible.filter((e) => e.is_recurring && !offBudget(e));
 
-  // A saved recurring expense is charged one month at a time, the one being viewed; anything else has only its own.
+  // A saved recurring expense changes card from the month being viewed; anything else has only its own month.
   const chargeMonth = form.is_recurring && editingId != null ? viewedMonthKey : form.month;
   const chargePeriod = parseMonthKey(chargeMonth);
+
+  const paidEntry = useCallback(
+    (houseId: string | null, key: string) =>
+      houseEntries.get(houseId ?? "")?.find((x) => {
+        const p = periodForDate(payPeriodStarts, x.paid_on);
+        return monthKey(p.year, p.month) === key;
+      }),
+    [houseEntries, payPeriodStarts],
+  );
 
   const openModal = useCallback(
     (half: PeriodHalf = 1) => {
@@ -198,10 +242,13 @@ export default function MonthlyExpensesClient() {
         date: exp.expense_date ?? "",
         skipped_months: exp.skipped_months,
         charged_months: exp.charged_months,
+        bill_category_id: exp.bill_category_id ?? "",
+        house_payment_id: exp.house_payment_id ?? "",
+        paid: paidEntry(exp.house_payment_id, viewedMonthKey) != null,
       });
       setModalOpen(true);
     },
-    [payPeriodStarts],
+    [payPeriodStarts, paidEntry, viewedMonthKey],
   );
 
   const closeModal = useCallback(() => {
@@ -241,39 +288,43 @@ export default function MonthlyExpensesClient() {
           expense_date: form.date || null,
           skipped_months: form.skipped_months,
           charged_months: form.charged_months,
+          bill_category_id: form.bill_category_id || null,
+          house_payment_id: form.house_payment_id || null,
         };
-        if (editingId != null) {
-          await updateMonthlyExpense(editingId, body);
-        } else {
-          await createMonthlyExpense(body);
+        const before = expenses.find((x) => x.id === editingId) ?? null;
+        const { expense } = await (editingId != null
+          ? updateMonthlyExpense(editingId, body)
+          : createMonthlyExpense(body));
+
+        // Logging it on House Payments deducts nothing more: this expense already does.
+        const house = expense.house_payment_id;
+        const logged = paidEntry(house, chargeMonth);
+        if (house && chargePeriod && form.paid && !logged) {
+          const [due] = expenseDuesIn(expense, payPeriodStarts, chargePeriod.y, chargePeriod.m, bills);
+          const today = toIsoDateLocal(new Date());
+          const now = periodForDate(payPeriodStarts, today);
+          const paid_on =
+            monthKey(now.year, now.month) === chargeMonth
+              ? today
+              : (due?.due ?? effectiveHalfStartIso(payPeriodStarts, chargePeriod.y, chargePeriod.m, due?.half ?? 1));
+          await createHousePaymentEntry(house, { paid_on, amount: due?.amount ?? amount });
+        } else if (house && !form.paid && logged) {
+          await deleteHousePaymentEntry(house, logged.id);
         }
+
         setModalOpen(false);
         setEditingId(null);
         await load();
-
-        // Going on or off a card moves that month's budget; a new expense never was in it, a skipped one isn't.
-        const wasCharged = expenses.find((x) => x.id === editingId)?.charged_months[chargeMonth] != null;
-        const isCharged = form.charged_months[chargeMonth] != null;
-        if (editingId != null && wasCharged !== isCharged && chargePeriod && !form.skipped_months.includes(chargeMonth)) {
-          const listedIn = byHalf[1].some((x) => x.id === editingId) ? 1 : 2;
-          await spreadBudgetChanges(payPeriodStarts, [
-            {
-              year: chargePeriod.y,
-              month: chargePeriod.m,
-              half: form.is_recurring ? listedIn : form.period_half,
-              delta: isCharged ? amount : -amount,
-            },
-          ]).catch(() =>
-            setError("The expense is saved, but the calendar's daily amounts didn't update. Use Even out on the calendar."),
-          );
-        }
+        await spreadExpenseChanges(payPeriodStarts, [{ before, after: expense }], bills).catch(() =>
+          setError(SPREAD_FAILED),
+        );
       } catch (err) {
         setFormError(err instanceof Error ? err.message : "Failed to save expense");
       } finally {
         setSaving(false);
       }
     },
-    [form, editingId, load, expenses, chargeMonth, chargePeriod, byHalf, payPeriodStarts],
+    [form, editingId, load, expenses, chargeMonth, chargePeriod, payPeriodStarts, bills, paidEntry],
   );
 
   const onDelete = useCallback(
@@ -281,16 +332,19 @@ export default function MonthlyExpensesClient() {
       if (!(await confirmDialog("Delete this monthly expense?"))) return;
       setError(null);
       try {
+        const before = expenses.find((x) => x.id === id) ?? null;
         await deleteMonthlyExpense(id);
         closeModal();
         await load();
+        await spreadExpenseChanges(payPeriodStarts, [{ before, after: null }], bills).catch(() => setError(SPREAD_FAILED));
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to delete expense");
       }
     },
-    [load, closeModal],
+    [load, closeModal, expenses, payPeriodStarts, bills],
   );
 
+  const billSources = billCategories.filter((c) => !c.is_credit_card || c.id === form.bill_category_id);
   const scopeLabel = showAll ? "All months" : formatMonthYear(month.y, month.m);
   const halfRange = (half: PeriodHalf, at: { y: number; m: number } | null = showAll ? null : month) =>
     at ? periodRangeLabel(payPeriodStarts, at.y, at.m, half) : HALF[half].days;
@@ -347,7 +401,7 @@ export default function MonthlyExpensesClient() {
             <Metric label={`2nd half · ${halfRange(2)}`} value={fmtMoney(totalFor(2))} hint={`${byHalf[2].length} items`} />
             <Metric
               label="Recurring"
-              value={fmtMoney(recurring.reduce((s, e) => s + e.amount, 0))}
+              value={fmtMoney(recurring.reduce((s, e) => s + e.shown, 0))}
               hint={`${recurring.length} every month`}
             />
           </StatStrip>
@@ -402,6 +456,10 @@ export default function MonthlyExpensesClient() {
                                 {chargedCard(exp) != null && (
                                   <Pill>On {cards.find((c) => c.id === chargedCard(exp))?.name ?? "a card"}</Pill>
                                 )}
+                                {exp.fromBill && <Pill>Actual bill</Pill>}
+                                {!showAll && paidEntry(exp.house_payment_id, viewedMonthKey) && (
+                                  <Pill tone="success">Paid</Pill>
+                                )}
                                 {exp.is_recurring ? (
                                   <Pill tone="brand">
                                     {exp.expense_date ? `Every ${ordinal(Number(exp.expense_date.slice(8, 10)))}` : "Recurring"}
@@ -421,7 +479,7 @@ export default function MonthlyExpensesClient() {
                                 offBudget(exp) ? "line-through" : ""
                               }`}
                             >
-                              {fmtMoney(exp.amount)}
+                              {fmtMoney(exp.shown)}
                             </span>
                           </div>
                         </li>
@@ -582,18 +640,71 @@ export default function MonthlyExpensesClient() {
             {cards.length > 0 && !(showAll && editingId != null && form.is_recurring) && (
               <ChargedToField
                 cards={cards}
-                value={form.charged_months[chargeMonth] ?? ""}
+                value={chargedCardIn(form.charged_months, chargeMonth) ?? ""}
                 onChange={(cardId) =>
-                  setForm((f) => ({
-                    ...f,
-                    charged_months: Object.fromEntries(
-                      Object.entries({ ...f.charged_months, [chargeMonth]: cardId }).filter(([, id]) => id),
-                    ),
-                  }))
+                  setForm((f) => ({ ...f, charged_months: chargeFrom(f.charged_months, chargeMonth, cardId || null) }))
                 }
-                hint={`${chargePeriod ? formatMonthYear(chargePeriod.y, chargePeriod.m) : "This month"} only: stays out of that month's calendar budget.`}
+                hint={
+                  form.is_recurring && chargePeriod
+                    ? `${formatMonthYear(chargePeriod.y, chargePeriod.m)} onward: a card keeps it out of the calendar budget. Earlier months don't change.`
+                    : "A card keeps it out of the calendar budget."
+                }
                 disabled={saving}
               />
+            )}
+
+            {billSources.length > 0 && (
+              <Field label="Real bills from" hint="Once a month's bill is in, it replaces the amount and date above for that month.">
+                <select
+                  className={INPUT_CLASSES}
+                  value={form.bill_category_id}
+                  onChange={(e) => setForm((f) => ({ ...f, bill_category_id: e.target.value }))}
+                  disabled={saving}
+                >
+                  <option value="">Not linked to bills</option>
+                  {billSources.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            )}
+
+            {houses.length > 0 && (
+              <Field label="House payment">
+                <select
+                  className={INPUT_CLASSES}
+                  value={form.house_payment_id}
+                  onChange={(e) => setForm((f) => ({ ...f, house_payment_id: e.target.value }))}
+                  disabled={saving}
+                >
+                  <option value="">Not a house payment</option>
+                  {houses.map((h) => (
+                    <option key={h.id} value={h.id}>
+                      {h.name}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            )}
+
+            {form.house_payment_id && chargePeriod && !showAll && (
+              <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-line p-3.5 transition-colors duration-150 hover:bg-surface-2/60">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 size-4"
+                  checked={form.paid}
+                  onChange={(e) => setForm((f) => ({ ...f, paid: e.target.checked }))}
+                  disabled={saving}
+                />
+                <span className="text-sm">
+                  <span className="block font-medium text-ink">
+                    Paid for {formatMonthYear(chargePeriod.y, chargePeriod.m)}
+                  </span>
+                  <span className="text-ink-3">Logs it on House Payments. Nothing extra comes out of your budget.</span>
+                </span>
+              </label>
             )}
 
             {formError && (

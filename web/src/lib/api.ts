@@ -199,6 +199,7 @@ export type InstallmentRow = {
   credit_card_id: string | null;
   created_at: string;
   due_payment?: number;
+  due_this_month?: boolean; // on a card's installments only
 };
 
 export type InstallmentLineRow = {
@@ -755,7 +756,10 @@ export type MonthlyExpenseRow = {
   is_recurring: boolean;
   expense_date: string | null;
   skipped_months: string[]; // "YYYY-MM" pay-period months it isn't deducted in
-  charged_months: Record<string, string>; // "YYYY-MM" pay-period month -> card it went on instead of the budget
+  // "YYYY-MM" pay-period month -> the card it's on from then until the next entry, or null for none from then.
+  charged_months: Record<string, string | null>;
+  bill_category_id: string | null; // a month's real bills here replace `amount` and the date
+  house_payment_id: string | null; // where a month marked paid gets logged
   created_at: string;
 };
 
@@ -769,8 +773,16 @@ export type MonthlyExpenseCreateBody = {
   is_recurring?: boolean;
   expense_date?: string | null;
   skipped_months?: string[];
-  charged_months?: Record<string, string>;
+  charged_months?: Record<string, string | null>;
+  bill_category_id?: string | null;
+  house_payment_id?: string | null;
 };
+
+export type SearchResult = { label: string; section: string; href: string };
+
+export async function searchRecords(q: string) {
+  return getJson<{ results: SearchResult[] }>("/api/search", { q });
+}
 
 export async function getMonthlyExpenses(
   periodHalf?: 1 | 2,
@@ -911,6 +923,7 @@ export type CreditCardRow = {
   due_date: string | null;
   bill_category_id: string | null; // when set, the statement is that bill category's latest bill
   monthly_dues: number;
+  statement_paid: boolean; // payments since the statement date cover it
   created_at: string;
 };
 

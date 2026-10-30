@@ -4,8 +4,8 @@ Add what ties credit cards to the calendar budget. Additive, one transaction,
 safe to re-run (``ADD COLUMN IF NOT EXISTS``):
 
   - ``monthly_expense.charged_months`` JSONB NOT NULL DEFAULT '{}' -- the
-    "YYYY-MM" pay-period months an expense went on a credit card instead of the
-    calendar budget, each with that card's id
+    "YYYY-MM" pay-period months an expense changes card, each with the card it's
+    on instead of the calendar budget from then on, or null for none
   - ``fixed_expense.credit_card_payment_id`` UUID (nullable), references
     ``credit_card_payment(id)`` ON DELETE SET NULL -- the card payment this
     budget expense was recorded for

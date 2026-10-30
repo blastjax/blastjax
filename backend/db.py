@@ -974,7 +974,9 @@ def insert_monthly_expense(
     is_recurring: bool = False,
     expense_date: date | None = None,
     skipped_months: list[str] | None = None,
-    charged_months: dict[str, str] | None = None,
+    charged_months: dict[str, str | None] | None = None,
+    bill_category_id: UUID | None = None,
+    house_payment_id: UUID | None = None,
 ) -> dict[str, Any]:
     values = dict(locals(), skipped_months=skipped_months or [], charged_months=charged_months or {})
     with _session(write=True) as s:
@@ -992,7 +994,9 @@ def update_monthly_expense(
     is_recurring: bool = False,
     expense_date: date | None = None,
     skipped_months: list[str] | None = None,
-    charged_months: dict[str, str] | None = None,
+    charged_months: dict[str, str | None] | None = None,
+    bill_category_id: UUID | None = None,
+    house_payment_id: UUID | None = None,
 ) -> dict[str, Any] | None:
     values = dict(locals(), skipped_months=skipped_months or [], charged_months=charged_months or {})
     del values["expense_id"]
@@ -1294,6 +1298,28 @@ def delete_credit_card_payment(payment_id: UUID) -> list[dict[str, Any]] | None:
             return None
         _shift_credit_card_balance(s, row.credit_card_id, row.amount)
         return [_budget_change((spent[0], spent[1], spent[2]), spent.amount)] if spent else []
+
+
+_SEARCHED: tuple[tuple[Any, str, str], ...] = (
+    (MonthlyExpense.name, "Monthly Expenses", "/monthly-expenses"),
+    (FixedExpense.description, "Calendar", "/calendar"),
+    (BillCategory.name, "Bills", "/bills"),
+    (CreditCard.name, "Credit Cards", "/credit-card"),
+    (Installment.name, "Installments", "/installments"),
+    (HousePayment.name, "House Payments", "/house-payments"),
+    (TravelTrip.title, "Travels", "/travels"),
+)
+
+
+def search_records(query: str, per_kind: int = 4) -> list[dict[str, str]]:
+    with _session() as s:
+        return [
+            {"label": label, "section": section, "href": href}
+            for column, section, href in _SEARCHED
+            for label in s.scalars(
+                select(column).where(column.icontains(query, autoescape=True)).distinct().order_by(column).limit(per_kind)
+            )
+        ]
 
 
 def _calendar_day_overrides(s: Session) -> list[dict[str, Any]]:

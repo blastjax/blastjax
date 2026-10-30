@@ -31,6 +31,8 @@ import {
   deleteBill,
   deleteBillCategory,
   getBills,
+  getMonthlyExpenses,
+  getPayPeriodStartOverrides,
   readBillPdf,
   updateBill,
   updateBillCategory,
@@ -41,12 +43,14 @@ import {
   type BillDefaults,
   type BillPdfFields,
   type BillRow,
+  type MonthlyExpenseRow,
   type RelativeDay,
 } from "@/lib/api";
 import { BillYearBlock } from "./BillYearBlock";
 import { addMonths, formatMonthYear, parseDateOnlyLocal, toIsoDateLocal } from "@/lib/dateFormat";
 import { fmtCount } from "@/lib/formatNumber";
 import { formatAmountNumber, parseFormNumber } from "@/lib/parseFormNumber";
+import { periodKey, spreadExpenseChanges } from "@/lib/payPeriods";
 import {
   FILE_INPUT_CLASSES,
   INPUT_CLASSES,
@@ -396,6 +400,8 @@ function BillPdfModal({ bill, title, onClose }: { bill: BillRow; title: string; 
 export default function BillsClient() {
   const [categories, setCategories] = useState<BillCategoryRow[]>([]);
   const [bills, setBills] = useState<BillRow[]>([]);
+  const [expenses, setExpenses] = useState<MonthlyExpenseRow[]>([]);
+  const [payPeriodStarts, setPayPeriodStarts] = useState<Map<string, string>>(new Map());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -408,10 +414,19 @@ export default function BillsClient() {
 
   const load = useCallback(async () => {
     try {
-      const r = await getBills();
+      const [r, monthly, starts] = await Promise.all([
+        getBills(),
+        getMonthlyExpenses().catch(() => ({ expenses: [] })),
+        getPayPeriodStartOverrides().catch(() => ({ overrides: [] })),
+      ]);
       setCategories(r.categories);
       setBills(r.bills);
+      setExpenses(monthly.expenses);
+      setPayPeriodStarts(
+        new Map(starts.overrides.map((o) => [periodKey(o.period_year, o.period_month, o.period_half), o.start_date])),
+      );
       setError(null);
+      return r.bills;
     } catch (e) {
       setError(errorText(e, "Failed to load bills"));
     } finally {
@@ -461,7 +476,15 @@ export default function BillsClient() {
     } finally {
       setSaving(false);
     }
-    await load();
+    const billsBefore = bills;
+    const billsAfter = await load();
+    // A real bill replaces a linked monthly expense's estimate, which moves the budget.
+    if (billsAfter) {
+      const linked = expenses.filter((x) => x.bill_category_id != null).map((x) => ({ before: x, after: x }));
+      await spreadExpenseChanges(payPeriodStarts, linked, billsBefore, billsAfter).catch(() =>
+        setError("The bill is saved, but the calendar's daily amounts didn't update. Use Even out on the calendar."),
+      );
+    }
   };
 
   const saveCategory = (e: React.FormEvent) => {

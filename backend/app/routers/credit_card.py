@@ -68,12 +68,26 @@ def _monthly_dues(card: dict[str, Any], installments: list[dict[str, Any]]) -> f
     return total
 
 
+def _statement_paid(card: dict[str, Any], payments: list[dict[str, Any]]) -> bool:
+    """Whether payments since the statement date cover it. Partial payments don't count, whatever they add up to."""
+    since, balance = card.get("statement_date"), float(card.get("last_statement_balance") or 0)
+    if not since or balance <= 0:
+        return False
+    return sum(float(p["amount"]) for p in payments if p["payment_date"] >= since) >= balance
+
+
 def _serialize_bundle(bundle: dict[str, Any]) -> dict[str, Any]:
-    card, installments = bundle["card"], bundle["installments"]
+    card, installments, payments = bundle["card"], bundle["installments"], bundle["payments"]
     return {
-        "card": {**_serialize_card(card), "monthly_dues": _monthly_dues(card, installments)},
-        "installments": [serialize_installment_row(r) for r in installments],
-        "payments": [_serialize_payment(p) for p in bundle["payments"]],
+        "card": {
+            **_serialize_card(card),
+            "monthly_dues": _monthly_dues(card, installments),
+            "statement_paid": _statement_paid(card, payments),
+        },
+        "installments": [
+            {**serialize_installment_row(r), "due_this_month": is_installment_due_this_month(r)} for r in installments
+        ],
+        "payments": [_serialize_payment(p) for p in payments],
     }
 
 

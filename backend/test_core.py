@@ -368,6 +368,19 @@ def check_calendar_override_bulk_bounds() -> None:
         raise AssertionError(f"accepted {len(bad)} override(s) it should reject")
 
 
+def check_statement_paid() -> None:
+    from app.routers.credit_card import _statement_paid
+
+    card = {"statement_date": "2026-10-10", "last_statement_balance": 1000.0}
+    paid = lambda *amounts: [{"amount": a, "payment_date": "2026-10-20"} for a in amounts]  # noqa: E731
+    assert _statement_paid(card, paid(1000.0)), "the full amount didn't count"
+    assert _statement_paid(card, paid(400.0, 600.0)), "two payments adding up didn't count"
+    assert not _statement_paid(card, paid(999.0)), "a partial payment counted"
+    assert not _statement_paid(card, [{"amount": 5000.0, "payment_date": "2026-10-09"}]), "an older payment counted"
+    assert not _statement_paid({**card, "statement_date": None}, paid(1000.0))
+    assert not _statement_paid({**card, "last_statement_balance": 0.0}, []), "nothing owed isn't paid"
+
+
 def check_fixed_expense_amount_sign() -> None:
     from pydantic import ValidationError
 
@@ -785,12 +798,26 @@ def check_db_against_postgres() -> None:
         skip = (bill["id"], "Internet", None, 1500.0, 2, 2026, 10, True, dt.date(2026, 10, 20), ["2026-11"])
         assert db.update_monthly_expense(*skip)["skipped_months"] == ["2026-11"]
         assert bill["charged_months"] == {}, bill
-        charges = {"2026-12": str(uuid.uuid4())}
+        charges = {"2026-12": str(uuid.uuid4()), "2027-02": None}
         assert db.update_monthly_expense(*skip, charges)["charged_months"] == charges
         assert db.list_monthly_expenses(period_year=2026, period_month=12)[0]["charged_months"] == charges
 
         power = db.insert_bill_category({"name": "Electricity"})
         assert power["defaults"] == {}, power
+        water = db.insert_bill_category({"name": "Water"})
+        home = db.insert_house_payment("The Beacon", None)
+        pipes = db.insert_monthly_expense(
+            "Pipes", None, 900.0, 1, 2026, 10, True, None, None, None, water["id"], home["id"]
+        )
+        assert (pipes["bill_category_id"], pipes["house_payment_id"]) == (water["id"], home["id"]), pipes
+        hits = db.search_records("pipe")
+        assert {"label": "Pipes", "section": "Monthly Expenses", "href": "/monthly-expenses"} in hits, hits
+        assert {"label": "The Beacon", "section": "House Payments", "href": "/house-payments"} in db.search_records("BEAC")
+        assert db.search_records("%") == [], "a search wildcard matched everything"
+        assert db.delete_bill_category(water["id"]) and db.delete_house_payment(home["id"])
+        unlinked_pipes = next(e for e in db.list_monthly_expenses() if e["name"] == "Pipes")
+        assert unlinked_pipes["bill_category_id"] is None and unlinked_pipes["house_payment_id"] is None, unlinked_pipes
+        assert db.delete_monthly_expense(pipes["id"])
         due = {"due_date": {"months": 1, "day": 8}, "amount": 1500.0}
         assert db.update_bill_category(power["id"], {"name": "Electricity", "defaults": due})["defaults"] == due
         visa = db.insert_bill_category({"name": "Visa", "is_credit_card": True})

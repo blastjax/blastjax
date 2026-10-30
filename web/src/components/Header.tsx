@@ -9,20 +9,67 @@ import {
   SidebarToggleIcon,
   SunIcon,
 } from "@/components/Icons";
+import { useCurrentUser } from "@/components/AuthGate";
 import { useTheme } from "@/components/ThemeProvider";
-import { activeDestination, searchDestinations } from "@/lib/nav";
+import { searchRecords, type SearchResult } from "@/lib/api";
+import { NAV_DESTINATIONS, activeDestination, isPageAllowed, searchDestinations } from "@/lib/nav";
 import { useShellLayout } from "@/lib/shellLayoutContext";
 import { ICON_BUTTON_CLASSES } from "@/lib/ui";
 
 function NavSearch() {
   const router = useRouter();
+  const user = useCurrentUser();
   const [query, setQuery] = useState("");
+  const [records, setRecords] = useState<SearchResult[]>([]);
   const [open, setOpen] = useState(false);
   const [cursor, setCursor] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const boxRef = useRef<HTMLDivElement>(null);
 
-  const results = useMemo(() => searchDestinations(query), [query]);
+  useEffect(() => {
+    const q = query.trim();
+    if (q.length < 2) {
+      setRecords([]);
+      return;
+    }
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      searchRecords(q).then(
+        (r) => {
+          if (!cancelled) setRecords(r.results);
+        },
+        () => {
+          if (!cancelled) setRecords([]);
+        },
+      );
+    }, 200);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [query]);
+
+  const results = useMemo(
+    () => [
+      ...searchDestinations(query).map((d) => ({
+        key: d.href,
+        href: d.href,
+        label: d.label,
+        note: d.parent ?? d.section,
+        icon: d.icon,
+      })),
+      ...records
+        .filter((r) => isPageAllowed(r.href, user))
+        .map((r) => ({
+          key: `${r.href}:${r.label}`,
+          href: r.href,
+          label: r.label,
+          note: r.section,
+          icon: NAV_DESTINATIONS.find((d) => d.href === r.href)?.icon ?? SearchIcon,
+        })),
+    ],
+    [query, records, user],
+  );
 
   useEffect(() => {
     setCursor(0);
@@ -63,8 +110,8 @@ function NavSearch() {
         ref={inputRef}
         type="search"
         value={query}
-        placeholder="Search pages…"
-        aria-label="Search pages"
+        placeholder="Search…"
+        aria-label="Search pages, bills, expenses and more"
         onChange={(e) => {
           setQuery(e.target.value);
           setOpen(true);
@@ -98,14 +145,14 @@ function NavSearch() {
         <div className="absolute left-0 right-0 top-full z-50 mt-2 overflow-hidden rounded-xl border border-line bg-surface py-1 shadow-pop">
           {results.length === 0 ? (
             <p className="px-3 py-3 text-sm text-ink-3">
-              No page matches “{query.trim()}”.
+              Nothing matches “{query.trim()}”.
             </p>
           ) : (
             results.map((d, i) => {
               const Icon = d.icon;
               return (
                 <button
-                  key={d.href}
+                  key={d.key}
                   type="button"
                   onMouseEnter={() => setCursor(i)}
                   onClick={() => go(d.href)}
@@ -117,9 +164,7 @@ function NavSearch() {
                   <span className="min-w-0 flex-1 truncate text-sm font-medium text-ink">
                     {d.label}
                   </span>
-                  <span className="shrink-0 text-xs text-ink-4">
-                    {d.parent ?? d.section}
-                  </span>
+                  <span className="shrink-0 text-xs text-ink-4">{d.note}</span>
                 </button>
               );
             })
