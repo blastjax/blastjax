@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import threading
 import time as _time
@@ -14,7 +15,7 @@ from uuid import UUID
 
 import psycopg2
 from dotenv import load_dotenv
-from sqlalchemy import Engine, Integer, and_, create_engine, delete, event, func, inspect, or_, select, update
+from sqlalchemy import Engine, Integer, and_, create_engine, delete, event, func, or_, select, update
 from sqlalchemy.dialects.postgresql import distinct_on, insert
 from sqlalchemy.engine import Row
 from sqlalchemy.exc import DisconnectionError
@@ -67,6 +68,8 @@ def _load_env_files() -> None:
 
 
 _load_env_files()
+
+_log = logging.getLogger(__name__)
 
 
 def database_url() -> str:
@@ -238,17 +241,11 @@ def _limit(limit: int) -> int:
 
 
 def init_schema() -> None:
-    with _session() as s:
-        present = set(inspect(s.connection()).get_table_names())
-    missing = [t for t in schema.Base.metadata.tables if t not in present]
-    if missing:
-        raise RuntimeError(
-            "Postgres is missing "
-            f"{len(missing)} expected table(s): {', '.join(missing)}. "
-            "Build them with backend/schema.py's create_all()."
-        )
     with _session(write=True) as s:
+        added = schema.sync_schema(s.connection())
         schema.sync_lotto_games(s)
+    if added:
+        _log.warning("Schema updated, added: %s", ", ".join(added))
 
 
 _PAYSLIP_INSERT_COLS: tuple[str, ...] = (

@@ -18,10 +18,12 @@ from sqlalchemy import (
     Time,
     UniqueConstraint,
     func,
+    inspect,
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, TIMESTAMP, insert
 from sqlalchemy.orm import DeclarativeBase, Mapped, column_property, mapped_column, relationship
+from sqlalchemy.schema import AddConstraint, CreateColumn
 
 # uuid7 is time-ordered, so ORDER BY id still means oldest first.
 UuidPK = Annotated[uuid.UUID, mapped_column(primary_key=True, default=uuid.uuid7)]
@@ -488,6 +490,7 @@ class TravelAccommodation(Base):
     booked_via: Mapped[str | None]
     price: Mapped[str | None]
     created_at: Mapped[StampNN]
+    paid_price: Mapped[str | None]
 
 
 class TravelFlight(Base):
@@ -653,6 +656,26 @@ SEED_LOTTO_GAMES = [
 
 def sync_lotto_games(conn: Any) -> None:
     conn.execute(insert(LottoGame).values([{"name": name} for name in SEED_LOTTO_GAMES]).on_conflict_do_nothing())
+
+
+def sync_schema(conn: Any) -> list[str]:
+    """Add the tables and columns defined here that the database lacks, and return what was added.
+
+    Additive only, so it's safe on every start. Anything else still needs its own script first: a
+    renamed column would look like a new empty one, and types and indexes aren't compared.
+    """
+    have = {table: {c["name"] for c in cols} for (_, table), cols in inspect(conn).get_multi_columns().items()}
+    added = [name for name in Base.metadata.tables if name not in have]
+    if added:
+        Base.metadata.create_all(conn)
+    for name, table in Base.metadata.tables.items():
+        for col in table.columns:
+            if name in have and col.name not in have[name]:
+                conn.exec_driver_sql(f'ALTER TABLE "{name}" ADD COLUMN {CreateColumn(col).compile(dialect=conn.dialect)}')
+                for fk in col.foreign_keys:
+                    conn.execute(AddConstraint(fk.constraint))
+                added.append(f"{name}.{col.name}")
+    return added
 
 
 def create_all(conn: Any) -> None:

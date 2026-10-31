@@ -694,7 +694,7 @@ def check_db_against_postgres() -> None:
     if not url:
         print("  --  check_db_against_postgres skipped (set TEST_DATABASE_URL)")
         return
-    from sqlalchemy import create_engine, text
+    from sqlalchemy import create_engine, inspect, text
     from sqlalchemy.exc import IntegrityError
 
     url = "postgresql+psycopg2://" + url.split("://", 1)[1]
@@ -710,6 +710,25 @@ def check_db_against_postgres() -> None:
             schema.create_all(c)
         db.init_schema()
         db.init_schema()  # re-seeding the lotto games again is a no-op
+
+        # What schema.py has and the database lacks: a plain column, one with a default, one with a foreign key, a table.
+        with engine.begin() as c:
+            c.execute(text("ALTER TABLE travel_accommodation DROP COLUMN paid_price"))
+            c.execute(text("ALTER TABLE monthly_expense DROP COLUMN skipped_months, DROP COLUMN bill_category_id"))
+            c.execute(text("DROP TABLE travel_city"))
+        with engine.begin() as c:
+            added = schema.sync_schema(c)
+        assert sorted(added) == [
+            "monthly_expense.bill_category_id",
+            "monthly_expense.skipped_months",
+            "travel_accommodation.paid_price",
+            "travel_city",
+        ], added
+        with engine.begin() as c:
+            assert schema.sync_schema(c) == [], "nothing is left to add"
+            fks = inspect(c).get_foreign_keys("monthly_expense")
+        assert any(fk["constrained_columns"] == ["bill_category_id"] for fk in fks), fks
+
         missing = uuid.uuid4()
 
         trip_id = db.insert_travel_trip("Osaka", dt.date(2026, 4, 13), dt.date(2026, 4, 16), None)["trip"]["id"]

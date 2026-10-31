@@ -1446,6 +1446,7 @@ export type TravelAccommodationRow = {
   phone: string | null;
   booked_via: string | null;
   price: string | null;
+  paid_price: string | null;
   created_at: string;
 };
 
@@ -1549,6 +1550,7 @@ export type TravelAccommodationBody = {
   phone?: string | null;
   booked_via?: string | null;
   price?: string | null;
+  paid_price?: string | null;
 };
 
 export async function getTravelTrips(limit?: number) {

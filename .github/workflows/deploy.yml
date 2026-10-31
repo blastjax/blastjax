@@ -119,8 +119,8 @@ jobs:
           compose run --rm --no-deps api python scripts/migrate_ids_to_uuid.py
           # The cache may still hold integer ids; the new API can't read those.
           compose run --rm redis-flush
-          # The API refuses to start while a table in schema.py is missing, so the new image creates any first.
-          compose run --rm --no-deps api python scripts/create_missing_tables.py
+          # The API does this on start too, but a failure here stops the deploy with the old API still running.
+          compose run --rm --no-deps api python scripts/sync_schema.py
           # --wait fails on any exited container, so the one-shot redis-flush runs separately.
           compose up --remove-orphans --wait --wait-timeout 200 redis api web || { compose logs --tail 50 >&2; exit 1; }
           compose run --rm redis-flush

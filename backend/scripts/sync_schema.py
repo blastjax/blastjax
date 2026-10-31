@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 """
-Create every table ``schema.py`` defines that Postgres doesn't have yet, so the
-API (which refuses to start while one is missing) comes up after a deploy that
-adds a model. Additive only: existing tables are never altered, so a new
-column on an existing table still needs its own ``add_*.py`` script. Safe to
-re-run.
+Bring Postgres up to ``schema.py``: add every table and column it defines that
+the database lacks. Additive only and safe to re-run, so a new model or column
+needs no script of its own (see ``schema.sync_schema`` for what it won't do).
 
-The deploy runs it with the new API image just before starting the API:
+The API does the same on every start. The deploy also runs it with the new API
+image first, so a failure stops the deploy while the old API is still running:
 
-    docker compose run --rm --no-deps api python scripts/create_missing_tables.py
+    docker compose run --rm --no-deps api python scripts/sync_schema.py
 
 Reads the Postgres URL from ``DATABASE_URL``, like the API.
 """
@@ -22,7 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 
 def main() -> int:
-    from sqlalchemy import create_engine, inspect
+    from sqlalchemy import create_engine
 
     import db
     import schema
@@ -33,11 +32,9 @@ def main() -> int:
 
     engine = create_engine("postgresql+psycopg2://" + url.split("://", 1)[1])
     with engine.begin() as conn:
-        present = set(inspect(conn).get_table_names())
-        missing = [t for t in schema.Base.metadata.tables if t not in present]
-        schema.Base.metadata.create_all(conn)
+        added = schema.sync_schema(conn)
     engine.dispose()
-    print(f"created {len(missing)} table(s): {', '.join(missing)}" if missing else "no missing tables")
+    print(f"added: {', '.join(added)}" if added else "schema is up to date")
     return 0
 
 

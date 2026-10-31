@@ -236,6 +236,7 @@ class TravelAccommodationCreate(BaseModel):
     phone: str | None = None
     booked_via: str | None = None
     price: str | None = None
+    paid_price: str | None = None
 
     @field_validator("name")
     @classmethod
@@ -258,6 +259,7 @@ class TravelAccommodationCreate(BaseModel):
         "phone",
         "booked_via",
         "price",
+        "paid_price",
     )
     @classmethod
     def _optional(cls, v: str | None) -> str | None:

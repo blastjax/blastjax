@@ -6,6 +6,7 @@ import { Source_Serif_4 } from "next/font/google";
 import { Fragment, useEffect, useState, type ReactNode } from "react";
 import { DatePickerField } from "@/components/DatePickerField";
 import { Modal } from "@/components/Modal";
+import { SuggestInput } from "@/components/SuggestInput";
 import {
   createTravelAccommodation,
   createTravelCity,
@@ -30,6 +31,7 @@ import {
 } from "@/lib/api";
 import { formatMonthDayShort, formatMonthYear, formatWeekdayMonthDay, toIsoDateLocal } from "@/lib/dateFormat";
 import { mapsUrlFor } from "@/lib/maps";
+import { remainingPrice } from "@/lib/remainingPrice";
 
 const serif = Source_Serif_4({ subsets: ["latin"], weight: ["600", "700"], variable: "--tv-serif" });
 
@@ -100,6 +102,7 @@ type Entry = {
   guests: string;
   bookedVia: string;
   price: string;
+  paid: string;
   phone: string;
   fromMapUrl: string;
   fromCity: string;
@@ -118,7 +121,7 @@ const after = (end: string | null, start: string) => (end && end > start ? end :
 const NO_DETAILS = {
   title: "", from: "", to: "", fromShort: "", toShort: "", location: "", endDate: "", ref: "", seat: "", conf: "",
   notes: "", airline: "", terminal: "", gate: "", baggage: "", room: "", guests: "", bookedVia: "", price: "",
-  phone: "", fromMapUrl: "", fromCity: "", fromCountry: "", toMapUrl: "", toCity: "", toCountry: "",
+  paid: "", phone: "", fromMapUrl: "", fromCity: "", fromCountry: "", toMapUrl: "", toCity: "", toCountry: "",
   locationMapUrl: "", instructions: "",
 };
 
@@ -179,7 +182,7 @@ function toEntries(d: TravelTripDetail): Entry[] {
       location: s(a.location_name), locationMapUrl: s(a.location_map_url),
       startDate: a.checkin_date, startTime: hm(a.checkin_time), endDate: after(a.checkout_date, a.checkin_date), endTime: hm(a.checkout_time),
       conf: s(a.booking_confirmation), notes: s(a.notes), instructions: s(a.instructions), room: s(a.room),
-      guests: s(a.guests), phone: s(a.phone), bookedVia: s(a.booked_via), price: s(a.price),
+      guests: s(a.guests), phone: s(a.phone), bookedVia: s(a.booked_via), price: s(a.price), paid: s(a.paid_price),
     });
   }
   return out;
@@ -392,7 +395,7 @@ function buildAgenda(start: string, end: string, entries: Entry[], places: Place
 
 const FIELDS = [
   "name", "title", "from", "to", "location", "startDate", "startTime", "endDate", "endTime", "ref", "seat", "conf",
-  "notes", "airline", "terminal", "gate", "baggage", "room", "guests", "bookedVia", "price", "phone",
+  "notes", "airline", "terminal", "gate", "baggage", "room", "guests", "bookedVia", "price", "paid", "phone",
 ] as const;
 type Field = (typeof FIELDS)[number];
 type Form = Record<Field, string> & { kind: FormKind; type: Kind; orig: Entry | null };
@@ -486,6 +489,9 @@ export default function TravelsClient() {
   const trip = view === "trip" ? (trips.find((t) => t.trip.id === activeId) ?? null) : null;
   const entries = trip ? toEntries(trip) : [];
   const places = trip ? placesOf(trip) : [];
+  // Every trip's entries: what the entry form's autocomplete offers.
+  const stays = trips.flatMap((t) => t.accommodations);
+  const activities = trips.flatMap((t) => t.itinerary);
   const detail = entries.find((e) => e.key === drawerKey) ?? null;
   const inTrip = (iso: string) => !!trip && iso >= trip.trip.start_date && iso <= trip.trip.end_date;
 
@@ -558,10 +564,13 @@ export default function TravelsClient() {
       const o = f.orig;
       const tid = trip.trip.id;
       const endDate = f.endDate > f.startDate ? f.endDate : "";
+      // A location picked from the suggestions keeps the map link it was saved with.
+      const location = f.location.trim();
+      const reused = location === o?.location ? null : [...stays, ...activities].find((r) => r.location_name === location && r.location_map_url);
       const [from, to, loc] = await Promise.all([
         placeOf(f.from, o?.from ?? "", o?.fromMapUrl ?? "", o?.fromCity ?? "", o?.fromCountry ?? ""),
         placeOf(f.to, o?.to ?? "", o?.toMapUrl ?? "", o?.toCity ?? "", o?.toCountry ?? ""),
-        placeOf(f.location, o?.location ?? "", o?.locationMapUrl ?? "", "", ""),
+        placeOf(f.location, reused?.location_name ?? o?.location ?? "", reused?.location_map_url ?? o?.locationMapUrl ?? "", "", ""),
       ]);
       const ends = {
         from_location: n(from.name), from_map_url: n(from.url), from_city: n(from.city), from_country: n(from.country),
@@ -603,7 +612,7 @@ export default function TravelsClient() {
           checkin_time: startTime, checkout_time: endTime, booking_confirmation: n(f.conf),
           instructions: o?.instructions || null, location_name: n(loc.name), location_map_url: n(loc.url),
           notes: n(f.notes), room: n(f.room), guests: n(f.guests), phone: n(f.phone), booked_via: n(f.bookedVia),
-          price: n(f.price),
+          price: n(f.price), paid_price: n(f.paid),
         };
         d = o ? await updateTravelAccommodation(tid, o.id, body) : await createTravelAccommodation(tid, body);
       }
@@ -656,6 +665,16 @@ export default function TravelsClient() {
   };
   const txt = (k: Field, placeholder: string) => (
     <input className={`${INPUT} py-[9px]`} value={f[k]} onChange={on(k)} placeholder={placeholder} />
+  );
+  const suggest = (k: Field, placeholder: string, past: (string | null)[]) => (
+    <SuggestInput
+      className={`${INPUT} py-[9px]`}
+      popoverClassName={POPOVER}
+      value={f[k]}
+      onChange={(v) => setF((x) => ({ ...x, [k]: v }))}
+      suggestions={past}
+      placeholder={placeholder}
+    />
   );
   const dateTime = (k: Field, type: "date" | "time") => (
     <input type={type} className={`${INPUT} py-2`} value={f[k]} onChange={on(k)} />
@@ -979,7 +998,9 @@ export default function TravelsClient() {
         ["ROOM", e.room],
         ["GUESTS", e.guests],
         ["BOOKED VIA", e.bookedVia],
-        ["PRICE", e.price],
+        [stay ? "TOTAL PRICE" : "PRICE", e.price],
+        ["PAID", e.paid],
+        ["PAYABLE TO PROPERTY", remainingPrice(e.price, e.paid)],
         ["PHONE", e.phone],
         ["CONFIRMATION", e.conf],
       ] as const
@@ -1187,9 +1208,17 @@ export default function TravelsClient() {
             </div>
           )}
           <FormField label={route ? "Title (optional)" : "Name"}>
-            {txt("title", route ? "Defaults to From → To" : f.kind === "stay" ? "e.g. Luk Hostel" : "e.g. Cooking class")}
+            {route
+              ? txt("title", "Defaults to From → To")
+              : f.kind === "stay"
+                ? suggest("title", "e.g. Luk Hostel", stays.map((a) => a.name))
+                : suggest("title", "e.g. Cooking class", activities.map((i) => i.activity))}
           </FormField>
-          {!route && <FormField label="Location">{txt("location", "Address or place name")}</FormField>}
+          {!route && (
+            <FormField label="Location">
+              {suggest("location", "Address or place name", (f.kind === "stay" ? stays : activities).map((r) => r.location_name))}
+            </FormField>
+          )}
           <div className="grid grid-cols-[1.3fr_1fr] gap-2.5">
             <FormField label={`${startCap} date`}>
               <DatePickerField
@@ -1239,7 +1268,7 @@ export default function TravelsClient() {
             )}
             {f.kind === "stay" && (
               <>
-                <FormField label="Room">{txt("room", "e.g. Deluxe Double")}</FormField>
+                <FormField label="Room">{suggest("room", "e.g. Deluxe Double", stays.map((a) => a.room))}</FormField>
                 <FormField label="Guests">{txt("guests", "e.g. 2 adults")}</FormField>
                 <FormField wide label="Phone">
                   {txt("phone", "Property contact")}
@@ -1248,8 +1277,26 @@ export default function TravelsClient() {
             )}
             {!route && (
               <>
-                <FormField label="Booked via">{txt("bookedVia", "e.g. Agoda")}</FormField>
-                <FormField label="Price">{txt("price", "e.g. THB 4,200 · paid")}</FormField>
+                <FormField wide={f.kind === "stay"} label="Booked via">
+                  {suggest("bookedVia", "e.g. Agoda", [...stays, ...activities].map((r) => r.booked_via))}
+                </FormField>
+                {f.kind === "stay" ? (
+                  <>
+                    <FormField label="Total price">{txt("price", "e.g. THB 4,200")}</FormField>
+                    <FormField label="Paid (initial)">{txt("paid", "e.g. THB 1,000")}</FormField>
+                    <FormField wide label="Payable to property (remaining)">
+                      <input
+                        readOnly
+                        tabIndex={-1}
+                        className={`${INPUT} cursor-default py-[9px] font-semibold`}
+                        value={remainingPrice(f.price, f.paid)}
+                        placeholder="Total minus paid"
+                      />
+                    </FormField>
+                  </>
+                ) : (
+                  <FormField label="Price">{txt("price", "e.g. THB 4,200 · paid")}</FormField>
+                )}
               </>
             )}
             <FormField wide label="Confirmation #">
