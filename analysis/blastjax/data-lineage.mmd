@@ -1,0 +1,81 @@
+graph LR
+  auth["Auth & Users"]
+  shell["Shell, Dashboard & Search"]
+  income["Income"]
+  calendar["Budget Calendar"]
+  monthly["Monthly Expenses"]
+  bills["Bills"]
+  debt["Debt"]
+  health["Health"]
+  travel["Travel"]
+  lotto["Lotto"]
+  infra["Infra & Data"]
+  ds_app_user[("app_user")]
+  ds_app_user_passkey[("app_user_passkey")]
+  ds_app_user_session[("app_user_session")]
+  ds_bill[("bill")]
+  ds_bill_category[("bill_category")]
+  ds_blood_pressure[("blood_pressure")]
+  ds_calendar_day_override[("calendar_day_override")]
+  ds_company[("company")]
+  ds_credit_card[("credit_card")]
+  ds_credit_card_payment[("credit_card_payment")]
+  ds_fixed_expense[("fixed_expense")]
+  ds_house_payment[("house_payment")]
+  ds_house_payment_entry[("house_payment_entry")]
+  ds_installment[("installment")]
+  ds_installment_line[("installment_line")]
+  ds_lotto_attempt[("lotto_attempt")]
+  ds_lotto_draw[("lotto_draw")]
+  ds_lotto_game[("lotto_game")]
+  ds_monthly_expense[("monthly_expense")]
+  ds_pay_period_start_override[("pay_period_start_override")]
+  ds_payslip[("payslip")]
+  ds_payslip_default[("payslip_default")]
+  ds_payslip_default_settings[("payslip_default_settings")]
+  ds_redis[("Redis cache")]
+  ds_travel_accommodation[("travel_accommodation")]
+  ds_travel_city[("travel_city")]
+  ds_travel_flight[("travel_flight")]
+  ds_travel_itinerary[("travel_itinerary")]
+  ds_travel_transport[("travel_transport")]
+  ds_travel_trip[("travel_trip")]
+  auth ==>|write| ds_app_user
+  auth ==>|write| ds_app_user_passkey
+  auth ==>|write| ds_app_user_session
+  bills ==>|write| ds_bill
+  bills ==>|write| ds_bill_category
+  calendar ==>|write| ds_calendar_day_override
+  calendar ==>|write| ds_fixed_expense
+  calendar ==>|write| ds_pay_period_start_override
+  debt -.->|read| ds_bill
+  debt ==>|write| ds_credit_card
+  debt ==>|write| ds_credit_card_payment
+  debt ==>|write| ds_fixed_expense
+  debt ==>|write| ds_house_payment
+  debt ==>|write| ds_house_payment_entry
+  debt ==>|write| ds_installment
+  debt ==>|write| ds_installment_line
+  health ==>|write| ds_blood_pressure
+  income ==>|write| ds_company
+  income ==>|write| ds_payslip
+  income ==>|write| ds_payslip_default
+  income ==>|write| ds_payslip_default_settings
+  infra ==>|write| ds_redis
+  lotto ==>|write| ds_lotto_attempt
+  lotto ==>|write| ds_lotto_draw
+  lotto -.->|read| ds_lotto_game
+  monthly ==>|write| ds_monthly_expense
+  shell -.->|read| ds_bill_category
+  shell -.->|read| ds_credit_card
+  shell -.->|read| ds_fixed_expense
+  shell -.->|read| ds_house_payment
+  shell -.->|read| ds_installment
+  shell -.->|read| ds_monthly_expense
+  shell -.->|read| ds_travel_trip
+  travel ==>|write| ds_travel_accommodation
+  travel ==>|write| ds_travel_city
+  travel ==>|write| ds_travel_flight
+  travel ==>|write| ds_travel_itinerary
+  travel ==>|write| ds_travel_transport
+  travel ==>|write| ds_travel_trip

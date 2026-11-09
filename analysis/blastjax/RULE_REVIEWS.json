@@ -1,0 +1,191 @@
+{
+ "system": "blastjax",
+ "version": 1,
+ "reviews": {
+  "RULE-002": {
+   "verdict": "confirmed",
+   "at": "2026-11-09T07:20:42+00:00",
+   "title": "Login is off until the first user exists"
+  },
+  "RULE-003": {
+   "verdict": "confirmed",
+   "at": "2026-11-09T07:20:42+00:00",
+   "title": "User admin has no server-side authorization"
+  },
+  "RULE-004": {
+   "verdict": "confirmed",
+   "at": "2026-11-09T07:20:42+00:00",
+   "title": "Page restrictions are enforced only in the browser"
+  },
+  "RULE-005": {
+   "verdict": "confirmed",
+   "at": "2026-11-09T07:20:42+00:00",
+   "title": "Deleting the last user turns login off"
+  },
+  "RULE-006": {
+   "verdict": "confirmed",
+   "at": "2026-11-09T07:20:42+00:00",
+   "title": "Login lockout after 8 failures per address"
+  },
+  "RULE-007": {
+   "verdict": "confirmed",
+   "at": "2026-11-09T07:20:42+00:00",
+   "title": "The password-check endpoint is not throttled"
+  },
+  "RULE-008": {
+   "verdict": "confirmed",
+   "at": "2026-11-09T07:20:42+00:00",
+   "title": "Sessions never expire and survive password changes"
+  },
+  "RULE-009": {
+   "verdict": "confirmed",
+   "at": "2026-11-09T07:20:42+00:00",
+   "title": "Passkey login: own origin, one-use 5-minute challenge"
+  },
+  "RULE-010": {
+   "verdict": "confirmed",
+   "at": "2026-11-09T08:13:53+00:00",
+   "title": "Deleting a bill category deletes its bills"
+  },
+  "RULE-011": {
+   "verdict": "confirmed",
+   "at": "2026-11-09T08:13:53+00:00",
+   "title": "Deleting a card drops payments, keeps budget lines"
+  },
+  "RULE-013": {
+   "verdict": "confirmed",
+   "at": "2026-11-09T08:13:53+00:00",
+   "title": "Upload size and type limits"
+  },
+  "RULE-014": {
+   "verdict": "confirmed",
+   "at": "2026-11-09T08:13:53+00:00",
+   "title": "A company in use can't be deleted (by name only)"
+  },
+  "RULE-016": {
+   "verdict": "confirmed",
+   "at": "2026-11-09T08:13:53+00:00",
+   "title": "Pay-period start overrides stay within bounds"
+  },
+  "RULE-017": {
+   "verdict": "confirmed",
+   "at": "2026-11-09T08:13:53+00:00",
+   "title": "Credit card setup limits"
+  },
+  "RULE-018": {
+   "verdict": "confirmed",
+   "at": "2026-11-09T08:13:53+00:00",
+   "title": "Card payments are positive and filed to a pay period"
+  },
+  "RULE-019": {
+   "verdict": "confirmed",
+   "at": "2026-11-09T08:13:53+00:00",
+   "title": "Moving budget between days is checked only in the browser"
+  },
+  "RULE-021": {
+   "verdict": "confirmed",
+   "at": "2026-11-09T08:13:53+00:00",
+   "title": "Monthly expense amounts, periods and month keys"
+  },
+  "RULE-022": {
+   "verdict": "confirmed",
+   "at": "2026-11-09T08:13:53+00:00",
+   "title": "Bill period order and minimum-due ceiling"
+  },
+  "RULE-023": {
+   "verdict": "confirmed",
+   "at": "2026-11-09T08:13:53+00:00",
+   "title": "Installment counts and remaining balance"
+  },
+  "RULE-024": {
+   "verdict": "confirmed",
+   "at": "2026-11-09T08:13:53+00:00",
+   "title": "Installment payment only while one is owed"
+  },
+  "RULE-026": {
+   "verdict": "confirmed",
+   "at": "2026-11-09T09:22:57+00:00",
+   "title": "Pay-period boundaries follow payday"
+  },
+  "RULE-027": {
+   "verdict": "confirmed",
+   "at": "2026-11-09T09:22:57+00:00",
+   "title": "Daily budget from the funding payslip"
+  },
+  "RULE-029": {
+   "verdict": "confirmed",
+   "at": "2026-11-09T09:22:57+00:00",
+   "title": "Off-budget months: charged to a card or skipped"
+  },
+  "RULE-030": {
+   "verdict": "confirmed",
+   "at": "2026-11-09T09:22:57+00:00",
+   "title": "Off-calendar changes spread over pinned days; shortfall banked"
+  },
+  "RULE-034": {
+   "verdict": "confirmed",
+   "at": "2026-11-09T09:22:57+00:00",
+   "title": "A period's savings carry over to the next"
+  },
+  "RULE-035": {
+   "verdict": "confirmed",
+   "at": "2026-11-09T09:22:57+00:00",
+   "title": "Calendar fixed entries rebalance the period's days"
+  },
+  "RULE-036": {
+   "verdict": "confirmed",
+   "at": "2026-11-09T09:22:57+00:00",
+   "title": "Installment line totals and plan aggregates"
+  },
+  "RULE-037": {
+   "verdict": "confirmed",
+   "at": "2026-11-09T09:22:57+00:00",
+   "title": "Installment due this month and monthly total"
+  },
+  "RULE-039": {
+   "verdict": "confirmed",
+   "at": "2026-11-09T09:22:57+00:00",
+   "title": "Card dues this month"
+  },
+  "RULE-048": {
+   "verdict": "confirmed",
+   "at": "2026-11-09T09:22:57+00:00",
+   "title": "Calendar edits of a card-payment line don't touch the payment"
+  },
+  "RULE-049": {
+   "verdict": "confirmed",
+   "at": "2026-11-09T09:22:57+00:00",
+   "title": "\"Paid\" on a monthly expense logs or deletes a house-payment entry"
+  },
+  "RULE-050": {
+   "verdict": "confirmed",
+   "at": "2026-11-09T09:22:57+00:00",
+   "title": "Changing an installment's count resets its schedule"
+  },
+  "RULE-051": {
+   "verdict": "confirmed",
+   "at": "2026-11-09T09:24:15+00:00",
+   "title": "A covering card payment auto-advances installments, never undone"
+  },
+  "RULE-052": {
+   "verdict": "confirmed",
+   "at": "2026-11-09T09:24:15+00:00",
+   "title": "A typed statement resets the balance; linked cards never reset"
+  },
+  "RULE-053": {
+   "verdict": "confirmed",
+   "at": "2026-11-09T09:24:15+00:00",
+   "title": "A write clears its cache namespaces and linked ones"
+  },
+  "RULE-054": {
+   "verdict": "confirmed",
+   "at": "2026-11-09T09:24:15+00:00",
+   "title": "Deploy order: tests, migration, flush, schema sync, start"
+  },
+  "RULE-055": {
+   "verdict": "confirmed",
+   "at": "2026-11-09T09:24:15+00:00",
+   "title": "API start syncs schema, seeds games, wipes the cache"
+  }
+ }
+}

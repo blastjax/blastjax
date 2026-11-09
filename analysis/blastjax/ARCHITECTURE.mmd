@@ -1,0 +1,57 @@
+graph TD
+  subgraph PLAT["Platform / Auth"]
+    AUTH["Auth & Users"]
+    SHELL["Shell, Dashboard & Search"]
+  end
+  subgraph FIN["Finance"]
+    INC["Income: Payslips & Companies"]
+    CAL["Budget Calendar + payPeriods.ts"]
+    MON["Monthly Expenses"]
+    BILL["Bills"]
+    DEBT["Debt: Cards, Installments, House"]
+  end
+  subgraph LIFE["Lifestyle"]
+    BP["Health: Blood Pressure"]
+    TRV["Travel"]
+  end
+  subgraph EXTRA["Games & Extras"]
+    GAME["Games: Mosaic, Mambo, Mastermind, Sets"]
+    LOT["Lotto + lotto-scraper.py"]
+  end
+  subgraph INFSG["Infra & Data"]
+    INFRA["factory.py, db.py, schema.py, cache.py"]
+    OPS["Docker, Caddy, CI deploy.yml"]
+  end
+
+  AUTH -->|"require_session"| FIN
+  AUTH -->|"require_session"| LIFE
+  AUTH -->|"require_session"| EXTRA
+  AUTH -->|"imports cors_allow_origins"| INFRA
+  INFRA -.->|"users write: forget_login_required"| AUTH
+  SHELL -->|"AuthGate"| AUTH
+  SHELL -->|"search_records + HomeOverview"| FIN
+  SHELL -->|"search + overview"| TRV
+  SHELL -->|"HomeOverview"| BP
+  CAL -->|"getPayslips"| INC
+  CAL -->|"getMonthlyExpenses"| MON
+  CAL -->|"getBills"| BILL
+  CAL -->|"getCreditCards"| DEBT
+  CAL -->|"getTravelTrips"| TRV
+  MON -->|"FK bill_category_id"| BILL
+  MON -->|"FK house_payment_id, entries"| DEBT
+  MON -->|"payPeriods.ts"| CAL
+  BILL -->|"payPeriods.ts"| CAL
+  BILL -->|"getMonthlyExpenses"| MON
+  DEBT -->|"payPeriods.ts budget_changes"| CAL
+  DEBT -->|"payment writes fixed_expense"| CAL
+  DEBT -->|"card reads latest bill"| BILL
+  INC -->|"bill_extract.pdf_text"| BILL
+  BILL -.->|"cache: invalidates credit_card"| DEBT
+  BILL -.->|"cache: invalidates monthly_expense"| MON
+  DEBT -.->|"cache: house_payment to monthly_expense"| MON
+  DEBT -.->|"cache: credit_card to fixed_expense"| CAL
+  FIN --> INFRA
+  LIFE --> INFRA
+  LOT --> INFRA
+  GAME -->|"require_session only"| AUTH
+  OPS --> INFRA

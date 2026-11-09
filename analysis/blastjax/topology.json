@@ -1,0 +1,4260 @@
+{
+ "system": "blastjax",
+ "root": {
+  "id": "sys",
+  "name": "blastjax",
+  "kind": "system",
+  "children": [
+   {
+    "id": "dom:auth",
+    "name": "Auth & Users",
+    "kind": "domain",
+    "children": [
+     {
+      "id": "be:core:deps",
+      "name": "deps.py",
+      "kind": "module",
+      "language": "python",
+      "loc": 32,
+      "file": "backend/app/deps.py",
+      "description": "deps.py is the backend's shared gatekeeper for incoming requests. It rejects calls with 503 when DATABASE_URL is not set. When login is required and the bearer session token is invalid, it returns 401 \"Login required.\" It also checks uploaded files: PDF files only, or PNG or JPEG photos too when images=True, up to 10 MB. Empty or wrong-type files get 400 and oversized ones get 413. It calls db.py and security.py, and is called by factory.py, test_core.py and routers including bill.py, payslip.py, credit_card.py, travel.py and user.py."
+     },
+     {
+      "id": "be:core:passwords",
+      "name": "passwords.py",
+      "kind": "module",
+      "language": "python",
+      "loc": 11,
+      "file": "backend/app/passwords.py",
+      "description": "passwords.py (backend/app/passwords.py) is an 11-line Python module that protects user passwords. hash_password turns a plain password into a hash using the argon2 library's PasswordHasher. verify_password checks a submitted password against an existing hash and returns False instead of raising an error when argon2 reports VerifyMismatchError or InvalidHash. The module does not read or write any data itself, and the packet lists no outgoing connections to other modules. It is called by routers/auth.py (be:router:auth) and routers/user.py (be:router:user)."
+     },
+     {
+      "id": "be:core:security",
+      "name": "security.py",
+      "kind": "module",
+      "language": "python",
+      "loc": 117,
+      "file": "backend/app/security.py",
+      "description": "security.py is the dashboard's login gatekeeper. It decides whether sign-in is required at all: only once an app user exists, and never when BUDGET_DISABLE_AUTH is set. It issues session tokens that last until logout and stores only their hash. It resolves tokens to a user through a 5-minute cache, revokes sessions on logout, and reports too many failed attempts after 8 per client IP within 15 minutes. It calls cache.py and db.py, reads app_user and app_user_session, writes app_user_session, and is called by deps.py, factory.py, test_core.py and routers/auth.py."
+     },
+     {
+      "id": "be:router:auth",
+      "name": "routers/auth.py",
+      "kind": "module",
+      "language": "python",
+      "loc": 199,
+      "file": "backend/app/routers/auth.py",
+      "description": "routers/auth.py is the Blastjax sign-in gate and serves routes under /api/auth. It reports whether login is required and signs users in with a username and password or with a passkey. Once an IP has too many failed attempts it answers 429, and on success it issues a session token. It also exposes passkey registration routes. It calls security.py, passwords.py, factory.py, schemas/ and db.py, reads app_user and app_user_passkey, and writes app_user_passkey. factory.py, test_core.py, AuthGate.tsx, SidebarNav.tsx, lib/api.ts and /settings call or dispatch to it."
+     },
+     {
+      "id": "be:router:user",
+      "name": "routers/user.py",
+      "kind": "module",
+      "language": "python",
+      "loc": 60,
+      "file": "backend/app/routers/user.py",
+      "description": "The routers/user.py module manages the dashboard's user accounts under /api/users: listing users, creating them with hashed passwords, verifying a username and password, updating usernames or passwords, setting is_superuser and allowed_pages access, and deleting users; it returns 409 for a taken username and 404 for missing users. It calls db.py, deps.py (require_db), passwords.py and the Pydantic schemas/, and reads and writes the app_user data store. It is called by factory.py and dispatched from lib/api.ts and the /settings page."
+     },
+     {
+      "id": "web:components:AuthGate",
+      "name": "components/AuthGate.tsx",
+      "kind": "module",
+      "language": "typescript",
+      "loc": 211,
+      "file": "web/src/components/AuthGate.tsx",
+      "description": "AuthGate is the login wall for the Blastjax web app. It checks /api/auth/status with the stored session token. Then it either shows the app, shows an unreachable message, or asks the user to log in with a username/password or a passkey. It saves the new token through setSessionToken and shares the signed-in user's page access through useCurrentUser. It dispatches to routers/auth.py through /api/auth/login and /api/auth/passkey/login, and calls lib/api.ts, lib/auth.ts, lib/nav.ts and lib/ui.ts. It is called by AppShell.tsx, Header.tsx, HomeOverview.tsx, SidebarNav.tsx, the Home page, layout + error and /settings."
+     },
+     {
+      "id": "web:lib:auth",
+      "name": "lib/auth.ts",
+      "kind": "module",
+      "language": "typescript",
+      "loc": 37,
+      "file": "web/src/lib/auth.ts",
+      "description": "lib/auth.ts is the web app's browser-side sign-in helper, 37 lines of TypeScript. It keeps the user's session token in localStorage under the budget-session key (getSessionToken, setSessionToken, clearSessionToken), checks whether the browser supports passkeys (passkeysSupported), and turns passkey failures such as a cancelled request into readable messages (passkeyErrorMessage). It also exports the AUTH_UNAUTHORIZED_EVENT name. It has no outgoing connections. It is called by components/AuthGate.tsx, components/SidebarNav.tsx, lib/api.ts and /settings."
+     }
+    ]
+   },
+   {
+    "id": "dom:shell",
+    "name": "Shell, Dashboard & Search",
+    "kind": "domain",
+    "children": [
+     {
+      "id": "be:router:search",
+      "name": "routers/search.py",
+      "kind": "module",
+      "language": "python",
+      "loc": 9,
+      "file": "backend/app/routers/search.py",
+      "description": "This module provides the dashboard's search feature through one endpoint, GET /api/search. It takes a query string q of 2 to 100 characters, trims it and returns the matching results. It calls search_records in db.py and applies require_db from deps.py to every request. It reads bill_category, credit_card, fixed_expense, house_payment, installment, monthly_expense and travel_trip. It is called by factory.py, and requests reach it from components/Header.tsx and lib/api.ts."
+     },
+     {
+      "id": "web:components:AmountInput",
+      "name": "components/AmountInput.tsx",
+      "kind": "module",
+      "language": "typescript",
+      "loc": 78,
+      "file": "web/src/components/AmountInput.tsx",
+      "description": "AmountInput is the shared money-entry field used across the finance forms. In its default \"amount\" mode it formats the typed value on blur. In \"expression\" mode it works as a small calculator: it offers Plus, Minus, Times and Divided by buttons and shows a running total such as \"= 210.00\" while a sum is typed. It calls lib/parseFormNumber.ts (evaluateAmountExpression, formatAmountOnBlur) and lib/ui.ts styling, and is called by /bills, /calendar, /credit-card, /house-payments, /installments, /lotto, /monthly-expenses and /payslip."
+     },
+     {
+      "id": "web:components:AppShell",
+      "name": "components/AppShell.tsx",
+      "kind": "module",
+      "language": "typescript",
+      "loc": 57,
+      "file": "web/src/components/AppShell.tsx",
+      "description": "AppShell is the shared page frame of the web app. It lays out SidebarNav, a mobile navigation backdrop, the Header and the main content area. It also guards page access: when isPageAllowed rejects the current pathname for the current user, it shows no page content and redirects to \"/\". It calls AuthGate (useCurrentUser), Header, SidebarNav, lib/nav (isPageAllowed) and lib/shellLayoutContext (ShellLayoutProvider, useShellLayout), wrapping everything in Suspense. It is called by layout + error (web:layout)."
+     },
+     {
+      "id": "web:components:ConfirmDialog",
+      "name": "components/ConfirmDialog.tsx",
+      "kind": "module",
+      "language": "typescript",
+      "loc": 59,
+      "file": "web/src/components/ConfirmDialog.tsx",
+      "description": "ConfirmDialog is the dashboard's in-app replacement for window.confirm(): confirmDialog(message, confirmLabel) returns a Promise that resolves true when the user confirms, defaulting the button label to \"Delete\". ConfirmHost shows the question in a Modal with Cancel and a danger-styled confirm button, and Escape cancels only this dialog; if no host is mounted it falls back to window.confirm. It calls FinanceUI, Modal and lib/ui, and is called by layout + error plus pages including /bills, /credit-card, /house-payments, /payslip, /settings and /travels."
+     },
+     {
+      "id": "web:components:DatePickerField",
+      "name": "components/DatePickerField.tsx",
+      "kind": "module",
+      "language": "typescript",
+      "loc": 99,
+      "file": "web/src/components/DatePickerField.tsx",
+      "description": "DatePickerField is the shared date-selection control used across the household-finance pages. It shows the chosen day as a readable label and opens a calendar popover titled \"Choose a date\". It passes the picked day back as an ISO date string, can block days outside minDate/maxDate, and can show a range starting at rangeFrom. It calls CalendarMonth, PickerField and lib/dateFormat (parseDateOnlyLocal, toIsoDateLocal). It is called by /bills, /calendar, /credit-card, /house-payments, /lotto, /monthly-expenses and /travels. It stores nothing itself; picks and clears go out through onChange."
+     },
+     {
+      "id": "web:components:DateRangePickerField",
+      "name": "components/DateRangePickerField.tsx",
+      "kind": "module",
+      "language": "typescript",
+      "loc": 101,
+      "file": "web/src/components/DateRangePickerField.tsx",
+      "description": "DateRangePickerField is a client-side form control that lets the user choose a start and end date. It shows two side-by-side CalendarMonth grids inside a PickerField popover labelled \"Choose a date range\". On narrow screens it shows one grid plus a \"Next month \u203a\" button. The first click sets the start date and the second sets the end date, swapping them if the second is earlier. It calls CalendarMonth, PickerField, dateFormat (addMonths, formatDate, toIsoDateLocal) and ui (ACTION_BUTTON_CLASSES). It sends picks back through onChange and is called by /bills."
+     },
+     {
+      "id": "web:components:ErrorAlert",
+      "name": "components/ErrorAlert.tsx",
+      "kind": "module",
+      "language": "typescript",
+      "loc": 21,
+      "file": "web/src/components/ErrorAlert.tsx",
+      "description": "ErrorAlert (web/src/components/ErrorAlert.tsx, 21 lines of typescript) is the dashboard's shared error banner that users can dismiss. It shows its children inside a role=\"alert\" box styled with ERROR_ALERT_CLASSES, plus a \"Dismiss error\" button with a CloseIcon. After the user dismisses it, it stays hidden until the children change. It calls components/Icons.tsx and lib/ui.ts. The /bills, /blood-pressure, /calendar, /commission, /credit-card, /house-payments, /installments, /lotto, /monthly-expenses, /payslip, /salary-stats and /settings pages call it, and so does components/CompanyRedirect.tsx."
+     },
+     {
+      "id": "web:components:FinanceUI",
+      "name": "components/FinanceUI.tsx",
+      "kind": "module",
+      "language": "typescript",
+      "loc": 376,
+      "file": "web/src/components/FinanceUI.tsx",
+      "description": "FinanceUI is the dashboard's kit of presentation components (376 lines of TypeScript): Panel sections, StatStrip, Metric figures that wrap instead of truncating so amount digits stay visible, Meter progress bars and Segmented option controls, styled with neutral, brand, success, warning and danger tones. It calls components/Icons.tsx, formatMonthYear from lib/dateFormat.ts and INPUT_CLASSES from lib/ui.ts. It is called by pages including /bills, /calendar, /credit-card, /monthly-expenses, /payslip, /salary-stats and /settings, plus ConfirmDialog, HomeOverview and Modal components."
+     },
+     {
+      "id": "web:components:Header",
+      "name": "components/Header.tsx",
+      "kind": "module",
+      "language": "typescript",
+      "loc": 219,
+      "file": "web/src/components/Header.tsx",
+      "description": "Header (web/src/components/Header.tsx, 219 lines) renders the dashboard's header. Its excerpted part, NavSearch, is a \u2318K-focusable box for searching pages, bills, expenses and more. After 200 ms, queries of at least 2 characters go to searchRecords in lib/api.ts, with a dispatch edge to routers/search.py. Record hits are filtered by isPageAllowed for the useCurrentUser user, merged with searchDestinations matches from lib/nav.ts, and opened via router.push. It also calls ThemeProvider, Icons, shellLayoutContext and ui, and AppShell calls it. Only the first 150 lines were excerpted."
+     },
+     {
+      "id": "web:components:HomeOverview",
+      "name": "components/HomeOverview.tsx",
+      "kind": "module",
+      "language": "typescript",
+      "loc": 209,
+      "file": "web/src/components/HomeOverview.tsx",
+      "description": "HomeOverview is the Home page's summary panel. It shows today's budget, money left to spend, card balances and unpaid card dues, up to 6 reminders due within 14 days, the next unfinished travel trip and a blood-pressure reading, and isPageAllowed hides sections the user cannot see. It calls lib/api.ts functions such as getBills, getPayslips, getCreditCards and getTravelTrips, which dispatch to routers including bill.py, payslip.py, credit_card.py and travel.py. It also calls payPeriods.ts, FinanceUI.tsx and AuthGate.tsx. If a source fails to load, it just drops out. The Home page calls it."
+     },
+     {
+      "id": "web:components:Icons",
+      "name": "components/Icons.tsx",
+      "kind": "module",
+      "language": "typescript",
+      "loc": 302,
+      "file": "web/src/components/Icons.tsx",
+      "description": "components/Icons.tsx is the dashboard's shared icon library. It is 302 lines of TypeScript that export outline SVG icons such as CalendarIcon, WalletIcon, CreditCardIcon, ReceiptIcon, HomeIcon and PlaneIcon. Every icon is drawn through one Svg wrapper (viewBox 0 0 24 24, default className size-5, aria-hidden), so all pages show the same visual style. It has no outgoing connections. It is called by shared components including SidebarNav.tsx, Header.tsx, PageHeader.tsx and FinanceUI.tsx, by lib/nav.ts, and by pages such as /bills, /credit-card, /payslip and /lotto."
+     },
+     {
+      "id": "web:components:Modal",
+      "name": "components/Modal.tsx",
+      "kind": "module",
+      "language": "typescript",
+      "loc": 55,
+      "file": "web/src/components/Modal.tsx",
+      "description": "Modal is the shared pop-up dialog shell used across the app's screens. When open, it dims the page with a blurred backdrop and shows its children in a dialog styled with FinanceUI's DIALOG_CLASSES (max-w-lg by default). It calls onClose when the user presses Escape or clicks the backdrop. It calls components/FinanceUI.tsx and does not read or write any data. ConfirmDialog calls it, and so do the /bills, /blood-pressure, /calendar, /credit-card, /house-payments, /installments, /lotto, /monthly-expenses, /payslip and /travels pages."
+     },
+     {
+      "id": "web:components:MonthPickerField",
+      "name": "components/MonthPickerField.tsx",
+      "kind": "module",
+      "language": "typescript",
+      "loc": 46,
+      "file": "web/src/components/MonthPickerField.tsx",
+      "description": "MonthPickerField is a client-side form control that lets a user pick a single month, stored as a YYYY-MM string, and shows it as a readable month-and-year label with a \"Select month\" placeholder and an optional clear action. It wraps PickerField (a 320-wide popover titled \"Choose a month\") around MonthGrid from CalendarMonth, using formatMonthYear, monthKey and parseMonthKey from lib/dateFormat to convert values; selecting a month calls onChange and closes the popover. It is called by the /installments and /monthly-expenses pages."
+     },
+     {
+      "id": "web:components:PageHeader",
+      "name": "components/PageHeader.tsx",
+      "kind": "module",
+      "language": "typescript",
+      "loc": 67,
+      "file": "web/src/components/PageHeader.tsx",
+      "description": "PageHeader is the shared title bar for app pages. It shows a page title, an optional description and optional action controls, plus a breadcrumb trail built from the current pathname: Home, then an optional parent section, then the current page. It calls activeDestination from lib/nav.ts to work out the current destination's label and parent, and uses ChevronRightIcon from components/Icons.tsx as breadcrumb separators. Pages that call it include /bills, /calendar, /credit-card, /monthly-expenses, /payslip, /settings and /games/mastermind."
+     },
+     {
+      "id": "web:components:PickerField",
+      "name": "components/PickerField.tsx",
+      "kind": "module",
+      "language": "typescript",
+      "loc": 117,
+      "file": "web/src/components/PickerField.tsx",
+      "description": "PickerField is the shared trigger button and popover behind every date, date range, month and year picker. It shows the chosen label, or a placeholder, beside a CalendarIcon, opens a dialog narrowed to fit small screens, closes on an outside click or Escape, and offers an optional clear button. It calls components/Icons.tsx, lib/ui.ts and lib/usePopoverPosition.ts, and is called by DatePickerField, DateRangePickerField, MonthPickerField and YearPickerField. The packet shows no data reads or writes."
+     },
+     {
+      "id": "web:components:SidebarNav",
+      "name": "components/SidebarNav.tsx",
+      "kind": "module",
+      "language": "typescript",
+      "loc": 284,
+      "file": "web/src/components/SidebarNav.tsx",
+      "description": "SidebarNav (284 lines) is the web app's client-side navigation sidebar: it renders NAV_SECTIONS links with expandable child pages, marks the current page from usePathname, and has a collapsed rail view, mobile close and logout icons, plus company nav items. It calls lib/nav.ts, lib/api.ts (getCompanies, dataApiBase), lib/auth.ts (getSessionToken, clearSessionToken), AuthGate.tsx (useCurrentUser), shellLayoutContext.tsx, Icons.tsx and lib/ui.ts, and dispatches to routers/auth.py and routers/company.py. AppShell.tsx calls it. The packet shows only 150 lines, so logout and company-loading behaviour is inferred."
+     },
+     {
+      "id": "web:components:SuggestInput",
+      "name": "components/SuggestInput.tsx",
+      "kind": "module",
+      "language": "typescript",
+      "loc": 103,
+      "file": "web/src/components/SuggestInput.tsx",
+      "description": "SuggestInput is a free-text field that offers values entered before while still letting anything else be typed; the /travels page calls it. It drops blank suggestions, merges spellings that differ only by case, and shows at most 6 matching rows in a popover list driven by arrow keys, Enter and Escape. It calls usePopoverPosition (lib/usePopoverPosition.ts) to place that list and hands each picked value back to its caller through onChange; the packet shows it reading or writing no stored data."
+     },
+     {
+      "id": "web:components:ThemeInitScript",
+      "name": "components/ThemeInitScript.tsx",
+      "kind": "module",
+      "language": "typescript",
+      "loc": 15,
+      "file": "web/src/components/ThemeInitScript.tsx",
+      "description": "ThemeInitScript is a 15-line TypeScript component that sets the app's light or dark look by emitting an inline script. That script reads the saved choice from localStorage under BUDGET_THEME_STORAGE_KEY. If no explicit \"dark\" or \"light\" value is stored, it falls back to the browser's prefers-color-scheme setting. It then toggles the \"dark\" class on the document element and writes THEME_COLOR.light or THEME_COLOR.dark into every theme-color meta tag, silently ignoring errors. It calls lib/theme.ts for both constants, and layout + error (web:layout) calls it."
+     },
+     {
+      "id": "web:components:ThemeProvider",
+      "name": "components/ThemeProvider.tsx",
+      "kind": "module",
+      "language": "typescript",
+      "loc": 70,
+      "file": "web/src/components/ThemeProvider.tsx",
+      "description": "ThemeProvider is the web dashboard's light/dark theme switch. It holds the current BudgetTheme, which starts as \"light\" and is then resolved when the provider mounts. It keeps open tabs in sync by listening for storage events on BUDGET_THEME_STORAGE_KEY. It exposes setTheme, toggleTheme and the useTheme hook, which throws if used outside the provider. It calls lib/theme.ts for resolveInitialTheme, writeStoredTheme and applyThemeToDocument. It is called by /blood-pressure, components/Header.tsx, layout + error and /software-architecture."
+     },
+     {
+      "id": "web:components:TooltipLayer",
+      "name": "components/TooltipLayer.tsx",
+      "kind": "module",
+      "language": "typescript",
+      "loc": 95,
+      "file": "web/src/components/TooltipLayer.tsx",
+      "description": "TooltipLayer is the single app-wide tooltip for the web app: any element carrying data-tooltip shows its text on mouse hover after a 400 ms delay or immediately on keyboard focus, and hides on Escape, pointerdown, focusout, scroll or resize. It reads the element's data-tooltip text and its getBoundingClientRect position, renders a fixed app-tooltip box with role tooltip above or below the target with an 8-pixel GAP, and sets aria-describedby on the target. It has no outgoing connections and is called by layout + error (web:layout)."
+     },
+     {
+      "id": "web:components:YearMonthGrid",
+      "name": "components/YearMonthGrid.tsx",
+      "kind": "module",
+      "language": "typescript",
+      "loc": 134,
+      "file": "web/src/components/YearMonthGrid.tsx",
+      "description": "YearMonthGrid lays out one year as twelve month cards, a view shared by the payslip and bills pages. Its exports YearMonthGrid, EmptyMonth, MonthCard, AddSlotButton, MonthEntry and MonthLine supply the year header, empty and filled month cards, an add-slot button, clickable entries and label/value lines. It calls components/Icons.tsx for PlusIcon and lib/dateFormat.ts for MONTH_NAMES_FULL, and is called by /bills and /payslip. It reads and writes no data itself; callers supply content through renderMonth and click handlers."
+     },
+     {
+      "id": "web:components:YearPickerField",
+      "name": "components/YearPickerField.tsx",
+      "kind": "module",
+      "language": "typescript",
+      "loc": 45,
+      "file": "web/src/components/YearPickerField.tsx",
+      "description": "YearPickerField is a client-side form control that lets the user choose a year, showing the \"Select year\" placeholder when empty and a \"Choose a year\" popover. It takes a value string and reports the picked year, or an empty string on clear, through onChange; invalid values count as unselected and the grid opens on the current year. It calls PickerField for the 320-wide popover shell and YearGrid from CalendarMonth for the year grid, and is called by /payslip."
+     },
+     {
+      "id": "web:home",
+      "name": "Home page",
+      "kind": "module",
+      "language": "typescript",
+      "loc": 151,
+      "file": "web/src/app/page.tsx",
+      "description": "The Home page (web/src/app/page.tsx) is the dashboard's landing screen. It greets the user with \"Welcome back\", renders the HomeOverview component and shows cards for the Finances, Payslip, Health, Travels and Games areas. Some cards have \"Jump to\" shortcuts such as Monthly Expenses, Credit Cards and Bills. It calls useCurrentUser from AuthGate and keeps only the areas that isPageAllowed in lib/nav permits for the current user. It also uses Icons and CARD_CLASSES from lib/ui. The packet records no incoming connections."
+     },
+     {
+      "id": "web:layout",
+      "name": "layout + error",
+      "kind": "module",
+      "language": "typescript",
+      "loc": 100,
+      "file": "web/src/app/layout.tsx",
+      "description": "web:layout is the root page frame of the Blastjax web app, whose metadata describes it as \"Payslip calendar, loan schedules, health and travel\". It loads the Manrope and IBM_Plex_Mono fonts, sets light and dark theme colours from THEME_COLOR in lib/theme.ts, and adds a \"Skip to content\" link. It wraps every page in ThemeProvider, AuthGate and AppShell, and mounts ThemeInitScript, ConfirmHost from ConfirmDialog and TooltipLayer. The packet also lists a call to lib/ui.ts that the 67-line excerpt does not show. No incoming connections are recorded."
+     },
+     {
+      "id": "web:lib:dateFormat",
+      "name": "lib/dateFormat.ts",
+      "kind": "module",
+      "language": "typescript",
+      "loc": 123,
+      "file": "web/src/lib/dateFormat.ts",
+      "description": "lib/dateFormat.ts is the dashboard's shared date toolkit. It shows dates in en-US style, such as \"Oct 23, 2026\" or \"Friday, October 23, 2026\". It builds and parses year-month keys and moves between months with addMonths. It reads a bare calendar day as a local date, so the date does not slip to the previous day west of UTC. It has no outgoing connections. Pages such as /bills, /calendar, /credit-card, /payslip and /travels call it, as do lib/payPeriods.ts and components including FinanceUI.tsx, DatePickerField.tsx and YearMonthGrid.tsx."
+     },
+     {
+      "id": "web:lib:formatNumber",
+      "name": "lib/formatNumber.ts",
+      "kind": "module",
+      "language": "typescript",
+      "loc": 33,
+      "file": "web/src/lib/formatNumber.ts",
+      "description": "lib/formatNumber.ts is the dashboard's shared number formatter. fmtAmount and fmtAmountEnUs render money with 2 decimal places, fmtAmountOrDash shows a dash for non-finite values, fmtCount formats counts, fmtJackpotCompact shows large jackpots in millions with an \"M\" suffix, and fmtCompactMoney fits amounts into at most 4 characters, like \"4.8k\", for a phone calendar cell. It has no outgoing connections. It is called by /bills, /calendar, /commission, /credit-card, /house-payments, /installments, /lotto, /monthly-expenses, /payslip, /salary-stats, components/HomeOverview.tsx and lib/parseFormNumber.ts."
+     },
+     {
+      "id": "web:lib:nav",
+      "name": "lib/nav.ts",
+      "kind": "module",
+      "language": "typescript",
+      "loc": 204,
+      "file": "web/src/lib/nav.ts",
+      "description": "lib/nav.ts is the app's navigation catalogue: NAV_SECTIONS groups destinations under Finances (Calendar with Monthly Expenses, Credit Cards, Installments, House Payments, Bills), Health, Travels, Games and an untitled section holding Software Architecture and Settings. payslipNavItem builds per-company Payslip entries with optional Commission and Salary Stats children; NAV_DESTINATIONS flattens everything, and matchingNavHref and activeDestination resolve the current pathname. It calls only components/Icons.tsx and is called by AppShell, AuthGate, Header, HomeOverview, PageHeader, SidebarNav, the Home page and /settings."
+     },
+     {
+      "id": "web:lib:parseFormNumber",
+      "name": "lib/parseFormNumber.ts",
+      "kind": "module",
+      "language": "typescript",
+      "loc": 66,
+      "file": "web/src/lib/parseFormNumber.ts",
+      "description": "This module turns what a user types into an amount field into a usable number. parseFormNumber strips commas and rejects blank or sign-only input; formatAmountOnBlur reformats a valid entry; evaluateAmountExpression works like a small calculator, accepting +, -, \u00d7, \u00f7, ignoring a trailing operator still being typed, refusing division by zero, and rounding the result. It calls fmtAmountEnUs in lib/formatNumber.ts and is called by components/AmountInput.tsx, lib/remainingPrice.ts and the /bills, /calendar, /credit-card, /house-payments, /installments, /monthly-expenses and /payslip pages."
+     },
+     {
+      "id": "web:lib:shellLayoutContext",
+      "name": "lib/shellLayoutContext.tsx",
+      "kind": "module",
+      "language": "typescript",
+      "loc": 91,
+      "file": "web/src/lib/shellLayoutContext.tsx",
+      "description": "This 91-line client module holds the shell layout state of the blastjax dashboard: whether the sidebar is collapsed and whether the mobile navigation is open. ShellLayoutProvider reads and writes the collapsed flag in localStorage under blastjax:shell:sidebarCollapsed, closes mobile navigation once the viewport reaches min-width: 1024px, and locks page scrolling while it is open. Its useShellLayout hook throws an error outside the provider. It has no outgoing connections; components/AppShell.tsx, components/Header.tsx and components/SidebarNav.tsx call it."
+     },
+     {
+      "id": "web:lib:theme",
+      "name": "lib/theme.ts",
+      "kind": "module",
+      "language": "typescript",
+      "loc": 37,
+      "file": "web/src/lib/theme.ts",
+      "description": "lib/theme.ts manages the dashboard's light/dark display preference. readStoredTheme and writeStoredTheme keep the chosen BudgetTheme in browser localStorage under the key \"budget-theme\"; resolveInitialTheme falls back to the system prefers-color-scheme setting when nothing is stored; applyThemeToDocument toggles the \"dark\" class and sets theme-color meta tags from THEME_COLOR. It has no outgoing connections and is called by components/ThemeInitScript.tsx, components/ThemeProvider.tsx, layout + error, and /software-architecture."
+     },
+     {
+      "id": "web:lib:ui",
+      "name": "lib/ui.ts",
+      "kind": "module",
+      "language": "typescript",
+      "loc": 62,
+      "file": "web/src/lib/ui.ts",
+      "description": "lib/ui.ts is the shared styling vocabulary that keeps the web app looking uniform: exported class strings for page containers, cards matching FinanceUI's <Panel>, section labels, empty states, alerts via alertClasses (error, warning, success, info), primary, secondary, add, edit, delete, danger and toggle buttons, inputs, labels, chart zoom buttons, tables and file inputs. It has no outgoing connections and reads or writes no data. Callers include FinanceUI.tsx, ErrorAlert.tsx, ConfirmDialog.tsx, SidebarNav.tsx, layout + error, and pages such as /bills, /credit-card, /payslip, /settings and /games/mastermind."
+     },
+     {
+      "id": "web:lib:usePopoverPosition",
+      "name": "lib/usePopoverPosition.ts",
+      "kind": "module",
+      "language": "typescript",
+      "loc": 38,
+      "file": "web/src/lib/usePopoverPosition.ts",
+      "description": "usePopoverPosition is a 38-line client-side React hook. It keeps floating popovers next to the field that opens them without letting them spill off screen. Its openAt function measures the trigger element and keeps the left edge within a margin of 8. If there is not enough room below for estimatedHeight (default 360), it moves the popover above the trigger. An effect closes the popover when the window scrolls or resizes. It has no outgoing connections and reads or writes no data. PickerField and SuggestInput call it."
+     },
+     {
+      "id": "web:lib:useWheelStep",
+      "name": "lib/useWheelStep.ts",
+      "kind": "module",
+      "language": "typescript",
+      "loc": 22,
+      "file": "web/src/lib/useWheelStep.ts",
+      "description": "useWheelStep is a 22-line client-side React hook that lets a dashboard page step back or forward by turning the mouse wheel over an element. It returns a callback ref that attaches a non-passive wheel listener, ignores ctrl-modified or zero-delta scrolls, prevents default page scrolling, throttles to one step per 250 ms, and calls the supplied step function with -1 or 1. It has no outgoing connections and reads or writes no data; it is called by the /calendar, /commission, /payslip and /salary-stats pages."
+     },
+     {
+      "id": "web:settings",
+      "name": "/settings",
+      "kind": "module",
+      "language": "typescript",
+      "loc": 1239,
+      "file": "web/src/app/settings",
+      "description": "The /settings module (1239 lines of TypeScript in web/src/app/settings) is the dashboard's administration screen, with panels for users, companies, payslip defaults and passkeys. UsersSettingsPanel lists, creates, edits and deletes app users, checks user passwords, sets superuser status or allowed pages per user, and sets a minimum password length of 8. It calls lib/api.ts, lib/auth.ts, lib/nav.ts, lib/ui.ts, lib/dateFormat.ts and the shared components AuthGate, ConfirmDialog, ErrorAlert, FinanceUI and PageHeader, and dispatches to routers/auth.py, routers/company.py and routers/user.py. No incoming connections are recorded."
+     },
+     {
+      "id": "web:software-architecture",
+      "name": "/software-architecture",
+      "kind": "module",
+      "language": "typescript",
+      "loc": 67,
+      "file": "web/src/app/software-architecture",
+      "description": "The /software-architecture page shows the app's Software Architecture diagram: how a request reaches the API and the database, which APIs need a login, and what the app calls outside the server. Its 67 lines of typescript embed /software-architecture.html, rendered by archify, in an iframe, push the app's theme into it via data-theme, and lift the frame over the whole window while the viewer's Presentation Stage is on. It calls components Icons, PageHeader and ThemeProvider plus lib/theme and lib/ui; no incoming connections are recorded."
+     }
+    ]
+   },
+   {
+    "id": "dom:income",
+    "name": "Income",
+    "kind": "domain",
+    "children": [
+     {
+      "id": "be:router:company",
+      "name": "routers/company.py",
+      "kind": "module",
+      "language": "python",
+      "loc": 58,
+      "file": "backend/app/routers/company.py",
+      "description": "routers/company.py is the 58-line FastAPI router behind /api/companies. It lets the dashboard list, create, reorder, update and delete companies. It returns 409 when a company already exists or a delete is refused, and 404 when a company is not found. It calls db.py (list_companies, insert_company, reorder_companies, update_company, delete_company), require_db from deps.py and the Pydantic schemas/. It reads and writes company and reads payslip. factory.py calls it, and lib/api.ts, SidebarNav.tsx, CompanyRedirect.tsx, /payslip and /settings dispatch to it."
+     },
+     {
+      "id": "be:router:payslip",
+      "name": "routers/payslip.py",
+      "kind": "module",
+      "language": "python",
+      "loc": 178,
+      "file": "backend/app/routers/payslip.py",
+      "description": "routers/payslip.py is the FastAPI router for payslip records. It lists, fetches, creates and replaces payslips, bulk-imports them from nested JSON, and extracts fields from an uploaded Sophos payslip PDF. It calls cache.py to cache list and single-payslip reads, db.py to read and write payslip, deps.py for upload handling and the database guard, schemas/ (Pydantic) for PayslipCreate, and services/bill_extract.py and services/payslip_parse.py to get the PDF text and parse it. factory.py calls it, and /payslip, /commission, /calendar, /salary-stats, components/HomeOverview.tsx and lib/api.ts dispatch to it."
+     },
+     {
+      "id": "be:router:payslip_default",
+      "name": "routers/payslip_default.py",
+      "kind": "module",
+      "language": "python",
+      "loc": 55,
+      "file": "backend/app/routers/payslip_default.py",
+      "description": "This router supplies each company's payslip form defaults for the first and second pay halves. GET /api/payslip-defaults returns a cached payslip_default:bundle entry from cache.py. On a cache miss it loads get_payslip_defaults from db.py and falls back to blank forms prefilled with mp2 5,000.00 and allowances 1,108.30. PUT /api/payslip-defaults takes a PayslipDefaultsUpsert body and calls save_payslip_defaults. It reads and writes payslip_default and payslip_default_settings, depends on require_db from deps.py, is called and dispatched by factory.py, and receives dispatches from lib/api.ts and /payslip."
+     },
+     {
+      "id": "be:service:payslip_parse",
+      "name": "services/payslip_parse.py",
+      "kind": "module",
+      "language": "python",
+      "loc": 252,
+      "file": "backend/app/services/payslip_parse.py",
+      "description": "Turns raw payslip rows and JSON sections into normalized pay records. It maps loosely written headers to canonical fields such as basic_salary, commission, allowances, mp2, thirteenth_month and medical_reimbursement, parses numeric cells after stripping commas, converts month names to numbers, detects empty rows, and handles half-month periods, halving a single value when two rows are expected. The 252-line module has no outgoing connections; it is called by routers/payslip.py, test_core.py and scripts/ (migrations)."
+     },
+     {
+      "id": "web:commission",
+      "name": "/commission",
+      "kind": "module",
+      "language": "typescript",
+      "loc": 727,
+      "file": "web/src/app/commission",
+      "description": "The /commission module (727 lines of TypeScript, web/src/app/commission) tracks commission earned per month and forecasts what's still to come, defaulting to company Sophos. CommissionClient.tsx fetches payslips via getPayslips from lib/api.ts, and the module dispatches to routers/payslip.py; monthlyCommission and buildForecast in commissionForecast.ts derive history and a 3, 6 or 12 month forecast, shown as a Heatmap or Lines. It also calls ErrorAlert, FinanceUI, Icons, StatsPage, CompanyRedirect, dateFormat, formatNumber and useWheelStep. No incoming connections are recorded."
+     },
+     {
+      "id": "web:components:CompanyRedirect",
+      "name": "components/CompanyRedirect.tsx",
+      "kind": "module",
+      "language": "typescript",
+      "loc": 40,
+      "file": "web/src/components/CompanyRedirect.tsx",
+      "description": "CompanyRedirect sends a per-company page's bare route, such as /payslip, to the page for the first matching company (for example /payslip/Acme). It calls getCompanies from lib/api.ts and keeps the companies that pass an optional pick filter. If one matches, it uses router.replace to go to basePath plus the encoded company name. If none match, it shows emptyMessage, and if loading fails it shows an ErrorAlert. While waiting it renders LoadingBlocks from FinanceUI.tsx, styled with classes from lib/ui.ts. The map records a dispatch to routers/company.py. It is called by /commission, /payslip and /salary-stats."
+     },
+     {
+      "id": "web:components:StatsPage",
+      "name": "components/StatsPage.tsx",
+      "kind": "module",
+      "language": "typescript",
+      "loc": 190,
+      "file": "web/src/components/StatsPage.tsx",
+      "description": "StatsPage is a shared UI toolkit for the payslip statistics pages. It supplies page and card styling, a StatsHeader with a Home and company Payslip breadcrumb, a Segmented toggle, a YearStepper, and chart helpers. Those helpers format amounts in k/M (fk), pick axis steps (niceStep), compute percentages (pctOf), label months (xLabels) and track chart width via ResizeObserver (useWidth). It calls Icons and dateFormat (MONTH_NAMES_SHORT) and is called by /commission and /salary-stats. Only the first 150 of its 190 lines were visible."
+     },
+     {
+      "id": "web:payslip",
+      "name": "/payslip",
+      "kind": "module",
+      "language": "typescript",
+      "loc": 3292,
+      "file": "web/src/app/payslip",
+      "description": "The /payslip module (web:payslip, 3292 lines of TypeScript in web/src/app/payslip) is the payslip section of the app: per-company pages, a modal for viewing payslip details and adding or editing payslips, uploading, reading and deleting payslip PDFs (plus bulk PDF upload), year stats and settings. It dispatches to routers/payslip.py, routers/company.py and routers/payslip_default.py via lib/api.ts, and calls shared components including Modal, FinanceUI, ConfirmDialog, ErrorAlert and YearMonthGrid. No incoming connections are recorded."
+     },
+     {
+      "id": "web:salary-stats",
+      "name": "/salary-stats",
+      "kind": "module",
+      "language": "typescript",
+      "loc": 596,
+      "file": "web/src/app/salary-stats",
+      "description": "The /salary-stats module is the Salary Stats page, which compares income and deductions across months and years for a company (default Sophos). SalaryStatsClient calls getPayslips from lib/api.ts with 2000 and the company, then totals income series such as Basic salary and Commission against deductions such as Withholding tax, PhilHealth and SSS contribution per calendar month. The node dispatches to routers/payslip.py and calls components/StatsPage.tsx, FinanceUI.tsx, ErrorAlert.tsx, Icons.tsx, CompanyRedirect.tsx, lib/dateFormat.ts, lib/formatNumber.ts and lib/useWheelStep.ts. No incoming connections are recorded."
+     }
+    ]
+   },
+   {
+    "id": "dom:calendar",
+    "name": "Budget Calendar",
+    "kind": "domain",
+    "children": [
+     {
+      "id": "be:router:calendar_day_override",
+      "name": "routers/calendar_day_override.py",
+      "kind": "module",
+      "language": "python",
+      "loc": 29,
+      "file": "backend/app/routers/calendar_day_override.py",
+      "description": "This FastAPI router manages per-day calendar overrides. GET /api/calendar-day-override returns the stored overrides, with day and created_at converted to ISO strings, and caches the result under calendar_day_override:list. PUT /api/calendar-day-override/bulk upserts a batch of day, amount and saved values; the excerpt shows no cache invalidation there. It calls cache.py, db.py (list_calendar_day_overrides, upsert_calendar_day_overrides), deps.py (require_db) and the CalendarDayOverrideBulkUpsert schema, and reads and writes calendar_day_override. factory.py calls it; /calendar, HomeOverview.tsx, lib/api.ts and lib/payPeriods.ts dispatch to it."
+     },
+     {
+      "id": "be:router:fixed_expense",
+      "name": "routers/fixed_expense.py",
+      "kind": "module",
+      "language": "python",
+      "loc": 57,
+      "file": "backend/app/routers/fixed_expense.py",
+      "description": "This FastAPI router manages fixed expenses, each tied to a period half (1 or 2), year and month. It exposes GET, POST, PUT and DELETE on /api/fixed-expense, trims descriptions, and returns 404 \"Expense not found.\" for unknown ids. It calls cache.py to cache list results, db.py (list_fixed_expenses, insert_fixed_expense, update_fixed_expense, delete_fixed_expense) to read and write fixed_expense, deps.py for require_db, and Pydantic schemas. It is called by factory.py, and /calendar, HomeOverview.tsx and lib/api.ts dispatch to it."
+     },
+     {
+      "id": "be:router:pay_period_start_override",
+      "name": "routers/pay_period_start_override.py",
+      "kind": "module",
+      "language": "python",
+      "loc": 83,
+      "file": "backend/app/routers/pay_period_start_override.py",
+      "description": "This module lets users shift when a half-month pay period starts, keyed by period_year, period_month and period_half. GET /api/pay-period-start-override lists overrides (cached); PUT validates and upserts one; DELETE removes one. A half 1 start cannot be later than day 1 and must follow the previous month's half 2 start (default day 16); a half 2 start must fall between days 2 and 16. It calls cache.py, db.py, deps.py and schemas/, reads and writes pay_period_start_override, is called by factory.py and dispatched from lib/api.ts, /bills, /calendar, /credit-card, /monthly-expenses and HomeOverview.tsx."
+     },
+     {
+      "id": "web:calendar",
+      "name": "/calendar",
+      "kind": "module",
+      "language": "typescript",
+      "loc": 2154,
+      "file": "web/src/app/calendar",
+      "description": "The /calendar module (2154 lines of TypeScript in web/src/app/calendar) is the pay-period calendar screen: it lays out each month by pay-period half, shows due and trip reminders, lets the user create, update and delete fixed expenses, override pay-period start dates and calendar days, and even out amounts across pay periods using payslips. It reads bills, credit cards, monthly expenses, payslips and travel trips, dispatching through lib/api.ts to routers such as routers/calendar_day_override.py, routers/fixed_expense.py and routers/pay_period_start_override.py, and calls lib/payPeriods.ts and FinanceUI.tsx. No incoming connections are recorded."
+     },
+     {
+      "id": "web:components:CalendarMonth",
+      "name": "components/CalendarMonth.tsx",
+      "kind": "module",
+      "language": "typescript",
+      "loc": 329,
+      "file": "web/src/components/CalendarMonth.tsx",
+      "description": "CalendarMonth is the calendar picker panel behind the app's date inputs. It provides a YearGrid that pages through twelve years, a MonthGrid that shows one year's months, and a DayState type (today, anchor, selected, range-start, range-middle, range-end) for marking picked dates and ranges. It calls components/Icons.tsx for chevron icons, lib/dateFormat.ts for MONTH_NAMES_FULL, addMonths and toIsoDateLocal, and lib/ui.ts for ICON_BUTTON_CLASSES. It is called by DatePickerField, DateRangePickerField, MonthPickerField, YearPickerField and /lotto."
+     },
+     {
+      "id": "web:lib:payPeriods",
+      "name": "lib/payPeriods.ts",
+      "kind": "module",
+      "language": "typescript",
+      "loc": 341,
+      "file": "web/src/lib/payPeriods.ts",
+      "description": "lib/payPeriods.ts (341 lines) is the household's pay-period calendar. It splits each month into a 1st half, by default starting the day before the previous month's last day, and a 2nd half, starting the day before the 15th (the Thursday before when that is Sat/Sun/Mon). It then places each monthly expense in a half, letting a real bill replace the estimate and treating skipped or card-charged months as off-budget. It calls lib/api.ts (getCalendarDayOverrides, bulkUpsertCalendarDayOverrides) and lib/dateFormat.ts and dispatches to routers/calendar_day_override.py. /bills, /calendar, components/HomeOverview.tsx, /credit-card and /monthly-expenses call it."
+     }
+    ]
+   },
+   {
+    "id": "dom:monthly",
+    "name": "Monthly Expenses",
+    "kind": "domain",
+    "children": [
+     {
+      "id": "be:router:monthly_expense",
+      "name": "routers/monthly_expense.py",
+      "kind": "module",
+      "language": "python",
+      "loc": 93,
+      "file": "backend/app/routers/monthly_expense.py",
+      "description": "This FastAPI router manages monthly expenses. It lists them, optionally filtered by period_half, period_year and period_month, and it creates, replaces and deletes entries. It returns 404 when an expense, bill category or house payment link is missing. It calls cache.py to cache list results, db.py functions such as list_monthly_expenses and insert_monthly_expense, deps.py for require_db, and schemas/ (Pydantic) for MonthlyExpenseCreate, and it reads and writes the monthly_expense data store. factory.py calls it, and the /bills, /calendar, /credit-card and /monthly-expenses pages, HomeOverview.tsx and lib/api.ts dispatch to it."
+     },
+     {
+      "id": "web:monthly-expenses",
+      "name": "/monthly-expenses",
+      "kind": "module",
+      "language": "typescript",
+      "loc": 704,
+      "file": "web/src/app/monthly-expenses",
+      "description": "The /monthly-expenses page (704 lines of TypeScript) lets the household add, edit and delete monthly expenses per month and pay-period half (\"1st half\", \"2nd half\"), with recurring, skipped and paid flags, a charged-to card, and optional bill-category or house-payment links. Through lib/api.ts it dispatches to routers/monthly_expense.py, routers/bill.py, routers/credit_card.py, routers/house_payment.py and routers/pay_period_start_override.py; it calls spreadExpenseChanges in lib/payPeriods.ts to update calendar daily amounts, plus FinanceUI and other shared components. No incoming connections are recorded."
+     }
+    ]
+   },
+   {
+    "id": "dom:bills",
+    "name": "Bills",
+    "kind": "domain",
+    "children": [
+     {
+      "id": "be:router:bill",
+      "name": "routers/bill.py",
+      "kind": "module",
+      "language": "python",
+      "loc": 124,
+      "file": "backend/app/routers/bill.py",
+      "description": "routers/bill.py is the bill API: it lists bills (cached as bill:list), creates, updates and deletes bills and bill categories (409 on a duplicate category), extracts a bill's fields from an uploaded PDF or photo, falling back to what that category's saved bills teach, and stores or serves a bill's attached file. It calls cache.py, db.py, deps.py, schemas/ (Pydantic) and services/bill_extract.py, reads and writes bill and bill_category, and is called by factory.py, lib/api.ts, /bills, /calendar, /credit-card, /monthly-expenses and components/HomeOverview.tsx."
+     },
+     {
+      "id": "be:service:bill_extract",
+      "name": "services/bill_extract.py",
+      "kind": "module",
+      "language": "python",
+      "loc": 425,
+      "file": "backend/app/services/bill_extract.py",
+      "description": "services/bill_extract.py reads a bill's dates and amount from a text PDF (pypdf) or a photo (Tesseract OCR), with no AI. UnionBank, Meralco, Globe and The Beacon bills are read by their own layout; other billers get generic label rules plus what learn() takes from their saved bills. It reads the first 3 pages and raises UnreadablePdf for password-protected or textless PDFs. It has no outgoing connections and is called by routers/bill.py, routers/payslip.py, test_core.py and scripts/ (migrations)."
+     },
+     {
+      "id": "web:bills",
+      "name": "/bills",
+      "kind": "module",
+      "language": "typescript",
+      "loc": 852,
+      "file": "web/src/app/bills",
+      "description": "The /bills page (web/src/app/bills, 852 lines of typescript) records household bills by category: bill date, due date, period start and end, amount and minimum due, with optional PDF upload and per-category default dates. BillsClient.tsx groups bills by year in BillYearBlock.tsx and calls lib/api.ts (getBills, createBill, updateBill, deleteBill, uploadBillPdf, getMonthlyExpenses), which dispatches to routers/bill.py, routers/monthly_expense.py and routers/pay_period_start_override.py. It uses the shared FinanceUI, Modal, DatePickerField and lib/payPeriods.ts helpers. The packet records no incoming connections."
+     }
+    ]
+   },
+   {
+    "id": "dom:debt",
+    "name": "Debt",
+    "kind": "domain",
+    "children": [
+     {
+      "id": "be:router:credit_card",
+      "name": "routers/credit_card.py",
+      "kind": "module",
+      "language": "python",
+      "loc": 176,
+      "file": "backend/app/routers/credit_card.py",
+      "description": "routers/credit_card.py is the backend API for credit cards. It lists each card with its available limit, its monthly dues (minimum due plus installments due this month) and whether the latest statement is paid. It also creates, replaces and balance-adjusts cards. It calls cache.py, db.py, deps.py, the Pydantic schemas and installment_service.py. It reads bill, installment and installment_line, reads and writes credit_card and credit_card_payment, and writes fixed_expense. factory.py and test_core.py call it, and /credit-card, /calendar, /installments, /monthly-expenses, HomeOverview.tsx and lib/api.ts dispatch to it."
+     },
+     {
+      "id": "be:router:house_payment",
+      "name": "routers/house_payment.py",
+      "kind": "module",
+      "language": "python",
+      "loc": 113,
+      "file": "backend/app/routers/house_payment.py",
+      "description": "The house_payment router provides the HTTP API for tracking house payments and the dated payment entries under each one. It lists payments with a summary (limit default 500, max 2000) and fetches one payment with its entries, caching both responses. It also creates, replaces and deletes payments and entries, and returns 404 when a record is not found. It calls cache.py, db.py, deps.py (require_db), schemas/ (Pydantic) and services/house_payment_service.py, and it reads and writes house_payment and house_payment_entry. factory.py calls it; /house-payments, /monthly-expenses and lib/api.ts dispatch to it."
+     },
+     {
+      "id": "be:router:installment",
+      "name": "routers/installment.py",
+      "kind": "module",
+      "language": "python",
+      "loc": 212,
+      "file": "backend/app/routers/installment.py",
+      "description": "This FastAPI router serves installment plans: listing them with a summary, listing schedules, creating a plan after validating installment counts and that remaining is not negative, fetching one plan with its lines, and updating a line by seq. It calls cache.py to cache responses, db.py functions such as insert_installment and list_installments, require_db from deps.py, Pydantic schemas, and installment_service.py, and reads and writes the installment and installment_line data stores. factory.py calls and dispatches it; /installments, /credit-card and lib/api.ts dispatch to it."
+     },
+     {
+      "id": "be:service:house_payment_service",
+      "name": "services/house_payment_service.py",
+      "kind": "module",
+      "language": "python",
+      "loc": 27,
+      "file": "backend/app/services/house_payment_service.py",
+      "description": "house_payment_service (backend/app/services/house_payment_service.py, 27 lines of code) is a small helper module that prepares house payment records for output. serialize_house_payment_row copies a row and converts created_at and last_paid_on to isoformat strings. serialize_house_payment_entry does the same for paid_on and created_at. house_payment_summary adds up the rows' total_paid and entry_count values and returns sum_total_paid, total_entries and plan_count. It has no outgoing connections, reads and writes nothing beyond the arguments it receives, and only routers/house_payment.py (be:router:house_payment) calls it."
+     },
+     {
+      "id": "be:service:installment_service",
+      "name": "services/installment_service.py",
+      "kind": "module",
+      "language": "python",
+      "loc": 81,
+      "file": "backend/app/services/installment_service.py",
+      "description": "installment_service (backend/app/services/installment_service.py, 81 lines of code) is a Python helper for installment payment plans. It decides whether an installment is due this month from start_date, installment_current, installment_total and remaining. It converts start_date, finish_date and created_at to isoformat strings, and totals rows into sum_original_total, sum_remaining and due_this_month, the last taken from due_payment or payment_total. It only works on row dictionaries passed in, has no outgoing connections, and is called by routers/credit_card.py and routers/installment.py."
+     },
+     {
+      "id": "web:credit-card",
+      "name": "/credit-card",
+      "kind": "module",
+      "language": "typescript",
+      "loc": 1263,
+      "file": "web/src/app/credit-card",
+      "description": "The /credit-card module (1263 lines of TypeScript, in CreditCardClient.tsx and page.tsx) manages credit cards: credit limit, statement balance, minimum due, interest rate, statement and due dates, plus card payments, balance adjustments and installment payments. It shows due-date countdowns and payoff estimates by payment or by months. It calls lib/api.ts, lib/payPeriods.ts, lib/dateFormat.ts and FinanceUI.tsx, and dispatches to routers/credit_card.py, routers/bill.py, routers/installment.py, routers/monthly_expense.py and routers/pay_period_start_override.py. No incoming connections are recorded."
+     },
+     {
+      "id": "web:house-payments",
+      "name": "/house-payments",
+      "kind": "module",
+      "language": "typescript",
+      "loc": 636,
+      "file": "web/src/app/house-payments",
+      "description": "The /house-payments page (web/src/app/house-payments, 636 lines of typescript) tracks house payment plans and the dated payment entries made against each one. It shows total paid, entry counts and the last paid date, and entry amounts must be non-negative. HousePaymentsClient loads plans via getHousePayments(500), creates, updates and deletes plans and entries through lib/api.ts, and dispatches to routers/house_payment.py. It calls shared components including FinanceUI, Modal, DatePickerField, AmountInput and ConfirmDialog, plus the lib helpers dateFormat, formatNumber, parseFormNumber and ui. No incoming connections are recorded."
+     },
+     {
+      "id": "web:installments",
+      "name": "/installments",
+      "kind": "module",
+      "language": "typescript",
+      "loc": 1419,
+      "file": "web/src/app/installments",
+      "description": "The /installments page (web:installments, 1419 lines of TypeScript) tracks monthly installment plans. It lists them, works out each plan's next due month and schedule progress, flags the ones due this month, and lets the user create, edit, delete, record payments and reorder lines. Through lib/api.ts it calls getInstallments, createInstallment, recordInstallmentPayment, updateInstallmentLinesBulk and getCreditCards, dispatching to routers/installment.py and routers/credit_card.py. It also uses the FinanceUI, Modal, ConfirmDialog, AmountInput and MonthPickerField components. No incoming connections are recorded."
+     }
+    ]
+   },
+   {
+    "id": "dom:health",
+    "name": "Health",
+    "kind": "domain",
+    "children": [
+     {
+      "id": "be:router:blood_pressure",
+      "name": "routers/blood_pressure.py",
+      "kind": "module",
+      "language": "python",
+      "loc": 66,
+      "file": "backend/app/routers/blood_pressure.py",
+      "description": "The blood_pressure router records and manages blood-pressure readings: systolic, diastolic, pulse, spo2, temperature, weight and trimmed notes. It serves GET, POST, PUT and DELETE on /api/blood-pressure. GET lists up to 500 readings by default (max 2000) and caches the result in cache.py. Unknown ids return 404 \"Reading not found.\" The write handlers here never touch the cache. It calls db.py (list_blood_pressures, insert_blood_pressure, update_blood_pressure, delete_blood_pressure), deps.py require_db and the BloodPressureCreate schema, and it reads and writes the blood_pressure store. factory.py calls it; /blood-pressure, HomeOverview.tsx and lib/api.ts dispatch to it."
+     },
+     {
+      "id": "web:blood-pressure",
+      "name": "/blood-pressure",
+      "kind": "module",
+      "language": "typescript",
+      "loc": 558,
+      "file": "web/src/app/blood-pressure",
+      "description": "The /blood-pressure page lets the user log and chart health readings (systolic, diastolic, pulse, SpO2, temperature, weight), flagging values outside NORMAL bands such as systolic 90-119 and SpO2 95-100. BloodPressureClient.tsx imports getBloodPressures, createBloodPressure, updateBloodPressure and deleteBloodPressure from lib/api.ts, and the node dispatches to routers/blood_pressure.py. It builds recharts line charts with ChartZoomControls and useChartZoom, and uses FinanceUI, Modal, ConfirmDialog, PageHeader and dateFormat helpers. No incoming connections are recorded."
+     },
+     {
+      "id": "web:components:ChartZoomControls",
+      "name": "components/ChartZoomControls.tsx",
+      "kind": "module",
+      "language": "typescript",
+      "loc": 51,
+      "file": "web/src/components/ChartZoomControls.tsx",
+      "description": "ChartZoomControls is a reusable toolbar that lets the user zoom a chart in or out and reset it, showing the current zoom as a rounded percentage. It renders buttons in a group labelled \"Chart zoom\": a \"Zoom out\" button that is disabled when canZoomOut is false, a \"Reset zoom\" button showing Math.round(zoom * 100)%, and a \"Zoom in\" button that is disabled when canZoomIn is false. These buttons call the onZoomOut, onReset and onZoomIn callbacks that the caller passes in. It calls lib/ui.ts for CHART_ZOOM_BUTTON_CLASSES and is called by /blood-pressure."
+     },
+     {
+      "id": "web:lib:chartAxis",
+      "name": "lib/chartAxis.ts",
+      "kind": "module",
+      "language": "typescript",
+      "loc": 12,
+      "file": "web/src/lib/chartAxis.ts",
+      "description": "lib/chartAxis.ts is a 12-line typescript helper that keeps the app's charts readable as the number of data points grows. xAxisTickInterval returns 0 when pointCount is at most maxTicks (default 7); otherwise it returns Math.ceil(pointCount / maxTicks) - 1, which spaces out the x-axis ticks. chartScrollMinWidth sets a scrolling chart's minimum width to pointCount times pxPerPoint (56), kept between floorPx 480 and capPx 6000. It has no outgoing connections and reads or writes no data. Its only recorded caller is the /blood-pressure page (web:blood-pressure)."
+     },
+     {
+      "id": "web:lib:chartTooltipStyle",
+      "name": "lib/chartTooltipStyle.ts",
+      "kind": "module",
+      "language": "typescript",
+      "loc": 21,
+      "file": "web/src/lib/chartTooltipStyle.ts",
+      "description": "web:lib:chartTooltipStyle (web/src/lib/chartTooltipStyle.ts, 21 lines of code) gives the dashboard's charts a consistent tooltip look that follows the active colour theme. Its single export, getChartTooltipStyle, takes a BudgetTheme and returns a React CSSProperties object. When the theme is \"dark\" it returns a near-black translucent panel with light text. Otherwise it returns a near-white panel with dark text. Both versions use a 10px border radius and a 12px font size. It reads and writes no data and has no outgoing connections beyond type imports. Its only recorded caller is /blood-pressure (web:blood-pressure)."
+     },
+     {
+      "id": "web:lib:useChartZoom",
+      "name": "lib/useChartZoom.ts",
+      "kind": "module",
+      "language": "typescript",
+      "loc": 21,
+      "file": "web/src/lib/useChartZoom.ts",
+      "description": "useChartZoom is a small React hook (21 lines of code, web/src/lib/useChartZoom.ts) that lets a user zoom a chart in or out through fixed ZOOM_STEPS from 0.5 to 3, starting at the default of 1. It returns the current zoom, zoomIn, zoomOut and resetZoom actions, plus canZoomIn and canZoomOut flags that show whether either end of the scale is reached. It uses only React's useState and useCallback, has no outgoing connections, reads or writes no stored data, and is called by the /blood-pressure page."
+     }
+    ]
+   },
+   {
+    "id": "dom:travel",
+    "name": "Travel",
+    "kind": "domain",
+    "children": [
+     {
+      "id": "be:router:travel",
+      "name": "routers/travel.py",
+      "kind": "module",
+      "language": "python",
+      "loc": 209,
+      "file": "backend/app/routers/travel.py",
+      "description": "routers/travel.py is the FastAPI router for trip planning. It creates, updates, lists and deletes trips and their child cities, flights, transport legs, itinerary items and accommodations, and works out nights and days for each accommodation. Through /api/travel/resolve-map-link it resolves Google Maps links, using Nominatim reverse geocoding to fill in city and country. It calls cache.py, db.py, deps.py and schemas/ (Pydantic), and reads and writes travel_trip, travel_city, travel_flight, travel_transport, travel_itinerary and travel_accommodation. factory.py and test_core.py call it, and /travels, /calendar, components/HomeOverview.tsx and lib/api.ts dispatch to it."
+     },
+     {
+      "id": "web:lib:maps",
+      "name": "lib/maps.ts",
+      "kind": "module",
+      "language": "typescript",
+      "loc": 13,
+      "file": "web/src/lib/maps.ts",
+      "description": "lib/maps.ts is a 13-line TypeScript helper that turns a place into a map link for the /travels page. mapsUrlFor uses a custom URL first, once it is trimmed. If there is none, it trims the name and passes it to googleMapsSearchUrl, which builds a Google Maps search URL with the query encoded by encodeURIComponent. If both are empty, it returns null. It has no outgoing connections and does not read or write stored data. Its only recorded caller is /travels (web:travels)."
+     },
+     {
+      "id": "web:lib:remainingPrice",
+      "name": "lib/remainingPrice.ts",
+      "kind": "module",
+      "language": "typescript",
+      "loc": 42,
+      "file": "web/src/lib/remainingPrice.ts",
+      "description": "The remainingPrice module (web/src/lib/remainingPrice.ts) works out what is still left to pay on a price. It takes a total and a paid amount written as free text, such as \"THB 4,200\" or \"4,200 THB\", and returns the difference with the currency marking kept. It returns an empty string when the result isn't certain: either text isn't one amount, paid is blank, or the currencies differ. It calls lib/parseFormNumber.ts (parseFormNumber, formatAmountNumber) to read and format amounts. It is called by /travels (web:travels)."
+     },
+     {
+      "id": "web:travels",
+      "name": "/travels",
+      "kind": "module",
+      "language": "typescript",
+      "loc": 1300,
+      "file": "web/src/app/travels",
+      "description": "The /travels module (web/src/app/travels, 1300 lines of typescript, files TravelsClient.tsx and page.tsx) is the dashboard's travel screen, where trips and their flights, trains, buses, ferries, stays and activities are recorded, along with price and paid amounts. TravelsClient.tsx calls lib/api.ts functions such as getTravelTrips, createTravelTrip, updateTravelFlight, deleteTravelAccommodation and resolveMapLink, and the node dispatches to routers/travel.py. It also uses ConfirmDialog, DatePickerField, Modal, SuggestInput, lib/dateFormat.ts, lib/maps.ts and lib/remainingPrice.ts. The packet lists no incoming connections."
+     }
+    ]
+   },
+   {
+    "id": "dom:lotto",
+    "name": "Lotto",
+    "kind": "domain",
+    "children": [
+     {
+      "id": "be:lotto-scraper",
+      "name": "lotto-scraper.py",
+      "kind": "module",
+      "language": "python",
+      "loc": 406,
+      "file": "lotto-scraper.py",
+      "description": "lotto-scraper.py is a 406-line Python module that collects lotto draw results from pcso.gov.ph. It parses the ASP.NET search form on SearchLottoResult.aspx, picks the game and start/end month, day and year dropdowns, and models each result as a Draw with game, combination, draw_date, jackpot and winners. Its only recorded connection is an outgoing call to pcso.gov.ph (ext:pcso), and nothing calls it. The excerpt imports sqlite3 and csv but stops at line 150, so where results are written is not shown."
+     },
+     {
+      "id": "be:router:lotto",
+      "name": "routers/lotto.py",
+      "kind": "module",
+      "language": "python",
+      "loc": 180,
+      "file": "backend/app/routers/lotto.py",
+      "description": "routers/lotto.py is the FastAPI router behind the lotto tracker. It lists lotto games, recorded draws and a monthly calendar of results. It also saves single draws, bulk-imports pasted draw rows, and syncs new results from PCSO, returning a 502 when that fetch fails. It calls cache.py to cache reads, db.py for persistence, deps.py for require_db, the Pydantic schemas, services/lotto_import.py for text parsing and services/pcso_results.py for fetching results. It reads and writes lotto_draw and lotto_attempt and reads lotto_game. factory.py calls it, and lib/api.ts and /lotto dispatch to it."
+     },
+     {
+      "id": "be:service:lotto_import",
+      "name": "services/lotto_import.py",
+      "kind": "module",
+      "language": "python",
+      "loc": 64,
+      "file": "backend/app/services/lotto_import.py",
+      "description": "The lotto_import service turns plain-text lottery draw tables into structured draw records. parse_lotto_draw_text reads each line, skips blanks and table borders, regex-matches the numbers, date, jackpot and winners columns, validates numbers through the LottoNumbers schema, and collects per-line errors instead of stopping. import_rows_to_bulk_params converts each LottoDrawImportRow into a dictionary of bulk parameters. It calls schemas/ (Pydantic) and is called by routers/lotto.py; the excerpt shows no direct database reads or writes."
+     },
+     {
+      "id": "be:service:pcso_results",
+      "name": "services/pcso_results.py",
+      "kind": "module",
+      "language": "python",
+      "loc": 188,
+      "file": "backend/app/services/pcso_results.py",
+      "description": "Fetches PCSO lotto results (game, draw date, numbers, jackpot prize, winners) from pcso.gov.ph/SearchLottoResult.aspx, an ASP.NET WebForms page, behaving like one returning Chrome visitor. It syncs up to 90 days, reuses the last fetch for 15 minutes, and after a failure backs off 10 minutes, doubling per failure up to 6 hours; HTTP 403/429 raises PcsoBlocked. It calls pcso.gov.ph (lotto results) and schemas/ (Pydantic), importing LottoNumbers, and is called by routers/lotto.py and test_core.py."
+     },
+     {
+      "id": "web:lotto",
+      "name": "/lotto",
+      "kind": "module",
+      "language": "typescript",
+      "loc": 2959,
+      "file": "web/src/app/lotto",
+      "description": "The /lotto module (2959 lines of typescript in web/src/app/lotto) is the lotto tracker. Users log draw results and their own attempts, and each set is checked to be 6 unique numbers from 1-58. They can review what-if matches, where an attempt hit a different draw, and export draws (numbers, date, jackpot, winners) as a text file. LottoClient.tsx calls lib/api.ts functions such as getLottoDraws, setLottoDraw, createLottoAttempt and importLottoDrawResultsText. The node dispatches to routers/lotto.py and uses components including FinanceUI.tsx, Modal.tsx and DatePickerField.tsx. No incoming connections are recorded."
+     }
+    ]
+   },
+   {
+    "id": "dom:games",
+    "name": "Games",
+    "kind": "domain",
+    "children": [
+     {
+      "id": "be:router:mambo",
+      "name": "routers/mambo.py",
+      "kind": "module",
+      "language": "python",
+      "loc": 82,
+      "file": "backend/app/routers/mambo.py",
+      "description": "This FastAPI router backs the Mambo grid game under /games/mambo, a game feature rather than a finance one. It exposes POST endpoints /api/mambo/solve (solution, solution_count, unique flag), /api/mambo/steps (step-by-step solve listing each value with its technique and detail) and /api/mambo/generate (new grid at a requested difficulty). Each endpoint calls one of solve, solve_steps or generate in services/mambo_solver.py, uses models from schemas/ (Pydantic), and converts a ValueError into HTTP 400. It is called by factory.py and dispatched from /games/mambo and lib/api.ts."
+     },
+     {
+      "id": "be:router:mosaic",
+      "name": "routers/mosaic.py",
+      "kind": "module",
+      "language": "python",
+      "loc": 90,
+      "file": "backend/app/routers/mosaic.py",
+      "description": "routers/mosaic.py is a 90-line FastAPI router serving the /games/mosaic puzzle feature: solving a grid from a given seed, free-cell solving, finding the best start, and generating new puzzles. Its POST endpoints /api/mosaic/solve, /api/mosaic/solve-free and /api/mosaic/solve-best-start first reject empty or ragged grids with status 400; /api/mosaic/generate does not. It calls solve, solve_free_cell, solve_best_start and generate_puzzle in services/mosaic_solver.py and builds responses from schemas/ models. factory.py calls it; /games/mosaic and lib/api.ts dispatch to it. No database reads or writes appear in the excerpt."
+     },
+     {
+      "id": "be:service:mambo_solver",
+      "name": "services/mambo_solver.py",
+      "kind": "module",
+      "language": "python",
+      "loc": 650,
+      "file": "backend/app/services/mambo_solver.py",
+      "description": "mambo_solver.py is a 650-line Python module that appears, from its name and the 150-line excerpt, to model and solve a circle-and-square grid puzzle. build_puzzle validates boards whose sides are even and between 4 and 16, accepts Horizontal signs and Vertical signs (0 none, 1 =, 2 x) linking neighbouring cells, and indexes rows, columns, pairs and triples; constants name techniques (pair, sandwich, count, elimination, deep) and difficulties easy, medium, hard. It has no outgoing connections and is called by routers/mambo.py."
+     },
+     {
+      "id": "be:service:mosaic_solver",
+      "name": "services/mosaic_solver.py",
+      "kind": "module",
+      "language": "python",
+      "loc": 459,
+      "file": "backend/app/services/mosaic_solver.py",
+      "description": "The mosaic_solver module (backend/app/services/mosaic_solver.py, 459 lines of Python) appears to solve a colour-flooding grid puzzle rather than any finance task. build_region_graph flood-fills same-coloured cells into RegionNode regions with neighbour links; apply_move_region recolours a seed region and merges matching neighbours, while active_count, eccentricity and candidate_colors look like scoring helpers for a search. It uses only the standard library (random, time, dataclasses), has no outgoing connections, and is called by routers/mosaic.py. The packet shows only the first 150 lines, so the solving logic itself is not visible."
+     },
+     {
+      "id": "web:games/mambo",
+      "name": "/games/mambo",
+      "kind": "module",
+      "language": "typescript",
+      "loc": 1147,
+      "file": "web/src/app/games/mambo",
+      "description": "The /games/mambo module is a Mambo logic-puzzle game. Users fill boards of 4 to 16 cells per side with circle and square symbols, following = and \u2715 sign rules. They choose easy, medium or hard difficulty and can solve the board, replay the solution steps, take hints or share puzzle codes. MamboClient.tsx calls generateMamboPuzzle, solveMambo and solveMamboSteps from lib/api.ts, and the node sends requests to routers/mambo.py. It also uses lib/ui.ts styling classes and local logic.ts helpers. No incoming connections are recorded."
+     },
+     {
+      "id": "web:games/mastermind",
+      "name": "/games/mastermind",
+      "kind": "module",
+      "language": "typescript",
+      "loc": 598,
+      "file": "web/src/app/games/mastermind",
+      "description": "The /games/mastermind node is a 598-line TypeScript module in web/src/app/games/mastermind that serves a Mastermind code-breaking assistant page. MastermindClient.tsx tracks the player's guesses and feedback pegs, with a default of 6 colors and up to MAX_ATTEMPTS rows. It narrows the code space with filterCandidates and suggests guesses through openingGuess and pickNextGuess from logic.ts. It calls components/PageHeader.tsx and lib/ui.ts, and no incoming connections are recorded. The packet shows only the first 150 lines, so what happens inside logic.ts is not confirmed."
+     },
+     {
+      "id": "web:games/mosaic",
+      "name": "/games/mosaic",
+      "kind": "module",
+      "language": "typescript",
+      "loc": 1003,
+      "file": "web/src/app/games/mosaic",
+      "description": "The /games/mosaic module (1003 lines of TypeScript) is a color-grid puzzle page: MosaicClient.tsx lets a user paint or seed a board (8 rows, 8 columns and 4 colors by default), generate a puzzle, and request a solution that can be stepped through or played back. It calls lib/api.ts (generateMosaicPuzzle, solveMosaic, solveMosaicBestStart, solveMosaicFree) and dispatches to routers/mosaic.py. It uses lib/ui.ts for button and card styles and solver.ts for applyMove, encodeBoard and decodeBoard. No incoming connections are recorded."
+     },
+     {
+      "id": "web:games/sets",
+      "name": "/games/sets",
+      "kind": "module",
+      "language": "typescript",
+      "loc": 482,
+      "file": "web/src/app/games/sets",
+      "description": "The /games/sets module (web/src/app/games/sets, 482 lines of TypeScript) is a solving assistant for Sets. Users add the cards they see on the table by Symbol, Color, Texture and Count; SetsClient then finds every valid Set on the board with findAllSets, or shows the exact card completing two selected cards via thirdCard, and deals new boards with dealBoard from logic.ts. It calls components/PageHeader.tsx and lib/ui.ts, and no incoming connections are recorded."
+     }
+    ]
+   },
+   {
+    "id": "dom:infra",
+    "name": "Infra & Data",
+    "kind": "domain",
+    "children": [
+     {
+      "id": "be:core:cache",
+      "name": "cache.py",
+      "kind": "module",
+      "language": "python",
+      "loc": 94,
+      "file": "backend/cache.py",
+      "description": "cache.py is the backend's optional Redis caching layer: it stores JSON-encoded values under string keys for a default 86400 seconds (REDIS_CACHE_TTL), and if Redis is unavailable it logs a warning and disables caching rather than raising errors. init_cache connects to REDIS_URL (default redis://localhost:6379, rewritten to redis:6379 when /.dockerenv exists). Through get, set, delete, flush and prefix-based invalidate it reads and writes the Redis cache. It is called by factory.py, security.py and routers including routers/bill.py, routers/credit_card.py, routers/payslip.py and routers/travel.py."
+     },
+     {
+      "id": "be:core:db",
+      "name": "db.py",
+      "kind": "module",
+      "language": "python",
+      "loc": 1681,
+      "file": "backend/db.py",
+      "description": "db.py is the 1681-line Python persistence layer for the app's bills, credit cards, payslips, house payments, travel, lotto and blood-pressure records: it loads .env files, resolves DATABASE_URL to a Postgres URL, and keeps a pooled SQLAlchemy engine (default 10 connections, 6 kept) that probes stale connections with SELECT 1 after 20 seconds. It calls schema.py for models such as Bill, CreditCard and Payslip. It is called by deps.py, factory.py, security.py, test_core.py, scripts/ (migrations) and the routers, including routers/auth.py, routers/bill.py and routers/travel.py."
+     },
+     {
+      "id": "be:core:factory",
+      "name": "factory.py",
+      "kind": "module",
+      "language": "python",
+      "loc": 139,
+      "file": "backend/app/factory.py",
+      "description": "factory.py builds the Budget payslip & installments API. Its create_app function sets up a FastAPI app with CORSMiddleware, which allows localhost:3000 plus any origins listed in BUDGET_CORS_ORIGINS. At startup the lifespan runs init_schema, init_cache and flush, and at shutdown it runs close_cache and close_connection_pool. After a successful POST, PUT, PATCH or DELETE, the invalidate_cache_on_write middleware clears the matching cache namespaces, for example bill also clears credit_card and monthly_expense. A write to /api/users calls forget_login_required. It mounts routers including health, auth, payslip and travel, calls cache.py, db.py, deps.py and security.py, and is called by main.py and routers/auth.py."
+     },
+     {
+      "id": "be:core:main",
+      "name": "main.py",
+      "kind": "module",
+      "language": "python",
+      "loc": 2,
+      "file": "backend/main.py",
+      "description": "main.py (backend/main.py) appears to be the backend's entry-point module. In 2 lines of code it imports create_app from app.factory and calls it once to build the module-level app object, which a server process presumably loads to run the application. Its only outgoing connection is a call to factory.py (be:core:factory), where the application setup appears to happen. The packet lists no incoming connections and shows no reads or writes. The packet is thin, so it supports no business role beyond starting up the app."
+     },
+     {
+      "id": "be:core:schema",
+      "name": "schema.py",
+      "kind": "module",
+      "language": "python",
+      "loc": 562,
+      "file": "backend/schema.py",
+      "description": "schema.py (backend/schema.py, 562 lines of code) defines the database tables behind the dashboard as sqlalchemy models: app_user with passkeys and sessions, bill_category and bill (with optional pdf_data), blood_pressure readings, calendar_day_override, and credit_card limits and statement balances. It has no outgoing connections; db.py, test_core.py and scripts/ (migrations) all call it. The packet shows only the first 150 lines, so any tables after credit_card are not visible here."
+     },
+     {
+      "id": "be:core:test_core",
+      "name": "test_core.py",
+      "kind": "module",
+      "language": "python",
+      "loc": 848,
+      "file": "backend/test_core.py",
+      "description": "test_core.py (backend/test_core.py, 848 lines of Python) is an assert-based self-check for backend core logic: db._normalize value conversion, travel._nights_and_days night and day counts, travel request models matching writable columns, rejection of drifting write values, and PCSO lotto result parsing, sync start and 403 backoff. It calls db.py, deps.py, schema.py, security.py, routers/auth.py, routers/credit_card.py, routers/travel.py, schemas/ (Pydantic), services/bill_extract.py, services/payslip_parse.py and services/pcso_results.py; the 150-line excerpt doesn't show how credit_card, bill_extract or payslip_parse are tested. Nothing calls it."
+     },
+     {
+      "id": "be:router:health",
+      "name": "routers/health.py",
+      "kind": "module",
+      "language": "python",
+      "loc": 16,
+      "file": "backend/app/routers/health.py",
+      "description": "The health router (routers/health.py, 16 lines of code) is the backend's status check: a GET on /api/health reports whether a database is configured and which storage is in use. It calls database_url() and storage_kind() from db.py (be:core:db). With a database URL it returns status \"ok\" and database \"configured\". Otherwise it returns \"degraded\" and \"unset\", plus a detail saying DATABASE_URL (or DB_*) missing in .env. It writes nothing. factory.py (be:core:factory) calls and dispatches it."
+     },
+     {
+      "id": "be:schemas",
+      "name": "schemas/ (Pydantic)",
+      "kind": "module",
+      "language": "python",
+      "loc": 722,
+      "file": "backend/app/schemas",
+      "description": "The schemas/ module is the 722-line Pydantic layer that validates the data shapes for each blastjax area, from bills, credit cards, payslips, installments and house payments to lotto, blood pressure and travel. In the travel.py excerpt, TravelTripCreate and TravelFlightCreate trim text, require a title or flight number, and reject end or arrival dates that precede the start. It is called by the routers, including routers/bill.py and routers/travel.py, plus services/lotto_import.py, services/pcso_results.py and test_core.py, and the map lists outgoing calls to Google Maps (link resolve) and Nominatim (reverse geocode)."
+     },
+     {
+      "id": "be:scripts",
+      "name": "scripts/ (migrations)",
+      "kind": "module",
+      "language": "python",
+      "loc": 798,
+      "file": "backend/scripts",
+      "description": "backend/scripts (798 lines of Python) holds standalone migration scripts that bring the Postgres database up to date. The add_*.py scripts, such as add_bills.py and add_passkeys.py, add missing columns. migrate_ids_to_uuid.py switches every integer id and foreign key to a uuid7 in one transaction and moves the old tables into the pre_uuid_ids backup schema. It also has a --dry-run option. sync_schema.py and bill_accuracy.py are listed but not excerpted. The module calls db.py (for DATABASE_URL), schema.py, services/bill_extract.py and services/payslip_parse.py, and no incoming connections are recorded."
+     },
+     {
+      "id": "web:lib:api",
+      "name": "lib/api.ts",
+      "kind": "module",
+      "language": "typescript",
+      "loc": 1555,
+      "file": "web/src/lib/api.ts",
+      "description": "lib/api.ts (1555 lines of TypeScript) is the web front end's shared data client. Dashboard pages use it to read and change records such as payslips, bills, credit cards, house payments and travel, through typed helpers like getPayslips, createPayslip and updatePayslip. Its apiFetch attaches the session token from lib/auth.ts as a Bearer header and clears it on a 401. It dispatches to backend routers including routers/payslip.py, routers/bill.py and routers/credit_card.py. It is called by /bills, /payslip, /calendar, /settings, components/AuthGate.tsx and lib/payPeriods.ts."
+     }
+    ]
+   },
+   {
+    "id": "dom:data",
+    "name": "Data stores",
+    "kind": "domain",
+    "children": [
+     {
+      "id": "ds:_app_meta",
+      "name": "_app_meta",
+      "kind": "datastore",
+      "description": "_app_meta (node ds:_app_meta) is recorded in the dependency map as a datastore, but the packet gives no description of its contents or business role, and its name alone does not establish what it stores. The map lists no outgoing connections and no incoming connections, so no component is shown calling, reading or writing it, and it calls nothing itself. The packet is too thin to say more than that this datastore exists in the map with no recorded links."
+     },
+     {
+      "id": "ds:app_user",
+      "name": "app_user",
+      "kind": "datastore",
+      "description": "app_user is a datastore that, going only by its name, appears to hold the application's user records. It makes no outgoing connections. It is read by security.py (be:core:security) and routers/auth.py (be:router:auth), and both read and written by routers/user.py (be:router:user), making that router the only component in the packet that changes it. The packet is too thin to say what fields it stores or what business rules govern it, so its exact contents remain unconfirmed."
+     },
+     {
+      "id": "ds:app_user_passkey",
+      "name": "app_user_passkey",
+      "kind": "datastore",
+      "description": "app_user_passkey is a datastore that, judging only from its name, appears to store passkey records tied to app users; the packet provides no schema or fields to confirm this. It has no outgoing connections. Its only incoming connections come from routers/auth.py (be:router:auth), which both reads from it and writes to it, making the auth router its sole consumer and maintainer. The packet is too thin to describe its fields, lifecycle or any other callers."
+     },
+     {
+      "id": "ds:app_user_session",
+      "name": "app_user_session",
+      "kind": "datastore",
+      "description": "app_user_session is a datastore node. Its name suggests it holds application user session records, but the packet does not confirm what it contains, its schema or its business purpose. It has no outgoing connections. Its only incoming connections come from security.py (be:core:security), which both reads from it and writes to it, so that module is the only component this map shows touching the store. The packet is too thin to describe columns, retention or session rules beyond these read and write links."
+     },
+     {
+      "id": "ds:bill",
+      "name": "bill",
+      "kind": "datastore",
+      "description": "The bill node (ds:bill) is a datastore that, judging only by its name, appears to hold bill records; the packet gives no schema, fields or business rules, so its exact contents cannot be confirmed. It has no outgoing connections. Its only writer is routers/bill.py (be:router:bill), which both reads and writes it, making that router its apparent owner. routers/credit_card.py (be:router:credit_card) also reads it but never writes, so credit card logic consumes bill data without changing it."
+     },
+     {
+      "id": "ds:bill_category",
+      "name": "bill_category",
+      "kind": "datastore",
+      "description": "bill_category (ds:bill_category) is a datastore that, judging only by its name, appears to hold the categories used to classify bills. It makes no outgoing connections. It is both read and written by routers/bill.py (be:router:bill), the only writer listed, and it is read, but not written, by routers/search.py (be:router:search). The packet lists only these connections, with no columns, schema or business rules, so what the node actually stores and how the routers use it cannot be confirmed."
+     },
+     {
+      "id": "ds:blood_pressure",
+      "name": "blood_pressure",
+      "kind": "datastore",
+      "description": "The blood_pressure node (ds:blood_pressure) is a datastore that, judging only by its name, appears to hold blood pressure records. It has no outgoing connections. Its only incoming connections come from routers/blood_pressure.py (be:router:blood_pressure), which both reads from and writes to it, so that router is the only listed accessor of this data. The packet is too thin to say what the records contain, how they are structured, or how the dashboard uses them."
+     },
+     {
+      "id": "ds:calendar_day_override",
+      "name": "calendar_day_override",
+      "kind": "datastore",
+      "description": "calendar_day_override is a datastore (ds:calendar_day_override) that, judging from its name alone, appears to store overrides for individual calendar days; the packet gives no schema, fields or business rules to confirm this. It has no outgoing connections, so it calls nothing. It is used by a single router, routers/calendar_day_override.py (be:router:calendar_day_override), which both reads from it and writes to it. The packet is too thin to say more about its contents or purpose."
+     },
+     {
+      "id": "ds:company",
+      "name": "company",
+      "kind": "datastore",
+      "description": "The company node (ds:company) is a datastore named \"company\"; from that name alone it appears to hold company records. It has no outgoing connections, so it calls nothing itself. Its only incoming connections come from routers/company.py (be:router:company), which both reads from and writes to it, making that router the only component in the packet that touches this data. The packet is too thin to say what a company means in this application, which fields it stores, or how its records are used."
+     },
+     {
+      "id": "ds:credit_card",
+      "name": "credit_card",
+      "kind": "datastore",
+      "description": "The credit_card node is a datastore that, judging only by its name, holds credit card records. It has no outgoing connections. It is read and written by routers/credit_card.py (be:router:credit_card), the only component in the packet that changes it, and it is read without being written by routers/search.py (be:router:search), which appears to pull from it for search. The packet is too thin to describe its fields, schema or business rules beyond these access links."
+     },
+     {
+      "id": "ds:credit_card_payment",
+      "name": "credit_card_payment",
+      "kind": "datastore",
+      "description": "credit_card_payment is a datastore node that, judging only by its name, appears to hold credit card payment records. The packet gives no schema, columns or business rules that would confirm this. It has no outgoing connections, so it calls nothing itself. Its only incoming connections come from the router routers/credit_card.py (be:router:credit_card), which both reads from it and writes to it, so that router is the only reader and writer listed. The packet is too thin to say what the store holds or how payments are recorded."
+     },
+     {
+      "id": "ds:fixed_expense",
+      "name": "fixed_expense",
+      "kind": "datastore",
+      "description": "fixed_expense is a datastore node in the blastjax map. Going only by its name, it appears to hold the household's fixed expense records, but the packet gives no schema or columns to confirm that. It has no outgoing connections. It is written by routers/credit_card.py (be:router:credit_card), read and written by routers/fixed_expense.py (be:router:fixed_expense), and read by routers/search.py (be:router:search). The packet lists only these connections, so it cannot say what fields the datastore has, what business rules apply to it, or why the credit card router writes to it."
+     },
+     {
+      "id": "ds:house_payment",
+      "name": "house_payment",
+      "kind": "datastore",
+      "description": "The house_payment node (ds:house_payment) is a datastore. Its name suggests it holds house payment records, but the packet gives no schema, fields or business rules, so what it contains cannot be confirmed. It has no outgoing connections. routers/house_payment.py (be:router:house_payment) both reads and writes it and is the only writer listed. routers/search.py (be:router:search) only reads it. The packet is too thin to say more than which routers read and write this store."
+     },
+     {
+      "id": "ds:house_payment_entry",
+      "name": "house_payment_entry",
+      "kind": "datastore",
+      "description": "house_payment_entry is a datastore that, judging only by its name, appears to hold house payment entries. It makes no outgoing connections of its own. Its only incoming connections come from routers/house_payment.py (be:router:house_payment), which both reads from and writes to it, so that router is the only recorded user of this data. The packet is too thin to confirm what each record contains or which fields and business rules apply."
+     },
+     {
+      "id": "ds:installment",
+      "name": "installment",
+      "kind": "datastore",
+      "description": "The installment node is a datastore. Its name suggests it holds installment records, but the packet does not describe its fields or business rules, so its exact contents cannot be confirmed from this evidence. It has no outgoing connections. Its callers are routers: routers/installment.py (be:router:installment) both reads and writes it and is the only writer listed, while routers/credit_card.py (be:router:credit_card) and routers/search.py (be:router:search) only read from it."
+     },
+     {
+      "id": "ds:installment_line",
+      "name": "installment_line",
+      "kind": "datastore",
+      "description": "installment_line is a datastore that, judging only by its name, appears to record individual installment lines. It makes no outgoing connections. routers/installment.py (be:router:installment) both reads and writes it, making that router the only writer listed, while routers/credit_card.py (be:router:credit_card) only reads it, which suggests credit card features draw on installment data. The packet is too thin to confirm the datastore's fields, contents or business rules, so anything beyond these connections is unverified."
+     },
+     {
+      "id": "ds:lotto_attempt",
+      "name": "lotto_attempt",
+      "kind": "datastore",
+      "description": "lotto_attempt is a datastore node in the dependency map; its name suggests it stores records of lotto attempts, though that is inferred from the name alone. It has no outgoing connections, so it calls nothing. Its only incoming connections come from routers/lotto.py (be:router:lotto), which both reads from and writes to it, making that router its sole known reader and writer. The packet is too thin to say what this datastore actually holds or how its data is used in business terms."
+     },
+     {
+      "id": "ds:lotto_draw",
+      "name": "lotto_draw",
+      "kind": "datastore",
+      "description": "lotto_draw (ds:lotto_draw) is a datastore whose name suggests it holds lotto draw records. It has no outgoing connections. Its only incoming connections come from routers/lotto.py (be:router:lotto), which both reads from and writes to it, so that router is the only component the packet shows touching this data. The packet is too thin to confirm what the records contain or what business rules govern them, since it lists no schema, columns or other callers."
+     },
+     {
+      "id": "ds:lotto_game",
+      "name": "lotto_game",
+      "kind": "datastore",
+      "description": "lotto_game is a datastore; its name suggests it holds lotto game records, but the packet does not confirm its contents, schema or business purpose. It has no outgoing connections, so it calls nothing and depends on no other node. Its only incoming connection is a read by routers/lotto.py (be:router:lotto), the lotto router. The packet records no writer, so who populates this datastore is unknown. The packet is too thin to describe its business role beyond that read relationship."
+     },
+     {
+      "id": "ds:monthly_expense",
+      "name": "monthly_expense",
+      "kind": "datastore",
+      "description": "monthly_expense is a datastore node; judging only by its name, it appears to hold monthly expense records, but the packet gives no schema or business rules to confirm that. It has no outgoing connections. It is read and written by the be:router:monthly_expense router in routers/monthly_expense.py, and is only read by the be:router:search router in routers/search.py, so search appears to query it without changing it. The packet is thin and supports only these connections."
+     },
+     {
+      "id": "ds:pay_period_start_override",
+      "name": "pay_period_start_override",
+      "kind": "datastore",
+      "description": "The pay_period_start_override node is a datastore. Going only by its name, it seems to hold overrides to the start of a pay period, but the packet does not say what it stores. It has no outgoing connections, so it calls nothing. Its only incoming connections come from routers/pay_period_start_override.py (be:router:pay_period_start_override), which both reads from it and writes to it. The packet is too thin to describe its fields or keys, or what else depends on it."
+     },
+     {
+      "id": "ds:payslip",
+      "name": "payslip",
+      "kind": "datastore",
+      "description": "The payslip node (ds:payslip) is a datastore. Going only by its name, it probably holds payslip records. It has no outgoing connections, so it calls nothing. routers/company.py (be:router:company) reads from it. routers/payslip.py (be:router:payslip) both reads from it and writes to it, and is the only writer the packet lists. The packet is too thin to say what fields are stored, what business rules apply, or what the company router reads from it."
+     },
+     {
+      "id": "ds:payslip_default",
+      "name": "payslip_default",
+      "kind": "datastore",
+      "description": "payslip_default (ds:payslip_default) is a datastore node. Its name suggests it holds default payslip values, but the packet gives no schema, fields or business rules to confirm that. It has no outgoing connections. Its only incoming connections come from routers/payslip_default.py (be:router:payslip_default), which both reads from it and writes to it, so that router is the only recorded accessor. The packet is too thin to describe the stored data or its business purpose beyond this read/write relationship."
+     },
+     {
+      "id": "ds:payslip_default_settings",
+      "name": "payslip_default_settings",
+      "kind": "datastore",
+      "description": "payslip_default_settings is a datastore that, judging only by its name, appears to hold default settings for payslips. It has no outgoing connections. Its only incoming connections come from routers/payslip_default.py (be:router:payslip_default), which both reads from it and writes to it. That router is the only component the packet shows touching this data. The packet is too thin to say which fields the settings contain, what business rules apply to them, or how the router uses them."
+     },
+     {
+      "id": "ds:redis",
+      "name": "Redis cache",
+      "kind": "datastore",
+      "description": "The ds:redis node is the Redis cache, a datastore that holds cached data for the dashboard. It has no outgoing connections, so it calls nothing itself. Its only incoming connections come from cache.py (be:core:cache), which both reads from and writes to it. The packet is thin: it does not say what is cached, how long entries live, or which features depend on the cache, so its wider business role cannot be confirmed here."
+     },
+     {
+      "id": "ds:travel_accommodation",
+      "name": "travel_accommodation",
+      "kind": "datastore",
+      "description": "travel_accommodation (ds:travel_accommodation) is a datastore that, judging only by its name, appears to hold accommodation records for travel; the packet gives no schema or fields to confirm this. It has no outgoing connections. Its only incoming connections come from routers/travel.py (be:router:travel), which both reads from and writes to it, making that router its sole known reader and writer. The packet is too thin to describe its fields, business rules or any other consumers beyond this router."
+     },
+     {
+      "id": "ds:travel_city",
+      "name": "travel_city",
+      "kind": "datastore",
+      "description": "travel_city (ds:travel_city) is a datastore. Its name suggests it holds the cities used for travel tracking, but nothing in the packet confirms that. It has no outgoing connections. Its only incoming connections come from routers/travel.py (be:router:travel), which both reads from it and writes to it, so the travel router is the only component shown using it. The packet is too thin to say more about its business purpose, its fields or any other callers."
+     },
+     {
+      "id": "ds:travel_flight",
+      "name": "travel_flight",
+      "kind": "datastore",
+      "description": "travel_flight is a datastore node; its name suggests it holds flight records for the travel feature, though that business meaning is inferred from the name alone. It has no outgoing connections. Its only incoming connections come from routers/travel.py (be:router:travel), which both reads from and writes to it, so that router is the only component recorded as touching this data. The packet is too thin to describe its fields, contents or any rules applied to them."
+     },
+     {
+      "id": "ds:travel_itinerary",
+      "name": "travel_itinerary",
+      "kind": "datastore",
+      "description": "travel_itinerary (ds:travel_itinerary) is a datastore node. Judging only by its name, it holds travel itinerary records. It has no outgoing connections. Its only incoming connections come from routers/travel.py (be:router:travel), which both reads from it and writes to it, so in this map that router is the only component that uses or changes the data. The packet is too thin to describe the store's fields, records or business rules, so nothing beyond this read and write link to the travel router can be stated."
+     },
+     {
+      "id": "ds:travel_transport",
+      "name": "travel_transport",
+      "kind": "datastore",
+      "description": "travel_transport (ds:travel_transport) is a datastore; judging only by its name, it appears to hold the transport side of travel records, but the packet gives no schema, columns or business rules to confirm that. It has no outgoing connections, so it calls nothing. Its only incoming connections come from routers/travel.py (be:router:travel), which both reads from it and writes to it, making that router the only node listed as touching it. The packet is too thin to describe its contents or purpose beyond these links."
+     },
+     {
+      "id": "ds:travel_trip",
+      "name": "travel_trip",
+      "kind": "datastore",
+      "description": "travel_trip (ds:travel_trip) is a datastore that, judging only by its name, holds trip records for the travel side of the app. It makes no outgoing connections. It is read by routers/search.py (be:router:search) and by routers/travel.py (be:router:travel). routers/travel.py is also the only writer listed, so changes to trip data appear to go through the travel router alone. The packet is too thin to describe columns, keys or business rules."
+     }
+    ]
+   },
+   {
+    "id": "dom:ext",
+    "name": "External services",
+    "kind": "domain",
+    "children": [
+     {
+      "id": "ext:google-maps",
+      "name": "Google Maps (link resolve)",
+      "kind": "datastore",
+      "description": "Google Maps (link resolve), node ext:google-maps, is classified as a datastore. Its label says it resolves Google Maps links, and its callers suggest it supports travel features, but the packet confirms nothing beyond that label. It has no outgoing connections. Two nodes call it: routers/travel.py (be:router:travel) and schemas/ (Pydantic) (be:schemas). The packet is too thin to say which links get resolved, what data comes back, or how failures are handled."
+     },
+     {
+      "id": "ext:nominatim",
+      "name": "Nominatim (reverse geocode)",
+      "kind": "datastore",
+      "description": "Nominatim (ext:nominatim) is an external reverse-geocode service, classified in the map as a datastore; being called from the travel router suggests it turns locations into place details for travel records, though the packet does not confirm this. It has no outgoing connections. It is called by routers/travel.py (be:router:travel) and by schemas/ (Pydantic) (be:schemas). The packet is thin, listing only these incoming calls without endpoints, payloads or caching details, so nothing further can be stated."
+     },
+     {
+      "id": "ext:pcso",
+      "name": "pcso.gov.ph (lotto results)",
+      "kind": "datastore",
+      "description": "The ext:pcso node stands for pcso.gov.ph, the outside source of lotto results, which the map classifies as a datastore. It has no outgoing connections, so it calls, reads and writes nothing in the codebase. It is called by lotto-scraper.py (be:lotto-scraper) and by services/pcso_results.py (be:service:pcso_results). The packet is thin: it does not say what the calls return, in what format, how often they run, or what either caller does with the lotto results."
+     }
+    ]
+   }
+  ]
+ },
+ "edges": [
+  {
+   "source": "be:core:cache",
+   "target": "ds:redis",
+   "kind": "read"
+  },
+  {
+   "source": "be:core:cache",
+   "target": "ds:redis",
+   "kind": "write"
+  },
+  {
+   "source": "be:core:db",
+   "target": "be:core:schema",
+   "kind": "call"
+  },
+  {
+   "source": "be:core:deps",
+   "target": "be:core:db",
+   "kind": "call"
+  },
+  {
+   "source": "be:core:deps",
+   "target": "be:core:security",
+   "kind": "call"
+  },
+  {
+   "source": "be:core:factory",
+   "target": "be:core:cache",
+   "kind": "call"
+  },
+  {
+   "source": "be:core:factory",
+   "target": "be:core:db",
+   "kind": "call"
+  },
+  {
+   "source": "be:core:factory",
+   "target": "be:core:deps",
+   "kind": "call"
+  },
+  {
+   "source": "be:core:factory",
+   "target": "be:core:security",
+   "kind": "call"
+  },
+  {
+   "source": "be:core:factory",
+   "target": "be:router:auth",
+   "kind": "call"
+  },
+  {
+   "source": "be:core:factory",
+   "target": "be:router:auth",
+   "kind": "dispatch"
+  },
+  {
+   "source": "be:core:factory",
+   "target": "be:router:bill",
+   "kind": "call"
+  },
+  {
+   "source": "be:core:factory",
+   "target": "be:router:bill",
+   "kind": "dispatch"
+  },
+  {
+   "source": "be:core:factory",
+   "target": "be:router:blood_pressure",
+   "kind": "call"
+  },
+  {
+   "source": "be:core:factory",
+   "target": "be:router:blood_pressure",
+   "kind": "dispatch"
+  },
+  {
+   "source": "be:core:factory",
+   "target": "be:router:calendar_day_override",
+   "kind": "call"
+  },
+  {
+   "source": "be:core:factory",
+   "target": "be:router:calendar_day_override",
+   "kind": "dispatch"
+  },
+  {
+   "source": "be:core:factory",
+   "target": "be:router:company",
+   "kind": "call"
+  },
+  {
+   "source": "be:core:factory",
+   "target": "be:router:company",
+   "kind": "dispatch"
+  },
+  {
+   "source": "be:core:factory",
+   "target": "be:router:credit_card",
+   "kind": "call"
+  },
+  {
+   "source": "be:core:factory",
+   "target": "be:router:credit_card",
+   "kind": "dispatch"
+  },
+  {
+   "source": "be:core:factory",
+   "target": "be:router:fixed_expense",
+   "kind": "call"
+  },
+  {
+   "source": "be:core:factory",
+   "target": "be:router:fixed_expense",
+   "kind": "dispatch"
+  },
+  {
+   "source": "be:core:factory",
+   "target": "be:router:health",
+   "kind": "call"
+  },
+  {
+   "source": "be:core:factory",
+   "target": "be:router:health",
+   "kind": "dispatch"
+  },
+  {
+   "source": "be:core:factory",
+   "target": "be:router:house_payment",
+   "kind": "call"
+  },
+  {
+   "source": "be:core:factory",
+   "target": "be:router:house_payment",
+   "kind": "dispatch"
+  },
+  {
+   "source": "be:core:factory",
+   "target": "be:router:installment",
+   "kind": "call"
+  },
+  {
+   "source": "be:core:factory",
+   "target": "be:router:installment",
+   "kind": "dispatch"
+  },
+  {
+   "source": "be:core:factory",
+   "target": "be:router:lotto",
+   "kind": "call"
+  },
+  {
+   "source": "be:core:factory",
+   "target": "be:router:lotto",
+   "kind": "dispatch"
+  },
+  {
+   "source": "be:core:factory",
+   "target": "be:router:mambo",
+   "kind": "call"
+  },
+  {
+   "source": "be:core:factory",
+   "target": "be:router:mambo",
+   "kind": "dispatch"
+  },
+  {
+   "source": "be:core:factory",
+   "target": "be:router:monthly_expense",
+   "kind": "call"
+  },
+  {
+   "source": "be:core:factory",
+   "target": "be:router:monthly_expense",
+   "kind": "dispatch"
+  },
+  {
+   "source": "be:core:factory",
+   "target": "be:router:mosaic",
+   "kind": "call"
+  },
+  {
+   "source": "be:core:factory",
+   "target": "be:router:mosaic",
+   "kind": "dispatch"
+  },
+  {
+   "source": "be:core:factory",
+   "target": "be:router:pay_period_start_override",
+   "kind": "call"
+  },
+  {
+   "source": "be:core:factory",
+   "target": "be:router:pay_period_start_override",
+   "kind": "dispatch"
+  },
+  {
+   "source": "be:core:factory",
+   "target": "be:router:payslip",
+   "kind": "call"
+  },
+  {
+   "source": "be:core:factory",
+   "target": "be:router:payslip",
+   "kind": "dispatch"
+  },
+  {
+   "source": "be:core:factory",
+   "target": "be:router:payslip_default",
+   "kind": "call"
+  },
+  {
+   "source": "be:core:factory",
+   "target": "be:router:payslip_default",
+   "kind": "dispatch"
+  },
+  {
+   "source": "be:core:factory",
+   "target": "be:router:search",
+   "kind": "call"
+  },
+  {
+   "source": "be:core:factory",
+   "target": "be:router:search",
+   "kind": "dispatch"
+  },
+  {
+   "source": "be:core:factory",
+   "target": "be:router:travel",
+   "kind": "call"
+  },
+  {
+   "source": "be:core:factory",
+   "target": "be:router:travel",
+   "kind": "dispatch"
+  },
+  {
+   "source": "be:core:factory",
+   "target": "be:router:user",
+   "kind": "call"
+  },
+  {
+   "source": "be:core:factory",
+   "target": "be:router:user",
+   "kind": "dispatch"
+  },
+  {
+   "source": "be:core:main",
+   "target": "be:core:factory",
+   "kind": "call"
+  },
+  {
+   "source": "be:core:security",
+   "target": "be:core:cache",
+   "kind": "call"
+  },
+  {
+   "source": "be:core:security",
+   "target": "be:core:db",
+   "kind": "call"
+  },
+  {
+   "source": "be:core:security",
+   "target": "ds:app_user",
+   "kind": "read"
+  },
+  {
+   "source": "be:core:security",
+   "target": "ds:app_user_session",
+   "kind": "read"
+  },
+  {
+   "source": "be:core:security",
+   "target": "ds:app_user_session",
+   "kind": "write"
+  },
+  {
+   "source": "be:core:test_core",
+   "target": "be:core:db",
+   "kind": "call"
+  },
+  {
+   "source": "be:core:test_core",
+   "target": "be:core:deps",
+   "kind": "call"
+  },
+  {
+   "source": "be:core:test_core",
+   "target": "be:core:schema",
+   "kind": "call"
+  },
+  {
+   "source": "be:core:test_core",
+   "target": "be:core:security",
+   "kind": "call"
+  },
+  {
+   "source": "be:core:test_core",
+   "target": "be:router:auth",
+   "kind": "call"
+  },
+  {
+   "source": "be:core:test_core",
+   "target": "be:router:credit_card",
+   "kind": "call"
+  },
+  {
+   "source": "be:core:test_core",
+   "target": "be:router:travel",
+   "kind": "call"
+  },
+  {
+   "source": "be:core:test_core",
+   "target": "be:schemas",
+   "kind": "call"
+  },
+  {
+   "source": "be:core:test_core",
+   "target": "be:service:bill_extract",
+   "kind": "call"
+  },
+  {
+   "source": "be:core:test_core",
+   "target": "be:service:payslip_parse",
+   "kind": "call"
+  },
+  {
+   "source": "be:core:test_core",
+   "target": "be:service:pcso_results",
+   "kind": "call"
+  },
+  {
+   "source": "be:lotto-scraper",
+   "target": "ext:pcso",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:auth",
+   "target": "be:core:db",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:auth",
+   "target": "be:core:factory",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:auth",
+   "target": "be:core:passwords",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:auth",
+   "target": "be:core:security",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:auth",
+   "target": "be:schemas",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:auth",
+   "target": "ds:app_user",
+   "kind": "read"
+  },
+  {
+   "source": "be:router:auth",
+   "target": "ds:app_user_passkey",
+   "kind": "read"
+  },
+  {
+   "source": "be:router:auth",
+   "target": "ds:app_user_passkey",
+   "kind": "write"
+  },
+  {
+   "source": "be:router:bill",
+   "target": "be:core:cache",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:bill",
+   "target": "be:core:db",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:bill",
+   "target": "be:core:deps",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:bill",
+   "target": "be:schemas",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:bill",
+   "target": "be:service:bill_extract",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:bill",
+   "target": "ds:bill",
+   "kind": "read"
+  },
+  {
+   "source": "be:router:bill",
+   "target": "ds:bill",
+   "kind": "write"
+  },
+  {
+   "source": "be:router:bill",
+   "target": "ds:bill_category",
+   "kind": "read"
+  },
+  {
+   "source": "be:router:bill",
+   "target": "ds:bill_category",
+   "kind": "write"
+  },
+  {
+   "source": "be:router:blood_pressure",
+   "target": "be:core:cache",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:blood_pressure",
+   "target": "be:core:db",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:blood_pressure",
+   "target": "be:core:deps",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:blood_pressure",
+   "target": "be:schemas",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:blood_pressure",
+   "target": "ds:blood_pressure",
+   "kind": "read"
+  },
+  {
+   "source": "be:router:blood_pressure",
+   "target": "ds:blood_pressure",
+   "kind": "write"
+  },
+  {
+   "source": "be:router:calendar_day_override",
+   "target": "be:core:cache",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:calendar_day_override",
+   "target": "be:core:db",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:calendar_day_override",
+   "target": "be:core:deps",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:calendar_day_override",
+   "target": "be:schemas",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:calendar_day_override",
+   "target": "ds:calendar_day_override",
+   "kind": "read"
+  },
+  {
+   "source": "be:router:calendar_day_override",
+   "target": "ds:calendar_day_override",
+   "kind": "write"
+  },
+  {
+   "source": "be:router:company",
+   "target": "be:core:db",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:company",
+   "target": "be:core:deps",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:company",
+   "target": "be:schemas",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:company",
+   "target": "ds:company",
+   "kind": "read"
+  },
+  {
+   "source": "be:router:company",
+   "target": "ds:company",
+   "kind": "write"
+  },
+  {
+   "source": "be:router:company",
+   "target": "ds:payslip",
+   "kind": "read"
+  },
+  {
+   "source": "be:router:credit_card",
+   "target": "be:core:cache",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:credit_card",
+   "target": "be:core:db",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:credit_card",
+   "target": "be:core:deps",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:credit_card",
+   "target": "be:schemas",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:credit_card",
+   "target": "be:service:installment_service",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:credit_card",
+   "target": "ds:bill",
+   "kind": "read"
+  },
+  {
+   "source": "be:router:credit_card",
+   "target": "ds:credit_card",
+   "kind": "read"
+  },
+  {
+   "source": "be:router:credit_card",
+   "target": "ds:credit_card",
+   "kind": "write"
+  },
+  {
+   "source": "be:router:credit_card",
+   "target": "ds:credit_card_payment",
+   "kind": "read"
+  },
+  {
+   "source": "be:router:credit_card",
+   "target": "ds:credit_card_payment",
+   "kind": "write"
+  },
+  {
+   "source": "be:router:credit_card",
+   "target": "ds:fixed_expense",
+   "kind": "write"
+  },
+  {
+   "source": "be:router:credit_card",
+   "target": "ds:installment",
+   "kind": "read"
+  },
+  {
+   "source": "be:router:credit_card",
+   "target": "ds:installment_line",
+   "kind": "read"
+  },
+  {
+   "source": "be:router:fixed_expense",
+   "target": "be:core:cache",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:fixed_expense",
+   "target": "be:core:db",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:fixed_expense",
+   "target": "be:core:deps",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:fixed_expense",
+   "target": "be:schemas",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:fixed_expense",
+   "target": "ds:fixed_expense",
+   "kind": "read"
+  },
+  {
+   "source": "be:router:fixed_expense",
+   "target": "ds:fixed_expense",
+   "kind": "write"
+  },
+  {
+   "source": "be:router:health",
+   "target": "be:core:db",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:house_payment",
+   "target": "be:core:cache",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:house_payment",
+   "target": "be:core:db",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:house_payment",
+   "target": "be:core:deps",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:house_payment",
+   "target": "be:schemas",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:house_payment",
+   "target": "be:service:house_payment_service",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:house_payment",
+   "target": "ds:house_payment",
+   "kind": "read"
+  },
+  {
+   "source": "be:router:house_payment",
+   "target": "ds:house_payment",
+   "kind": "write"
+  },
+  {
+   "source": "be:router:house_payment",
+   "target": "ds:house_payment_entry",
+   "kind": "read"
+  },
+  {
+   "source": "be:router:house_payment",
+   "target": "ds:house_payment_entry",
+   "kind": "write"
+  },
+  {
+   "source": "be:router:installment",
+   "target": "be:core:cache",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:installment",
+   "target": "be:core:db",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:installment",
+   "target": "be:core:deps",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:installment",
+   "target": "be:schemas",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:installment",
+   "target": "be:service:installment_service",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:installment",
+   "target": "ds:installment",
+   "kind": "read"
+  },
+  {
+   "source": "be:router:installment",
+   "target": "ds:installment",
+   "kind": "write"
+  },
+  {
+   "source": "be:router:installment",
+   "target": "ds:installment_line",
+   "kind": "read"
+  },
+  {
+   "source": "be:router:installment",
+   "target": "ds:installment_line",
+   "kind": "write"
+  },
+  {
+   "source": "be:router:lotto",
+   "target": "be:core:cache",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:lotto",
+   "target": "be:core:db",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:lotto",
+   "target": "be:core:deps",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:lotto",
+   "target": "be:schemas",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:lotto",
+   "target": "be:service:lotto_import",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:lotto",
+   "target": "be:service:pcso_results",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:lotto",
+   "target": "ds:lotto_attempt",
+   "kind": "read"
+  },
+  {
+   "source": "be:router:lotto",
+   "target": "ds:lotto_attempt",
+   "kind": "write"
+  },
+  {
+   "source": "be:router:lotto",
+   "target": "ds:lotto_draw",
+   "kind": "read"
+  },
+  {
+   "source": "be:router:lotto",
+   "target": "ds:lotto_draw",
+   "kind": "write"
+  },
+  {
+   "source": "be:router:lotto",
+   "target": "ds:lotto_game",
+   "kind": "read"
+  },
+  {
+   "source": "be:router:mambo",
+   "target": "be:schemas",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:mambo",
+   "target": "be:service:mambo_solver",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:monthly_expense",
+   "target": "be:core:cache",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:monthly_expense",
+   "target": "be:core:db",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:monthly_expense",
+   "target": "be:core:deps",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:monthly_expense",
+   "target": "be:schemas",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:monthly_expense",
+   "target": "ds:monthly_expense",
+   "kind": "read"
+  },
+  {
+   "source": "be:router:monthly_expense",
+   "target": "ds:monthly_expense",
+   "kind": "write"
+  },
+  {
+   "source": "be:router:mosaic",
+   "target": "be:schemas",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:mosaic",
+   "target": "be:service:mosaic_solver",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:pay_period_start_override",
+   "target": "be:core:cache",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:pay_period_start_override",
+   "target": "be:core:db",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:pay_period_start_override",
+   "target": "be:core:deps",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:pay_period_start_override",
+   "target": "be:schemas",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:pay_period_start_override",
+   "target": "ds:pay_period_start_override",
+   "kind": "read"
+  },
+  {
+   "source": "be:router:pay_period_start_override",
+   "target": "ds:pay_period_start_override",
+   "kind": "write"
+  },
+  {
+   "source": "be:router:payslip",
+   "target": "be:core:cache",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:payslip",
+   "target": "be:core:db",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:payslip",
+   "target": "be:core:deps",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:payslip",
+   "target": "be:schemas",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:payslip",
+   "target": "be:service:bill_extract",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:payslip",
+   "target": "be:service:payslip_parse",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:payslip",
+   "target": "ds:payslip",
+   "kind": "read"
+  },
+  {
+   "source": "be:router:payslip",
+   "target": "ds:payslip",
+   "kind": "write"
+  },
+  {
+   "source": "be:router:payslip_default",
+   "target": "be:core:cache",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:payslip_default",
+   "target": "be:core:db",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:payslip_default",
+   "target": "be:core:deps",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:payslip_default",
+   "target": "be:schemas",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:payslip_default",
+   "target": "ds:payslip_default",
+   "kind": "read"
+  },
+  {
+   "source": "be:router:payslip_default",
+   "target": "ds:payslip_default",
+   "kind": "write"
+  },
+  {
+   "source": "be:router:payslip_default",
+   "target": "ds:payslip_default_settings",
+   "kind": "read"
+  },
+  {
+   "source": "be:router:payslip_default",
+   "target": "ds:payslip_default_settings",
+   "kind": "write"
+  },
+  {
+   "source": "be:router:search",
+   "target": "be:core:db",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:search",
+   "target": "be:core:deps",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:search",
+   "target": "ds:bill_category",
+   "kind": "read"
+  },
+  {
+   "source": "be:router:search",
+   "target": "ds:credit_card",
+   "kind": "read"
+  },
+  {
+   "source": "be:router:search",
+   "target": "ds:fixed_expense",
+   "kind": "read"
+  },
+  {
+   "source": "be:router:search",
+   "target": "ds:house_payment",
+   "kind": "read"
+  },
+  {
+   "source": "be:router:search",
+   "target": "ds:installment",
+   "kind": "read"
+  },
+  {
+   "source": "be:router:search",
+   "target": "ds:monthly_expense",
+   "kind": "read"
+  },
+  {
+   "source": "be:router:search",
+   "target": "ds:travel_trip",
+   "kind": "read"
+  },
+  {
+   "source": "be:router:travel",
+   "target": "be:core:cache",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:travel",
+   "target": "be:core:db",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:travel",
+   "target": "be:core:deps",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:travel",
+   "target": "be:schemas",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:travel",
+   "target": "ds:travel_accommodation",
+   "kind": "read"
+  },
+  {
+   "source": "be:router:travel",
+   "target": "ds:travel_accommodation",
+   "kind": "write"
+  },
+  {
+   "source": "be:router:travel",
+   "target": "ds:travel_city",
+   "kind": "read"
+  },
+  {
+   "source": "be:router:travel",
+   "target": "ds:travel_city",
+   "kind": "write"
+  },
+  {
+   "source": "be:router:travel",
+   "target": "ds:travel_flight",
+   "kind": "read"
+  },
+  {
+   "source": "be:router:travel",
+   "target": "ds:travel_flight",
+   "kind": "write"
+  },
+  {
+   "source": "be:router:travel",
+   "target": "ds:travel_itinerary",
+   "kind": "read"
+  },
+  {
+   "source": "be:router:travel",
+   "target": "ds:travel_itinerary",
+   "kind": "write"
+  },
+  {
+   "source": "be:router:travel",
+   "target": "ds:travel_transport",
+   "kind": "read"
+  },
+  {
+   "source": "be:router:travel",
+   "target": "ds:travel_transport",
+   "kind": "write"
+  },
+  {
+   "source": "be:router:travel",
+   "target": "ds:travel_trip",
+   "kind": "read"
+  },
+  {
+   "source": "be:router:travel",
+   "target": "ds:travel_trip",
+   "kind": "write"
+  },
+  {
+   "source": "be:router:travel",
+   "target": "ext:google-maps",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:travel",
+   "target": "ext:nominatim",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:user",
+   "target": "be:core:db",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:user",
+   "target": "be:core:deps",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:user",
+   "target": "be:core:passwords",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:user",
+   "target": "be:schemas",
+   "kind": "call"
+  },
+  {
+   "source": "be:router:user",
+   "target": "ds:app_user",
+   "kind": "read"
+  },
+  {
+   "source": "be:router:user",
+   "target": "ds:app_user",
+   "kind": "write"
+  },
+  {
+   "source": "be:schemas",
+   "target": "ext:google-maps",
+   "kind": "call"
+  },
+  {
+   "source": "be:schemas",
+   "target": "ext:nominatim",
+   "kind": "call"
+  },
+  {
+   "source": "be:scripts",
+   "target": "be:core:db",
+   "kind": "call"
+  },
+  {
+   "source": "be:scripts",
+   "target": "be:core:schema",
+   "kind": "call"
+  },
+  {
+   "source": "be:scripts",
+   "target": "be:service:bill_extract",
+   "kind": "call"
+  },
+  {
+   "source": "be:scripts",
+   "target": "be:service:payslip_parse",
+   "kind": "call"
+  },
+  {
+   "source": "be:service:lotto_import",
+   "target": "be:schemas",
+   "kind": "call"
+  },
+  {
+   "source": "be:service:pcso_results",
+   "target": "be:schemas",
+   "kind": "call"
+  },
+  {
+   "source": "be:service:pcso_results",
+   "target": "ext:pcso",
+   "kind": "call"
+  },
+  {
+   "source": "web:bills",
+   "target": "be:router:bill",
+   "kind": "dispatch"
+  },
+  {
+   "source": "web:bills",
+   "target": "be:router:monthly_expense",
+   "kind": "dispatch"
+  },
+  {
+   "source": "web:bills",
+   "target": "be:router:pay_period_start_override",
+   "kind": "dispatch"
+  },
+  {
+   "source": "web:bills",
+   "target": "web:components:AmountInput",
+   "kind": "call"
+  },
+  {
+   "source": "web:bills",
+   "target": "web:components:ConfirmDialog",
+   "kind": "call"
+  },
+  {
+   "source": "web:bills",
+   "target": "web:components:DatePickerField",
+   "kind": "call"
+  },
+  {
+   "source": "web:bills",
+   "target": "web:components:DateRangePickerField",
+   "kind": "call"
+  },
+  {
+   "source": "web:bills",
+   "target": "web:components:ErrorAlert",
+   "kind": "call"
+  },
+  {
+   "source": "web:bills",
+   "target": "web:components:FinanceUI",
+   "kind": "call"
+  },
+  {
+   "source": "web:bills",
+   "target": "web:components:Icons",
+   "kind": "call"
+  },
+  {
+   "source": "web:bills",
+   "target": "web:components:Modal",
+   "kind": "call"
+  },
+  {
+   "source": "web:bills",
+   "target": "web:components:PageHeader",
+   "kind": "call"
+  },
+  {
+   "source": "web:bills",
+   "target": "web:components:YearMonthGrid",
+   "kind": "call"
+  },
+  {
+   "source": "web:bills",
+   "target": "web:lib:api",
+   "kind": "call"
+  },
+  {
+   "source": "web:bills",
+   "target": "web:lib:dateFormat",
+   "kind": "call"
+  },
+  {
+   "source": "web:bills",
+   "target": "web:lib:formatNumber",
+   "kind": "call"
+  },
+  {
+   "source": "web:bills",
+   "target": "web:lib:parseFormNumber",
+   "kind": "call"
+  },
+  {
+   "source": "web:bills",
+   "target": "web:lib:payPeriods",
+   "kind": "call"
+  },
+  {
+   "source": "web:bills",
+   "target": "web:lib:ui",
+   "kind": "call"
+  },
+  {
+   "source": "web:blood-pressure",
+   "target": "be:router:blood_pressure",
+   "kind": "dispatch"
+  },
+  {
+   "source": "web:blood-pressure",
+   "target": "web:components:ChartZoomControls",
+   "kind": "call"
+  },
+  {
+   "source": "web:blood-pressure",
+   "target": "web:components:ConfirmDialog",
+   "kind": "call"
+  },
+  {
+   "source": "web:blood-pressure",
+   "target": "web:components:ErrorAlert",
+   "kind": "call"
+  },
+  {
+   "source": "web:blood-pressure",
+   "target": "web:components:FinanceUI",
+   "kind": "call"
+  },
+  {
+   "source": "web:blood-pressure",
+   "target": "web:components:Icons",
+   "kind": "call"
+  },
+  {
+   "source": "web:blood-pressure",
+   "target": "web:components:Modal",
+   "kind": "call"
+  },
+  {
+   "source": "web:blood-pressure",
+   "target": "web:components:PageHeader",
+   "kind": "call"
+  },
+  {
+   "source": "web:blood-pressure",
+   "target": "web:components:ThemeProvider",
+   "kind": "call"
+  },
+  {
+   "source": "web:blood-pressure",
+   "target": "web:lib:api",
+   "kind": "call"
+  },
+  {
+   "source": "web:blood-pressure",
+   "target": "web:lib:chartAxis",
+   "kind": "call"
+  },
+  {
+   "source": "web:blood-pressure",
+   "target": "web:lib:chartTooltipStyle",
+   "kind": "call"
+  },
+  {
+   "source": "web:blood-pressure",
+   "target": "web:lib:dateFormat",
+   "kind": "call"
+  },
+  {
+   "source": "web:blood-pressure",
+   "target": "web:lib:ui",
+   "kind": "call"
+  },
+  {
+   "source": "web:blood-pressure",
+   "target": "web:lib:useChartZoom",
+   "kind": "call"
+  },
+  {
+   "source": "web:calendar",
+   "target": "be:router:bill",
+   "kind": "dispatch"
+  },
+  {
+   "source": "web:calendar",
+   "target": "be:router:calendar_day_override",
+   "kind": "dispatch"
+  },
+  {
+   "source": "web:calendar",
+   "target": "be:router:credit_card",
+   "kind": "dispatch"
+  },
+  {
+   "source": "web:calendar",
+   "target": "be:router:fixed_expense",
+   "kind": "dispatch"
+  },
+  {
+   "source": "web:calendar",
+   "target": "be:router:monthly_expense",
+   "kind": "dispatch"
+  },
+  {
+   "source": "web:calendar",
+   "target": "be:router:pay_period_start_override",
+   "kind": "dispatch"
+  },
+  {
+   "source": "web:calendar",
+   "target": "be:router:payslip",
+   "kind": "dispatch"
+  },
+  {
+   "source": "web:calendar",
+   "target": "be:router:travel",
+   "kind": "dispatch"
+  },
+  {
+   "source": "web:calendar",
+   "target": "web:components:AmountInput",
+   "kind": "call"
+  },
+  {
+   "source": "web:calendar",
+   "target": "web:components:ConfirmDialog",
+   "kind": "call"
+  },
+  {
+   "source": "web:calendar",
+   "target": "web:components:DatePickerField",
+   "kind": "call"
+  },
+  {
+   "source": "web:calendar",
+   "target": "web:components:ErrorAlert",
+   "kind": "call"
+  },
+  {
+   "source": "web:calendar",
+   "target": "web:components:FinanceUI",
+   "kind": "call"
+  },
+  {
+   "source": "web:calendar",
+   "target": "web:components:Icons",
+   "kind": "call"
+  },
+  {
+   "source": "web:calendar",
+   "target": "web:components:Modal",
+   "kind": "call"
+  },
+  {
+   "source": "web:calendar",
+   "target": "web:components:PageHeader",
+   "kind": "call"
+  },
+  {
+   "source": "web:calendar",
+   "target": "web:lib:api",
+   "kind": "call"
+  },
+  {
+   "source": "web:calendar",
+   "target": "web:lib:dateFormat",
+   "kind": "call"
+  },
+  {
+   "source": "web:calendar",
+   "target": "web:lib:formatNumber",
+   "kind": "call"
+  },
+  {
+   "source": "web:calendar",
+   "target": "web:lib:parseFormNumber",
+   "kind": "call"
+  },
+  {
+   "source": "web:calendar",
+   "target": "web:lib:payPeriods",
+   "kind": "call"
+  },
+  {
+   "source": "web:calendar",
+   "target": "web:lib:ui",
+   "kind": "call"
+  },
+  {
+   "source": "web:calendar",
+   "target": "web:lib:useWheelStep",
+   "kind": "call"
+  },
+  {
+   "source": "web:commission",
+   "target": "be:router:payslip",
+   "kind": "dispatch"
+  },
+  {
+   "source": "web:commission",
+   "target": "web:components:CompanyRedirect",
+   "kind": "call"
+  },
+  {
+   "source": "web:commission",
+   "target": "web:components:ErrorAlert",
+   "kind": "call"
+  },
+  {
+   "source": "web:commission",
+   "target": "web:components:FinanceUI",
+   "kind": "call"
+  },
+  {
+   "source": "web:commission",
+   "target": "web:components:Icons",
+   "kind": "call"
+  },
+  {
+   "source": "web:commission",
+   "target": "web:components:StatsPage",
+   "kind": "call"
+  },
+  {
+   "source": "web:commission",
+   "target": "web:lib:api",
+   "kind": "call"
+  },
+  {
+   "source": "web:commission",
+   "target": "web:lib:dateFormat",
+   "kind": "call"
+  },
+  {
+   "source": "web:commission",
+   "target": "web:lib:formatNumber",
+   "kind": "call"
+  },
+  {
+   "source": "web:commission",
+   "target": "web:lib:useWheelStep",
+   "kind": "call"
+  },
+  {
+   "source": "web:components:AmountInput",
+   "target": "web:lib:parseFormNumber",
+   "kind": "call"
+  },
+  {
+   "source": "web:components:AmountInput",
+   "target": "web:lib:ui",
+   "kind": "call"
+  },
+  {
+   "source": "web:components:AppShell",
+   "target": "web:components:AuthGate",
+   "kind": "call"
+  },
+  {
+   "source": "web:components:AppShell",
+   "target": "web:components:Header",
+   "kind": "call"
+  },
+  {
+   "source": "web:components:AppShell",
+   "target": "web:components:SidebarNav",
+   "kind": "call"
+  },
+  {
+   "source": "web:components:AppShell",
+   "target": "web:lib:nav",
+   "kind": "call"
+  },
+  {
+   "source": "web:components:AppShell",
+   "target": "web:lib:shellLayoutContext",
+   "kind": "call"
+  },
+  {
+   "source": "web:components:AuthGate",
+   "target": "be:router:auth",
+   "kind": "dispatch"
+  },
+  {
+   "source": "web:components:AuthGate",
+   "target": "web:lib:api",
+   "kind": "call"
+  },
+  {
+   "source": "web:components:AuthGate",
+   "target": "web:lib:auth",
+   "kind": "call"
+  },
+  {
+   "source": "web:components:AuthGate",
+   "target": "web:lib:nav",
+   "kind": "call"
+  },
+  {
+   "source": "web:components:AuthGate",
+   "target": "web:lib:ui",
+   "kind": "call"
+  },
+  {
+   "source": "web:components:CalendarMonth",
+   "target": "web:components:Icons",
+   "kind": "call"
+  },
+  {
+   "source": "web:components:CalendarMonth",
+   "target": "web:lib:dateFormat",
+   "kind": "call"
+  },
+  {
+   "source": "web:components:CalendarMonth",
+   "target": "web:lib:ui",
+   "kind": "call"
+  },
+  {
+   "source": "web:components:ChartZoomControls",
+   "target": "web:lib:ui",
+   "kind": "call"
+  },
+  {
+   "source": "web:components:CompanyRedirect",
+   "target": "be:router:company",
+   "kind": "dispatch"
+  },
+  {
+   "source": "web:components:CompanyRedirect",
+   "target": "web:components:ErrorAlert",
+   "kind": "call"
+  },
+  {
+   "source": "web:components:CompanyRedirect",
+   "target": "web:components:FinanceUI",
+   "kind": "call"
+  },
+  {
+   "source": "web:components:CompanyRedirect",
+   "target": "web:lib:api",
+   "kind": "call"
+  },
+  {
+   "source": "web:components:CompanyRedirect",
+   "target": "web:lib:ui",
+   "kind": "call"
+  },
+  {
+   "source": "web:components:ConfirmDialog",
+   "target": "web:components:FinanceUI",
+   "kind": "call"
+  },
+  {
+   "source": "web:components:ConfirmDialog",
+   "target": "web:components:Modal",
+   "kind": "call"
+  },
+  {
+   "source": "web:components:ConfirmDialog",
+   "target": "web:lib:ui",
+   "kind": "call"
+  },
+  {
+   "source": "web:components:DatePickerField",
+   "target": "web:components:CalendarMonth",
+   "kind": "call"
+  },
+  {
+   "source": "web:components:DatePickerField",
+   "target": "web:components:PickerField",
+   "kind": "call"
+  },
+  {
+   "source": "web:components:DatePickerField",
+   "target": "web:lib:dateFormat",
+   "kind": "call"
+  },
+  {
+   "source": "web:components:DateRangePickerField",
+   "target": "web:components:CalendarMonth",
+   "kind": "call"
+  },
+  {
+   "source": "web:components:DateRangePickerField",
+   "target": "web:components:PickerField",
+   "kind": "call"
+  },
+  {
+   "source": "web:components:DateRangePickerField",
+   "target": "web:lib:dateFormat",
+   "kind": "call"
+  },
+  {
+   "source": "web:components:DateRangePickerField",
+   "target": "web:lib:ui",
+   "kind": "call"
+  },
+  {
+   "source": "web:components:ErrorAlert",
+   "target": "web:components:Icons",
+   "kind": "call"
+  },
+  {
+   "source": "web:components:ErrorAlert",
+   "target": "web:lib:ui",
+   "kind": "call"
+  },
+  {
+   "source": "web:components:FinanceUI",
+   "target": "web:components:Icons",
+   "kind": "call"
+  },
+  {
+   "source": "web:components:FinanceUI",
+   "target": "web:lib:dateFormat",
+   "kind": "call"
+  },
+  {
+   "source": "web:components:FinanceUI",
+   "target": "web:lib:ui",
+   "kind": "call"
+  },
+  {
+   "source": "web:components:Header",
+   "target": "be:router:search",
+   "kind": "dispatch"
+  },
+  {
+   "source": "web:components:Header",
+   "target": "web:components:AuthGate",
+   "kind": "call"
+  },
+  {
+   "source": "web:components:Header",
+   "target": "web:components:Icons",
+   "kind": "call"
+  },
+  {
+   "source": "web:components:Header",
+   "target": "web:components:ThemeProvider",
+   "kind": "call"
+  },
+  {
+   "source": "web:components:Header",
+   "target": "web:lib:api",
+   "kind": "call"
+  },
+  {
+   "source": "web:components:Header",
+   "target": "web:lib:nav",
+   "kind": "call"
+  },
+  {
+   "source": "web:components:Header",
+   "target": "web:lib:shellLayoutContext",
+   "kind": "call"
+  },
+  {
+   "source": "web:components:Header",
+   "target": "web:lib:ui",
+   "kind": "call"
+  },
+  {
+   "source": "web:components:HomeOverview",
+   "target": "be:router:bill",
+   "kind": "dispatch"
+  },
+  {
+   "source": "web:components:HomeOverview",
+   "target": "be:router:blood_pressure",
+   "kind": "dispatch"
+  },
+  {
+   "source": "web:components:HomeOverview",
+   "target": "be:router:calendar_day_override",
+   "kind": "dispatch"
+  },
+  {
+   "source": "web:components:HomeOverview",
+   "target": "be:router:credit_card",
+   "kind": "dispatch"
+  },
+  {
+   "source": "web:components:HomeOverview",
+   "target": "be:router:fixed_expense",
+   "kind": "dispatch"
+  },
+  {
+   "source": "web:components:HomeOverview",
+   "target": "be:router:monthly_expense",
+   "kind": "dispatch"
+  },
+  {
+   "source": "web:components:HomeOverview",
+   "target": "be:router:pay_period_start_override",
+   "kind": "dispatch"
+  },
+  {
+   "source": "web:components:HomeOverview",
+   "target": "be:router:payslip",
+   "kind": "dispatch"
+  },
+  {
+   "source": "web:components:HomeOverview",
+   "target": "be:router:travel",
+   "kind": "dispatch"
+  },
+  {
+   "source": "web:components:HomeOverview",
+   "target": "web:components:AuthGate",
+   "kind": "call"
+  },
+  {
+   "source": "web:components:HomeOverview",
+   "target": "web:components:FinanceUI",
+   "kind": "call"
+  },
+  {
+   "source": "web:components:HomeOverview",
+   "target": "web:lib:api",
+   "kind": "call"
+  },
+  {
+   "source": "web:components:HomeOverview",
+   "target": "web:lib:dateFormat",
+   "kind": "call"
+  },
+  {
+   "source": "web:components:HomeOverview",
+   "target": "web:lib:formatNumber",
+   "kind": "call"
+  },
+  {
+   "source": "web:components:HomeOverview",
+   "target": "web:lib:nav",
+   "kind": "call"
+  },
+  {
+   "source": "web:components:HomeOverview",
+   "target": "web:lib:payPeriods",
+   "kind": "call"
+  },
+  {
+   "source": "web:components:Modal",
+   "target": "web:components:FinanceUI",
+   "kind": "call"
+  },
+  {
+   "source": "web:components:MonthPickerField",
+   "target": "web:components:CalendarMonth",
+   "kind": "call"
+  },
+  {
+   "source": "web:components:MonthPickerField",
+   "target": "web:components:PickerField",
+   "kind": "call"
+  },
+  {
+   "source": "web:components:MonthPickerField",
+   "target": "web:lib:dateFormat",
+   "kind": "call"
+  },
+  {
+   "source": "web:components:PageHeader",
+   "target": "web:components:Icons",
+   "kind": "call"
+  },
+  {
+   "source": "web:components:PageHeader",
+   "target": "web:lib:nav",
+   "kind": "call"
+  },
+  {
+   "source": "web:components:PickerField",
+   "target": "web:components:Icons",
+   "kind": "call"
+  },
+  {
+   "source": "web:components:PickerField",
+   "target": "web:lib:ui",
+   "kind": "call"
+  },
+  {
+   "source": "web:components:PickerField",
+   "target": "web:lib:usePopoverPosition",
+   "kind": "call"
+  },
+  {
+   "source": "web:components:SidebarNav",
+   "target": "be:router:auth",
+   "kind": "dispatch"
+  },
+  {
+   "source": "web:components:SidebarNav",
+   "target": "be:router:company",
+   "kind": "dispatch"
+  },
+  {
+   "source": "web:components:SidebarNav",
+   "target": "web:components:AuthGate",
+   "kind": "call"
+  },
+  {
+   "source": "web:components:SidebarNav",
+   "target": "web:components:Icons",
+   "kind": "call"
+  },
+  {
+   "source": "web:components:SidebarNav",
+   "target": "web:lib:api",
+   "kind": "call"
+  },
+  {
+   "source": "web:components:SidebarNav",
+   "target": "web:lib:auth",
+   "kind": "call"
+  },
+  {
+   "source": "web:components:SidebarNav",
+   "target": "web:lib:nav",
+   "kind": "call"
+  },
+  {
+   "source": "web:components:SidebarNav",
+   "target": "web:lib:shellLayoutContext",
+   "kind": "call"
+  },
+  {
+   "source": "web:components:SidebarNav",
+   "target": "web:lib:ui",
+   "kind": "call"
+  },
+  {
+   "source": "web:components:StatsPage",
+   "target": "web:components:Icons",
+   "kind": "call"
+  },
+  {
+   "source": "web:components:StatsPage",
+   "target": "web:lib:dateFormat",
+   "kind": "call"
+  },
+  {
+   "source": "web:components:SuggestInput",
+   "target": "web:lib:usePopoverPosition",
+   "kind": "call"
+  },
+  {
+   "source": "web:components:ThemeInitScript",
+   "target": "web:lib:theme",
+   "kind": "call"
+  },
+  {
+   "source": "web:components:ThemeProvider",
+   "target": "web:lib:theme",
+   "kind": "call"
+  },
+  {
+   "source": "web:components:YearMonthGrid",
+   "target": "web:components:Icons",
+   "kind": "call"
+  },
+  {
+   "source": "web:components:YearMonthGrid",
+   "target": "web:lib:dateFormat",
+   "kind": "call"
+  },
+  {
+   "source": "web:components:YearPickerField",
+   "target": "web:components:CalendarMonth",
+   "kind": "call"
+  },
+  {
+   "source": "web:components:YearPickerField",
+   "target": "web:components:PickerField",
+   "kind": "call"
+  },
+  {
+   "source": "web:credit-card",
+   "target": "be:router:bill",
+   "kind": "dispatch"
+  },
+  {
+   "source": "web:credit-card",
+   "target": "be:router:credit_card",
+   "kind": "dispatch"
+  },
+  {
+   "source": "web:credit-card",
+   "target": "be:router:installment",
+   "kind": "dispatch"
+  },
+  {
+   "source": "web:credit-card",
+   "target": "be:router:monthly_expense",
+   "kind": "dispatch"
+  },
+  {
+   "source": "web:credit-card",
+   "target": "be:router:pay_period_start_override",
+   "kind": "dispatch"
+  },
+  {
+   "source": "web:credit-card",
+   "target": "web:components:AmountInput",
+   "kind": "call"
+  },
+  {
+   "source": "web:credit-card",
+   "target": "web:components:ConfirmDialog",
+   "kind": "call"
+  },
+  {
+   "source": "web:credit-card",
+   "target": "web:components:DatePickerField",
+   "kind": "call"
+  },
+  {
+   "source": "web:credit-card",
+   "target": "web:components:ErrorAlert",
+   "kind": "call"
+  },
+  {
+   "source": "web:credit-card",
+   "target": "web:components:FinanceUI",
+   "kind": "call"
+  },
+  {
+   "source": "web:credit-card",
+   "target": "web:components:Icons",
+   "kind": "call"
+  },
+  {
+   "source": "web:credit-card",
+   "target": "web:components:Modal",
+   "kind": "call"
+  },
+  {
+   "source": "web:credit-card",
+   "target": "web:components:PageHeader",
+   "kind": "call"
+  },
+  {
+   "source": "web:credit-card",
+   "target": "web:lib:api",
+   "kind": "call"
+  },
+  {
+   "source": "web:credit-card",
+   "target": "web:lib:dateFormat",
+   "kind": "call"
+  },
+  {
+   "source": "web:credit-card",
+   "target": "web:lib:formatNumber",
+   "kind": "call"
+  },
+  {
+   "source": "web:credit-card",
+   "target": "web:lib:parseFormNumber",
+   "kind": "call"
+  },
+  {
+   "source": "web:credit-card",
+   "target": "web:lib:payPeriods",
+   "kind": "call"
+  },
+  {
+   "source": "web:credit-card",
+   "target": "web:lib:ui",
+   "kind": "call"
+  },
+  {
+   "source": "web:games/mambo",
+   "target": "be:router:mambo",
+   "kind": "dispatch"
+  },
+  {
+   "source": "web:games/mambo",
+   "target": "web:lib:api",
+   "kind": "call"
+  },
+  {
+   "source": "web:games/mambo",
+   "target": "web:lib:ui",
+   "kind": "call"
+  },
+  {
+   "source": "web:games/mastermind",
+   "target": "web:components:PageHeader",
+   "kind": "call"
+  },
+  {
+   "source": "web:games/mastermind",
+   "target": "web:lib:ui",
+   "kind": "call"
+  },
+  {
+   "source": "web:games/mosaic",
+   "target": "be:router:mosaic",
+   "kind": "dispatch"
+  },
+  {
+   "source": "web:games/mosaic",
+   "target": "web:lib:api",
+   "kind": "call"
+  },
+  {
+   "source": "web:games/mosaic",
+   "target": "web:lib:ui",
+   "kind": "call"
+  },
+  {
+   "source": "web:games/sets",
+   "target": "web:components:PageHeader",
+   "kind": "call"
+  },
+  {
+   "source": "web:games/sets",
+   "target": "web:lib:ui",
+   "kind": "call"
+  },
+  {
+   "source": "web:home",
+   "target": "web:components:AuthGate",
+   "kind": "call"
+  },
+  {
+   "source": "web:home",
+   "target": "web:components:HomeOverview",
+   "kind": "call"
+  },
+  {
+   "source": "web:home",
+   "target": "web:components:Icons",
+   "kind": "call"
+  },
+  {
+   "source": "web:home",
+   "target": "web:lib:nav",
+   "kind": "call"
+  },
+  {
+   "source": "web:home",
+   "target": "web:lib:ui",
+   "kind": "call"
+  },
+  {
+   "source": "web:house-payments",
+   "target": "be:router:house_payment",
+   "kind": "dispatch"
+  },
+  {
+   "source": "web:house-payments",
+   "target": "web:components:AmountInput",
+   "kind": "call"
+  },
+  {
+   "source": "web:house-payments",
+   "target": "web:components:ConfirmDialog",
+   "kind": "call"
+  },
+  {
+   "source": "web:house-payments",
+   "target": "web:components:DatePickerField",
+   "kind": "call"
+  },
+  {
+   "source": "web:house-payments",
+   "target": "web:components:ErrorAlert",
+   "kind": "call"
+  },
+  {
+   "source": "web:house-payments",
+   "target": "web:components:FinanceUI",
+   "kind": "call"
+  },
+  {
+   "source": "web:house-payments",
+   "target": "web:components:Icons",
+   "kind": "call"
+  },
+  {
+   "source": "web:house-payments",
+   "target": "web:components:Modal",
+   "kind": "call"
+  },
+  {
+   "source": "web:house-payments",
+   "target": "web:components:PageHeader",
+   "kind": "call"
+  },
+  {
+   "source": "web:house-payments",
+   "target": "web:lib:api",
+   "kind": "call"
+  },
+  {
+   "source": "web:house-payments",
+   "target": "web:lib:dateFormat",
+   "kind": "call"
+  },
+  {
+   "source": "web:house-payments",
+   "target": "web:lib:formatNumber",
+   "kind": "call"
+  },
+  {
+   "source": "web:house-payments",
+   "target": "web:lib:parseFormNumber",
+   "kind": "call"
+  },
+  {
+   "source": "web:house-payments",
+   "target": "web:lib:ui",
+   "kind": "call"
+  },
+  {
+   "source": "web:installments",
+   "target": "be:router:credit_card",
+   "kind": "dispatch"
+  },
+  {
+   "source": "web:installments",
+   "target": "be:router:installment",
+   "kind": "dispatch"
+  },
+  {
+   "source": "web:installments",
+   "target": "web:components:AmountInput",
+   "kind": "call"
+  },
+  {
+   "source": "web:installments",
+   "target": "web:components:ConfirmDialog",
+   "kind": "call"
+  },
+  {
+   "source": "web:installments",
+   "target": "web:components:ErrorAlert",
+   "kind": "call"
+  },
+  {
+   "source": "web:installments",
+   "target": "web:components:FinanceUI",
+   "kind": "call"
+  },
+  {
+   "source": "web:installments",
+   "target": "web:components:Icons",
+   "kind": "call"
+  },
+  {
+   "source": "web:installments",
+   "target": "web:components:Modal",
+   "kind": "call"
+  },
+  {
+   "source": "web:installments",
+   "target": "web:components:MonthPickerField",
+   "kind": "call"
+  },
+  {
+   "source": "web:installments",
+   "target": "web:components:PageHeader",
+   "kind": "call"
+  },
+  {
+   "source": "web:installments",
+   "target": "web:lib:api",
+   "kind": "call"
+  },
+  {
+   "source": "web:installments",
+   "target": "web:lib:dateFormat",
+   "kind": "call"
+  },
+  {
+   "source": "web:installments",
+   "target": "web:lib:formatNumber",
+   "kind": "call"
+  },
+  {
+   "source": "web:installments",
+   "target": "web:lib:parseFormNumber",
+   "kind": "call"
+  },
+  {
+   "source": "web:installments",
+   "target": "web:lib:ui",
+   "kind": "call"
+  },
+  {
+   "source": "web:layout",
+   "target": "web:components:AppShell",
+   "kind": "call"
+  },
+  {
+   "source": "web:layout",
+   "target": "web:components:AuthGate",
+   "kind": "call"
+  },
+  {
+   "source": "web:layout",
+   "target": "web:components:ConfirmDialog",
+   "kind": "call"
+  },
+  {
+   "source": "web:layout",
+   "target": "web:components:ThemeInitScript",
+   "kind": "call"
+  },
+  {
+   "source": "web:layout",
+   "target": "web:components:ThemeProvider",
+   "kind": "call"
+  },
+  {
+   "source": "web:layout",
+   "target": "web:components:TooltipLayer",
+   "kind": "call"
+  },
+  {
+   "source": "web:layout",
+   "target": "web:lib:theme",
+   "kind": "call"
+  },
+  {
+   "source": "web:layout",
+   "target": "web:lib:ui",
+   "kind": "call"
+  },
+  {
+   "source": "web:lib:api",
+   "target": "be:router:auth",
+   "kind": "dispatch"
+  },
+  {
+   "source": "web:lib:api",
+   "target": "be:router:bill",
+   "kind": "dispatch"
+  },
+  {
+   "source": "web:lib:api",
+   "target": "be:router:blood_pressure",
+   "kind": "dispatch"
+  },
+  {
+   "source": "web:lib:api",
+   "target": "be:router:calendar_day_override",
+   "kind": "dispatch"
+  },
+  {
+   "source": "web:lib:api",
+   "target": "be:router:company",
+   "kind": "dispatch"
+  },
+  {
+   "source": "web:lib:api",
+   "target": "be:router:credit_card",
+   "kind": "dispatch"
+  },
+  {
+   "source": "web:lib:api",
+   "target": "be:router:fixed_expense",
+   "kind": "dispatch"
+  },
+  {
+   "source": "web:lib:api",
+   "target": "be:router:house_payment",
+   "kind": "dispatch"
+  },
+  {
+   "source": "web:lib:api",
+   "target": "be:router:installment",
+   "kind": "dispatch"
+  },
+  {
+   "source": "web:lib:api",
+   "target": "be:router:lotto",
+   "kind": "dispatch"
+  },
+  {
+   "source": "web:lib:api",
+   "target": "be:router:mambo",
+   "kind": "dispatch"
+  },
+  {
+   "source": "web:lib:api",
+   "target": "be:router:monthly_expense",
+   "kind": "dispatch"
+  },
+  {
+   "source": "web:lib:api",
+   "target": "be:router:mosaic",
+   "kind": "dispatch"
+  },
+  {
+   "source": "web:lib:api",
+   "target": "be:router:pay_period_start_override",
+   "kind": "dispatch"
+  },
+  {
+   "source": "web:lib:api",
+   "target": "be:router:payslip",
+   "kind": "dispatch"
+  },
+  {
+   "source": "web:lib:api",
+   "target": "be:router:payslip_default",
+   "kind": "dispatch"
+  },
+  {
+   "source": "web:lib:api",
+   "target": "be:router:search",
+   "kind": "dispatch"
+  },
+  {
+   "source": "web:lib:api",
+   "target": "be:router:travel",
+   "kind": "dispatch"
+  },
+  {
+   "source": "web:lib:api",
+   "target": "be:router:user",
+   "kind": "dispatch"
+  },
+  {
+   "source": "web:lib:api",
+   "target": "web:lib:auth",
+   "kind": "call"
+  },
+  {
+   "source": "web:lib:nav",
+   "target": "web:components:Icons",
+   "kind": "call"
+  },
+  {
+   "source": "web:lib:parseFormNumber",
+   "target": "web:lib:formatNumber",
+   "kind": "call"
+  },
+  {
+   "source": "web:lib:payPeriods",
+   "target": "be:router:calendar_day_override",
+   "kind": "dispatch"
+  },
+  {
+   "source": "web:lib:payPeriods",
+   "target": "web:lib:api",
+   "kind": "call"
+  },
+  {
+   "source": "web:lib:payPeriods",
+   "target": "web:lib:dateFormat",
+   "kind": "call"
+  },
+  {
+   "source": "web:lib:remainingPrice",
+   "target": "web:lib:parseFormNumber",
+   "kind": "call"
+  },
+  {
+   "source": "web:lotto",
+   "target": "be:router:lotto",
+   "kind": "dispatch"
+  },
+  {
+   "source": "web:lotto",
+   "target": "web:components:AmountInput",
+   "kind": "call"
+  },
+  {
+   "source": "web:lotto",
+   "target": "web:components:CalendarMonth",
+   "kind": "call"
+  },
+  {
+   "source": "web:lotto",
+   "target": "web:components:ConfirmDialog",
+   "kind": "call"
+  },
+  {
+   "source": "web:lotto",
+   "target": "web:components:DatePickerField",
+   "kind": "call"
+  },
+  {
+   "source": "web:lotto",
+   "target": "web:components:ErrorAlert",
+   "kind": "call"
+  },
+  {
+   "source": "web:lotto",
+   "target": "web:components:FinanceUI",
+   "kind": "call"
+  },
+  {
+   "source": "web:lotto",
+   "target": "web:components:Icons",
+   "kind": "call"
+  },
+  {
+   "source": "web:lotto",
+   "target": "web:components:Modal",
+   "kind": "call"
+  },
+  {
+   "source": "web:lotto",
+   "target": "web:components:PageHeader",
+   "kind": "call"
+  },
+  {
+   "source": "web:lotto",
+   "target": "web:lib:api",
+   "kind": "call"
+  },
+  {
+   "source": "web:lotto",
+   "target": "web:lib:dateFormat",
+   "kind": "call"
+  },
+  {
+   "source": "web:lotto",
+   "target": "web:lib:formatNumber",
+   "kind": "call"
+  },
+  {
+   "source": "web:lotto",
+   "target": "web:lib:ui",
+   "kind": "call"
+  },
+  {
+   "source": "web:monthly-expenses",
+   "target": "be:router:bill",
+   "kind": "dispatch"
+  },
+  {
+   "source": "web:monthly-expenses",
+   "target": "be:router:credit_card",
+   "kind": "dispatch"
+  },
+  {
+   "source": "web:monthly-expenses",
+   "target": "be:router:house_payment",
+   "kind": "dispatch"
+  },
+  {
+   "source": "web:monthly-expenses",
+   "target": "be:router:monthly_expense",
+   "kind": "dispatch"
+  },
+  {
+   "source": "web:monthly-expenses",
+   "target": "be:router:pay_period_start_override",
+   "kind": "dispatch"
+  },
+  {
+   "source": "web:monthly-expenses",
+   "target": "web:components:AmountInput",
+   "kind": "call"
+  },
+  {
+   "source": "web:monthly-expenses",
+   "target": "web:components:ConfirmDialog",
+   "kind": "call"
+  },
+  {
+   "source": "web:monthly-expenses",
+   "target": "web:components:DatePickerField",
+   "kind": "call"
+  },
+  {
+   "source": "web:monthly-expenses",
+   "target": "web:components:ErrorAlert",
+   "kind": "call"
+  },
+  {
+   "source": "web:monthly-expenses",
+   "target": "web:components:FinanceUI",
+   "kind": "call"
+  },
+  {
+   "source": "web:monthly-expenses",
+   "target": "web:components:Icons",
+   "kind": "call"
+  },
+  {
+   "source": "web:monthly-expenses",
+   "target": "web:components:Modal",
+   "kind": "call"
+  },
+  {
+   "source": "web:monthly-expenses",
+   "target": "web:components:MonthPickerField",
+   "kind": "call"
+  },
+  {
+   "source": "web:monthly-expenses",
+   "target": "web:components:PageHeader",
+   "kind": "call"
+  },
+  {
+   "source": "web:monthly-expenses",
+   "target": "web:lib:api",
+   "kind": "call"
+  },
+  {
+   "source": "web:monthly-expenses",
+   "target": "web:lib:dateFormat",
+   "kind": "call"
+  },
+  {
+   "source": "web:monthly-expenses",
+   "target": "web:lib:formatNumber",
+   "kind": "call"
+  },
+  {
+   "source": "web:monthly-expenses",
+   "target": "web:lib:parseFormNumber",
+   "kind": "call"
+  },
+  {
+   "source": "web:monthly-expenses",
+   "target": "web:lib:payPeriods",
+   "kind": "call"
+  },
+  {
+   "source": "web:monthly-expenses",
+   "target": "web:lib:ui",
+   "kind": "call"
+  },
+  {
+   "source": "web:payslip",
+   "target": "be:router:company",
+   "kind": "dispatch"
+  },
+  {
+   "source": "web:payslip",
+   "target": "be:router:payslip",
+   "kind": "dispatch"
+  },
+  {
+   "source": "web:payslip",
+   "target": "be:router:payslip_default",
+   "kind": "dispatch"
+  },
+  {
+   "source": "web:payslip",
+   "target": "web:components:AmountInput",
+   "kind": "call"
+  },
+  {
+   "source": "web:payslip",
+   "target": "web:components:CompanyRedirect",
+   "kind": "call"
+  },
+  {
+   "source": "web:payslip",
+   "target": "web:components:ConfirmDialog",
+   "kind": "call"
+  },
+  {
+   "source": "web:payslip",
+   "target": "web:components:ErrorAlert",
+   "kind": "call"
+  },
+  {
+   "source": "web:payslip",
+   "target": "web:components:FinanceUI",
+   "kind": "call"
+  },
+  {
+   "source": "web:payslip",
+   "target": "web:components:Icons",
+   "kind": "call"
+  },
+  {
+   "source": "web:payslip",
+   "target": "web:components:Modal",
+   "kind": "call"
+  },
+  {
+   "source": "web:payslip",
+   "target": "web:components:PageHeader",
+   "kind": "call"
+  },
+  {
+   "source": "web:payslip",
+   "target": "web:components:YearMonthGrid",
+   "kind": "call"
+  },
+  {
+   "source": "web:payslip",
+   "target": "web:components:YearPickerField",
+   "kind": "call"
+  },
+  {
+   "source": "web:payslip",
+   "target": "web:lib:api",
+   "kind": "call"
+  },
+  {
+   "source": "web:payslip",
+   "target": "web:lib:dateFormat",
+   "kind": "call"
+  },
+  {
+   "source": "web:payslip",
+   "target": "web:lib:formatNumber",
+   "kind": "call"
+  },
+  {
+   "source": "web:payslip",
+   "target": "web:lib:parseFormNumber",
+   "kind": "call"
+  },
+  {
+   "source": "web:payslip",
+   "target": "web:lib:ui",
+   "kind": "call"
+  },
+  {
+   "source": "web:payslip",
+   "target": "web:lib:useWheelStep",
+   "kind": "call"
+  },
+  {
+   "source": "web:salary-stats",
+   "target": "be:router:payslip",
+   "kind": "dispatch"
+  },
+  {
+   "source": "web:salary-stats",
+   "target": "web:components:CompanyRedirect",
+   "kind": "call"
+  },
+  {
+   "source": "web:salary-stats",
+   "target": "web:components:ErrorAlert",
+   "kind": "call"
+  },
+  {
+   "source": "web:salary-stats",
+   "target": "web:components:FinanceUI",
+   "kind": "call"
+  },
+  {
+   "source": "web:salary-stats",
+   "target": "web:components:Icons",
+   "kind": "call"
+  },
+  {
+   "source": "web:salary-stats",
+   "target": "web:components:StatsPage",
+   "kind": "call"
+  },
+  {
+   "source": "web:salary-stats",
+   "target": "web:lib:api",
+   "kind": "call"
+  },
+  {
+   "source": "web:salary-stats",
+   "target": "web:lib:dateFormat",
+   "kind": "call"
+  },
+  {
+   "source": "web:salary-stats",
+   "target": "web:lib:formatNumber",
+   "kind": "call"
+  },
+  {
+   "source": "web:salary-stats",
+   "target": "web:lib:useWheelStep",
+   "kind": "call"
+  },
+  {
+   "source": "web:settings",
+   "target": "be:router:auth",
+   "kind": "dispatch"
+  },
+  {
+   "source": "web:settings",
+   "target": "be:router:company",
+   "kind": "dispatch"
+  },
+  {
+   "source": "web:settings",
+   "target": "be:router:user",
+   "kind": "dispatch"
+  },
+  {
+   "source": "web:settings",
+   "target": "web:components:AuthGate",
+   "kind": "call"
+  },
+  {
+   "source": "web:settings",
+   "target": "web:components:ConfirmDialog",
+   "kind": "call"
+  },
+  {
+   "source": "web:settings",
+   "target": "web:components:ErrorAlert",
+   "kind": "call"
+  },
+  {
+   "source": "web:settings",
+   "target": "web:components:FinanceUI",
+   "kind": "call"
+  },
+  {
+   "source": "web:settings",
+   "target": "web:components:PageHeader",
+   "kind": "call"
+  },
+  {
+   "source": "web:settings",
+   "target": "web:lib:api",
+   "kind": "call"
+  },
+  {
+   "source": "web:settings",
+   "target": "web:lib:auth",
+   "kind": "call"
+  },
+  {
+   "source": "web:settings",
+   "target": "web:lib:dateFormat",
+   "kind": "call"
+  },
+  {
+   "source": "web:settings",
+   "target": "web:lib:nav",
+   "kind": "call"
+  },
+  {
+   "source": "web:settings",
+   "target": "web:lib:ui",
+   "kind": "call"
+  },
+  {
+   "source": "web:software-architecture",
+   "target": "web:components:Icons",
+   "kind": "call"
+  },
+  {
+   "source": "web:software-architecture",
+   "target": "web:components:PageHeader",
+   "kind": "call"
+  },
+  {
+   "source": "web:software-architecture",
+   "target": "web:components:ThemeProvider",
+   "kind": "call"
+  },
+  {
+   "source": "web:software-architecture",
+   "target": "web:lib:theme",
+   "kind": "call"
+  },
+  {
+   "source": "web:software-architecture",
+   "target": "web:lib:ui",
+   "kind": "call"
+  },
+  {
+   "source": "web:travels",
+   "target": "be:router:travel",
+   "kind": "dispatch"
+  },
+  {
+   "source": "web:travels",
+   "target": "web:components:ConfirmDialog",
+   "kind": "call"
+  },
+  {
+   "source": "web:travels",
+   "target": "web:components:DatePickerField",
+   "kind": "call"
+  },
+  {
+   "source": "web:travels",
+   "target": "web:components:Modal",
+   "kind": "call"
+  },
+  {
+   "source": "web:travels",
+   "target": "web:components:SuggestInput",
+   "kind": "call"
+  },
+  {
+   "source": "web:travels",
+   "target": "web:lib:api",
+   "kind": "call"
+  },
+  {
+   "source": "web:travels",
+   "target": "web:lib:dateFormat",
+   "kind": "call"
+  },
+  {
+   "source": "web:travels",
+   "target": "web:lib:maps",
+   "kind": "call"
+  },
+  {
+   "source": "web:travels",
+   "target": "web:lib:remainingPrice",
+   "kind": "call"
+  }
+ ],
+ "entryPoints": [
+  "be:core:main",
+  "be:core:test_core",
+  "be:lotto-scraper",
+  "be:scripts",
+  "web:bills",
+  "web:blood-pressure",
+  "web:calendar",
+  "web:commission",
+  "web:credit-card",
+  "web:games/mambo",
+  "web:games/mastermind",
+  "web:games/mosaic",
+  "web:games/sets",
+  "web:home",
+  "web:house-payments",
+  "web:installments",
+  "web:layout",
+  "web:lotto",
+  "web:monthly-expenses",
+  "web:payslip",
+  "web:salary-stats",
+  "web:settings",
+  "web:software-architecture",
+  "web:travels"
+ ],
+ "deadEnds": [],
+ "observations": [
+  "backend/db.py is the single data-access hub: every router reaches Postgres through it, so the table edges here are resolved through the db.py functions each module imports (db.py helper calls followed).",
+  "Most-written tables: fixed_expense (2 writers); app_user (1 writers); app_user_passkey (1 writers). A table with several writers is where cross-domain side effects live.",
+  "web/src/lib/payPeriods.ts is client-side business logic: Calendar, Bills, Credit Card, Monthly Expenses and the home overview share it, and it writes calendar-day overrides back through the API.",
+  "Cache invalidation is a hand-kept map in backend/app/factory.py (_CACHE_PREFIXES, _CACHE_ALSO_INVALIDATES): a write clears other domains' namespaces, which import edges cannot show.",
+  "Unresolved by this script: fetch paths built at runtime in the web app (only literal /api/ segments are matched) and the pypdf/tesseract work in services/bill_extract.py (local processing, not a store).",
+  "Dead code found by reading, hidden inside aggregated leaves: web/src/app/payslip/pdfs/PdfBulkUploadClient.tsx (imported by nothing) and lotto-scraper.py (standalone CLI duplicating services/pcso_results.py)."
+ ],
+ "flows": [
+  {
+   "name": "Record a credit-card payment",
+   "persona": "You, running the household budget",
+   "description": "You mark a card statement paid and the payment lands on the budget calendar.",
+   "steps": [
+    {
+     "label": "Open Credit Cards and record the payment",
+     "nodes": [
+      "web:credit-card",
+      "web:lib:api"
+     ]
+    },
+    {
+     "label": "The API saves the payment",
+     "nodes": [
+      "be:router:credit_card",
+      "be:core:db"
+     ]
+    },
+    {
+     "label": "The payment also becomes a fixed expense on its day",
+     "nodes": [
+      "ds:fixed_expense"
+     ]
+    },
+    {
+     "label": "The page re-spreads the pay-period budget",
+     "nodes": [
+      "web:lib:payPeriods",
+      "be:router:calendar_day_override"
+     ]
+    },
+    {
+     "label": "The calendar shows the new daily amounts",
+     "nodes": [
+      "ds:calendar_day_override",
+      "web:calendar"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "Add a bill from a photo",
+   "persona": "You, paying the monthly bills",
+   "description": "You upload a photo or PDF of a bill and the amount and due date are read for you.",
+   "steps": [
+    {
+     "label": "Upload the bill on the Bills page",
+     "nodes": [
+      "web:bills",
+      "web:lib:api"
+     ]
+    },
+    {
+     "label": "The API checks the file type and size",
+     "nodes": [
+      "be:router:bill",
+      "be:core:deps"
+     ]
+    },
+    {
+     "label": "Text is read from the PDF or photo",
+     "nodes": [
+      "be:service:bill_extract"
+     ]
+    },
+    {
+     "label": "The bill is saved",
+     "nodes": [
+      "be:core:db",
+      "ds:bill"
+     ]
+    },
+    {
+     "label": "Linked card and monthly-expense views refresh",
+     "nodes": [
+      "be:core:factory",
+      "ds:redis"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "Import a payslip",
+   "persona": "You, tracking salary",
+   "description": "You add a payslip PDF and it feeds salary stats and the budget.",
+   "steps": [
+    {
+     "label": "Upload the payslip",
+     "nodes": [
+      "web:payslip",
+      "web:lib:api"
+     ]
+    },
+    {
+     "label": "The API parses the PDF",
+     "nodes": [
+      "be:router:payslip",
+      "be:service:payslip_parse"
+     ]
+    },
+    {
+     "label": "The payslip is stored with its company",
+     "nodes": [
+      "be:core:db",
+      "ds:payslip"
+     ]
+    },
+    {
+     "label": "Salary stats and the calendar read it",
+     "nodes": [
+      "web:salary-stats",
+      "web:calendar"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "Log in",
+   "persona": "Anyone using the app once users exist",
+   "description": "You sign in with a password or passkey and every page opens behind the session gate.",
+   "steps": [
+    {
+     "label": "The app checks whether a login is needed",
+     "nodes": [
+      "web:components:AuthGate",
+      "be:router:auth"
+     ]
+    },
+    {
+     "label": "Password or passkey is verified",
+     "nodes": [
+      "be:core:security",
+      "be:core:passwords"
+     ]
+    },
+    {
+     "label": "A session token is issued and stored hashed",
+     "nodes": [
+      "ds:app_user_session",
+      "ds:redis"
+     ]
+    },
+    {
+     "label": "Every API call is checked against the session",
+     "nodes": [
+      "be:core:deps",
+      "be:core:factory"
+     ]
+    }
+   ]
+  }
+ ]
+}

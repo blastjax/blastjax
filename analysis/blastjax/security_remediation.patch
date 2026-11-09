@@ -1,0 +1,429 @@
+# blastjax security remediation — Critical and High findings only (see SECURITY_FINDINGS.md).
+# Paths are relative to the repository root. Apply from the root:  git apply analysis/blastjax/security_remediation.patch
+# (or: patch -p1 < analysis/blastjax/security_remediation.patch). Then: python backend/test_core.py; cd web && npm ci && npx tsc --noEmit && npm run lint.
+
+
+# SEC-002: add require_settings_access, the server's copy of the web rule isPageAllowed('/settings')
+#          (superuser, unrestricted allowed_pages, or '/settings' listed); open mode stays open.
+diff --git a/backend/app/deps.py b/backend/app/deps.py
+index 468b65a..89a63bc 100644
+--- a/backend/app/deps.py
++++ b/backend/app/deps.py
+@@ -2,8 +2,8 @@ from __future__ import annotations
+ 
+ from fastapi import HTTPException, Request, UploadFile
+ 
+-from app.security import login_required, session_is_valid
+-from db import database_url
++from app.security import login_required, session_is_valid, session_user_id
++from db import database_url, get_app_user_by_id
+ 
+ _MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+ _IMAGE_TYPES = {b"\x89PNG\r\n\x1a\n": "image/png", b"\xff\xd8\xff": "image/jpeg"}
+@@ -14,13 +14,29 @@ def require_db() -> None:
+         raise HTTPException(status_code=503, detail="DATABASE_URL is not set.")
+ 
+ 
++def _bearer_token(request: Request) -> str:
++    header = request.headers.get("authorization") or ""
++    return header[7:] if header.lower().startswith("bearer ") else ""
++
++
+ def require_session(request: Request) -> None:
+     if not login_required():
+         return
+-    header = request.headers.get("authorization") or ""
+-    token = header[7:] if header.lower().startswith("bearer ") else ""
+-    if not session_is_valid(token):
++    if not session_is_valid(_bearer_token(request)):
++        raise HTTPException(status_code=401, detail="Login required.")
++
++
++def require_settings_access(request: Request) -> None:
++    """The server's copy of the web's isPageAllowed("/settings"): managing users is for whoever may open Settings."""
++    if not login_required():
++        return
++    user_id = session_user_id(_bearer_token(request))
++    user = get_app_user_by_id(user_id) if user_id else None
++    if user is None:
+         raise HTTPException(status_code=401, detail="Login required.")
++    pages = user["allowed_pages"]
++    if not (user["is_superuser"] or pages is None or "/settings" in pages):
++        raise HTTPException(status_code=403, detail="You don't have access to Settings.")
+ 
+ 
+ def image_type(data: bytes) -> str | None:
+
+# SEC-002 (hunks 1-2): every /api/users route now requires Settings access, not just any session.
+# SEC-003 (hunk 3): refuse to delete the last user, which would reopen the whole API to anyone.
+#          Behavior change: today deleting the last user is allowed. Drop this hunk to keep it.
+diff --git a/backend/app/routers/user.py b/backend/app/routers/user.py
+index 59a7fe4..9b6f7d3 100644
+--- a/backend/app/routers/user.py
++++ b/backend/app/routers/user.py
+@@ -6,7 +6,7 @@ from uuid import UUID
+ from fastapi import APIRouter, Depends, HTTPException
+ from sqlalchemy.exc import IntegrityError
+ 
+-from app.deps import require_db
++from app.deps import require_db, require_settings_access
+ from app.passwords import hash_password, verify_password
+ from app.schemas.user import AppUserAccessUpdate, AppUserCreate, AppUserUpdate, AppUserVerify
+ from db import (
+@@ -18,7 +18,7 @@ from db import (
+     update_app_user_access,
+ )
+ 
+-router = APIRouter(prefix="/api/users", tags=["users"], dependencies=[Depends(require_db)])
++router = APIRouter(prefix="/api/users", tags=["users"], dependencies=[Depends(require_db), Depends(require_settings_access)])
+ 
+ 
+ def _serialize(row: dict[str, Any]) -> dict[str, Any]:
+@@ -73,6 +73,10 @@ def users_update_access(user_id: UUID, body: AppUserAccessUpdate) -> dict[str, A
+ 
+ @router.delete("/{user_id}")
+ def users_remove(user_id: UUID) -> dict[str, Any]:
++    # ponytail: two simultaneous deletes of the last two users can both pass; lock the rows if that ever matters.
++    users = list_app_users()
++    if len(users) == 1 and users[0]["id"] == user_id:
++        raise HTTPException(status_code=409, detail="The last user can't be deleted: with no users the app is open to anyone.")
+     if not delete_app_user(user_id):
+         raise HTTPException(status_code=404, detail="User not found.")
+     return {"ok": True}
+
+# SEC-002 / SEC-003: check_settings_access, a runnable check for both rules (python backend/test_core.py).
+diff --git a/backend/test_core.py b/backend/test_core.py
+index 39e0f1b..3e1fe55 100644
+--- a/backend/test_core.py
++++ b/backend/test_core.py
+@@ -210,6 +210,59 @@ def check_sessions() -> None:
+         vars(security).update(saved)
+ 
+ 
++def check_settings_access() -> None:
++    from fastapi import HTTPException
++    from starlette.requests import Request
++
++    from app import deps
++    from app.routers import user as users_api
++
++    def status(call) -> int:
++        try:
++            call()
++        except HTTPException as exc:
++            return exc.status_code
++        return 200
++
++    def settings(token: str) -> int:
++        scope = {"type": "http", "headers": [(b"authorization", f"Bearer {token}".encode())]}
++        return status(lambda: deps.require_settings_access(Request(scope)))
++
++    people = {
++        "super": {"is_superuser": True, "allowed_pages": ["/calendar"]},
++        "unrestricted": {"is_superuser": False, "allowed_pages": None},
++        "settings": {"is_superuser": False, "allowed_pages": ["/settings"]},
++        "calendar": {"is_superuser": False, "allowed_pages": ["/calendar"]},
++        "nothing": {"is_superuser": False, "allowed_pages": []},
++    }
++    saved = {k: vars(deps)[k] for k in ("login_required", "session_user_id", "get_app_user_by_id")}
++    saved_list = users_api.list_app_users
++    try:
++        deps.login_required = lambda: True
++        deps.session_user_id = lambda token: token or None
++        deps.get_app_user_by_id = people.get
++        assert [settings(t) for t in ("super", "unrestricted", "settings")] == [200, 200, 200]
++        assert settings("calendar") == 403 and settings("nothing") == 403, "a user without Settings reached user admin"
++        assert settings("") == 401 and settings("deleted") == 401
++        deps.login_required = lambda: False
++        assert settings("") == 200, "first-user setup needs a login"
++        last, other = uuid.uuid4(), uuid.uuid4()
++        users_api.list_app_users = lambda: [{"id": last}]
++        assert status(lambda: users_api.users_remove(last)) == 409, "deleted the last user"
++        saved_delete = users_api.delete_app_user
++        try:
++            users_api.delete_app_user = lambda user_id: False
++            assert status(lambda: users_api.users_remove(other)) == 404, "an unknown id must stay a 404"
++            users_api.list_app_users = lambda: [{"id": last}, {"id": other}]
++            users_api.delete_app_user = lambda user_id: True
++            assert status(lambda: users_api.users_remove(last)) == 200, "blocked deleting a user who is not the last"
++        finally:
++            users_api.delete_app_user = saved_delete
++    finally:
++        vars(deps).update(saved)
++        users_api.list_app_users = saved_list
++
++
+ def check_passkey_ceremony() -> None:
+     import hashlib
+     import json
+
+# SEC-001: lockfile regenerated by `npm install` for next / eslint-config-next 15.5.29, so `npm ci` (CI, Dockerfile.web) installs the fix.
+diff --git a/web/package-lock.json b/web/package-lock.json
+index d705ca2..b869ed6 100644
+--- a/web/package-lock.json
++++ b/web/package-lock.json
+@@ -8,7 +8,7 @@
+       "name": "web",
+       "version": "0.1.0",
+       "dependencies": {
+-        "next": "15.5.14",
++        "next": "15.5.29",
+         "react": "19.1.0",
+         "react-dom": "19.1.0",
+         "recharts": "^3.8.0"
+@@ -21,7 +21,7 @@
+         "@types/react-dom": "^19",
+         "cross-env": "^7.0.3",
+         "eslint": "^9",
+-        "eslint-config-next": "15.5.14",
++        "eslint-config-next": "15.5.29",
+         "rimraf": "^6.1.3",
+         "tailwindcss": "^4",
+         "typescript": "^5"
+@@ -799,15 +799,15 @@
+       }
+     },
+     "node_modules/@next/env": {
+-      "version": "15.5.14",
+-      "resolved": "https://registry.npmjs.org/@next/env/-/env-15.5.14.tgz",
+-      "integrity": "sha512-aXeirLYuASxEgi4X4WhfXsShCFxWDfNn/8ZeC5YXAS2BB4A8FJi1kwwGL6nvMVboE7fZCzmJPNdMvVHc8JpaiA==",
++      "version": "15.5.29",
++      "resolved": "https://registry.npmjs.org/@next/env/-/env-15.5.29.tgz",
++      "integrity": "sha512-9SrTiTsgORa+KfhlXXAGC1eSs847E+d2MQTPUX+n7R5XA8g/B6ZitfL6GoYHNMLwG3Hzs1wjDH0/ME5WrGMqBQ==",
+       "license": "MIT"
+     },
+     "node_modules/@next/eslint-plugin-next": {
+-      "version": "15.5.14",
+-      "resolved": "https://registry.npmjs.org/@next/eslint-plugin-next/-/eslint-plugin-next-15.5.14.tgz",
+-      "integrity": "sha512-ogBjgsFrPPz19abP3VwcYSahbkUOMMvJjxCOYWYndw+PydeMuLuB4XrvNkNutFrTjC9St2KFULRdKID8Sd/CMQ==",
++      "version": "15.5.29",
++      "resolved": "https://registry.npmjs.org/@next/eslint-plugin-next/-/eslint-plugin-next-15.5.29.tgz",
++      "integrity": "sha512-d3dH0WVbXr+W/3f/TMU6fl7vHJBuok7ugMCDPfRnHhCLl8ppAtFbfXgVHpnLrUirHN4vE5GkTMnId3Fmxv9UCQ==",
+       "dev": true,
+       "license": "MIT",
+       "dependencies": {
+@@ -815,9 +815,9 @@
+       }
+     },
+     "node_modules/@next/swc-darwin-arm64": {
+-      "version": "15.5.14",
+-      "resolved": "https://registry.npmjs.org/@next/swc-darwin-arm64/-/swc-darwin-arm64-15.5.14.tgz",
+-      "integrity": "sha512-Y9K6SPzobnZvrRDPO2s0grgzC+Egf0CqfbdvYmQVaztV890zicw8Z8+4Vqw8oPck8r1TjUHxVh8299Cg4TrxXg==",
++      "version": "15.5.29",
++      "resolved": "https://registry.npmjs.org/@next/swc-darwin-arm64/-/swc-darwin-arm64-15.5.29.tgz",
++      "integrity": "sha512-vozRDuM23T0faRR0O3oN1eRqjEqUue4Eljhkb9f7urQgzmyzve7j3atzTv3Z1AnjQ9IeVY0X3aS1/an56TOiTg==",
+       "cpu": [
+         "arm64"
+       ],
+@@ -831,9 +831,9 @@
+       }
+     },
+     "node_modules/@next/swc-darwin-x64": {
+-      "version": "15.5.14",
+-      "resolved": "https://registry.npmjs.org/@next/swc-darwin-x64/-/swc-darwin-x64-15.5.14.tgz",
+-      "integrity": "sha512-aNnkSMjSFRTOmkd7qoNI2/rETQm/vKD6c/Ac9BZGa9CtoOzy3c2njgz7LvebQJ8iPxdeTuGnAjagyis8a9ifBw==",
++      "version": "15.5.29",
++      "resolved": "https://registry.npmjs.org/@next/swc-darwin-x64/-/swc-darwin-x64-15.5.29.tgz",
++      "integrity": "sha512-FzrcEzMZVcp/SqFXCW5SXyPil10bB9l5wpTBapEs9ZMqke3W+hyC5mNAdAa1divn+4SZ7LD5BtK67XvK7SucWQ==",
+       "cpu": [
+         "x64"
+       ],
+@@ -847,12 +847,15 @@
+       }
+     },
+     "node_modules/@next/swc-linux-arm64-gnu": {
+-      "version": "15.5.14",
+-      "resolved": "https://registry.npmjs.org/@next/swc-linux-arm64-gnu/-/swc-linux-arm64-gnu-15.5.14.tgz",
+-      "integrity": "sha512-tjlpia+yStPRS//6sdmlVwuO1Rioern4u2onafa5n+h2hCS9MAvMXqpVbSrjgiEOoCs0nJy7oPOmWgtRRNSM5Q==",
++      "version": "15.5.29",
++      "resolved": "https://registry.npmjs.org/@next/swc-linux-arm64-gnu/-/swc-linux-arm64-gnu-15.5.29.tgz",
++      "integrity": "sha512-FWbWE5P313Yy5062vgY9UspNz/t6Ve/s35X9v6YU7ilsbhqKGabPBPIWcMEPhyomeRdwfv19NAITkU2FFIhGwA==",
+       "cpu": [
+         "arm64"
+       ],
++      "libc": [
++        "glibc"
++      ],
+       "license": "MIT",
+       "optional": true,
+       "os": [
+@@ -863,12 +866,15 @@
+       }
+     },
+     "node_modules/@next/swc-linux-arm64-musl": {
+-      "version": "15.5.14",
+-      "resolved": "https://registry.npmjs.org/@next/swc-linux-arm64-musl/-/swc-linux-arm64-musl-15.5.14.tgz",
+-      "integrity": "sha512-8B8cngBaLadl5lbDRdxGCP1Lef8ipD6KlxS3v0ElDAGil6lafrAM3B258p1KJOglInCVFUjk751IXMr2ixeQOQ==",
++      "version": "15.5.29",
++      "resolved": "https://registry.npmjs.org/@next/swc-linux-arm64-musl/-/swc-linux-arm64-musl-15.5.29.tgz",
++      "integrity": "sha512-xjTHrVisb9GeDSNFOwJI+4UJrKdwlpjz95q8sEvQh46yUp3+JikNcf26pode/HlHktSdJwcHx3iVMCjfPcnU+A==",
+       "cpu": [
+         "arm64"
+       ],
++      "libc": [
++        "musl"
++      ],
+       "license": "MIT",
+       "optional": true,
+       "os": [
+@@ -879,12 +885,15 @@
+       }
+     },
+     "node_modules/@next/swc-linux-x64-gnu": {
+-      "version": "15.5.14",
+-      "resolved": "https://registry.npmjs.org/@next/swc-linux-x64-gnu/-/swc-linux-x64-gnu-15.5.14.tgz",
+-      "integrity": "sha512-bAS6tIAg8u4Gn3Nz7fCPpSoKAexEt2d5vn1mzokcqdqyov6ZJ6gu6GdF9l8ORFrBuRHgv3go/RfzYz5BkZ6YSQ==",
++      "version": "15.5.29",
++      "resolved": "https://registry.npmjs.org/@next/swc-linux-x64-gnu/-/swc-linux-x64-gnu-15.5.29.tgz",
++      "integrity": "sha512-5WqW7kHscT02wyF8TlbYv9+zx3KhnQeZwk+FkTCr1r7TuvMrqqOZ3RDkdDKl3O0M0Er3VuQEzoEIrj8VX5fjaw==",
+       "cpu": [
+         "x64"
+       ],
++      "libc": [
++        "glibc"
++      ],
+       "license": "MIT",
+       "optional": true,
+       "os": [
+@@ -895,12 +904,15 @@
+       }
+     },
+     "node_modules/@next/swc-linux-x64-musl": {
+-      "version": "15.5.14",
+-      "resolved": "https://registry.npmjs.org/@next/swc-linux-x64-musl/-/swc-linux-x64-musl-15.5.14.tgz",
+-      "integrity": "sha512-mMxv/FcrT7Gfaq4tsR22l17oKWXZmH/lVqcvjX0kfp5I0lKodHYLICKPoX1KRnnE+ci6oIUdriUhuA3rBCDiSw==",
++      "version": "15.5.29",
++      "resolved": "https://registry.npmjs.org/@next/swc-linux-x64-musl/-/swc-linux-x64-musl-15.5.29.tgz",
++      "integrity": "sha512-I0QJ1Be9vtdq5FABhNcSbkELllA91WnhG+m4BjJHCn1bXAIL8AuDABIKIJ7Bz84T/sIkZP6TvOEWJcKckrX3yQ==",
+       "cpu": [
+         "x64"
+       ],
++      "libc": [
++        "musl"
++      ],
+       "license": "MIT",
+       "optional": true,
+       "os": [
+@@ -911,9 +923,9 @@
+       }
+     },
+     "node_modules/@next/swc-win32-arm64-msvc": {
+-      "version": "15.5.14",
+-      "resolved": "https://registry.npmjs.org/@next/swc-win32-arm64-msvc/-/swc-win32-arm64-msvc-15.5.14.tgz",
+-      "integrity": "sha512-OTmiBlYThppnvnsqx0rBqjDRemlmIeZ8/o4zI7veaXoeO1PVHoyj2lfTfXTiiGjCyRDhA10y4h6ZvZvBiynr2g==",
++      "version": "15.5.29",
++      "resolved": "https://registry.npmjs.org/@next/swc-win32-arm64-msvc/-/swc-win32-arm64-msvc-15.5.29.tgz",
++      "integrity": "sha512-q4fQFWtR7nH7ZDhU8RIvwNW0S/nHImaZkoOSw7rOXFgoP51HTesm8/8P/w3ACjc9GxqytXj0LZZesykK3arFBw==",
+       "cpu": [
+         "arm64"
+       ],
+@@ -927,9 +939,9 @@
+       }
+     },
+     "node_modules/@next/swc-win32-x64-msvc": {
+-      "version": "15.5.14",
+-      "resolved": "https://registry.npmjs.org/@next/swc-win32-x64-msvc/-/swc-win32-x64-msvc-15.5.14.tgz",
+-      "integrity": "sha512-+W7eFf3RS7m4G6tppVTOSyP9Y6FsJXfOuKzav1qKniiFm3KFByQfPEcouHdjlZmysl4zJGuGLQ/M9XyVeyeNEg==",
++      "version": "15.5.29",
++      "resolved": "https://registry.npmjs.org/@next/swc-win32-x64-msvc/-/swc-win32-x64-msvc-15.5.29.tgz",
++      "integrity": "sha512-putWQ+CTEJunAPIPDPfb06Kc4emhYpdM5FoCDHSkC/ym7Dy2xOBMPgBjBbRkw2Hp5/550ACYxCmUtV4k4ui3Iw==",
+       "cpu": [
+         "x64"
+       ],
+@@ -3081,13 +3093,13 @@
+       }
+     },
+     "node_modules/eslint-config-next": {
+-      "version": "15.5.14",
+-      "resolved": "https://registry.npmjs.org/eslint-config-next/-/eslint-config-next-15.5.14.tgz",
+-      "integrity": "sha512-lmJ5F8ZgOYogq0qtH4L5SpxuASY2SPdOzqUprN2/56+P3GPsIpXaUWIJC66kYIH+yZdsM4nkHE5MIBP6s1NiBw==",
++      "version": "15.5.29",
++      "resolved": "https://registry.npmjs.org/eslint-config-next/-/eslint-config-next-15.5.29.tgz",
++      "integrity": "sha512-44lyVuWyyuYgLeuJvuHSMcvHsfC/JLae6C2xCdi6neWAxk94vKm5qGBFmTrGQavQ2JIL2Jrll16incpNlKOJbQ==",
+       "dev": true,
+       "license": "MIT",
+       "dependencies": {
+-        "@next/eslint-plugin-next": "15.5.14",
++        "@next/eslint-plugin-next": "15.5.29",
+         "@rushstack/eslint-patch": "^1.10.3",
+         "@typescript-eslint/eslint-plugin": "^5.4.2 || ^6.0.0 || ^7.0.0 || ^8.0.0",
+         "@typescript-eslint/parser": "^5.4.2 || ^6.0.0 || ^7.0.0 || ^8.0.0",
+@@ -3509,9 +3521,9 @@
+       "license": "MIT"
+     },
+     "node_modules/fastq": {
+-      "version": "1.20.1",
+-      "resolved": "https://registry.npmjs.org/fastq/-/fastq-1.20.1.tgz",
+-      "integrity": "sha512-GGToxJ/w1x32s/D2EKND7kTil4n8OVk/9mycTc4VDza13lOvpUZTGX3mFSCtV9ksdGBVzvsyAVLM6mHFThxXxw==",
++      "version": "1.20.3",
++      "resolved": "https://registry.npmjs.org/fastq/-/fastq-1.20.3.tgz",
++      "integrity": "sha512-XKv5nnLs6nLF71NgiKJLIZFLkPyIEuOselLG7ujZnGrRfQK8HpvY+WqKhAJUAdLomwVHErVS4LfxFlPq0/FTAw==",
+       "dev": true,
+       "license": "ISC",
+       "dependencies": {
+@@ -4995,12 +5007,12 @@
+       "license": "MIT"
+     },
+     "node_modules/next": {
+-      "version": "15.5.14",
+-      "resolved": "https://registry.npmjs.org/next/-/next-15.5.14.tgz",
+-      "integrity": "sha512-M6S+4JyRjmKic2Ssm7jHUPkE6YUJ6lv4507jprsSZLulubz0ihO2E+S4zmQK3JZ2ov81JrugukKU4Tz0ivgqqQ==",
++      "version": "15.5.29",
++      "resolved": "https://registry.npmjs.org/next/-/next-15.5.29.tgz",
++      "integrity": "sha512-93AMszTCdi9Az7fD5VzcWy46SHCdQF45+i53K0LpDc4dDXCwB9P1SxP1wBYZKW6dF3HJnz41jyEni1vmgCluiw==",
+       "license": "MIT",
+       "dependencies": {
+-        "@next/env": "15.5.14",
++        "@next/env": "15.5.29",
+         "@swc/helpers": "0.5.15",
+         "caniuse-lite": "^1.0.30001579",
+         "postcss": "8.4.31",
+@@ -5013,15 +5025,15 @@
+         "node": "^18.18.0 || ^19.8.0 || >= 20.0.0"
+       },
+       "optionalDependencies": {
+-        "@next/swc-darwin-arm64": "15.5.14",
+-        "@next/swc-darwin-x64": "15.5.14",
+-        "@next/swc-linux-arm64-gnu": "15.5.14",
+-        "@next/swc-linux-arm64-musl": "15.5.14",
+-        "@next/swc-linux-x64-gnu": "15.5.14",
+-        "@next/swc-linux-x64-musl": "15.5.14",
+-        "@next/swc-win32-arm64-msvc": "15.5.14",
+-        "@next/swc-win32-x64-msvc": "15.5.14",
+-        "sharp": "^0.34.3"
++        "@next/swc-darwin-arm64": "15.5.29",
++        "@next/swc-darwin-x64": "15.5.29",
++        "@next/swc-linux-arm64-gnu": "15.5.29",
++        "@next/swc-linux-arm64-musl": "15.5.29",
++        "@next/swc-linux-x64-gnu": "15.5.29",
++        "@next/swc-linux-x64-musl": "15.5.29",
++        "@next/swc-win32-arm64-msvc": "15.5.29",
++        "@next/swc-win32-x64-msvc": "15.5.29",
++        "sharp": "^0.34.3 || ^0.35.5"
+       },
+       "peerDependencies": {
+         "@opentelemetry/api": "^1.1.0",
+
+# SEC-001: Next.js 15.5.14 -> 15.5.29 (npm audit: critical advisory fixed in 15.5.29); eslint-config-next to match.
+diff --git a/web/package.json b/web/package.json
+index 972b540..c08eb47 100644
+--- a/web/package.json
++++ b/web/package.json
+@@ -13,7 +13,7 @@
+     "lint": "eslint"
+   },
+   "dependencies": {
+-    "next": "15.5.14",
++    "next": "15.5.29",
+     "react": "19.1.0",
+     "react-dom": "19.1.0",
+     "recharts": "^3.8.0"
+@@ -26,7 +26,7 @@
+     "@types/react-dom": "^19",
+     "cross-env": "^7.0.3",
+     "eslint": "^9",
+-    "eslint-config-next": "15.5.14",
++    "eslint-config-next": "15.5.29",
+     "rimraf": "^6.1.3",
+     "tailwindcss": "^4",
+     "typescript": "^5"

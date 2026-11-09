@@ -1,0 +1,55 @@
+graph TD
+  auth["Auth & Users"]
+  shell["Shell, Dashboard & Search"]
+  income["Income"]
+  calendar["Budget Calendar"]
+  monthly["Monthly Expenses"]
+  bills["Bills"]
+  debt["Debt"]
+  health["Health"]
+  travel["Travel"]
+  lotto["Lotto"]
+  games["Games"]
+  infra["Infra & Data"]
+  debt -->|36| shell
+  income -->|31| shell
+  calendar -->|17| shell
+  bills -->|14| shell
+  shell -->|13| auth
+  monthly -->|13| shell
+  infra -->|12| auth
+  income -->|12| infra
+  debt -->|12| infra
+  infra -->|11| income
+  calendar -->|11| infra
+  lotto -->|11| shell
+  infra -->|10| debt
+  health -->|10| shell
+  auth -->|9| infra
+  infra -->|9| calendar
+  shell -->|8| calendar
+  infra -->|6| games
+  lotto -->|6| infra
+  games -->|6| shell
+  travel -->|6| shell
+  infra -->|5| bills
+  shell -->|5| infra
+  infra -->|4| lotto
+  infra -->|4| travel
+  bills -->|4| infra
+  health -->|4| infra
+  games -->|4| infra
+  monthly -->|4| infra
+  travel -->|4| infra
+  infra -->|3| health
+  infra -->|3| monthly
+  infra -->|3| shell
+  calendar -->|3| auth
+  income -->|3| auth
+  debt -->|3| auth
+  shell -->|3| income
+  bills -->|2| calendar
+  auth -->|2| shell
+  debt -->|2| calendar
+  classDef entry fill:#cc785c,stroke:#cc785c,color:#fff
+  class shell,income,calendar,monthly,bills,debt,health,travel,lotto,games,infra entry

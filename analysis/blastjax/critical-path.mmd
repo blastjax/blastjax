@@ -1,0 +1,17 @@
+flowchart TD
+  A["You record a card payment<br/>web: /credit-card"] --> B["lib/api.ts<br/>POST /api/credit-card/{id}/payments"]
+  B --> C{"Session gate<br/>deps.require_session"}
+  C -->|401| X["Login required"]
+  C -->|ok| D["routers/credit_card.py"]
+  D --> E["db.insert_credit_card_payment<br/>one transaction"]
+  E --> F[("credit_card_payment")]
+  E --> G[("credit_card: balance minus amount")]
+  E --> H[("fixed_expense: 'card payment' in the pay period")]
+  D --> I["factory: clear cache namespaces<br/>credit_card, installment, fixed_expense"]
+  E --> J["budget_changes returned"]
+  J --> K["lib/payPeriods.ts spreadBudgetChanges<br/>pinned days, shortfall banked"]
+  K --> L["PUT /api/calendar-day-override/bulk"]
+  L --> M[("calendar_day_override")]
+  A --> N{"Payment covers monthly dues?"}
+  N -->|yes| O["POST /api/installment/{id}/pay<br/>for each installment due"]
+  O --> P[("installment, installment_line")]

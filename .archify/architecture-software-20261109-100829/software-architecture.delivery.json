@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "b9514b03-e19e-4b79-b2df-ee0f1a2ed655",
+  "status": "current",
+  "command": "deliver",
+  "type": "architecture",
+  "input": "C:\\Users\\blastjax\\blastjax\\.archify\\architecture-software-20261109-100829\\candidate.json",
+  "output": "C:\\Users\\blastjax\\blastjax\\.archify\\architecture-software-20261109-100829\\software-architecture.html",
+  "specification": {
+    "sha256": "666c9c39fdc3e2dcff056e32e1de43c51b63824534bd709e251b08a651b2d318",
+    "bytes": 13937
+  },
+  "artifact": {
+    "sha256": "6aac7f86b8171b2dfc47db333c483bae249aaca4f4adf7c1ec170adc260141bd",
+    "bytes": 869516
+  }
+}
