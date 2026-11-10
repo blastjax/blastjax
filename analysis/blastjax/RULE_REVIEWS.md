@@ -1,13 +1,13 @@
 # Rule reviews — blastjax
 
-The owner's verdicts on the business rules that need a person's judgement (P0 rules with a suspected defect, an owner question or less than High confidence). 37 reviewed: 37 confirmed, 0 wrong or not wanted, 0 need discussion. "Confirmed" means the rule describes the code correctly and the behavior is wanted as it is today, including any suspected defect noted on its card.
+The owner's verdicts on the business rules that need a person's judgement (P0 rules with a suspected defect, an owner question or less than High confidence). 37 reviewed: 35 confirmed, 2 wrong or not wanted, 0 need discussion. "Confirmed" means the rule describes the code correctly and the behavior is wanted as it is today, including any suspected defect noted on its card.
 
 | Rule | Verdict | When | Title | Note |
 |---|---|---|---|---|
 | RULE-002 | confirmed | 2026-11-09T07:20:42+00:00 | Login is off until the first user exists |  |
-| RULE-003 | confirmed | 2026-11-09T07:20:42+00:00 | User admin has no server-side authorization |  |
+| RULE-003 | wrong | 2026-11-09T15:42:49+00:00 | User admin has no server-side authorization | Owner applies SEC-002 (whole patch, 2026-11-09): user admin will require Settings access. New behavior = patch hunk + check_settings_access. |
 | RULE-004 | confirmed | 2026-11-09T07:20:42+00:00 | Page restrictions are enforced only in the browser |  |
-| RULE-005 | confirmed | 2026-11-09T07:20:42+00:00 | Deleting the last user turns login off |  |
+| RULE-005 | wrong | 2026-11-09T15:42:49+00:00 | Deleting the last user turns login off | Owner applies SEC-003 (whole patch, 2026-11-09): deleting the last user will be refused (409). New behavior = patch hunk + check_settings_access. |
 | RULE-006 | confirmed | 2026-11-09T07:20:42+00:00 | Login lockout after 8 failures per address |  |
 | RULE-007 | confirmed | 2026-11-09T07:20:42+00:00 | The password-check endpoint is not throttled |  |
 | RULE-008 | confirmed | 2026-11-09T07:20:42+00:00 | Sessions never expire and survive password changes |  |

@@ -82,7 +82,7 @@ Modules: web:layout, web:lib:api
 Scale: S
 Risk: Low; (1) lockfile drift breaks `npm ci` in CI and Docker — mitigated by committing the regenerated lockfile (already in `security_remediation.patch`); (2) a transitive bump changes build output — mitigated by `next build` plus a manual smoke of the four persona flows.
 Entry criteria:
-- [ ] `analysis/blastjax/security_remediation.patch` reviewed, with a decision recorded on its SEC-002/SEC-003 hunks (§7, first question)
+- [x] `analysis/blastjax/security_remediation.patch` reviewed, with a decision recorded on its SEC-002/SEC-003 hunks (§7, first question) — Note: owner chose the whole patch, 2026-11-09.
 - [ ] `web/` builds today on the current lockfile (`npm ci && npx tsc --noEmit && npm run lint && npx next build`)
 Exit criteria:
 - [ ] `web/package-lock.json` resolves `next` and `eslint-config-next` to 15.5.29 or later
@@ -215,7 +215,7 @@ deviation: it must re-run `/code-modernization:modernize-review blastjax` for th
 
 ## 7. Open Questions
 
-- [ ] **Security patch vs confirmed rules.** `security_remediation.patch` hunks SEC-002 (user admin needs Settings access) and SEC-003 (refuse deleting the last user) change behavior that RULE-003 and RULE-005 confirm as wanted. Apply them anyway (a deliberate deviation, then re-review those rules), or apply only the SEC-001 Next.js hunks?
+- [x] **Security patch vs confirmed rules.** Decided 2026-11-09: "Whole patch". RULE-003 and RULE-005 are now deliberate changes; their new behavior is the patch hunks plus `check_settings_access`. `security_remediation.patch` hunks SEC-002 (user admin needs Settings access) and SEC-003 (refuse deleting the last user) change behavior that RULE-003 and RULE-005 confirm as wanted. Apply them anyway (a deliberate deviation, then re-review those rules), or apply only the SEC-001 Next.js hunks?
 - [ ] **Credentials.** Rotate the production Neon owner credentials in the local `.env` files and point local work at a Neon dev branch (`SECRETS.local.md`), before Phase 1 touches anything that runs locally.
 - [ ] **Python dependency audit.** `pip-audit` was not run (`SECURITY_FINDINGS.md`, coverage gaps). Install it and re-run harden before Phase 3?
 - [ ] **postcss override.** Accept Next 15.5's pinned `postcss@8.4.31` (build-time only) or add the override from `DELTA_CATALOG.md` #6?
@@ -225,6 +225,6 @@ deviation: it must re-run `/code-modernization:modernize-review blastjax` for th
 ## 8. Approval Block
 
 ```
-Approved by: ________________  Date: __________
-Approval covers: Phase 1 only | Full plan
+Approved by: blastjax (owner, in session: "Approve the full plan")  Date: 2026-11-09
+Approval covers: Full plan
 ```

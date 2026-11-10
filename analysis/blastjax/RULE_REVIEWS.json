@@ -8,9 +8,10 @@
    "title": "Login is off until the first user exists"
   },
   "RULE-003": {
-   "verdict": "confirmed",
-   "at": "2026-11-09T07:20:42+00:00",
-   "title": "User admin has no server-side authorization"
+   "verdict": "wrong",
+   "at": "2026-11-09T15:42:49+00:00",
+   "title": "User admin has no server-side authorization",
+   "note": "Owner applies SEC-002 (whole patch, 2026-11-09): user admin will require Settings access. New behavior = patch hunk + check_settings_access."
   },
   "RULE-004": {
    "verdict": "confirmed",
@@ -18,9 +19,10 @@
    "title": "Page restrictions are enforced only in the browser"
   },
   "RULE-005": {
-   "verdict": "confirmed",
-   "at": "2026-11-09T07:20:42+00:00",
-   "title": "Deleting the last user turns login off"
+   "verdict": "wrong",
+   "at": "2026-11-09T15:42:49+00:00",
+   "title": "Deleting the last user turns login off",
+   "note": "Owner applies SEC-003 (whole patch, 2026-11-09): deleting the last user will be refused (409). New behavior = patch hunk + check_settings_access."
   },
   "RULE-006": {
    "verdict": "confirmed",
