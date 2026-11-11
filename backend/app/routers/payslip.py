@@ -14,14 +14,24 @@ from fastapi import (
     Response,
     UploadFile,
 )
-
 from starlette.concurrency import run_in_threadpool
 
 import cache
-from app.deps import read_upload, require_db
+from app.deps import found, read_upload, require_db
 from app.schemas.payslip import PayslipCreate
+from app.schemas.responses import (
+    Ok,
+    PayslipImport,
+    PayslipList,
+    PayslipPdfFields,
+    PayslipRow,
+    PdfState,
+)
 from app.services.bill_extract import UnreadablePdf, pdf_text
-from app.services.payslip_parse import _payslip_records_from_nested_json, payslip_from_text
+from app.services.payslip_parse import (
+    _payslip_records_from_nested_json,
+    payslip_from_text,
+)
 from db import (
     delete_payslip,
     delete_payslip_pdf,
@@ -36,60 +46,27 @@ from db import (
 
 router = APIRouter(tags=["payslip"], dependencies=[Depends(require_db)])
 
-
-def _serialize_payslip(row: dict[str, Any]) -> dict[str, Any]:
-    ca = row.get("created_at")
-    if hasattr(ca, "isoformat"):
-        row["created_at"] = ca.isoformat()
-    return row
+_NOT_FOUND = "Payslip not found."
 
 
-@router.get("/api/payslip")
+@router.get("/api/payslip", response_model=PayslipList)
 def payslip_list(
     limit: int = Query(default=1000, ge=1, le=2000),
     company: str | None = Query(default=None),
 ) -> dict[str, Any]:
-    key = f"payslip:list:{limit}:{company or ''}"
-    hit = cache.get(key)
-    if hit is not None:
-        return hit
-    result = {
-        "payslips": [_serialize_payslip(r) for r in list_payslips(limit=limit, company=company)]
-    }
-    cache.set(key, result)
-    return result
-
-
-@router.post("/api/payslip")
-def payslip_create(body: PayslipCreate) -> dict[str, Any]:
-    row = insert_payslip(
-        body.total,
-        body.commission,
-        body.reimbursement,
-        body.medical_reimbursement,
-        body.others,
-        body.mp2,
-        body.allowances,
-        body.thirteenth_month,
-        body.basic_salary,
-        body.period_year,
-        body.period_month,
-        body.period_half,
-        body.notes,
-        body.withholding_tax,
-        body.sss_contribution,
-        body.philhealth,
-        body.pag_ibig,
-        body.bereavement_asst,
-        company=body.company.strip(),
+    return cache.cached(
+        f"payslip:list:{limit}:{company or ''}",
+        lambda: {"payslips": list_payslips(limit=limit, company=company)},
     )
-    return _serialize_payslip(row)
 
 
-@router.post("/api/payslip/import-json")
+@router.post("/api/payslip", response_model=PayslipRow)
+def payslip_create(body: PayslipCreate) -> dict[str, Any]:
+    return insert_payslip(**body.model_dump())
+
+
+@router.post("/api/payslip/import-json", response_model=PayslipImport)
 def payslip_import_json(body: dict[str, Any] = Body(...)) -> dict[str, Any]:
-    if not isinstance(body, dict):
-        raise HTTPException(status_code=400, detail="JSON root must be an object.")
     recs = _payslip_records_from_nested_json(body)
     if not recs:
         raise HTTPException(
@@ -101,81 +78,47 @@ def payslip_import_json(body: dict[str, Any] = Body(...)) -> dict[str, Any]:
     return {"filename": "payslip-import.json", "inserted": len(ids), "ids": ids}
 
 
-@router.post("/api/payslip/extract")
+@router.post("/api/payslip/extract", response_model=PayslipPdfFields)
 async def payslip_extract(file: UploadFile = File(...)) -> dict[str, Any]:
     data = await read_upload(file)
     try:
-        found = payslip_from_text(await run_in_threadpool(pdf_text, data))
+        found_fields = payslip_from_text(await run_in_threadpool(pdf_text, data))
     except UnreadablePdf as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    if found is None:
+    if found_fields is None:
         raise HTTPException(
             status_code=422,
             detail="This doesn't look like a Sophos payslip from August 2025 on, so nothing could be read from it.",
         )
-    return found
+    return found_fields
 
 
-@router.get("/api/payslip/{payslip_id}")
+@router.get("/api/payslip/{payslip_id}", response_model=PayslipRow)
 def payslip_one(payslip_id: UUID) -> dict[str, Any]:
-    key = f"payslip:{payslip_id}"
-    hit = cache.get(key)
-    if hit is not None:
-        return hit
-    row = get_payslip(payslip_id)
-    if not row:
-        raise HTTPException(status_code=404, detail="Payslip not found.")
-    result = _serialize_payslip(row)
-    cache.set(key, result)
-    return result
+    return cache.cached(f"payslip:{payslip_id}", lambda: found(get_payslip(payslip_id), _NOT_FOUND))
 
 
-@router.put("/api/payslip/{payslip_id}")
+@router.put("/api/payslip/{payslip_id}", response_model=PayslipRow)
 def payslip_replace(payslip_id: UUID, body: PayslipCreate) -> dict[str, Any]:
-    row = update_payslip(
-        payslip_id,
-        body.total,
-        body.commission,
-        body.reimbursement,
-        body.medical_reimbursement,
-        body.others,
-        body.mp2,
-        body.allowances,
-        body.thirteenth_month,
-        body.basic_salary,
-        body.period_year,
-        body.period_month,
-        body.period_half,
-        body.notes,
-        body.withholding_tax,
-        body.sss_contribution,
-        body.philhealth,
-        body.pag_ibig,
-        body.bereavement_asst,
-        company=body.company.strip(),
-    )
-    if row is None:
-        raise HTTPException(status_code=404, detail="Payslip not found.")
-    return _serialize_payslip(row)
+    return found(update_payslip(payslip_id, **body.model_dump()), _NOT_FOUND)
 
 
-@router.delete("/api/payslip/{payslip_id}")
+@router.delete("/api/payslip/{payslip_id}", response_model=Ok)
 def payslip_remove(payslip_id: UUID) -> dict[str, Any]:
     if not delete_payslip(payslip_id):
-        raise HTTPException(status_code=404, detail="Payslip not found.")
+        raise HTTPException(status_code=404, detail=_NOT_FOUND)
     return {"ok": True}
 
 
-@router.post("/api/payslip/{payslip_id}/pdf")
+@router.post("/api/payslip/{payslip_id}/pdf", response_model=PdfState)
 async def payslip_upload_pdf(
     payslip_id: UUID,
     file: UploadFile = File(...),
 ) -> dict[str, Any]:
-    if get_payslip(payslip_id) is None:
-        raise HTTPException(status_code=404, detail="Payslip not found.")
     data = await read_upload(file)
-    if not set_payslip_pdf(payslip_id, data):
-        raise HTTPException(status_code=404, detail="Payslip not found.")
+    # In a worker thread: storing a file of up to 10 MB here would hold up every other request.
+    if not await run_in_threadpool(set_payslip_pdf, payslip_id, data):
+        raise HTTPException(status_code=404, detail=_NOT_FOUND)
     return {"ok": True, "has_pdf": True}
 
 
@@ -186,20 +129,17 @@ def payslip_get_pdf(payslip_id: UUID) -> Response:
     if cached is not None:
         data = base64.b64decode(cached)
     else:
-        data = get_payslip_pdf(payslip_id)
-        if data is None:
-            raise HTTPException(status_code=404, detail="No PDF attached to this payslip.")
+        data = found(get_payslip_pdf(payslip_id), "No PDF attached to this payslip.")
         cache.set(key, base64.b64encode(data).decode("ascii"))
-    disposition = f'inline; filename="payslip-{payslip_id}.pdf"'
     return Response(
         content=data,
         media_type="application/pdf",
-        headers={"Content-Disposition": disposition},
+        headers={"Content-Disposition": f'inline; filename="payslip-{payslip_id}.pdf"'},
     )
 
 
-@router.delete("/api/payslip/{payslip_id}/pdf")
+@router.delete("/api/payslip/{payslip_id}/pdf", response_model=PdfState)
 def payslip_delete_pdf(payslip_id: UUID) -> dict[str, Any]:
     if not delete_payslip_pdf(payslip_id):
-        raise HTTPException(status_code=404, detail="Payslip not found.")
+        raise HTTPException(status_code=404, detail=_NOT_FOUND)
     return {"ok": True, "has_pdf": False}

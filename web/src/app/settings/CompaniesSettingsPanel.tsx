@@ -1,158 +1,122 @@
 "use client";
 
 import { confirmDialog } from "@/components/ConfirmDialog";
-import { useEffect, useState, type DragEvent } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useState, type DragEvent } from "react";
 import {
   createCompany,
   DEFAULT_COMPANY_COLUMN_FLAGS,
   deleteCompany,
-  getCompanies,
+  errorMessage,
   reorderCompanies,
   updateCompany,
   type CompanyColumnFlags,
   type CompanyRow,
 } from "@/lib/api";
 import { ErrorAlert } from "@/components/ErrorAlert";
-import { LoadingBlocks } from "@/components/FinanceUI";
+import { Checkbox, Field, FormSection, LoadingBlocks, Panel } from "@/components/FinanceUI";
+import { queries } from "@/lib/queries";
+import { getQueryClient } from "@/lib/queryClient";
+import { useFlashMessage } from "@/lib/useFlashMessage";
 import {
-  CARD_CLASSES,
   DASHED_EMPTY_CLASSES,
   DELETE_BUTTON_CLASSES,
   EDIT_BUTTON_CLASSES,
   INPUT_CLASSES,
+  LIST_CLASSES,
   PRIMARY_BUTTON_CLASSES,
   SECONDARY_BUTTON_CLASSES,
+  SECTION_LABEL_CLASSES,
 } from "@/lib/ui";
 
-const INCOME_COLUMN_TOGGLES: { key: keyof CompanyColumnFlags; label: string }[] = [
-  { key: "show_total", label: "Total" },
-  { key: "show_basic_salary", label: "Basic salary" },
-  { key: "show_commission", label: "Commission" },
-  { key: "show_reimbursement", label: "Reimbursement" },
-  { key: "show_medical_reimbursement", label: "Medical reimbursement" },
-  { key: "show_others", label: "Others" },
-  { key: "show_allowances", label: "Allowances" },
-  { key: "show_thirteenth_month", label: "13th Month" },
-];
+type ColumnToggle = { key: keyof CompanyColumnFlags; label: string };
 
-const DEDUCTION_COLUMN_TOGGLES: { key: keyof CompanyColumnFlags; label: string }[] = [
-  { key: "show_withholding_tax", label: "Withholding tax" },
-  { key: "show_sss_contribution", label: "SSS contribution" },
-  { key: "show_philhealth", label: "Philhealth" },
-  { key: "show_pag_ibig", label: "Pag-ibig" },
-  { key: "show_mp2", label: "MP2" },
-  { key: "show_bereavement_asst", label: "Bereavement asst" },
+const COLUMN_TOGGLES: { title: string; toggles: ColumnToggle[] }[] = [
+  {
+    title: "Income",
+    toggles: [
+      { key: "show_total", label: "Total" },
+      { key: "show_basic_salary", label: "Basic salary" },
+      { key: "show_commission", label: "Commission" },
+      { key: "show_reimbursement", label: "Reimbursement" },
+      { key: "show_medical_reimbursement", label: "Medical reimbursement" },
+      { key: "show_others", label: "Others" },
+      { key: "show_allowances", label: "Allowances" },
+      { key: "show_thirteenth_month", label: "13th Month" },
+    ],
+  },
+  {
+    title: "Deductions",
+    toggles: [
+      { key: "show_withholding_tax", label: "Withholding tax" },
+      { key: "show_sss_contribution", label: "SSS contribution" },
+      { key: "show_philhealth", label: "Philhealth" },
+      { key: "show_pag_ibig", label: "Pag-ibig" },
+      { key: "show_mp2", label: "MP2" },
+      { key: "show_bereavement_asst", label: "Bereavement asst" },
+    ],
+  },
 ];
-
-const ALL_COLUMN_TOGGLES = [...INCOME_COLUMN_TOGGLES, ...DEDUCTION_COLUMN_TOGGLES];
 
 function describeFlags(flags: CompanyColumnFlags): string {
-  const hidden = ALL_COLUMN_TOGGLES.filter(
-    (t) => !flags[t.key] && DEFAULT_COMPANY_COLUMN_FLAGS[t.key],
-  ).map((t) => t.label);
+  const hidden = COLUMN_TOGGLES.flatMap((group) => group.toggles)
+    .filter((t) => !flags[t.key] && DEFAULT_COMPANY_COLUMN_FLAGS[t.key])
+    .map((t) => t.label);
   return hidden.length ? `Hides ${hidden.join(", ")}` : "All columns shown";
 }
 
-function ColumnToggleGroup({
-  title,
-  toggles,
+function ColumnToggles({
   flags,
   setFlags,
 }: {
-  title: string;
-  toggles: { key: keyof CompanyColumnFlags; label: string }[];
   flags: CompanyColumnFlags;
   setFlags: (flags: CompanyColumnFlags) => void;
 }) {
   return (
-    <div className="flex flex-col gap-1.5">
-      <span className="text-[11px] font-semibold uppercase tracking-wide text-ink-3">
-        {title}
-      </span>
-      <div className="grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-3">
-        {toggles.map(({ key, label }) => (
-          <label key={key} className="flex items-center gap-2 text-sm text-ink-2">
-            <input
-              type="checkbox"
-              checked={flags[key]}
-              onChange={(e) => setFlags({ ...flags, [key]: e.target.checked })}
-            />
-            {label}
-          </label>
+    <div className="flex flex-col gap-1.5 text-sm">
+      <span className="font-medium text-ink-2">Columns shown on this company&apos;s Payslip page</span>
+      <div className="flex flex-col gap-4 pt-1">
+        {COLUMN_TOGGLES.map(({ title, toggles }) => (
+          <div key={title} className="flex flex-col gap-2">
+            <span className={SECTION_LABEL_CLASSES}>{title}</span>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-3">
+              {toggles.map(({ key, label }) => (
+                <Checkbox
+                  key={key}
+                  label={label}
+                  checked={flags[key]}
+                  onChange={(e) => setFlags({ ...flags, [key]: e.target.checked })}
+                />
+              ))}
+            </div>
+          </div>
         ))}
       </div>
     </div>
   );
 }
 
-function ColumnToggleFieldset({
-  flags,
-  setFlags,
-}: {
-  flags: CompanyColumnFlags;
-  setFlags: (flags: CompanyColumnFlags) => void;
-}) {
-  return (
-    <div className="flex flex-col gap-4">
-      <ColumnToggleGroup
-        title="Income"
-        toggles={INCOME_COLUMN_TOGGLES}
-        flags={flags}
-        setFlags={setFlags}
-      />
-      <ColumnToggleGroup
-        title="Deductions"
-        toggles={DEDUCTION_COLUMN_TOGGLES}
-        flags={flags}
-        setFlags={setFlags}
-      />
-    </div>
-  );
-}
-
 export function CompaniesSettingsPanel() {
-  const [companies, setCompanies] = useState<CompanyRow[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const companiesQuery = useQuery(queries.companies());
+  const companies = companiesQuery.data?.companies ?? [];
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const loadError = companiesQuery.error ? errorMessage(companiesQuery.error, "Failed to load companies.") : deleteError;
+  // Shown at once while the new order saves; the save's refetch then confirms it.
+  const showOrder = (rows: CompanyRow[]) => getQueryClient().setQueryData(queries.companies().queryKey, { companies: rows });
 
   const [newName, setNewName] = useState("");
-  const [newFlags, setNewFlags] = useState<CompanyColumnFlags>(
-    DEFAULT_COMPANY_COLUMN_FLAGS,
-  );
+  const [newFlags, setNewFlags] = useState<CompanyColumnFlags>(DEFAULT_COMPANY_COLUMN_FLAGS);
   const [addError, setAddError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
-  const [editFlags, setEditFlags] = useState<CompanyColumnFlags>(
-    DEFAULT_COMPANY_COLUMN_FLAGS,
-  );
+  const [editFlags, setEditFlags] = useState<CompanyColumnFlags>(DEFAULT_COMPANY_COLUMN_FLAGS);
   const [editError, setEditError] = useState<string | null>(null);
   const [savingEdit, setSavingEdit] = useState(false);
 
-  const [infoMsg, setInfoMsg] = useState<string | null>(null);
+  const [infoMsg, setInfoMsg] = useFlashMessage();
   const [reorderError, setReorderError] = useState<string | null>(null);
-
-  const load = () => {
-    setLoading(true);
-    setLoadError(null);
-    getCompanies()
-      .then((res) => setCompanies(res.companies))
-      .catch((e: unknown) =>
-        setLoadError(e instanceof Error ? e.message : "Failed to load companies."),
-      )
-      .finally(() => setLoading(false));
-  };
-
-  useEffect(() => {
-    load();
-  }, []);
-
-  useEffect(() => {
-    if (!infoMsg) return;
-    const t = window.setTimeout(() => setInfoMsg(null), 2800);
-    return () => window.clearTimeout(t);
-  }, [infoMsg]);
 
   async function handleAdd() {
     const name = newName.trim();
@@ -167,9 +131,8 @@ export function CompaniesSettingsPanel() {
       setNewName("");
       setNewFlags(DEFAULT_COMPANY_COLUMN_FLAGS);
       setInfoMsg(`Added "${name}".`);
-      load();
     } catch (e: unknown) {
-      setAddError(e instanceof Error ? e.message : "Failed to add company.");
+      setAddError(errorMessage(e, "Failed to add company."));
     } finally {
       setAdding(false);
     }
@@ -199,9 +162,8 @@ export function CompaniesSettingsPanel() {
       await updateCompany(companyId, name, editFlags);
       setEditingId(null);
       setInfoMsg("Company updated.");
-      load();
     } catch (e: unknown) {
-      setEditError(e instanceof Error ? e.message : "Failed to update company.");
+      setEditError(errorMessage(e, "Failed to update company."));
     } finally {
       setSavingEdit(false);
     }
@@ -212,9 +174,8 @@ export function CompaniesSettingsPanel() {
     try {
       await deleteCompany(company.id);
       setInfoMsg(`Deleted "${company.name}".`);
-      load();
     } catch (e: unknown) {
-      setLoadError(e instanceof Error ? e.message : "Failed to delete company.");
+      setDeleteError(errorMessage(e, "Failed to delete company."));
     }
   }
 
@@ -245,40 +206,33 @@ export function CompaniesSettingsPanel() {
     if (from < 0 || to < 0) return;
     const [moved] = next.splice(from, 1);
     next.splice(to, 0, moved);
-    setCompanies(next);
+    showOrder(next);
     setReorderError(null);
 
     try {
-      const res = await reorderCompanies(next.map((c) => c.id));
-      setCompanies(res.companies);
+      await reorderCompanies(next.map((c) => c.id));
     } catch (e: unknown) {
-      setCompanies(previous);
-      setReorderError(e instanceof Error ? e.message : "Failed to save the new order.");
+      showOrder(previous);
+      setReorderError(errorMessage(e, "Failed to save the new order."));
     }
   }
 
   return (
-    <section className={CARD_CLASSES}>
-      <h2 className="text-lg font-medium text-ink">Companies</h2>
-      <p className="mt-1 text-sm text-ink-2">
-        Add or manage the companies payslips can be tagged under. Renaming or
-        deleting here doesn&apos;t change the company already stored on
-        existing payslips.
-      </p>
-
-      <div className="mt-6">
-        {loading ? (
+    <Panel
+      title="Companies"
+      subtitle="Add or manage the companies payslips can be tagged under. Renaming or deleting here doesn't change the company already stored on existing payslips."
+    >
+      <div className="flex flex-col gap-6">
+        {companiesQuery.isPending ? (
           <LoadingBlocks label="Loading companies…" rows={0} />
         ) : loadError ? (
           <ErrorAlert>{loadError}</ErrorAlert>
         ) : companies.length === 0 ? (
           <div className={DASHED_EMPTY_CLASSES}>No companies yet.</div>
         ) : (
-          <>
-            {reorderError && (
-              <ErrorAlert className="mb-3">{reorderError}</ErrorAlert>
-            )}
-            <ul className="divide-y divide-zinc-200 rounded-lg border border-line dark:divide-zinc-900">
+          <div className="flex flex-col gap-3">
+            {reorderError && <ErrorAlert>{reorderError}</ErrorAlert>}
+            <ul className={LIST_CLASSES}>
               {companies.map((company) => (
                 <li
                   key={company.id}
@@ -289,110 +243,78 @@ export function CompaniesSettingsPanel() {
                   onDragOver={handleCardDragOver}
                   onDrop={(e) => void handleCardDrop(e, company)}
                 >
-                {editingId === company.id ? (
-                  <div className="flex flex-col gap-3">
-                    <div className="flex flex-col gap-1">
-                      <label className="text-xs font-medium text-ink-2">
-                        Name
-                      </label>
-                      <input
-                        type="text"
-                        className={INPUT_CLASSES}
-                        value={editName}
-                        onChange={(e) => setEditName(e.target.value)}
-                      />
+                  {editingId === company.id ? (
+                    <div className="flex flex-col gap-4">
+                      <Field label="Name">
+                        <input
+                          type="text"
+                          className={INPUT_CLASSES}
+                          value={editName}
+                          onChange={(e) => setEditName(e.target.value)}
+                        />
+                      </Field>
+                      <ColumnToggles flags={editFlags} setFlags={setEditFlags} />
+                      {editError && <ErrorAlert>{editError}</ErrorAlert>}
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          className={PRIMARY_BUTTON_CLASSES}
+                          disabled={savingEdit}
+                          onClick={() => handleSaveEdit(company.id)}
+                        >
+                          {savingEdit ? "Saving…" : "Save"}
+                        </button>
+                        <button type="button" className={SECONDARY_BUTTON_CLASSES} onClick={cancelEdit}>
+                          Cancel
+                        </button>
+                      </div>
                     </div>
-                    <div className="flex flex-col gap-1">
-                      <span className="text-xs font-medium text-ink-2">
-                        Columns shown on this company&apos;s Payslip page
-                      </span>
-                      <ColumnToggleFieldset flags={editFlags} setFlags={setEditFlags} />
+                  ) : (
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <p className="font-medium text-ink">{company.name}</p>
+                        <p className="text-xs text-ink-3">{describeFlags(company)}</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button type="button" className={EDIT_BUTTON_CLASSES} onClick={() => startEdit(company)}>
+                          Edit
+                        </button>
+                        <button type="button" className={DELETE_BUTTON_CLASSES} onClick={() => handleDelete(company)}>
+                          Delete
+                        </button>
+                      </div>
                     </div>
-                    {editError && <ErrorAlert>{editError}</ErrorAlert>}
-                    <div className="flex flex-wrap items-center gap-2">
-                      <button
-                        type="button"
-                        className={PRIMARY_BUTTON_CLASSES}
-                        disabled={savingEdit}
-                        onClick={() => handleSaveEdit(company.id)}
-                      >
-                        {savingEdit ? "Saving…" : "Save"}
-                      </button>
-                      <button
-                        type="button"
-                        className={SECONDARY_BUTTON_CLASSES}
-                        onClick={cancelEdit}
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                      <p className="font-medium text-ink">{company.name}</p>
-                      <p className="text-xs text-ink-3">{describeFlags(company)}</p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        className={EDIT_BUTTON_CLASSES}
-                        onClick={() => startEdit(company)}
-                      >
-                        Edit
-                      </button>
-                      <button
-                        type="button"
-                        className={DELETE_BUTTON_CLASSES}
-                        onClick={() => handleDelete(company)}
-                      >
-                        Delete
-                      </button>
-                    </div>
-                  </div>
-                )}
+                  )}
                 </li>
               ))}
             </ul>
-          </>
+          </div>
         )}
-      </div>
 
-      <fieldset className="mt-8 rounded-lg border border-line bg-zinc-50/80 px-4 py-4 dark:bg-zinc-900/40">
-        <legend className="px-1 text-sm font-medium text-ink">
-          Add a company
-        </legend>
-        <div className="mt-4 flex flex-col gap-1 sm:max-w-sm">
-          <label className="text-xs font-medium text-ink-2">Name</label>
-          <input
-            type="text"
-            className={INPUT_CLASSES}
-            value={newName}
-            onChange={(e) => setNewName(e.target.value)}
-            autoComplete="off"
-          />
-        </div>
-        <div className="mt-4 flex flex-col gap-1">
-          <span className="text-xs font-medium text-ink-2">
-            Columns shown on this company&apos;s Payslip page
-          </span>
-          <ColumnToggleFieldset flags={newFlags} setFlags={setNewFlags} />
-        </div>
-        {addError && <ErrorAlert className="mt-3">{addError}</ErrorAlert>}
-        <div className="mt-4 flex flex-wrap items-center gap-3">
-          <button
-            type="button"
-            className={PRIMARY_BUTTON_CLASSES}
-            disabled={adding}
-            onClick={handleAdd}
-          >
-            {adding ? "Adding…" : "Add company"}
-          </button>
-          {infoMsg && (
-            <span className="text-sm text-emerald-700 dark:text-emerald-400">{infoMsg}</span>
-          )}
-        </div>
-      </fieldset>
-    </section>
+        <FormSection title="Add a company">
+          <Field label="Name" className="sm:max-w-sm">
+            <input
+              type="text"
+              className={INPUT_CLASSES}
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              autoComplete="off"
+            />
+          </Field>
+          <ColumnToggles flags={newFlags} setFlags={setNewFlags} />
+          {addError && <ErrorAlert>{addError}</ErrorAlert>}
+          <div className="flex flex-wrap items-center gap-3">
+            <button type="button" className={PRIMARY_BUTTON_CLASSES} disabled={adding} onClick={handleAdd}>
+              {adding ? "Adding…" : "Add company"}
+            </button>
+            {infoMsg && (
+              <span role="status" className="text-sm text-success-text">
+                {infoMsg}
+              </span>
+            )}
+          </div>
+        </FormSection>
+      </div>
+    </Panel>
   );
 }

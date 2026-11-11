@@ -20,6 +20,7 @@ import {
   type CompanyRow,
   type PayslipPdfFields,
   type PayslipRow,
+  errorMessage,
 } from "@/lib/api";
 import { PayslipFormFields } from "./PayslipFormFields";
 import {
@@ -40,11 +41,11 @@ import { ErrorAlert } from "@/components/ErrorAlert";
 import {
   DANGER_TEXT_BUTTON_CLASSES,
   DIALOG_BODY_CLASSES,
-  DIALOG_CLASSES,
   DIALOG_FOOTER_CLASSES,
   Field,
   ModalHeader,
   TEXT_BUTTON_CLASSES,
+  DIALOG_FORM_CLASSES,
 } from "@/components/FinanceUI";
 import { ChevronLeftIcon, ChevronRightIcon } from "@/components/Icons";
 import {
@@ -114,7 +115,7 @@ export function PayslipClientModal({
       open
       onClose={onCloseDialog}
       ariaLabelledBy={TITLE_ID}
-      dialogClassName={`${DIALOG_CLASSES} max-w-5xl lg:max-w-6xl`}
+      size="5xl" className="lg:max-w-6xl"
     >
             {nav.screen === "detail" && (() => {
               const row = rows.find((r) => r.id === nav.row.id) ?? nav.row;
@@ -360,7 +361,7 @@ export function PayslipClientModal({
                   onClose={onCloseDialog}
                 />
                 <form
-                  className="flex min-h-0 flex-1 flex-col"
+                  className={DIALOG_FORM_CLASSES}
                   onSubmit={(e) => {
                     e.preventDefault();
                     void saveEdit(pdf);
@@ -409,7 +410,7 @@ export function PayslipClientModal({
                   onClose={onCloseDialog}
                 />
                 <form
-                  className="flex min-h-0 flex-1 flex-col"
+                  className={DIALOG_FORM_CLASSES}
                   onSubmit={(e) => {
                     e.preventDefault();
                     void saveAddInModal(pdf);
@@ -479,7 +480,7 @@ function PayslipPdfReader({
         next = `Filled in from the payslip for ${period}. Check before saving.`;
       }
     } catch (e) {
-      next = e instanceof Error ? e.message : "Couldn't read this PDF.";
+      next = errorMessage(e, "Couldn't read this PDF.");
     }
     if (latest.current === file) setNote(next);
   };
@@ -540,7 +541,7 @@ function PayslipPdfPanel({
         objectUrl = URL.createObjectURL(blob);
         setBlobUrl(objectUrl);
       } catch (e) {
-        if (!cancelled) setErr(e instanceof Error ? e.message : "Failed to load PDF");
+        if (!cancelled) setErr(errorMessage(e, "Failed to load PDF"));
       }
     })();
     return () => {
@@ -559,7 +560,7 @@ function PayslipPdfPanel({
       setShowing(true);
       onPdfChange(payslipId, true);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Upload failed");
+      setErr(errorMessage(e, "Upload failed"));
     } finally {
       setBusy(false);
     }
@@ -575,7 +576,7 @@ function PayslipPdfPanel({
       setShowing(false);
       onPdfChange(payslipId, false);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Remove failed");
+      setErr(errorMessage(e, "Remove failed"));
     } finally {
       setBusy(false);
     }

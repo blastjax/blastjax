@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.schemas.text import OptionalText
+
 
 class FixedExpenseUpdate(BaseModel):
     amount: float = Field(..., description="Positive = expense, negative = extra income for the period")
-    description: str | None = None
+    description: OptionalText = None
 
     @field_validator("amount")
     @classmethod

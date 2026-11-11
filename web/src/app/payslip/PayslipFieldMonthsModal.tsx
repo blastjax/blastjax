@@ -6,7 +6,7 @@ import { MONTH_NAMES_FULL } from "@/lib/dateFormat";
 import { fmtNum } from "./payslipDisplay";
 import { MONTHS } from "./payslipModalForm";
 import type { YearSlots } from "./payslipAggregates";
-import { DIALOG_BODY_CLASSES, DIALOG_CLASSES, ModalHeader } from "@/components/FinanceUI";
+import { DIALOG_BODY_CLASSES, ModalHeader } from "@/components/FinanceUI";
 
 export type PayslipFieldKey = Extract<
   keyof PayslipRow,
@@ -61,7 +61,7 @@ export function PayslipFieldMonthsModal({
       open
       onClose={onClose}
       ariaLabelledBy="payslip-field-months-title"
-      dialogClassName={`${DIALOG_CLASSES} max-w-3xl`}
+      size="3xl"
     >
       <ModalHeader id="payslip-field-months-title" title={label} subtitle={`${year} · by month`} onClose={onClose} />
       <div className={DIALOG_BODY_CLASSES}>

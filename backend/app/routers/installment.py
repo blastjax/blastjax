@@ -1,20 +1,26 @@
 from __future__ import annotations
+
 from typing import Any
 from uuid import UUID
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 import cache
-from app.deps import require_db
+from app.deps import found, require_db
 from app.schemas.installment import (
     InstallmentCreate,
-    InstallmentLineUpdate,
     InstallmentLinesBulkUpdate,
     InstallmentLinesReorder,
+    InstallmentLineUpdate,
 )
-from app.services.installment_service import (
-    installment_summary,
-    serialize_installment_row,
+from app.schemas.responses import (
+    InstallmentDetail,
+    InstallmentList,
+    InstallmentPaid,
+    InstallmentSchedules,
+    Ok,
 )
+from app.services.installment_service import installment_summary
 from db import (
     delete_installment,
     fetch_installment_with_lines,
@@ -31,111 +37,68 @@ from db import (
 
 router = APIRouter(tags=["installment"], dependencies=[Depends(require_db)])
 
-
-def _serialize_detail(detail: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "installment": serialize_installment_row(detail["installment"]),
-        "lines": detail["lines"],
-    }
+_NOT_FOUND = "Installment not found."
 
 
-def _validate_installment_body(body: InstallmentCreate) -> tuple[float, float]:
+def _values(body: InstallmentCreate) -> dict[str, Any]:
+    """The body as `db` stores it: the two totals the web may leave out are worked out from the counts."""
     if body.installment_current > body.installment_total + 1:
         raise HTTPException(
             status_code=400,
             detail="installment_current cannot exceed installment_total + 1.",
         )
     payments_left = body.installment_total - body.installment_current + 1
-    if payments_left < 0:
-        raise HTTPException(status_code=400, detail="Invalid installment counts.")
-    rem = (
-        body.remaining
-        if body.remaining is not None
-        else payments_left * body.payment_total
-    )
-    orig = (
+    remaining = body.remaining if body.remaining is not None else payments_left * body.payment_total
+    if remaining < 0:
+        raise HTTPException(status_code=400, detail="remaining cannot be negative.")
+    original_total = (
         body.original_total
         if body.original_total is not None
         else float(body.installment_total) * float(body.principal)
     )
-    if rem < 0:
-        raise HTTPException(status_code=400, detail="remaining cannot be negative.")
-    return rem, orig
+    return body.model_dump() | {"remaining": remaining, "original_total": original_total}
 
 
-@router.get("/api/installment")
+def _total(installment_id: UUID) -> int:
+    row = found(get_installment(installment_id), _NOT_FOUND)
+    return int(row.get("installment_total") or 0)
+
+
+@router.get("/api/installment", response_model=InstallmentList)
 def installment_list(
     limit: int = Query(default=500, ge=1, le=2000),
 ) -> dict[str, Any]:
-    key = f"installment:list:{limit}"
-    hit = cache.get(key)
-    if hit is not None:
-        return hit
-    rows = list_installments(limit=limit)
-    result = {
-        "installments": [serialize_installment_row(r) for r in rows],
-        "summary": installment_summary(rows),
-    }
-    cache.set(key, result)
-    return result
+    def load() -> dict[str, Any]:
+        rows = list_installments(limit=limit)
+        return {"installments": rows, "summary": installment_summary(rows)}
+
+    return cache.cached(f"installment:list:{limit}", load)
 
 
-@router.get("/api/installment-schedules")
+@router.get("/api/installment-schedules", response_model=InstallmentSchedules)
 def installment_schedules(
     limit: int = Query(default=500, ge=1, le=2000),
 ) -> dict[str, Any]:
-    key = f"installment:schedules:{limit}"
-    hit = cache.get(key)
-    if hit is not None:
-        return hit
-    items = list_installments_with_lines(limit=limit)
-    result = {
-        "schedules": [
-            {
-                "installment": serialize_installment_row(it["installment"]),
-                "lines": it["lines"],
-            }
-            for it in items
-        ]
-    }
-    cache.set(key, result)
-    return result
-
-
-@router.post("/api/installment")
-def installment_create(body: InstallmentCreate) -> dict[str, Any]:
-    rem, orig = _validate_installment_body(body)
-    detail = insert_installment(
-        body.name.strip(),
-        body.installment_current,
-        body.installment_total,
-        body.principal,
-        body.interest,
-        body.payment_total,
-        body.start_date,
-        body.finish_date,
-        rem,
-        orig,
-        body.credit_card_id,
+    return cache.cached(
+        f"installment:schedules:{limit}",
+        lambda: {"schedules": list_installments_with_lines(limit=limit)},
     )
-    return _serialize_detail(detail)
 
 
-@router.get("/api/installment/{installment_id}")
+@router.post("/api/installment", response_model=InstallmentDetail)
+def installment_create(body: InstallmentCreate) -> dict[str, Any]:
+    return insert_installment(**_values(body))
+
+
+@router.get("/api/installment/{installment_id}", response_model=InstallmentDetail)
 def installment_one(installment_id: UUID) -> dict[str, Any]:
-    key = f"installment:{installment_id}"
-    hit = cache.get(key)
-    if hit is not None:
-        return hit
-    detail = fetch_installment_with_lines(installment_id)
-    if not detail:
-        raise HTTPException(status_code=404, detail="Installment not found.")
-    result = _serialize_detail(detail)
-    cache.set(key, result)
-    return result
+    return cache.cached(
+        f"installment:{installment_id}",
+        lambda: found(fetch_installment_with_lines(installment_id), _NOT_FOUND),
+    )
 
 
-@router.put("/api/installment/{installment_id}/line/{seq}")
+@router.put("/api/installment/{installment_id}/line/{seq}", response_model=InstallmentDetail)
 def installment_line_update(
     installment_id: UUID,
     seq: int,
@@ -143,91 +106,57 @@ def installment_line_update(
 ) -> dict[str, Any]:
     if seq < 1:
         raise HTTPException(status_code=400, detail="seq must be >= 1.")
-    row = get_installment(installment_id)
-    if not row:
-        raise HTTPException(status_code=404, detail="Installment not found.")
-    if seq > int(row.get("installment_total") or 0):
+    if seq > _total(installment_id):
         raise HTTPException(status_code=400, detail="seq exceeds installment total.")
-    detail = update_installment_line_and_fetch_detail(
-        installment_id,
-        seq,
-        body.principal,
-        body.interest,
+    return found(
+        update_installment_line_and_fetch_detail(installment_id, seq, body.principal, body.interest),
+        "Schedule line not found.",
     )
-    if not detail:
-        raise HTTPException(status_code=404, detail="Schedule line not found.")
-    return _serialize_detail(detail)
 
 
-@router.put("/api/installment/{installment_id}/lines")
+@router.put("/api/installment/{installment_id}/lines", response_model=InstallmentDetail)
 def installment_lines_bulk_update(
     installment_id: UUID,
     body: InstallmentLinesBulkUpdate,
 ) -> dict[str, Any]:
-    row = get_installment(installment_id)
-    if not row:
-        raise HTTPException(status_code=404, detail="Installment not found.")
-    total = int(row.get("installment_total") or 0)
+    total = _total(installment_id)
     for ln in body.lines:
         if ln.seq > total:
-            raise HTTPException(
-                status_code=400, detail=f"seq {ln.seq} exceeds installment total."
-            )
-    detail = update_installment_lines_bulk(
-        installment_id,
-        [(ln.seq, ln.principal, ln.interest) for ln in body.lines],
+            raise HTTPException(status_code=400, detail=f"seq {ln.seq} exceeds installment total.")
+    return found(
+        update_installment_lines_bulk(installment_id, [(ln.seq, ln.principal, ln.interest) for ln in body.lines]),
+        "Schedule lines not found.",
     )
-    if not detail:
-        raise HTTPException(status_code=404, detail="Schedule lines not found.")
-    return _serialize_detail(detail)
 
 
-@router.put("/api/installment/{installment_id}/lines/reorder")
+@router.put("/api/installment/{installment_id}/lines/reorder", response_model=InstallmentDetail)
 def installment_lines_reorder(
     installment_id: UUID,
     body: InstallmentLinesReorder,
 ) -> dict[str, Any]:
-    if not get_installment(installment_id):
-        raise HTTPException(status_code=404, detail="Installment not found.")
+    found(get_installment(installment_id), _NOT_FOUND)
     detail = reorder_installment_lines(installment_id, body.line_ids)
     if not detail:
         raise HTTPException(
             status_code=400,
             detail="line_ids must list every schedule row id for this installment exactly once.",
         )
-    return _serialize_detail(detail)
+    return detail
 
 
-@router.put("/api/installment/{installment_id}")
+@router.put("/api/installment/{installment_id}", response_model=InstallmentDetail)
 def installment_replace(installment_id: UUID, body: InstallmentCreate) -> dict[str, Any]:
-    rem, orig = _validate_installment_body(body)
-    detail = update_installment(
-        installment_id,
-        body.name.strip(),
-        body.installment_current,
-        body.installment_total,
-        body.principal,
-        body.interest,
-        body.payment_total,
-        body.start_date,
-        body.finish_date,
-        rem,
-        orig,
-        body.credit_card_id,
-    )
-    if detail is None:
-        raise HTTPException(status_code=404, detail="Installment not found.")
-    return _serialize_detail(detail)
+    return found(update_installment(installment_id, **_values(body)), _NOT_FOUND)
 
 
-@router.delete("/api/installment/{installment_id}")
+@router.delete("/api/installment/{installment_id}", response_model=Ok)
 def installment_remove(installment_id: UUID) -> dict[str, Any]:
     if not delete_installment(installment_id):
-        raise HTTPException(status_code=404, detail="Installment not found.")
+        raise HTTPException(status_code=404, detail=_NOT_FOUND)
     return {"ok": True}
 
 
-@router.post("/api/installment/{installment_id}/pay")
+@router.post("/api/installment/{installment_id}/pay", response_model=InstallmentPaid)
 def installment_pay(installment_id: UUID) -> dict[str, Any]:
     row = installment_apply_payment(installment_id)
     if not row:
@@ -235,4 +164,4 @@ def installment_pay(installment_id: UUID) -> dict[str, Any]:
             status_code=400,
             detail="Cannot record payment (not found, already complete, or no balance).",
         )
-    return {"installment": serialize_installment_row(row)}
+    return {"installment": row}

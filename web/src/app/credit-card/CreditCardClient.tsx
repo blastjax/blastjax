@@ -10,7 +10,6 @@ import { Modal } from "@/components/Modal";
 import {
   DANGER_TEXT_BUTTON_CLASSES,
   DIALOG_BODY_CLASSES,
-  DIALOG_CLASSES,
   DIALOG_FOOTER_CLASSES,
   EmptyState,
   Field,
@@ -21,8 +20,10 @@ import {
   Panel,
   Pill,
   Segmented,
+  Select,
   TEXT_BUTTON_CLASSES,
   TILE_BUTTON_CLASSES,
+  DIALOG_FORM_CLASSES,
 } from "@/components/FinanceUI";
 import { CreditCardIcon, PlusIcon } from "@/components/Icons";
 import {
@@ -31,10 +32,6 @@ import {
   createCreditCardPayment,
   deleteCreditCard,
   deleteCreditCardPayment,
-  getBills,
-  getCreditCards,
-  getMonthlyExpenses,
-  getPayPeriodStartOverrides,
   recordInstallmentPayment,
   updateCreditCard,
   updateCreditCardPayment,
@@ -45,7 +42,10 @@ import {
   type CreditCardPaymentRow,
   type CreditCardRow,
   type MonthlyExpenseRow,
+  errorMessage,
 } from "@/lib/api";
+import { queries } from "@/lib/queries";
+import { getQueryClient } from "@/lib/queryClient";
 import { formatAmountNumber, parseFormNumber } from "@/lib/parseFormNumber";
 import { formatDate, formatMonthYear, monthKey, parseDateOnlyLocal, toIsoDateLocal } from "@/lib/dateFormat";
 import { fmtAmountOrDash } from "@/lib/formatNumber";
@@ -606,10 +606,10 @@ export default function CreditCardClient() {
     try {
       // Bills only name where a linked statement comes from; the cards work without them.
       const [r, billData, starts, monthly] = await Promise.all([
-        getCreditCards(),
-        getBills().catch(() => null),
-        getPayPeriodStartOverrides().catch(() => ({ overrides: [] })),
-        getMonthlyExpenses().catch(() => ({ expenses: [] })),
+        getQueryClient().fetchQuery(queries.creditCards()),
+        getQueryClient().fetchQuery(queries.bills()).catch(() => null),
+        getQueryClient().fetchQuery(queries.payPeriodStarts()).catch(() => ({ overrides: [] })),
+        getQueryClient().fetchQuery(queries.monthlyExpenses()).catch(() => ({ expenses: [] })),
       ]);
       setCards(r.cards);
       setBillCategories(billData?.categories ?? []);
@@ -619,7 +619,7 @@ export default function CreditCardClient() {
         new Map(starts.overrides.map((o) => [periodKey(o.period_year, o.period_month, o.period_half), o.start_date])),
       );
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load credit cards");
+      setError(errorMessage(e, "Failed to load credit cards"));
       setCards([]);
     } finally {
       setLoading(false);
@@ -714,7 +714,7 @@ export default function CreditCardClient() {
         setCardModalOpen(false);
         await load();
       } catch (err) {
-        setCardFormError(err instanceof Error ? err.message : "Failed to save credit card");
+        setCardFormError(errorMessage(err, "Failed to save credit card"));
       } finally {
         setCardSaving(false);
       }
@@ -733,7 +733,7 @@ export default function CreditCardClient() {
       setDetailsOpen(false);
       await load();
     } catch (err) {
-      setCardFormError(err instanceof Error ? err.message : "Failed to remove credit card");
+      setCardFormError(errorMessage(err, "Failed to remove credit card"));
     }
   }, [card, load]);
 
@@ -818,7 +818,7 @@ export default function CreditCardClient() {
         }
         await spreadOverCalendar(payment.budget_changes);
       } catch (err) {
-        setPaymentFormError(err instanceof Error ? err.message : "Failed to save payment");
+        setPaymentFormError(errorMessage(err, "Failed to save payment"));
       } finally {
         setPaymentSaving(false);
       }
@@ -837,7 +837,7 @@ export default function CreditCardClient() {
         await load();
         await spreadOverCalendar(budget_changes);
       } catch (err) {
-        setPaymentFormError(err instanceof Error ? err.message : "Failed to delete payment");
+        setPaymentFormError(errorMessage(err, "Failed to delete payment"));
       } finally {
         setPaymentSaving(false);
       }
@@ -872,7 +872,7 @@ export default function CreditCardClient() {
         setBalanceModalOpen(false);
         await load();
       } catch (err) {
-        setBalanceFormError(err instanceof Error ? err.message : "Failed to update balance");
+        setBalanceFormError(errorMessage(err, "Failed to update balance"));
       } finally {
         setBalanceSaving(false);
       }
@@ -987,7 +987,7 @@ export default function CreditCardClient() {
         // Escape reaches every open modal; leave this one open under a form on top of it.
         onClose={cardModalOpen || paymentModalOpen || balanceModalOpen ? () => {} : closeDetails}
         ariaLabelledBy="credit-card-details-title"
-        dialogClassName={`${DIALOG_CLASSES} max-w-5xl`}
+        size="5xl"
       >
         {selected && (
           <>
@@ -1028,7 +1028,7 @@ export default function CreditCardClient() {
         open={cardModalOpen}
         onClose={closeCardModal}
         ariaLabelledBy="credit-card-title"
-        dialogClassName={`${DIALOG_CLASSES} max-w-xl`}
+        size="xl"
       >
         <ModalHeader
           id="credit-card-title"
@@ -1036,7 +1036,7 @@ export default function CreditCardClient() {
           subtitle={card && !formLinked ? "Changing the statement balance resets the current balance to it." : undefined}
           onClose={closeCardModal}
         />
-        <form onSubmit={submitCardForm} className="flex min-h-0 flex-1 flex-col">
+        <form onSubmit={submitCardForm} className={DIALOG_FORM_CLASSES}>
           <div className={`${DIALOG_BODY_CLASSES} grid gap-4 sm:grid-cols-2`}>
             <Field label="Card name" className="sm:col-span-2">
               <input
@@ -1077,19 +1077,15 @@ export default function CreditCardClient() {
                 }
                 className="sm:col-span-2"
               >
-                <select
-                  className={INPUT_CLASSES}
+                <Select
                   value={cardForm.bill_category_id}
-                  onChange={(e) => setCardForm((f) => ({ ...f, bill_category_id: e.target.value }))}
+                  onChange={(id) => setCardForm((f) => ({ ...f, bill_category_id: id }))}
                   disabled={cardSaving}
-                >
-                  <option value="">Typed in here</option>
-                  {statementSources.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      From the {c.name} bills
-                    </option>
-                  ))}
-                </select>
+                  options={[
+                    { value: "", label: "Typed in here" },
+                    ...statementSources.map((c) => ({ value: c.id, label: `From the ${c.name} bills` })),
+                  ]}
+                />
               </Field>
             )}
             {!formLinked && (
@@ -1160,7 +1156,7 @@ export default function CreditCardClient() {
         open={paymentModalOpen}
         onClose={closePaymentModal}
         ariaLabelledBy="credit-card-payment-title"
-        dialogClassName={`${DIALOG_CLASSES} max-w-md`}
+        size="md"
       >
         <ModalHeader
           id="credit-card-payment-title"
@@ -1168,7 +1164,7 @@ export default function CreditCardClient() {
           subtitle={card ? `${card.name} · current balance ${fmtMoney(card.current_balance)}` : undefined}
           onClose={closePaymentModal}
         />
-        <form onSubmit={submitPaymentForm} className="flex min-h-0 flex-1 flex-col">
+        <form onSubmit={submitPaymentForm} className={DIALOG_FORM_CLASSES}>
           <div className={`${DIALOG_BODY_CLASSES} grid gap-4`}>
             <div className="flex flex-col gap-2">
               <Field label="Amount">
@@ -1285,7 +1281,7 @@ export default function CreditCardClient() {
         open={balanceModalOpen}
         onClose={closeBalanceModal}
         ariaLabelledBy="credit-card-balance-title"
-        dialogClassName={`${DIALOG_CLASSES} max-w-md`}
+        size="md"
       >
         <ModalHeader
           id="credit-card-balance-title"
@@ -1293,7 +1289,7 @@ export default function CreditCardClient() {
           subtitle="Match what your bank shows, e.g. after purchases this app doesn't track. Statement details stay as they are."
           onClose={closeBalanceModal}
         />
-        <form onSubmit={submitBalanceForm} className="flex min-h-0 flex-1 flex-col">
+        <form onSubmit={submitBalanceForm} className={DIALOG_FORM_CLASSES}>
           <div className={`${DIALOG_BODY_CLASSES} grid gap-4`}>
             <Field label="Available credit">
               <AmountInput

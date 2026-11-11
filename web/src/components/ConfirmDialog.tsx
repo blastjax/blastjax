@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { DIALOG_BODY_CLASSES, DIALOG_CLASSES, DIALOG_FOOTER_CLASSES } from "@/components/FinanceUI";
+import { DIALOG_BODY_CLASSES, DIALOG_FOOTER_CLASSES } from "@/components/FinanceUI";
 import { Modal } from "@/components/Modal";
 import { DANGER_BUTTON_CLASSES, SECONDARY_BUTTON_CLASSES } from "@/lib/ui";
 
@@ -32,26 +32,9 @@ export function ConfirmHost() {
     setPending(null);
   };
 
-  useEffect(() => {
-    if (!pending) return;
-    // Capture phase so Escape cancels only this dialog, not a modal open underneath it.
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
-      e.stopPropagation();
-      pending.resolve(false);
-      setPending(null);
-    };
-    window.addEventListener("keydown", onKey, true);
-    return () => window.removeEventListener("keydown", onKey, true);
-  }, [pending]);
-
+  // Opened over another dialog it is the topmost layer, so Escape or a click outside answers it alone.
   return (
-    <Modal
-      open={pending !== null}
-      onClose={() => answer(false)}
-      ariaLabelledBy="confirm-dialog-message"
-      dialogClassName={`${DIALOG_CLASSES} max-w-md`}
-    >
+    <Modal open={pending !== null} onClose={() => answer(false)} ariaLabelledBy="confirm-dialog-message" size="md">
       <div className={DIALOG_BODY_CLASSES}>
         <p id="confirm-dialog-message" className="text-base text-ink">
           {pending?.message}

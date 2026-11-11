@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 import cache
 from app.deps import require_db
 from app.schemas.pay_period_start_override import PayPeriodStartOverrideUpsert
+from app.schemas.responses import Ok, PayPeriodStartOverrideOne, PayPeriodStartOverrides
 from db import (
     delete_pay_period_start_override,
     get_pay_period_start_override,
@@ -18,32 +19,18 @@ from db import (
 router = APIRouter(tags=["pay_period_start_override"], dependencies=[Depends(require_db)])
 
 
-def _serialize(row: dict[str, Any]) -> dict[str, Any]:
-    out = dict(row)
-    for key in ("start_date", "created_at"):
-        v = out.get(key)
-        if hasattr(v, "isoformat"):
-            out[key] = v.isoformat()
-    return out
-
-
 def _prev_month(year: int, month: int) -> tuple[int, int]:
     return (year - 1, 12) if month == 1 else (year, month - 1)
 
 
-@router.get("/api/pay-period-start-override")
+@router.get("/api/pay-period-start-override", response_model=PayPeriodStartOverrides)
 def pay_period_start_override_list() -> dict[str, Any]:
-    key = "pay_period_start_override:list"
-    hit = cache.get(key)
-    if hit is not None:
-        return hit
-    rows = list_pay_period_start_overrides()
-    result = {"overrides": [_serialize(r) for r in rows]}
-    cache.set(key, result)
-    return result
+    return cache.cached(
+        "pay_period_start_override:list", lambda: {"overrides": list_pay_period_start_overrides()}
+    )
 
 
-@router.put("/api/pay-period-start-override")
+@router.put("/api/pay-period-start-override", response_model=PayPeriodStartOverrideOne)
 def pay_period_start_override_upsert(body: PayPeriodStartOverrideUpsert) -> dict[str, Any]:
     try:
         start_date = date.fromisoformat(body.start_date)
@@ -83,13 +70,10 @@ def pay_period_start_override_upsert(body: PayPeriodStartOverrideUpsert) -> dict
                 ),
             )
 
-    row = upsert_pay_period_start_override(
-        body.period_year, body.period_month, body.period_half, body.start_date
-    )
-    return {"override": _serialize(row)}
+    return {"override": upsert_pay_period_start_override(**body.model_dump())}
 
 
-@router.delete("/api/pay-period-start-override")
+@router.delete("/api/pay-period-start-override", response_model=Ok)
 def pay_period_start_override_remove(
     period_year: int = Query(...),
     period_month: int = Query(..., ge=1, le=12),

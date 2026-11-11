@@ -8,6 +8,9 @@ export const CARD_CLASSES =
 export const SECTION_LABEL_CLASSES =
   "text-xs font-medium uppercase tracking-wider text-ink-4";
 
+// A bordered list of rows inside a panel; give each <li> its own padding.
+export const LIST_CLASSES = "divide-y divide-line rounded-xl border border-line";
+
 export const DASHED_EMPTY_CLASSES =
   "rounded-lg border border-dashed border-line-strong px-4 py-8 text-center text-sm text-ink-3";
 

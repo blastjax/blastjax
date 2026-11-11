@@ -5,20 +5,22 @@ import { ErrorAlert } from "@/components/ErrorAlert";
 import { LoadingBlocks, Panel } from "@/components/FinanceUI";
 import { PlusIcon } from "@/components/Icons";
 import { PageHeader } from "@/components/PageHeader";
+import { useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   apiFetch,
   companyColumnFlags,
   createPayslip,
   deletePayslip,
-  getCompanies,
-  getPayslips,
   payslipPdfUrl,
   updatePayslip,
   uploadPayslipPdf,
   type CompanyRow,
   type PayslipRow,
+  errorMessage,
 } from "@/lib/api";
+import { queries } from "@/lib/queries";
+import { getQueryClient } from "@/lib/queryClient";
 import {
   clearPayslipModalDraft,
   formFromRow,
@@ -105,9 +107,17 @@ async function withPdf(row: PayslipRow, pdf: File | null): Promise<PayslipRow> {
 
 export default function PayslipClient({ company = "Sophos" }: { company?: string }) {
   const [error, setError] = useState<string | null>(null);
-  const [rows, setRows] = useState<PayslipRow[]>([]);
-  const [companies, setCompanies] = useState<CompanyRow[]>([]);
-  const [loading, setLoading] = useState(true);
+  const payslips = useQuery(queries.payslips(2000, company));
+  const rows = useMemo(() => payslips.data?.payslips ?? [], [payslips.data]);
+  const companiesData = useQuery(queries.companies()).data;
+  const companies = useMemo<CompanyRow[]>(() => companiesData?.companies ?? [], [companiesData]);
+  // A saved payslip shows at once; the save's own refetch then confirms it.
+  const setRows = useCallback(
+    (update: (rs: PayslipRow[]) => PayslipRow[]) =>
+      getQueryClient().setQueryData(queries.payslips(2000, company).queryKey, (d) => d && { payslips: update(d.payslips) }),
+    [company],
+  );
+  const loading = payslips.isPending;
   const [saving, setSaving] = useState(false);
   const [nav, setNav] = useState<Nav | null>(null);
   const [modalForm, setModalForm] = useState<FormState>(emptyForm());
@@ -134,19 +144,6 @@ export default function PayslipClient({ company = "Sophos" }: { company?: string
     }
   }, [showGross]);
 
-  const load = useCallback(async () => {
-    setError(null);
-    try {
-      const r = await getPayslips(2000, company);
-      setRows(r.payslips);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load payslips");
-      setRows([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [company]);
-
   const upsertRow = useCallback((row: PayslipRow) => {
     setRows((rs) => {
       const i = rs.findIndex((r) => r.id === row.id);
@@ -155,28 +152,17 @@ export default function PayslipClient({ company = "Sophos" }: { company?: string
       out[i] = row;
       return out;
     });
-  }, []);
+  }, [setRows]);
 
   const removeRow = useCallback((id: string) => {
     setRows((rs) => rs.filter((r) => r.id !== id));
-  }, []);
+  }, [setRows]);
 
   const setRowPdfFlag = useCallback((id: string, hasPdf: boolean) => {
     setRows((rs) =>
       rs.map((r) => (r.id === id ? { ...r, has_pdf: hasPdf } : r)),
     );
-  }, []);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  useEffect(() => {
-    getCompanies()
-      .then((r) => setCompanies(r.companies))
-      .catch(() => {
-      });
-  }, []);
+  }, [setRows]);
 
   const warmedPdfIdsRef = useRef<Set<string>>(new Set());
   useEffect(() => {
@@ -239,7 +225,7 @@ export default function PayslipClient({ company = "Sophos" }: { company?: string
         return n;
       });
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Delete failed");
+      setError(errorMessage(e, "Delete failed"));
     } finally {
       setSaving(false);
     }
@@ -256,7 +242,7 @@ export default function PayslipClient({ company = "Sophos" }: { company?: string
       clearPayslipModalDraft(nav);
       setNav({ screen: "detail", row: updated });
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Update failed");
+      setError(errorMessage(e, "Update failed"));
     } finally {
       setSaving(false);
     }
@@ -284,7 +270,7 @@ export default function PayslipClient({ company = "Sophos" }: { company?: string
       clearPayslipModalDraft(nav);
       setNav({ screen: "detail", row: fresh });
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Save failed");
+      setError(errorMessage(e, "Save failed"));
     } finally {
       setSaving(false);
     }
@@ -424,7 +410,9 @@ export default function PayslipClient({ company = "Sophos" }: { company?: string
         )}
       </header>
 
-      {error && <ErrorAlert>{error}</ErrorAlert>}
+      {(error ?? (payslips.error && errorMessage(payslips.error, "Failed to load payslips"))) && (
+        <ErrorAlert>{error ?? errorMessage(payslips.error, "Failed to load payslips")}</ErrorAlert>
+      )}
 
       {loading && <LoadingBlocks label="Loading payslips…" />}
 

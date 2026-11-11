@@ -7,8 +7,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.exc import IntegrityError
 
 import cache
-from app.deps import require_db
+from app.deps import found, require_db
 from app.schemas.monthly_expense import MonthlyExpenseCreate
+from app.schemas.responses import MonthlyExpenseList, MonthlyExpenseOne, Ok
 from db import (
     delete_monthly_expense,
     insert_monthly_expense,
@@ -18,96 +19,53 @@ from db import (
 
 router = APIRouter(tags=["monthly_expense"], dependencies=[Depends(require_db)])
 
-
-def _serialize(row: dict[str, Any]) -> dict[str, Any]:
-    out = dict(row)
-    v = out.get("created_at")
-    if hasattr(v, "isoformat"):
-        out["created_at"] = v.isoformat()
-    return out
+_NOT_FOUND = "Expense not found."
+_NO_LINK = "That bill category or house payment doesn't exist."
 
 
-def _clean_description(description: str | None) -> str | None:
-    if description is None:
-        return None
-    trimmed = description.strip()
-    return trimmed or None
+def _values(body: MonthlyExpenseCreate) -> dict[str, Any]:
+    return body.model_dump() | {
+        "skipped_months": sorted(set(body.skipped_months)),
+        # Stored as JSON, which holds a card's id as text.
+        "charged_months": {month: str(card_id) if card_id else None for month, card_id in body.charged_months.items()},
+    }
 
 
-def _charged_months(body: MonthlyExpenseCreate) -> dict[str, str | None]:
-    return {month: str(card_id) if card_id else None for month, card_id in body.charged_months.items()}
-
-
-@router.get("/api/monthly-expense")
+@router.get("/api/monthly-expense", response_model=MonthlyExpenseList)
 def monthly_expense_list(
     period_half: int | None = Query(default=None, ge=1, le=2),
     period_year: int | None = Query(default=None),
     period_month: int | None = Query(default=None, ge=1, le=12),
 ) -> dict[str, Any]:
-    key = f"monthly_expense:list:{period_half}:{period_year}:{period_month}"
-    hit = cache.get(key)
-    if hit is not None:
-        return hit
-    rows = list_monthly_expenses(
-        period_half=period_half, period_year=period_year, period_month=period_month
+    return cache.cached(
+        f"monthly_expense:list:{period_half}:{period_year}:{period_month}",
+        lambda: {
+            "expenses": list_monthly_expenses(
+                period_half=period_half, period_year=period_year, period_month=period_month
+            )
+        },
     )
-    result = {"expenses": [_serialize(r) for r in rows]}
-    cache.set(key, result)
-    return result
 
 
-_NO_LINK = "That bill category or house payment doesn't exist."
-
-
-@router.post("/api/monthly-expense")
+@router.post("/api/monthly-expense", response_model=MonthlyExpenseOne)
 def monthly_expense_create(body: MonthlyExpenseCreate) -> dict[str, Any]:
     try:
-        row = insert_monthly_expense(
-            body.name.strip(),
-            _clean_description(body.description),
-            body.amount,
-            body.period_half,
-            body.period_year,
-            body.period_month,
-            body.is_recurring,
-            body.expense_date,
-            sorted(set(body.skipped_months)),
-            _charged_months(body),
-            body.bill_category_id,
-            body.house_payment_id,
-        )
+        return {"expense": insert_monthly_expense(**_values(body))}
     except IntegrityError:
         raise HTTPException(status_code=404, detail=_NO_LINK)
-    return {"expense": _serialize(row)}
 
 
-@router.put("/api/monthly-expense/{expense_id}")
+@router.put("/api/monthly-expense/{expense_id}", response_model=MonthlyExpenseOne)
 def monthly_expense_replace(expense_id: UUID, body: MonthlyExpenseCreate) -> dict[str, Any]:
     try:
-        row = update_monthly_expense(
-            expense_id,
-            body.name.strip(),
-            _clean_description(body.description),
-            body.amount,
-            body.period_half,
-            body.period_year,
-            body.period_month,
-            body.is_recurring,
-            body.expense_date,
-            sorted(set(body.skipped_months)),
-            _charged_months(body),
-            body.bill_category_id,
-            body.house_payment_id,
-        )
+        row = update_monthly_expense(expense_id, **_values(body))
     except IntegrityError:
         raise HTTPException(status_code=404, detail=_NO_LINK)
-    if row is None:
-        raise HTTPException(status_code=404, detail="Expense not found.")
-    return {"expense": _serialize(row)}
+    return {"expense": found(row, _NOT_FOUND)}
 
 
-@router.delete("/api/monthly-expense/{expense_id}")
+@router.delete("/api/monthly-expense/{expense_id}", response_model=Ok)
 def monthly_expense_remove(expense_id: UUID) -> dict[str, Any]:
     if not delete_monthly_expense(expense_id):
-        raise HTTPException(status_code=404, detail="Expense not found.")
+        raise HTTPException(status_code=404, detail=_NOT_FOUND)
     return {"ok": True}

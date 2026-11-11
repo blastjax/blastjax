@@ -4,17 +4,14 @@ import datetime as dt
 
 from pydantic import BaseModel, Field
 
+from app.schemas.text import OptionalText, Trimmed
+
 
 class HousePaymentCreate(BaseModel):
-    name: str = Field(min_length=1)
-    notes: str | None = None
+    name: Trimmed = Field(min_length=1)
+    notes: OptionalText = None
 
 
 class HousePaymentEntryCreate(BaseModel):
-    paid_on: dt.date
-    amount: float = Field(ge=0)
-
-
-class HousePaymentEntryUpdate(BaseModel):
     paid_on: dt.date
     amount: float = Field(ge=0)

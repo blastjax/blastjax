@@ -15,6 +15,7 @@ import {
   type MamboBoard,
   type MamboDifficulty,
   type MamboStep,
+  errorMessage,
 } from "@/lib/api";
 import {
   CIRCLE,
@@ -40,6 +41,8 @@ import {
   type Grid,
   type SignGrid,
 } from "./logic";
+import { useLatest } from "@/lib/useLatest";
+import { useWindowSize } from "@/lib/useWindowSize";
 
 const SIDES = [4, 6, 8, 10, 12, 14, 16] as const;
 const DIFFICULTIES: readonly MamboDifficulty[] = ["easy", "medium", "hard"];
@@ -70,25 +73,6 @@ const TECHNIQUE_LABELS: Record<string, string> = {
 
 function techniqueLabel(technique: string): string {
   return TECHNIQUE_LABELS[technique] ?? technique;
-}
-
-function useLatest<T>(value: T) {
-  const ref = useRef(value);
-  useEffect(() => {
-    ref.current = value;
-  });
-  return ref;
-}
-
-function useWindowSize() {
-  const [size, setSize] = useState({ width: 0, height: 0 });
-  useEffect(() => {
-    const update = () => setSize({ width: window.innerWidth, height: window.innerHeight });
-    update();
-    window.addEventListener("resize", update);
-    return () => window.removeEventListener("resize", update);
-  }, []);
-  return size;
 }
 
 function SymbolMark({ value, faded }: { value: number; faded: boolean }) {
@@ -263,7 +247,7 @@ export default function MamboClient() {
         } · one solution.`,
       );
     } catch (err) {
-      setGenerateError(err instanceof Error ? err.message : "Generate failed.");
+      setGenerateError(errorMessage(err, "Generate failed."));
     } finally {
       setGenerating(false);
     }
@@ -295,7 +279,7 @@ export default function MamboClient() {
             : "Solved — but the puzzle is ambiguous: it has more than one answer.",
       );
     } catch (err) {
-      setSolveError(err instanceof Error ? err.message : "Solve failed.");
+      setSolveError(errorMessage(err, "Solve failed."));
     } finally {
       setBusy(null);
     }
@@ -337,7 +321,7 @@ export default function MamboClient() {
       );
       return result.steps;
     } catch (err) {
-      setSolveError(err instanceof Error ? err.message : "Solve failed.");
+      setSolveError(errorMessage(err, "Solve failed."));
       return null;
     } finally {
       setBusy(null);

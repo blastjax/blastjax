@@ -1,14 +1,17 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  getPayslips,
   uploadPayslipPdf,
   type PayslipRow,
+  errorMessage,
 } from "@/lib/api";
+import { queries } from "@/lib/queries";
 import { rowsForSlot } from "@/app/payslip/payslipAggregates";
 import { slotTitle } from "@/app/payslip/payslipDisplay";
 import { ErrorAlert } from "@/components/ErrorAlert";
+import { Pill } from "@/components/FinanceUI";
 import {
   ACTION_BUTTON_CLASSES,
   ADD_BUTTON_CLASSES,
@@ -32,6 +35,15 @@ const MONTH_MAP: Record<string, number> = {
 };
 
 type ParseStatus = "pending" | "uploading" | "done" | "error" | "no-match" | "parse-error";
+
+const STATUS_PILL: Record<ParseStatus, ["neutral" | "brand" | "success" | "warning" | "danger", string]> = {
+  pending: ["neutral", "Ready"],
+  uploading: ["brand", "Uploading…"],
+  done: ["success", "Uploaded"],
+  error: ["danger", "Error"],
+  "no-match": ["warning", "No payslip record"],
+  "parse-error": ["danger", "Unrecognized filename"],
+};
 
 interface ParsedFile {
   file: File;
@@ -81,8 +93,9 @@ function resolveFileList(
 }
 
 export function PdfBulkUploadClient() {
-  const [rows, setRows] = useState<PayslipRow[]>([]);
-  const [loadErr, setLoadErr] = useState<string | null>(null);
+  const payslips = useQuery(queries.payslips(2000));
+  const rows = useMemo(() => payslips.data?.payslips ?? [], [payslips.data]);
+  const loadErr = payslips.error ? errorMessage(payslips.error, "Failed to load payslips") : null;
   const [items, setItems] = useState<ParsedFile[]>([]);
   const [dragging, setDragging] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -91,14 +104,6 @@ export function PdfBulkUploadClient() {
   rowsRef.current = rows;
   const itemsRef = useRef(items);
   itemsRef.current = items;
-
-  useEffect(() => {
-    getPayslips(2000)
-      .then((r) => setRows(r.payslips))
-      .catch((e) =>
-        setLoadErr(e instanceof Error ? e.message : "Failed to load payslips"),
-      );
-  }, []);
 
   useEffect(() => {
     if (rows.length > 0) {
@@ -156,7 +161,7 @@ export function PdfBulkUploadClient() {
         next[idx] = {
           ...cur,
           status: "error",
-          error: e instanceof Error ? e.message : "Upload failed",
+          error: errorMessage(e, "Upload failed"),
         };
         return next;
       });
@@ -213,8 +218,8 @@ export function PdfBulkUploadClient() {
         className={[
           "flex cursor-pointer flex-col items-center justify-center gap-3 rounded-lg border-2 border-dashed px-6 py-12 text-center transition-colors duration-150",
           dragging
-            ? "border-indigo-400 bg-indigo-50 dark:border-indigo-500 dark:bg-indigo-950/30"
-            : "border-line-strong hover:border-zinc-400 dark:hover:border-zinc-500",
+            ? "border-brand bg-brand-soft"
+            : "border-line-strong hover:border-ink-4",
         ].join(" ")}
       >
         <UploadIcon className="h-8 w-8 text-ink-4" />
@@ -245,17 +250,17 @@ export function PdfBulkUploadClient() {
             <p className="text-sm text-ink-2">
               {items.length} file{items.length !== 1 ? "s" : ""}
               {pendingCount > 0 && (
-                <span className="ml-2 text-indigo-600 dark:text-indigo-400">
+                <span className="ml-2 text-brand-text">
                   · {pendingCount} ready to upload
                 </span>
               )}
               {doneCount > 0 && (
-                <span className="ml-2 text-emerald-600 dark:text-emerald-400">
+                <span className="ml-2 text-success-text">
                   · {doneCount} uploaded
                 </span>
               )}
               {errorCount > 0 && (
-                <span className="ml-2 text-red-600 dark:text-red-400">
+                <span className="ml-2 text-danger-text">
                   · {errorCount} failed
                 </span>
               )}
@@ -282,7 +287,7 @@ export function PdfBulkUploadClient() {
             </div>
           </div>
 
-          <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">
+          <ul className="divide-y divide-line-soft">
             {items.map((item, idx) => (
               <FileRow
                 key={item.file.name + idx}
@@ -312,46 +317,7 @@ function FileRow({
 }) {
   const { file, parsed, status, error } = item;
 
-  const statusBadge = () => {
-    switch (status) {
-      case "pending":
-        return (
-          <span className="rounded-full bg-surface-2 px-2 py-0.5 text-xs text-ink-2">
-            Ready
-          </span>
-        );
-      case "uploading":
-        return (
-          <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-xs text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300">
-            Uploading…
-          </span>
-        );
-      case "done":
-        return (
-          <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300">
-            Uploaded
-          </span>
-        );
-      case "error":
-        return (
-          <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs text-red-700 dark:bg-red-950/60 dark:text-red-300">
-            Error
-          </span>
-        );
-      case "no-match":
-        return (
-          <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-700 dark:bg-amber-950/60 dark:text-amber-300">
-            No payslip record
-          </span>
-        );
-      case "parse-error":
-        return (
-          <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs text-red-700 dark:bg-red-950/60 dark:text-red-300">
-            Unrecognized filename
-          </span>
-        );
-    }
-  };
+  const [tone, label] = STATUS_PILL[status];
 
   const dimmed = status === "no-match" || status === "parse-error";
 
@@ -370,11 +336,11 @@ function FileRow({
               : "—"}
         </p>
         {error && (
-          <p className="mt-1 text-xs text-red-600 dark:text-red-400">{error}</p>
+          <p className="mt-1 text-xs text-danger-text">{error}</p>
         )}
       </div>
       <div className="flex shrink-0 items-center gap-2">
-        {statusBadge()}
+        <Pill tone={tone}>{label}</Pill>
         {status === "pending" && (
           <button
             type="button"

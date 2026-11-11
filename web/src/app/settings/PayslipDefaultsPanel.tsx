@@ -1,16 +1,13 @@
 "use client";
 
+import { useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useState, type SetStateAction } from "react";
-import { companyColumnFlags, getCompanies, type CompanyRow } from "@/lib/api";
-import {
-  ACTION_BUTTON_CLASSES,
-  CARD_CLASSES,
-  DASHED_EMPTY_CLASSES,
-  INPUT_CLASSES,
-  PRIMARY_BUTTON_CLASSES,
-} from "@/lib/ui";
+import { companyColumnFlags, errorMessage } from "@/lib/api";
+import { queries } from "@/lib/queries";
+import { ACTION_BUTTON_CLASSES, DASHED_EMPTY_CLASSES, PRIMARY_BUTTON_CLASSES } from "@/lib/ui";
 import { ErrorAlert } from "@/components/ErrorAlert";
-import { LoadingBlocks, Segmented } from "@/components/FinanceUI";
+import { FormSection, LoadingBlocks, Panel, Segmented, Select } from "@/components/FinanceUI";
+import { useFlashMessage } from "@/lib/useFlashMessage";
 import { PayslipFormFields } from "../payslip/PayslipFormFields";
 import {
   getPayslipDefaultsBundleFallback,
@@ -40,10 +37,12 @@ function normalizeStoredForms(b: {
 
 export function PayslipDefaultsPanel() {
   const fb = getPayslipDefaultsBundleFallback();
-  const [companies, setCompanies] = useState<CompanyRow[]>([]);
-  const [companiesLoaded, setCompaniesLoaded] = useState(false);
-  const [companiesError, setCompaniesError] = useState<string | null>(null);
-  const [company, setCompany] = useState<string>("");
+  const companiesQuery = useQuery(queries.companies());
+  const companies = companiesQuery.data?.companies ?? [];
+  const companiesLoaded = !companiesQuery.isPending;
+  const companiesError = companiesQuery.error ? errorMessage(companiesQuery.error, "Failed to load companies.") : null;
+  const [picked, setCompany] = useState("");
+  const company = picked || companies[0]?.name || "";
   const [activeHalf, setActiveHalf] = useState<PayslipPrefillHalfMode>(
     () => fb.settingsHalf,
   );
@@ -51,7 +50,7 @@ export function PayslipDefaultsPanel() {
     first: FormState;
     second: FormState;
   }>(() => normalizeStoredForms(fb));
-  const [saveMsg, setSaveMsg] = useState<string | null>(null);
+  const [saveMsg, setSaveMsg] = useFlashMessage();
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -74,18 +73,6 @@ export function PayslipDefaultsPanel() {
   );
 
   useEffect(() => {
-    getCompanies()
-      .then((r) => {
-        setCompanies(r.companies);
-        setCompany((c) => c || r.companies[0]?.name || "");
-      })
-      .catch((e: unknown) =>
-        setCompaniesError(e instanceof Error ? e.message : "Failed to load companies."),
-      )
-      .finally(() => setCompaniesLoaded(true));
-  }, []);
-
-  useEffect(() => {
     if (!company) return;
     let cancelled = false;
     void refreshPayslipDefaultsBundle(company).then((b) => {
@@ -98,26 +85,15 @@ export function PayslipDefaultsPanel() {
     };
   }, [company]);
 
-  useEffect(() => {
-    if (!saveMsg) return;
-    const t = window.setTimeout(() => setSaveMsg(null), 2800);
-    return () => window.clearTimeout(t);
-  }, [saveMsg]);
-
   return (
-    <section className={CARD_CLASSES}>
-      <h2 className="text-lg font-medium text-ink">
-        Payslip defaults
-      </h2>
-      <p className="mt-1 text-sm text-ink-2">
-        Each company has its own pair of half templates and its own active
-        half.
-      </p>
-
-      <fieldset className="mt-8 rounded-lg border border-line bg-zinc-50/80 px-4 py-4 dark:bg-zinc-900/40">
-        <legend className="px-1 text-sm font-medium text-ink">Company</legend>
+    <Panel
+      title="Payslip defaults"
+      subtitle="Each company has its own pair of half templates and its own active half."
+    >
+      <div className="flex flex-col gap-6">
+      <FormSection title="Company">
         {companiesError ? (
-          <ErrorAlert className="mt-2">{companiesError}</ErrorAlert>
+          <ErrorAlert>{companiesError}</ErrorAlert>
         ) : !companiesLoaded ? (
           <LoadingBlocks label="Loading companies…" rows={0} />
         ) : companies.length === 0 ? (
@@ -125,26 +101,19 @@ export function PayslipDefaultsPanel() {
             Add a company under Settings → Companies first.
           </div>
         ) : (
-          <select
-            className={`mt-2 max-w-xs ${INPUT_CLASSES}`}
+          <Select
+            aria-label="Company"
+            className="max-w-xs"
             value={company}
-            onChange={(e) => setCompany(e.target.value)}
-          >
-            {companies.map((c) => (
-              <option key={c.id} value={c.name}>
-                {c.name}
-              </option>
-            ))}
-          </select>
+            onChange={setCompany}
+            options={companies.map((c) => ({ value: c.name, label: c.name }))}
+          />
         )}
-      </fieldset>
+      </FormSection>
 
       {company && (
         <>
-          <fieldset className="mt-8 rounded-lg border border-line bg-surface-2 px-4 py-4">
-            <legend className="px-1 text-sm font-medium text-ink">
-              Edit defaults for
-            </legend>
+          <FormSection title="Edit defaults for">
             <Segmented
               label="Which half template to edit"
               options={HALF_MODE_OPTIONS}
@@ -159,8 +128,8 @@ export function PayslipDefaultsPanel() {
               fill
               className="max-w-md"
             />
-          </fieldset>
-          <div className="mt-8 min-w-0">
+          </FormSection>
+          <div className="min-w-0">
             <PayslipFormFields
               form={displayedForm}
               setForm={setDisplayedForm}
@@ -169,7 +138,7 @@ export function PayslipDefaultsPanel() {
               flags={companyColumnFlags(companies, company)}
             />
           </div>
-          <div className="mt-8 flex flex-wrap items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             <button
               type="button"
               className={PRIMARY_BUTTON_CLASSES}
@@ -190,7 +159,7 @@ export function PayslipDefaultsPanel() {
                   setFormByHalf(normalizeStoredForms(saved));
                   setSaveMsg("Defaults saved. Open add modals were updated.");
                 } catch (e) {
-                  setErrorMsg(e instanceof Error ? e.message : "Save failed");
+                  setErrorMsg(errorMessage(e, "Save failed"));
                 } finally {
                   setBusy(false);
                 }
@@ -212,7 +181,7 @@ export function PayslipDefaultsPanel() {
                   setSaveMsg("Reloaded saved defaults.");
                   notifyPayslipDefaultsSaved();
                 } catch (e) {
-                  setErrorMsg(e instanceof Error ? e.message : "Reload failed");
+                  setErrorMsg(errorMessage(e, "Reload failed"));
                 } finally {
                   setBusy(false);
                 }
@@ -221,18 +190,19 @@ export function PayslipDefaultsPanel() {
               Reload saved
             </button>
             {saveMsg && (
-              <span className="text-sm text-emerald-700 dark:text-emerald-400">
+              <span role="status" className="text-sm text-success-text">
                 {saveMsg}
               </span>
             )}
             {errorMsg && (
-              <span className="text-sm text-red-700 dark:text-red-400">
+              <span role="alert" className="text-sm text-danger-text">
                 {errorMsg}
               </span>
             )}
           </div>
         </>
       )}
-    </section>
+      </div>
+    </Panel>
   );
 }

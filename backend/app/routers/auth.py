@@ -29,6 +29,14 @@ from webauthn.helpers.structs import (
 from app.factory import cors_allow_origins
 from app.passwords import verify_password
 from app.schemas.auth import LoginBody, PasskeyLoginBody, PasskeyRegisterBody
+from app.schemas.responses import (
+    AuthConfig,
+    AuthStatus,
+    Ok,
+    PasskeyList,
+    PasskeyOne,
+    SessionToken,
+)
 from app.security import (
     clear_failed_attempts,
     create_session,
@@ -85,12 +93,12 @@ def _public_passkey(row: dict[str, Any]) -> dict[str, Any]:
     return {k: row[k] for k in ("id", "name", "created_at", "last_used_at")}
 
 
-@router.get("/config")
+@router.get("/config", response_model=AuthConfig)
 def auth_config() -> dict[str, Any]:
     return {"login_required": login_required()}
 
 
-@router.post("/login")
+@router.post("/login", response_model=SessionToken)
 def auth_login(body: LoginBody, request: Request) -> dict[str, Any]:
     ip = _client_ip(request)
     if too_many_failed_attempts(ip):
@@ -113,7 +121,7 @@ def auth_passkey_login_options(request: Request) -> dict[str, Any]:
     return options_to_json_dict(options)
 
 
-@router.post("/passkey/login")
+@router.post("/passkey/login", response_model=SessionToken)
 def auth_passkey_login(body: PasskeyLoginBody, request: Request) -> dict[str, Any]:
     ip = _client_ip(request)
     if too_many_failed_attempts(ip):
@@ -167,7 +175,7 @@ def auth_passkey_register_options(request: Request) -> dict[str, Any]:
     return options_to_json_dict(options)
 
 
-@router.post("/passkey/register")
+@router.post("/passkey/register", response_model=PasskeyOne)
 def auth_passkey_register(body: PasskeyRegisterBody, request: Request) -> dict[str, Any]:
     user = _session_user(request)
     origin, rp_id = _passkey_origin(request)
@@ -199,13 +207,13 @@ def auth_passkey_register(body: PasskeyRegisterBody, request: Request) -> dict[s
     return {"passkey": _public_passkey(row)}
 
 
-@router.get("/passkeys")
+@router.get("/passkeys", response_model=PasskeyList)
 def auth_passkeys(request: Request) -> dict[str, Any]:
     user = _session_user(request)
     return {"passkeys": [_public_passkey(p) for p in list_app_user_passkeys(user["id"])]}
 
 
-@router.delete("/passkeys/{passkey_id}")
+@router.delete("/passkeys/{passkey_id}", response_model=Ok)
 def auth_passkey_remove(passkey_id: UUID, request: Request) -> dict[str, Any]:
     user = _session_user(request)
     if not delete_app_user_passkey(user["id"], passkey_id):
@@ -213,7 +221,7 @@ def auth_passkey_remove(passkey_id: UUID, request: Request) -> dict[str, Any]:
     return {"ok": True}
 
 
-@router.get("/status")
+@router.get("/status", response_model=AuthStatus)
 def auth_status(request: Request) -> dict[str, Any]:
     if not login_required():
         return {"authenticated": True, "login_required": False, "user": None}
@@ -235,7 +243,7 @@ def auth_status(request: Request) -> dict[str, Any]:
     return {"authenticated": True, "login_required": True, "user": public_user}
 
 
-@router.post("/logout")
+@router.post("/logout", response_model=Ok)
 def auth_logout(request: Request) -> dict[str, Any]:
     revoke_session(_bearer_token(request))
     return {"ok": True}

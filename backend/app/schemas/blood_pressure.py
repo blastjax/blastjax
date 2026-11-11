@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field, model_validator
 
+from app.schemas.text import OptionalText
+
 
 class BloodPressureCreate(BaseModel):
     systolic: int | None = Field(default=None, gt=0, le=400, description="Systolic (mmHg)")
@@ -16,7 +18,7 @@ class BloodPressureCreate(BaseModel):
     weight: float | None = Field(
         default=None, gt=0, le=500, description="Body weight (kg)"
     )
-    notes: str | None = None
+    notes: OptionalText = None
 
     @model_validator(mode="after")
     def _check_fields(self) -> "BloodPressureCreate":
@@ -25,7 +27,6 @@ class BloodPressureCreate(BaseModel):
             raise ValueError(
                 "Systolic, diastolic, and pulse must all be set together, or all left blank."
             )
-        if all(v is None for v in core) and self.spo2 is None and self.temperature is None \
-                and self.weight is None and (self.notes is None or not self.notes.strip()):
+        if all(v is None for v in (*core, self.spo2, self.temperature, self.weight, self.notes)):
             raise ValueError("At least one field must be populated.")
         return self

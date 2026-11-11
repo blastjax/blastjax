@@ -19,7 +19,6 @@ import { Modal } from "@/components/Modal";
 import {
   DANGER_TEXT_BUTTON_CLASSES,
   DIALOG_BODY_CLASSES,
-  DIALOG_CLASSES,
   DIALOG_FOOTER_CLASSES,
   Field,
   LoadingBlocks,
@@ -31,6 +30,7 @@ import {
   Pill,
   StatStrip,
   TEXT_BUTTON_CLASSES,
+  DIALOG_FORM_CLASSES,
 } from "@/components/FinanceUI";
 import { CalendarIcon, ChevronRightIcon, PlusIcon } from "@/components/Icons";
 import {
@@ -39,24 +39,20 @@ import {
   deleteFixedExpense,
   updateFixedExpense,
   deletePayPeriodStartOverride,
-  getBills,
-  getCalendarDayOverrides,
-  getCreditCards,
-  getFixedExpenses,
-  getMonthlyExpenses,
-  getPayPeriodStartOverrides,
-  getPayslips,
-  getTravelTrips,
   upsertPayPeriodStartOverride,
   type BillCategoryRow,
   type BillRow as RealBill,
   type CalendarDayOverrideRow,
   type CreditCardRow,
   type FixedExpenseRow,
+  type HousePaymentDetailResponse,
   type MonthlyExpenseRow,
   type PayslipRow,
   type TravelTripRow,
+  errorMessage,
 } from "@/lib/api";
+import { queries } from "@/lib/queries";
+import { getQueryClient } from "@/lib/queryClient";
 import {
   MONTH_NAMES_SHORT,
   formatMonthDayShort,
@@ -94,6 +90,7 @@ import {
   payslipHalfFor,
   spreadCentsEvenly,
   tripReminders,
+  houseReminders,
   type OverrideWrite,
   type PeriodHalf,
   type Reminder,
@@ -384,6 +381,7 @@ export default function CalendarClient() {
   const [billCategories, setBillCategories] = useState<BillCategoryRow[]>([]);
   const [cards, setCards] = useState<CreditCardRow[]>([]);
   const [trips, setTrips] = useState<TravelTripRow[]>([]);
+  const [houses, setHouses] = useState<HousePaymentDetailResponse[]>([]);
   const [sharedLoaded, setSharedLoaded] = useState(false);
   const [monthLoaded, setMonthLoaded] = useState(false);
   const loading = !sharedLoaded || !monthLoaded;
@@ -447,8 +445,8 @@ export default function CalendarClient() {
   const fetchMonthExpenses = useCallback(
     async (y: number, m: number): Promise<MonthExpenses> => {
       const [fixed, monthly] = await Promise.all([
-        getFixedExpenses(undefined, y, m),
-        getMonthlyExpenses(undefined, y, m),
+        getQueryClient().fetchQuery(queries.fixedExpenses(y, m)),
+        getQueryClient().fetchQuery(queries.monthlyExpenses(y, m)),
       ]);
       const entry: MonthExpenses = { fixed: fixed.expenses, monthly: monthly.expenses };
       monthExpenseCache.current.set(monthCacheKey(y, m), entry);
@@ -482,12 +480,12 @@ export default function CalendarClient() {
   }, [clearMonthCache, loadViewedMonths]);
 
   const loadOverrides = useCallback(async () => {
-    const r = await getCalendarDayOverrides();
+    const r = await getQueryClient().fetchQuery(queries.calendarDays());
     applyOverrideRows(r.overrides);
   }, [applyOverrideRows]);
 
   const loadPayPeriodOverrides = useCallback(async () => {
-    const r = await getPayPeriodStartOverrides();
+    const r = await getQueryClient().fetchQuery(queries.payPeriodStarts());
     setPayPeriodOverrides(
       new Map(
         r.overrides.map((o) => [periodKey(o.period_year, o.period_month, o.period_half), o.start_date]),
@@ -495,22 +493,29 @@ export default function CalendarClient() {
     );
   }, []);
 
-  // Bills set what linked expenses cost; cards and trips only add reminders, so the calendar works without them.
+  // Bills set what linked expenses cost; cards, trips and house payments only add reminders, so the calendar works
+  // without them.
   const loadLinkedPages = useCallback(async () => {
-    const [b, c, t] = await Promise.all([
-      getBills(),
-      getCreditCards().catch(() => null),
-      getTravelTrips().catch(() => null),
+    const qc = getQueryClient();
+    const [b, c, t, h] = await Promise.all([
+      qc.fetchQuery(queries.bills()),
+      qc.fetchQuery(queries.creditCards()).catch(() => null),
+      qc.fetchQuery(queries.travelTrips()).catch(() => null),
+      qc
+        .fetchQuery(queries.housePayments())
+        .then((r) => Promise.all(r.house_payments.map((x) => qc.fetchQuery(queries.housePayment(x.id)))))
+        .catch(() => null),
     ]);
     setBills(b.bills);
     setBillCategories(b.categories);
     setCards(c?.cards.map((x) => x.card) ?? []);
     setTrips(t?.trips.map((x) => x.trip) ?? []);
+    setHouses(h ?? []);
   }, []);
 
   const loadSharedData = useCallback(async () => {
     const [payslipResult, overridesResult, payPeriodResult, linkedResult] = await Promise.allSettled([
-      getPayslips(12),
+      getQueryClient().fetchQuery(queries.payslips(12)),
       loadOverrides(),
       loadPayPeriodOverrides(),
       loadLinkedPages(),
@@ -520,22 +525,22 @@ export default function CalendarClient() {
       setPayslips(payslipResult.value.payslips);
     } else {
       const e = payslipResult.reason;
-      firstError = e instanceof Error ? e.message : "Failed to load last salary";
+      firstError = errorMessage(e, "Failed to load last salary");
       setPayslips([]);
     }
     if (overridesResult.status === "rejected") {
       const e = overridesResult.reason;
-      firstError ??= e instanceof Error ? e.message : "Failed to load day overrides";
+      firstError ??= errorMessage(e, "Failed to load day overrides");
       applyOverrideRows([]);
     }
     if (payPeriodResult.status === "rejected") {
       const e = payPeriodResult.reason;
-      firstError ??= e instanceof Error ? e.message : "Failed to load pay period overrides";
+      firstError ??= errorMessage(e, "Failed to load pay period overrides");
       setPayPeriodOverrides(new Map());
     }
     if (linkedResult.status === "rejected") {
       const e = linkedResult.reason;
-      firstError ??= e instanceof Error ? e.message : "Failed to load bills";
+      firstError ??= errorMessage(e, "Failed to load bills");
     }
     return firstError;
   }, [loadOverrides, loadPayPeriodOverrides, loadLinkedPages, applyOverrideRows]);
@@ -573,7 +578,7 @@ export default function CalendarClient() {
       },
       (e: unknown) => {
         if (cancelled) return;
-        setError(e instanceof Error ? e.message : "Failed to load expenses");
+        setError(errorMessage(e, "Failed to load expenses"));
         setMonthLoaded(true);
       },
     );
@@ -686,11 +691,15 @@ export default function CalendarClient() {
 
   const remindersByDay = useMemo(() => {
     const byDay = new Map<string, Reminder[]>();
-    for (const r of [...dueReminders(billCategories, bills, cards, monthlyExpenses), ...tripReminders(trips)]) {
+    for (const r of [
+      ...dueReminders(billCategories, bills, cards, monthlyExpenses),
+      ...tripReminders(trips),
+      ...houseReminders(houses),
+    ]) {
       byDay.set(r.day, [...(byDay.get(r.day) ?? []), r]);
     }
     return byDay;
-  }, [billCategories, bills, cards, monthlyExpenses, trips]);
+  }, [billCategories, bills, cards, monthlyExpenses, trips, houses]);
 
   const monthlyExpensesForPeriod = useCallback(
     (periodYear: number, periodMonth: number, periodHalf: PeriodHalf) =>
@@ -1017,7 +1026,7 @@ export default function CalendarClient() {
         applyOverrideRows(r.overrides);
         setTransfer(null);
       } catch (err) {
-        setTransferError(err instanceof Error ? err.message : "Failed to move budget");
+        setTransferError(errorMessage(err, "Failed to move budget"));
       } finally {
         setSavingTransfer(false);
       }
@@ -1161,7 +1170,7 @@ export default function CalendarClient() {
         if (carry.rowWrites.length > 0) await reloadViewedMonth();
         setSpendDay(null);
       } catch (err) {
-        setSpendError(err instanceof Error ? err.message : "Failed to record spend");
+        setSpendError(errorMessage(err, "Failed to record spend"));
       } finally {
         setSavingSpend(false);
       }
@@ -1214,7 +1223,7 @@ export default function CalendarClient() {
         const r = await bulkUpsertCalendarDayOverrides(overrides);
         applyOverrideRows(r.overrides);
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to even out budget");
+        setError(errorMessage(err, "Failed to even out budget"));
       } finally {
         setAutoDividing(false);
       }
@@ -1277,7 +1286,7 @@ export default function CalendarClient() {
         );
         setEntryForms((f) => ({ ...f, [kind]: emptyExpenseForm() }));
       } catch (err) {
-        setExpenseError(err instanceof Error ? err.message : `Failed to add ${kind}`);
+        setExpenseError(errorMessage(err, `Failed to add ${kind}`));
       } finally {
         setSavingEntry(null);
       }
@@ -1318,7 +1327,7 @@ export default function CalendarClient() {
         );
         setEditingEntry(null);
       } catch (err) {
-        setExpenseError(err instanceof Error ? err.message : "Failed to save");
+        setExpenseError(errorMessage(err, "Failed to save"));
       } finally {
         setSavingEntry(null);
       }
@@ -1337,7 +1346,7 @@ export default function CalendarClient() {
       await changeBudget(row.amount, () => deleteFixedExpense(row.id));
       setEditingEntry(null);
     } catch (err) {
-      setExpenseError(err instanceof Error ? err.message : "Failed to delete");
+      setExpenseError(errorMessage(err, "Failed to delete"));
     } finally {
       setSavingEntry(null);
     }
@@ -1429,7 +1438,7 @@ export default function CalendarClient() {
 
         setPayDateModalHalf(null);
       } catch (err) {
-        setPayDateError(err instanceof Error ? err.message : "Failed to save pay date");
+        setPayDateError(errorMessage(err, "Failed to save pay date"));
       } finally {
         setSavingPayDate(false);
       }
@@ -1450,7 +1459,7 @@ export default function CalendarClient() {
       });
       setPayDateModalHalf(null);
     } catch (err) {
-      setPayDateError(err instanceof Error ? err.message : "Failed to reset pay date");
+      setPayDateError(errorMessage(err, "Failed to reset pay date"));
     } finally {
       setSavingPayDate(false);
     }
@@ -1778,7 +1787,7 @@ export default function CalendarClient() {
         // Escape reaches every open modal; leave this one open under an edit on top of it.
         onClose={editingEntry ? () => {} : closeExpenseModal}
         ariaLabelledBy="fixed-expense-title"
-        dialogClassName={`${DIALOG_CLASSES} max-w-2xl`}
+        size="2xl"
       >
         <ModalHeader
           id="fixed-expense-title"
@@ -1931,7 +1940,7 @@ export default function CalendarClient() {
         open={editingEntry != null}
         onClose={closeEditEntry}
         ariaLabelledBy="edit-entry-title"
-        dialogClassName={`${DIALOG_CLASSES} max-w-md`}
+        size="md"
       >
         {editingEntry && editingKind && (
           <>
@@ -1997,7 +2006,7 @@ export default function CalendarClient() {
         open={transfer != null}
         onClose={closeTransferModal}
         ariaLabelledBy="transfer-title"
-        dialogClassName={`${DIALOG_CLASSES} max-w-md`}
+        size="md"
       >
         {transfer && (
           <>
@@ -2007,7 +2016,7 @@ export default function CalendarClient() {
               subtitle="Between two days in the same pay period."
               onClose={closeTransferModal}
             />
-            <form onSubmit={submitTransfer} className="flex min-h-0 flex-1 flex-col">
+            <form onSubmit={submitTransfer} className={DIALOG_FORM_CLASSES}>
               <div className={`${DIALOG_BODY_CLASSES} space-y-4`}>
                 <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
                   {(
@@ -2094,7 +2103,7 @@ export default function CalendarClient() {
         open={spendDay != null}
         onClose={closeSpendModal}
         ariaLabelledBy="spend-title"
-        dialogClassName={`${DIALOG_CLASSES} max-w-sm`}
+        size="sm"
       >
         {spendDay && spendPreview && (
           <>
@@ -2104,7 +2113,7 @@ export default function CalendarClient() {
               subtitle={fmtDay(spendDay.iso, true)}
               onClose={closeSpendModal}
             />
-            <form onSubmit={submitSpend} className="flex min-h-0 flex-1 flex-col">
+            <form onSubmit={submitSpend} className={DIALOG_FORM_CLASSES}>
               <div className={`${DIALOG_BODY_CLASSES} space-y-4`}>
                 <div className="rounded-xl bg-surface-2/70 px-4 py-3">
                   <p className="text-xs font-medium text-ink-3">Budget for this day</p>
@@ -2213,12 +2222,12 @@ export default function CalendarClient() {
         open={payDateModalHalf != null}
         onClose={closePayDateModal}
         ariaLabelledBy="pay-date-title"
-        dialogClassName={`${DIALOG_CLASSES} max-w-md`}
+        size="md"
       >
         {payDateModalHalf != null && (
           <>
             <ModalHeader id="pay-date-title" title="Adjust pay date" subtitle={payDateRange} onClose={closePayDateModal} />
-            <form onSubmit={submitPayDate} className="flex min-h-0 flex-1 flex-col">
+            <form onSubmit={submitPayDate} className={DIALOG_FORM_CLASSES}>
               <div className={`${DIALOG_BODY_CLASSES} space-y-4`}>
                 <p className="text-sm text-ink-3">
                   Paid on a different day than usual, like around a holiday? Set the real date. This period

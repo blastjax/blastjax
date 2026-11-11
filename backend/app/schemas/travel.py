@@ -1,22 +1,21 @@
 from __future__ import annotations
 
 import datetime as dt
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, BeforeValidator, Field, field_validator, model_validator
 
-
-def _clean_optional(v: str | None) -> str | None:
-    if v is None:
-        return None
-    trimmed = v.strip()
-    return trimmed or None
+from app.schemas.text import OptionalText
 
 
 def _blank_time_to_none(v: object) -> object:
     if isinstance(v, str):
         return v.strip() or None
     return v
+
+
+# A time field left empty arrives as "".
+OptionalTime = Annotated[dt.time | None, BeforeValidator(_blank_time_to_none)]
 
 
 def _require_text(v: str, label: str) -> str:
@@ -30,17 +29,12 @@ class TravelTripCreate(BaseModel):
     title: str = Field(min_length=1)
     start_date: dt.date
     end_date: dt.date
-    notes: str | None = None
+    notes: OptionalText = None
 
     @field_validator("title")
     @classmethod
     def _title(cls, v: str) -> str:
         return _require_text(v, "Title")
-
-    @field_validator("notes")
-    @classmethod
-    def _notes(cls, v: str | None) -> str | None:
-        return _clean_optional(v)
 
     @model_validator(mode="after")
     def _end_after_start(self) -> "TravelTripCreate":
@@ -70,56 +64,29 @@ class TravelFlightCreate(BaseModel):
     flight_number: str = Field(min_length=1)
     flight_date: dt.date | None = None
     arrival_date: dt.date | None = None
-    departure_time: dt.time | None = None
-    arrival_time: dt.time | None = None
-    from_location: str | None = None
-    from_map_url: str | None = None
-    from_city: str | None = None
-    from_country: str | None = None
-    to_location: str | None = None
-    to_map_url: str | None = None
-    to_city: str | None = None
-    to_country: str | None = None
-    notes: str | None = None
-    title: str | None = None
-    airline: str | None = None
-    seat: str | None = None
-    terminal: str | None = None
-    gate: str | None = None
-    baggage: str | None = None
-    confirmation: str | None = None
+    departure_time: OptionalTime = None
+    arrival_time: OptionalTime = None
+    from_location: OptionalText = None
+    from_map_url: OptionalText = None
+    from_city: OptionalText = None
+    from_country: OptionalText = None
+    to_location: OptionalText = None
+    to_map_url: OptionalText = None
+    to_city: OptionalText = None
+    to_country: OptionalText = None
+    notes: OptionalText = None
+    title: OptionalText = None
+    airline: OptionalText = None
+    seat: OptionalText = None
+    terminal: OptionalText = None
+    gate: OptionalText = None
+    baggage: OptionalText = None
+    confirmation: OptionalText = None
 
     @field_validator("flight_number")
     @classmethod
     def _flight_number(cls, v: str) -> str:
         return _require_text(v, "Flight number")
-
-    @field_validator("departure_time", "arrival_time", mode="before")
-    @classmethod
-    def _blank_time(cls, v: object) -> object:
-        return _blank_time_to_none(v)
-
-    @field_validator(
-        "from_location",
-        "from_map_url",
-        "from_city",
-        "from_country",
-        "to_location",
-        "to_map_url",
-        "to_city",
-        "to_country",
-        "notes",
-        "title",
-        "airline",
-        "seat",
-        "terminal",
-        "gate",
-        "baggage",
-        "confirmation",
-    )
-    @classmethod
-    def _optional(cls, v: str | None) -> str | None:
-        return _clean_optional(v)
 
     @model_validator(mode="after")
     def _arrival_after_departure(self) -> "TravelFlightCreate":
@@ -130,53 +97,26 @@ class TravelFlightCreate(BaseModel):
 
 class TravelTransportCreate(BaseModel):
     mode: Literal["bus", "train", "ferry"]
-    number: str | None = None
+    number: OptionalText = None
     travel_date: dt.date | None = None
     arrival_date: dt.date | None = None
-    departure_time: dt.time | None = None
-    arrival_time: dt.time | None = None
-    from_location: str | None = None
-    from_map_url: str | None = None
-    from_city: str | None = None
-    from_country: str | None = None
-    to_location: str | None = None
-    to_map_url: str | None = None
-    to_city: str | None = None
-    to_country: str | None = None
-    notes: str | None = None
-    title: str | None = None
-    operator: str | None = None
-    seat: str | None = None
-    travel_class: str | None = None
-    platform: str | None = None
-    confirmation: str | None = None
-
-    @field_validator("departure_time", "arrival_time", mode="before")
-    @classmethod
-    def _blank_time(cls, v: object) -> object:
-        return _blank_time_to_none(v)
-
-    @field_validator(
-        "number",
-        "from_location",
-        "from_map_url",
-        "from_city",
-        "from_country",
-        "to_location",
-        "to_map_url",
-        "to_city",
-        "to_country",
-        "notes",
-        "title",
-        "operator",
-        "seat",
-        "travel_class",
-        "platform",
-        "confirmation",
-    )
-    @classmethod
-    def _optional(cls, v: str | None) -> str | None:
-        return _clean_optional(v)
+    departure_time: OptionalTime = None
+    arrival_time: OptionalTime = None
+    from_location: OptionalText = None
+    from_map_url: OptionalText = None
+    from_city: OptionalText = None
+    from_country: OptionalText = None
+    to_location: OptionalText = None
+    to_map_url: OptionalText = None
+    to_city: OptionalText = None
+    to_country: OptionalText = None
+    notes: OptionalText = None
+    title: OptionalText = None
+    operator: OptionalText = None
+    seat: OptionalText = None
+    travel_class: OptionalText = None
+    platform: OptionalText = None
+    confirmation: OptionalText = None
 
     @model_validator(mode="after")
     def _arrival_after_departure(self) -> "TravelTransportCreate":
@@ -188,30 +128,20 @@ class TravelTransportCreate(BaseModel):
 class TravelItineraryCreate(BaseModel):
     item_date: dt.date
     item_end_date: dt.date | None = None
-    start_time: dt.time | None = None
-    end_time: dt.time | None = None
+    start_time: OptionalTime = None
+    end_time: OptionalTime = None
     activity: str = Field(min_length=1)
-    location_name: str | None = None
-    location_map_url: str | None = None
-    notes: str | None = None
-    booked_via: str | None = None
-    price: str | None = None
-    confirmation: str | None = None
+    location_name: OptionalText = None
+    location_map_url: OptionalText = None
+    notes: OptionalText = None
+    booked_via: OptionalText = None
+    price: OptionalText = None
+    confirmation: OptionalText = None
 
     @field_validator("activity")
     @classmethod
     def _activity(cls, v: str) -> str:
         return _require_text(v, "Activity")
-
-    @field_validator("start_time", "end_time", mode="before")
-    @classmethod
-    def _blank_time(cls, v: object) -> object:
-        return _blank_time_to_none(v)
-
-    @field_validator("location_name", "location_map_url", "notes", "booked_via", "price", "confirmation")
-    @classmethod
-    def _optional(cls, v: str | None) -> str | None:
-        return _clean_optional(v)
 
     @model_validator(mode="after")
     def _end_date_after_start(self) -> "TravelItineraryCreate":
@@ -224,46 +154,24 @@ class TravelAccommodationCreate(BaseModel):
     name: str = Field(min_length=1)
     checkin_date: dt.date
     checkout_date: dt.date
-    checkin_time: dt.time | None = None
-    checkout_time: dt.time | None = None
-    booking_confirmation: str | None = None
-    instructions: str | None = None
-    location_name: str | None = None
-    location_map_url: str | None = None
-    notes: str | None = None
-    room: str | None = None
-    guests: str | None = None
-    phone: str | None = None
-    booked_via: str | None = None
-    price: str | None = None
-    paid_price: str | None = None
+    checkin_time: OptionalTime = None
+    checkout_time: OptionalTime = None
+    booking_confirmation: OptionalText = None
+    instructions: OptionalText = None
+    location_name: OptionalText = None
+    location_map_url: OptionalText = None
+    notes: OptionalText = None
+    room: OptionalText = None
+    guests: OptionalText = None
+    phone: OptionalText = None
+    booked_via: OptionalText = None
+    price: OptionalText = None
+    paid_price: OptionalText = None
 
     @field_validator("name")
     @classmethod
     def _name(cls, v: str) -> str:
         return _require_text(v, "Name")
-
-    @field_validator("checkin_time", "checkout_time", mode="before")
-    @classmethod
-    def _blank_time(cls, v: object) -> object:
-        return _blank_time_to_none(v)
-
-    @field_validator(
-        "booking_confirmation",
-        "instructions",
-        "location_name",
-        "location_map_url",
-        "notes",
-        "room",
-        "guests",
-        "phone",
-        "booked_via",
-        "price",
-        "paid_price",
-    )
-    @classmethod
-    def _optional(cls, v: str | None) -> str | None:
-        return _clean_optional(v)
 
     @model_validator(mode="after")
     def _checkout_after_checkin(self) -> "TravelAccommodationCreate":

@@ -54,27 +54,23 @@ _CACHE_ALSO_INVALIDATES: dict[str, tuple[str, ...]] = {
 }
 
 
+def _under(path: str, route: str) -> bool:
+    return path == route or path.startswith(route + "/")
+
+
 def _cache_prefixes_for(path: str) -> tuple[str, ...]:
-    for route in sorted(_CACHE_PREFIXES, key=len, reverse=True):
-        if path == route or path.startswith(route + "/"):
-            prefix = _CACHE_PREFIXES[route]
+    # No route here sits under another, so the first match is the only one.
+    for route, prefix in _CACHE_PREFIXES.items():
+        if _under(path, route):
             return (prefix, *_CACHE_ALSO_INVALIDATES.get(prefix, ()))
     return ()
 
 
-def _invalidate_namespaces(names: tuple[str, ...]) -> None:
-    for name in names:
+def _forget_what_a_write_changed(path: str) -> None:
+    for name in _cache_prefixes_for(path):
         cache.invalidate(name)
-
-_EXTRA_INVALIDATORS: tuple[tuple[str, Any], ...] = (
-    ("/api/users", forget_login_required),
-)
-
-
-def _run_extra_invalidators(path: str) -> None:
-    for route, fn in _EXTRA_INVALIDATORS:
-        if path == route or path.startswith(route + "/"):
-            fn()
+    if _under(path, "/api/users"):  # adding the first user turns login on; removing the last turns it off
+        forget_login_required()
 
 
 @asynccontextmanager
@@ -107,14 +103,10 @@ def create_app() -> FastAPI:
 
     @app.middleware("http")
     async def invalidate_cache_on_write(request: Request, call_next):
-        path = request.url.path
-        is_write = request.method in _WRITE_METHODS
         response = await call_next(request)
-        if is_write and response.status_code < 400:
-            namespaces = _cache_prefixes_for(path)
-            if namespaces:
-                await run_in_threadpool(_invalidate_namespaces, namespaces)
-            _run_extra_invalidators(path)
+        if request.method in _WRITE_METHODS and response.status_code < 400:
+            # Redis is a blocking client: keep it off the event loop.
+            await run_in_threadpool(_forget_what_a_write_changed, request.url.path)
         return response
 
     from app.routers import (

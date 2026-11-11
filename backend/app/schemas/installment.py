@@ -5,9 +5,11 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from app.schemas.text import Trimmed
+
 
 class InstallmentCreate(BaseModel):
-    name: str = Field(min_length=1)
+    name: Trimmed = Field(min_length=1)
     installment_current: int = Field(ge=1)
     installment_total: int = Field(ge=1)
     principal: float = Field(ge=0)

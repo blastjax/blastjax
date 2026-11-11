@@ -9,7 +9,9 @@ import {
   LogoutIcon,
   type IconProps,
 } from "@/components/Icons";
-import { dataApiBase, getCompanies } from "@/lib/api";
+import { useQuery } from "@tanstack/react-query";
+import { dataApiBase } from "@/lib/api";
+import { queries } from "@/lib/queries";
 import { clearSessionToken, getSessionToken } from "@/lib/auth";
 import { useCurrentUser } from "@/components/AuthGate";
 import {
@@ -147,19 +149,17 @@ export function SidebarNav() {
   const pathname = usePathname();
   const { sidebarCollapsed, mobileNavOpen, closeMobileNav } = useShellLayout();
   const [hasSession] = useState(() => getSessionToken() !== null);
-  const [companyItems, setCompanyItems] = useState<NavItem[]>([]);
+  const companies = useQuery(queries.companies()).data?.companies;
   const currentUser = useCurrentUser();
 
   useEffect(() => {
     closeMobileNav();
   }, [pathname, closeMobileNav]);
 
-  useEffect(() => {
-    getCompanies()
-      .then((r) => setCompanyItems(r.companies.map((c) => payslipNavItem(c.name, c.show_commission))))
-      .catch(() => {
-      });
-  }, []);
+  const companyItems = useMemo<NavItem[]>(
+    () => (companies ?? []).map((c) => payslipNavItem(c.name, c.show_commission)),
+    [companies],
+  );
 
   const sections = useMemo(
     () =>

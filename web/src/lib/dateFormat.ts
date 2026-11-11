@@ -75,6 +75,11 @@ export function parseMonthKey(key: string): { y: number; m: number } | null {
   return { y, m: mo };
 }
 
+/** The month an ISO day falls in. */
+export function monthOf(iso: string): { y: number; m: number } {
+  return { y: Number(iso.slice(0, 4)), m: Number(iso.slice(5, 7)) };
+}
+
 export function formatMonthYear(year: number, month: number): string {
   if (month < 1 || month > 12) return String(year);
   return `${MONTH_NAMES_FULL[month - 1]} ${year}`;

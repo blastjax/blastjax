@@ -1,7 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { getPayslips, type PayslipRow } from "@/lib/api";
+import { useQuery } from "@tanstack/react-query";
+import { useMemo, useState } from "react";
+import { errorMessage } from "@/lib/api";
+import { queries } from "@/lib/queries";
 import { fmtAmount as fmt } from "@/lib/formatNumber";
 import { MONTH_NAMES_FULL as MF, MONTH_NAMES_SHORT as MN } from "@/lib/dateFormat";
 import { ErrorAlert } from "@/components/ErrorAlert";
@@ -57,29 +59,11 @@ const signedPct = (cur: number, base: number) =>
   `${cur >= base ? "+" : "−"}${Math.abs(((cur - base) / base) * 100).toFixed(1)}%`;
 
 export default function CommissionClient({ company = "Sophos" }: { company?: string }) {
-  const [rows, setRows] = useState<PayslipRow[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const payslips = useQuery(queries.payslips(2000, company));
+  const loading = payslips.isPending;
+  const error = payslips.error ? errorMessage(payslips.error, "Failed to load payslips") : null;
 
-  const load = useCallback(async () => {
-    setError(null);
-    setLoading(true);
-    try {
-      const r = await getPayslips(2000, company);
-      setRows(r.payslips);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load payslips");
-      setRows([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [company]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  const hist = useMemo(() => monthlyCommission(rows), [rows]);
+  const hist = useMemo(() => monthlyCommission(payslips.data?.payslips ?? []), [payslips.data]);
 
   if (loading || error || hist.length === 0) {
     return (

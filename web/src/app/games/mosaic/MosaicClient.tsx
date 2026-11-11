@@ -13,8 +13,11 @@ import {
   solveMosaic,
   solveMosaicBestStart,
   solveMosaicFree,
+  errorMessage,
 } from "@/lib/api";
 import { applyMove, decodeBoard, encodeBoard, type Cell, type Grid } from "./solver";
+import { useLatest } from "@/lib/useLatest";
+import { useWindowSize } from "@/lib/useWindowSize";
 
 const PALETTE = [
   "#e15b5b",
@@ -80,25 +83,6 @@ function countBlank(grid: Grid): number {
   let n = 0;
   for (const row of grid) for (const v of row) if (v === BLANK) n++;
   return n;
-}
-
-function useLatest<T>(value: T) {
-  const ref = useRef(value);
-  useEffect(() => {
-    ref.current = value;
-  });
-  return ref;
-}
-
-function useWindowSize() {
-  const [size, setSize] = useState({ width: 0, height: 0 });
-  useEffect(() => {
-    const update = () => setSize({ width: window.innerWidth, height: window.innerHeight });
-    update();
-    window.addEventListener("resize", update);
-    return () => window.removeEventListener("resize", update);
-  }, []);
-  return size;
 }
 
 export default function MosaicClient() {
@@ -319,7 +303,7 @@ export default function MosaicClient() {
       setSnapshots([cloneGrid(grid)]);
       setStepIndex(0);
     } catch (err) {
-      setSolveError(err instanceof Error ? err.message : "Solve failed.");
+      setSolveError(errorMessage(err, "Solve failed."));
     } finally {
       setSolving(null);
     }
@@ -357,7 +341,7 @@ export default function MosaicClient() {
       setSnapshots([cloneGrid(grid)]);
       setStepIndex(0);
     } catch (err) {
-      setSolveError(err instanceof Error ? err.message : "Solve failed.");
+      setSolveError(errorMessage(err, "Solve failed."));
     } finally {
       setSolving(null);
     }
@@ -383,7 +367,7 @@ export default function MosaicClient() {
       setSnapshots([cloneGrid(grid)]);
       setStepIndex(0);
     } catch (err) {
-      setSolveError(err instanceof Error ? err.message : "Solve failed.");
+      setSolveError(errorMessage(err, "Solve failed."));
     } finally {
       setSolving(null);
     }
@@ -415,7 +399,7 @@ export default function MosaicClient() {
           : `Closest found after ${result.attempts} attempts: ${result.moves.length} move${result.moves.length === 1 ? "" : "s"} (target was ${target}).`,
       );
     } catch (err) {
-      setGenerateError(err instanceof Error ? err.message : "Generate failed.");
+      setGenerateError(errorMessage(err, "Generate failed."));
     } finally {
       setGenerating(false);
     }

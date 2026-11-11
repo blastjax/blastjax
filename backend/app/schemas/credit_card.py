@@ -5,9 +5,11 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from app.schemas.text import OptionalText, Trimmed
+
 
 class CreditCardCreate(BaseModel):
-    name: str = Field(min_length=1)
+    name: Trimmed = Field(min_length=1)
     credit_limit: float = Field(gt=0)
     last_statement_balance: float  # negative is a credit balance
     minimum_due: float = Field(ge=0)
@@ -22,7 +24,7 @@ class CreditCardCreate(BaseModel):
 class CreditCardPaymentCreate(BaseModel):
     amount: float = Field(gt=0)
     payment_date: dt.date
-    note: str | None = None
+    note: OptionalText = None
     # The pay period it comes out of, as fixed expenses file one: by the payslip half funding it.
     period_half: int = Field(ge=1, le=2)
     period_year: int

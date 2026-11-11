@@ -66,7 +66,7 @@ def parse_lotto_draw_text(text: str) -> tuple[list[LottoDrawImportRow], list[str
 def import_rows_to_bulk_params(rows: list[LottoDrawImportRow]) -> list[dict[str, Any]]:
     return [
         {
-            "draw_date": r.draw_date.isoformat(),
+            "draw_date": r.draw_date,
             "numbers": r.numbers,
             "jackpot_prize": r.jackpot_prize,
             "winners": r.winners,

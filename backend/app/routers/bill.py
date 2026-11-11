@@ -9,8 +9,16 @@ from sqlalchemy.exc import IntegrityError
 from starlette.concurrency import run_in_threadpool
 
 import cache
-from app.deps import image_type, read_upload, require_db
+from app.deps import found, image_type, read_upload, require_db
 from app.schemas.bill import BillCategoryCreate, BillCreate
+from app.schemas.responses import (
+    BillCategoryOne,
+    BillList,
+    BillOne,
+    BillPdfFields,
+    Ok,
+    PdfState,
+)
 from app.services.bill_extract import (
     UnreadablePdf,
     biller_fields,
@@ -37,19 +45,16 @@ from db import (
 router = APIRouter(tags=["bill"], dependencies=[Depends(require_db)])
 
 _DUPLICATE_CATEGORY = "That category already exists."
+_NO_CATEGORY = "Category not found."
+_NO_BILL = "Bill not found."
 
 
-@router.get("/api/bill")
+@router.get("/api/bill", response_model=BillList)
 def bill_list() -> dict[str, Any]:
-    hit = cache.get("bill:list")
-    if hit is not None:
-        return hit
-    result = list_bills()
-    cache.set("bill:list", result)
-    return result
+    return cache.cached("bill:list", list_bills)
 
 
-@router.post("/api/bill-category")
+@router.post("/api/bill-category", response_model=BillCategoryOne)
 def bill_category_create(body: BillCategoryCreate) -> dict[str, Any]:
     try:
         return {"category": insert_bill_category(body.model_dump())}
@@ -57,51 +62,47 @@ def bill_category_create(body: BillCategoryCreate) -> dict[str, Any]:
         raise HTTPException(status_code=409, detail=_DUPLICATE_CATEGORY)
 
 
-@router.put("/api/bill-category/{category_id}")
+@router.put("/api/bill-category/{category_id}", response_model=BillCategoryOne)
 def bill_category_update(category_id: UUID, body: BillCategoryCreate) -> dict[str, Any]:
     try:
         row = update_bill_category(category_id, body.model_dump())
     except IntegrityError:
         raise HTTPException(status_code=409, detail=_DUPLICATE_CATEGORY)
-    if row is None:
-        raise HTTPException(status_code=404, detail="Category not found.")
-    return {"category": row}
+    return {"category": found(row, _NO_CATEGORY)}
 
 
-@router.delete("/api/bill-category/{category_id}")
+@router.delete("/api/bill-category/{category_id}", response_model=Ok)
 def bill_category_remove(category_id: UUID) -> dict[str, Any]:
     if not delete_bill_category(category_id):
-        raise HTTPException(status_code=404, detail="Category not found.")
+        raise HTTPException(status_code=404, detail=_NO_CATEGORY)
     return {"ok": True}
 
 
-@router.post("/api/bill")
+@router.post("/api/bill", response_model=BillOne)
 def bill_create(body: BillCreate) -> dict[str, Any]:
     try:
         return {"bill": insert_bill(body.model_dump())}
     except IntegrityError:
-        raise HTTPException(status_code=404, detail="Category not found.")
+        raise HTTPException(status_code=404, detail=_NO_CATEGORY)
 
 
-@router.put("/api/bill/{bill_id}")
+@router.put("/api/bill/{bill_id}", response_model=BillOne)
 def bill_replace(bill_id: UUID, body: BillCreate) -> dict[str, Any]:
     try:
         row = update_bill(bill_id, body.model_dump())
     except IntegrityError:
-        raise HTTPException(status_code=404, detail="Category not found.")
-    if row is None:
-        raise HTTPException(status_code=404, detail="Bill not found.")
-    return {"bill": row}
+        raise HTTPException(status_code=404, detail=_NO_CATEGORY)
+    return {"bill": found(row, _NO_BILL)}
 
 
-@router.delete("/api/bill/{bill_id}")
+@router.delete("/api/bill/{bill_id}", response_model=Ok)
 def bill_remove(bill_id: UUID) -> dict[str, Any]:
     if not delete_bill(bill_id):
-        raise HTTPException(status_code=404, detail="Bill not found.")
+        raise HTTPException(status_code=404, detail=_NO_BILL)
     return {"ok": True}
 
 
-@router.post("/api/bill/extract")
+@router.post("/api/bill/extract", response_model=BillPdfFields)
 async def bill_extract(
     file: UploadFile = File(...), category_id: UUID | None = Query(default=None)
 ) -> dict[str, Any]:
@@ -130,18 +131,18 @@ def _read_bill(data: bytes, category_id: UUID | None) -> dict[str, Any]:
     return {"minimum_due": None, **found}
 
 
-@router.post("/api/bill/{bill_id}/pdf")
+@router.post("/api/bill/{bill_id}/pdf", response_model=PdfState)
 async def bill_upload_pdf(bill_id: UUID, file: UploadFile = File(...)) -> dict[str, Any]:
-    if not set_bill_pdf(bill_id, await read_upload(file, images=True)):
-        raise HTTPException(status_code=404, detail="Bill not found.")
+    data = await read_upload(file, images=True)
+    # In a worker thread: storing a file of up to 10 MB here would hold up every other request.
+    if not await run_in_threadpool(set_bill_pdf, bill_id, data):
+        raise HTTPException(status_code=404, detail=_NO_BILL)
     return {"ok": True, "has_pdf": True}
 
 
 @router.get("/api/bill/{bill_id}/pdf")
 def bill_get_pdf(bill_id: UUID) -> Response:
-    data = get_bill_pdf(bill_id)
-    if data is None:
-        raise HTTPException(status_code=404, detail="No file attached to this bill.")
+    data = found(get_bill_pdf(bill_id), "No file attached to this bill.")
     media_type = image_type(data) or "application/pdf"
     extension = media_type.split("/")[1].replace("jpeg", "jpg")
     return Response(

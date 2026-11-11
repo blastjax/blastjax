@@ -7,14 +7,15 @@ import { ChevronRightIcon } from "@/components/Icons";
 import { Modal } from "@/components/Modal";
 import { PageHeader } from "@/components/PageHeader";
 import {
-  getLottoCalendar,
-  getLottoGames,
   importLottoDrawResultsText,
   lottoGameSlug,
   syncLottoResultsFromPcso,
   type LottoDrawResult,
   type LottoGame,
+  errorMessage,
 } from "@/lib/api";
+import { queries } from "@/lib/queries";
+import { getQueryClient } from "@/lib/queryClient";
 import { addMonths, formatDate, formatDateLong, monthKey, toIsoDateLocal } from "@/lib/dateFormat";
 import { fmtCount, fmtJackpotCompact } from "@/lib/formatNumber";
 import { MatchPill, NumberBall, NumberChip, ScoreCell } from "./LottoClient";
@@ -59,11 +60,11 @@ function nextDrawLabel(gameName: string): string | null {
 import { ErrorAlert } from "@/components/ErrorAlert";
 import {
   DIALOG_BODY_CLASSES,
-  DIALOG_CLASSES,
   DIALOG_FOOTER_CLASSES,
   LoadingBlocks,
   ModalHeader,
   Segmented,
+  DIALOG_FORM_CLASSES,
 } from "@/components/FinanceUI";
 import {
   ACTION_BUTTON_CLASSES,
@@ -199,7 +200,7 @@ function DayDrawsModal({ iso, draws, onClose }: { iso: string; draws: DayDraw[];
   const attempts = hasResult ? [...result.attempts].sort((a, b) => hits(b) - hits(a)) : result.attempts;
 
   return (
-    <Modal open onClose={onClose} ariaLabelledBy="day-draws-title" dialogClassName={`${DIALOG_CLASSES} max-w-lg`}>
+    <Modal open onClose={onClose} ariaLabelledBy="day-draws-title" size="lg">
       <ModalHeader id="day-draws-title" title={formatDateLong(iso)} onClose={onClose} />
       <div className={`${DIALOG_BODY_CLASSES} flex flex-col gap-5`}>
         <Segmented
@@ -228,9 +229,9 @@ function DayDrawsModal({ iso, draws, onClose }: { iso: string; draws: DayDraw[];
               {result.best_hits && <MatchPill count={result.best_hits.length} />}
             </div>
             <div className="flex flex-wrap gap-2">
-              {result.numbers.map((n) => (
-                <NumberBall key={n} n={n} variant={result.best_hits?.includes(n) ? "match" : "result"} />
-              ))}
+              {result.numbers.flatMap((n) =>
+                n == null ? [] : [<NumberBall key={n} n={n} variant={result.best_hits?.includes(n) ? "match" : "result"} />],
+              )}
             </div>
           </div>
         ) : (
@@ -293,14 +294,14 @@ function DrawCalendar({ games }: { games: LottoGame[] }) {
 
   useEffect(() => {
     let stale = false;
-    getLottoCalendar(view.y, view.m)
+    getQueryClient().fetchQuery(queries.lottoCalendar(view.y, view.m))
       .then((r) => {
         if (stale) return;
         setMonth({ key: monthKey(view.y, view.m), draws: r.draws });
         setError(null);
       })
       .catch((e: unknown) => {
-        if (!stale) setError(e instanceof Error ? e.message : "Failed to load draws.");
+        if (!stale) setError(errorMessage(e, "Failed to load draws."));
       });
     return () => {
       stale = true;
@@ -388,10 +389,10 @@ export default function LottoGamesPage() {
 
   const load = async () => {
     try {
-      const r = await getLottoGames();
+      const r = await getQueryClient().fetchQuery(queries.lottoGames());
       setGames(r.games);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Failed to load games.");
+      setError(errorMessage(e, "Failed to load games."));
     }
   };
 
@@ -415,7 +416,7 @@ export default function LottoGamesPage() {
     } catch (e: unknown) {
       setSyncNote({
         tone: "error",
-        text: `Couldn't update from PCSO: ${e instanceof Error ? e.message : "unknown error"}`,
+        text: `Couldn't update from PCSO: ${errorMessage(e, "unknown error")}`,
       });
     } finally {
       setSyncing(false);
@@ -463,7 +464,7 @@ export default function LottoGamesPage() {
       setImportText("");
       await load();
     } catch (err) {
-      setImportError(err instanceof Error ? err.message : "Import failed");
+      setImportError(errorMessage(err, "Import failed"));
     } finally {
       setSaving(false);
     }
@@ -648,10 +649,10 @@ export default function LottoGamesPage() {
         open={importOpen}
         onClose={closeImport}
         ariaLabelledBy="lotto-games-import-title"
-        dialogClassName={`${DIALOG_CLASSES} max-w-3xl`}
+        size="3xl"
       >
         <ModalHeader id="lotto-games-import-title" title="Import historic results" onClose={closeImport} />
-        <form onSubmit={submitImport} className="flex min-h-0 flex-1 flex-col">
+        <form onSubmit={submitImport} className={DIALOG_FORM_CLASSES}>
           <div className={`${DIALOG_BODY_CLASSES} flex flex-col gap-4`}>
             {importError && (
               <ErrorAlert>

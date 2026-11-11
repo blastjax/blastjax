@@ -2,28 +2,24 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import LottoClient from "../LottoClient";
-import { getLottoGames, lottoGameSlug, type LottoGame } from "@/lib/api";
+import { errorMessage, lottoGameSlug } from "@/lib/api";
+import { queries } from "@/lib/queries";
 import { ErrorAlert } from "@/components/ErrorAlert";
 import { LoadingBlocks } from "@/components/FinanceUI";
 import { ERROR_ALERT_CLASSES, PAGE_CONTAINER_CLASSES } from "@/lib/ui";
 
 export default function LottoGameSlugPage() {
   const { gameSlug } = useParams<{ gameSlug: string }>();
-  const [game, setGame] = useState<LottoGame | null | undefined>(undefined);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    getLottoGames()
-      .then((r) => setGame(r.games.find((g) => lottoGameSlug(g.name) === gameSlug) ?? null))
-      .catch((e: unknown) => setError(e instanceof Error ? e.message : "Failed to load games."));
-  }, [gameSlug]);
+  const { data, error } = useQuery(queries.lottoGames());
+  // undefined while loading, null when no game has this slug
+  const game = data && (data.games.find((g) => lottoGameSlug(g.name) === gameSlug) ?? null);
 
   if (error) {
     return (
       <div className={PAGE_CONTAINER_CLASSES}>
-        <ErrorAlert>{error}</ErrorAlert>
+        <ErrorAlert>{errorMessage(error, "Failed to load games.")}</ErrorAlert>
       </div>
     );
   }

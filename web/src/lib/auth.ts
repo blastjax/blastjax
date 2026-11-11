@@ -1,3 +1,5 @@
+import { getQueryClient } from "@/lib/queryClient";
+
 const SESSION_TOKEN_KEY = "budget-session";
 
 export const AUTH_UNAUTHORIZED_EVENT = "budget-auth:unauthorized";
@@ -21,6 +23,7 @@ export function setSessionToken(token: string): void {
 
 export function clearSessionToken(): void {
   if (typeof window === "undefined") return;
+  getQueryClient().clear(); // what one login read must not show to the next
   try {
     localStorage.removeItem(SESSION_TOKEN_KEY);
   } catch {

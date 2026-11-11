@@ -41,3 +41,10 @@ async def read_upload(file: UploadFile, images: bool = False) -> bytes:
         accepted = "PDF, PNG or JPG files" if images else "PDF files"
         raise HTTPException(status_code=400, detail=f"Only {accepted} are accepted.")
     return data
+
+
+def found[T](value: T | None, detail: str) -> T:
+    """value, or a 404 saying `detail` when db had no such row."""
+    if value is None:
+        raise HTTPException(status_code=404, detail=detail)
+    return value

@@ -7,16 +7,18 @@ import { DatePickerField } from "@/components/DatePickerField";
 import { DateRangePickerField } from "@/components/DateRangePickerField";
 import { ErrorAlert } from "@/components/ErrorAlert";
 import {
+  CheckOption,
   DANGER_TEXT_BUTTON_CLASSES,
   DIALOG_BODY_CLASSES,
-  DIALOG_CLASSES,
   DIALOG_FOOTER_CLASSES,
+  DIALOG_FORM_CLASSES,
   EmptyState,
   Field,
   LoadingBlocks,
   ModalHeader,
   Panel,
   Segmented,
+  Select,
   TEXT_BUTTON_CLASSES,
   TILE_BUTTON_CLASSES,
 } from "@/components/FinanceUI";
@@ -30,9 +32,6 @@ import {
   createBillCategory,
   deleteBill,
   deleteBillCategory,
-  getBills,
-  getMonthlyExpenses,
-  getPayPeriodStartOverrides,
   readBillPdf,
   updateBill,
   updateBillCategory,
@@ -45,10 +44,13 @@ import {
   type BillRow,
   type MonthlyExpenseRow,
   type RelativeDay,
+  errorMessage,
 } from "@/lib/api";
+import { queries } from "@/lib/queries";
+import { getQueryClient } from "@/lib/queryClient";
 import { BillYearBlock } from "./BillYearBlock";
 import { addMonths, formatMonthYear, parseDateOnlyLocal, toIsoDateLocal } from "@/lib/dateFormat";
-import { fmtCount } from "@/lib/formatNumber";
+import { plural } from "@/lib/formatNumber";
 import { formatAmountNumber, parseFormNumber } from "@/lib/parseFormNumber";
 import { periodKey, spreadExpenseChanges } from "@/lib/payPeriods";
 import {
@@ -84,10 +86,6 @@ type BillDraft = {
   preset: Partial<BillForm>;
   anchor?: Date; // the month a new bill's defaults are counted from
 };
-
-const plural = (n: number, word: string) => `${fmtCount(n)} ${word}${n === 1 ? "" : "s"}`;
-
-const errorText = (e: unknown, fallback: string) => (e instanceof Error ? e.message : fallback);
 
 const billMonth = (b: BillRow) => formatMonthYear(Number(b.bill_date.slice(0, 4)), Number(b.bill_date.slice(5, 7)));
 
@@ -359,7 +357,7 @@ function BillPdfModal({ bill, title, onClose }: { bill: BillRow; title: string; 
         setIsImage(blob.type.startsWith("image/"));
         setUrl(objectUrl);
       } catch (e) {
-        if (!cancelled) setError(errorText(e, "Failed to load the file"));
+        if (!cancelled) setError(errorMessage(e, "Failed to load the file"));
       }
     })();
     return () => {
@@ -369,7 +367,7 @@ function BillPdfModal({ bill, title, onClose }: { bill: BillRow; title: string; 
   }, [bill.id]);
 
   return (
-    <Modal open onClose={onClose} ariaLabelledBy="bill-pdf-title" dialogClassName={`${DIALOG_CLASSES} h-[90dvh] max-w-4xl`}>
+    <Modal open onClose={onClose} ariaLabelledBy="bill-pdf-title" size="4xl" className="h-[90dvh]">
       <ModalHeader id="bill-pdf-title" title={title} subtitle={billMonth(bill)} onClose={onClose} />
       <div className={`${DIALOG_BODY_CLASSES} flex flex-col`}>
         {error ? (
@@ -415,9 +413,9 @@ export default function BillsClient() {
   const load = useCallback(async () => {
     try {
       const [r, monthly, starts] = await Promise.all([
-        getBills(),
-        getMonthlyExpenses().catch(() => ({ expenses: [] })),
-        getPayPeriodStartOverrides().catch(() => ({ overrides: [] })),
+        getQueryClient().fetchQuery(queries.bills()),
+        getQueryClient().fetchQuery(queries.monthlyExpenses()).catch(() => ({ expenses: [] })),
+        getQueryClient().fetchQuery(queries.payPeriodStarts()).catch(() => ({ overrides: [] })),
       ]);
       setCategories(r.categories);
       setBills(r.bills);
@@ -428,7 +426,7 @@ export default function BillsClient() {
       setError(null);
       return r.bills;
     } catch (e) {
-      setError(errorText(e, "Failed to load bills"));
+      setError(errorMessage(e, "Failed to load bills"));
     } finally {
       setLoading(false);
     }
@@ -472,7 +470,7 @@ export default function BillsClient() {
       await action();
       close();
     } catch (e) {
-      setModalError(errorText(e, "Save failed"));
+      setModalError(errorMessage(e, "Save failed"));
     } finally {
       setSaving(false);
     }
@@ -543,7 +541,7 @@ export default function BillsClient() {
       const found = await readBillPdf(file, categoryId);
       apply = (d) => fillFromPdf(d, found);
     } catch (e) {
-      const note = errorText(e, "Couldn't read this file.");
+      const note = errorMessage(e, "Couldn't read this file.");
       apply = (d) => ({ ...d, note });
     }
     // Ignore the result if the form was closed or another file was picked meanwhile.
@@ -629,7 +627,7 @@ export default function BillsClient() {
         // Escape reaches every open modal; leave this one open under an edit or PDF on top of it.
         onClose={billDraft || pdfBill || categoryDraft ? () => {} : closeList}
         ariaLabelledBy="bill-list-title"
-        dialogClassName={`${DIALOG_CLASSES} max-w-5xl`}
+        size="5xl"
       >
         {listCategory && (
           <>
@@ -691,7 +689,7 @@ export default function BillsClient() {
         open={categoryDraft != null}
         onClose={closeCategory}
         ariaLabelledBy="bill-category-title"
-        dialogClassName={`${DIALOG_CLASSES} max-w-lg`}
+        size="lg"
       >
         {categoryDraft && (
           <>
@@ -701,7 +699,7 @@ export default function BillsClient() {
               subtitle="A kind of bill, like Electricity, Internet or Credit Card."
               onClose={closeCategory}
             />
-            <form onSubmit={saveCategory} className="flex min-h-0 flex-1 flex-col">
+            <form onSubmit={saveCategory} className={DIALOG_FORM_CLASSES}>
               <div className={`${DIALOG_BODY_CLASSES} grid gap-4`}>
                 <Field label="Name">
                   <input
@@ -715,19 +713,14 @@ export default function BillsClient() {
                     disabled={saving}
                   />
                 </Field>
-                <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-line p-3.5 transition-colors duration-150 hover:bg-surface-2/60">
-                  <input
-                    type="checkbox"
-                    className="mt-0.5 size-4"
-                    checked={categoryDraft.is_credit_card}
-                    onChange={(e) => setCategoryDraft({ ...categoryDraft, is_credit_card: e.target.checked })}
-                    disabled={saving}
-                  />
-                  <span className="text-sm">
-                    <span className="block font-medium text-ink">Credit card</span>
-                    <span className="text-ink-3">Its bills also get a minimum amount due.</span>
-                  </span>
-                </label>
+                <CheckOption
+                  title="Credit card"
+                  checked={categoryDraft.is_credit_card}
+                  onChange={(e) => setCategoryDraft({ ...categoryDraft, is_credit_card: e.target.checked })}
+                  disabled={saving}
+                >
+                  Its bills also get a minimum amount due.
+                </CheckOption>
                 <div className="grid gap-4 border-t border-line-soft pt-4">
                   <div>
                     <p className="text-sm font-medium text-ink">Defaults for new bills</p>
@@ -763,7 +756,7 @@ export default function BillsClient() {
         open={billDraft != null}
         onClose={closeBill}
         ariaLabelledBy="bill-title"
-        dialogClassName={`${DIALOG_CLASSES} max-w-lg`}
+        size="lg"
       >
         {billDraft && (
           <>
@@ -772,24 +765,18 @@ export default function BillsClient() {
               title={billDraft.id == null ? "Add bill" : "Edit bill"}
               onClose={closeBill}
             />
-            <form onSubmit={saveBill} className="flex min-h-0 flex-1 flex-col">
+            <form onSubmit={saveBill} className={DIALOG_FORM_CLASSES}>
               <div className={`${DIALOG_BODY_CLASSES} grid gap-4`}>
                 <Field label="Category">
-                  <select
-                    className={INPUT_CLASSES}
+                  <Select
                     value={billDraft.form.category_id}
-                    onChange={(e) => {
-                      const c = categories.find((x) => x.id === e.target.value);
+                    onChange={(id) => {
+                      const c = categories.find((x) => x.id === id);
                       if (c) setBillDraft((d) => d && switchCategory(d, c));
                     }}
                     disabled={saving}
-                  >
-                    {categories.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </select>
+                    options={categories.map((c) => ({ value: c.id, label: c.name }))}
+                  />
                 </Field>
                 <Field
                   label="PDF or photo"

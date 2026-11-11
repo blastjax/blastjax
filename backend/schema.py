@@ -31,6 +31,9 @@ Stamp = Annotated[dt.datetime | None, mapped_column(server_default=func.current_
 StampNN = Annotated[dt.datetime, mapped_column(server_default=func.current_timestamp())]
 Flag = Annotated[bool, mapped_column(server_default=text("true"))]
 FormText = Annotated[str, mapped_column(server_default="")]
+# An amount of money: NUMERIC, so sums in SQL are exact. Read as float, which is what the API does arithmetic in.
+Money = Annotated[float | None, mapped_column(Numeric(asdecimal=False))]
+MoneyNN = Annotated[float, mapped_column(Numeric(asdecimal=False))]
 TripId = Annotated[uuid.UUID, mapped_column(ForeignKey("travel_trip.id", ondelete="CASCADE"))]
 
 _SIX_ASCENDING = "n1 >= 1 AND n1 < n2 AND n2 < n3 AND n3 < n4 AND n4 < n5 AND n5 < n6 AND n6 <= 58"
@@ -109,8 +112,8 @@ class Bill(Base):
     due_date: Mapped[dt.date]
     period_start: Mapped[dt.date]
     period_end: Mapped[dt.date]
-    amount: Mapped[float | None]
-    minimum_due: Mapped[float | None]
+    amount: Mapped[Money]
+    minimum_due: Mapped[Money]
     pdf_data: Mapped[bytes | None] = mapped_column(deferred=True)
     created_at: Mapped[StampNN]
 
@@ -135,9 +138,9 @@ class CalendarDayOverride(Base):
     __tablename__ = "calendar_day_override"
 
     id: Mapped[UuidPK]
-    day: Mapped[dt.date | None] = mapped_column(unique=True)
-    amount: Mapped[float | None]
-    saved: Mapped[float | None]
+    day: Mapped[dt.date] = mapped_column(unique=True)
+    amount: Mapped[MoneyNN]
+    saved: Mapped[Money]
     created_at: Mapped[Stamp]
 
 
@@ -145,12 +148,12 @@ class CreditCard(Base):
     __tablename__ = "credit_card"
 
     id: Mapped[UuidPK]
-    name: Mapped[str | None]
-    credit_limit: Mapped[float | None]
-    last_statement_balance: Mapped[float | None] = mapped_column(server_default=text("0"))
-    current_balance: Mapped[float | None] = mapped_column(server_default=text("0"))
-    minimum_due: Mapped[float | None] = mapped_column(server_default=text("0"))
-    interest_rate: Mapped[float | None] = mapped_column(server_default=text("3.5"))
+    name: Mapped[str]
+    credit_limit: Mapped[MoneyNN]
+    last_statement_balance: Mapped[MoneyNN] = mapped_column(server_default=text("0"))
+    current_balance: Mapped[MoneyNN] = mapped_column(server_default=text("0"))
+    minimum_due: Mapped[MoneyNN] = mapped_column(server_default=text("0"))
+    interest_rate: Mapped[float] = mapped_column(server_default=text("3.5"))
     statement_date: Mapped[dt.date | None]
     due_date: Mapped[dt.date | None]
     # When set, the statement comes from this bill category's latest bill instead of the columns above.
@@ -162,9 +165,9 @@ class CreditCardPayment(Base):
     __tablename__ = "credit_card_payment"
 
     id: Mapped[UuidPK]
-    credit_card_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("credit_card.id", ondelete="CASCADE"))
-    amount: Mapped[float | None]
-    payment_date: Mapped[dt.date | None]
+    credit_card_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("credit_card.id", ondelete="CASCADE"))
+    amount: Mapped[MoneyNN]
+    payment_date: Mapped[dt.date]
     note: Mapped[str | None]
     created_at: Mapped[Stamp]
 
@@ -173,10 +176,10 @@ class FixedExpense(Base):
     __tablename__ = "fixed_expense"
 
     id: Mapped[UuidPK]
-    period_half: Mapped[int | None]
-    period_year: Mapped[int | None]
-    period_month: Mapped[int | None]
-    amount: Mapped[float | None]
+    period_half: Mapped[int]
+    period_year: Mapped[int]
+    period_month: Mapped[int]
+    amount: Mapped[MoneyNN]
     description: Mapped[str | None]
     created_at: Mapped[Stamp]
     # The card payment this was recorded for. Removing the card keeps the expense: that money did leave the budget.
@@ -189,7 +192,7 @@ class HousePayment(Base):
     __tablename__ = "house_payment"
 
     id: Mapped[UuidPK]
-    name: Mapped[str | None]
+    name: Mapped[str]
     notes: Mapped[str | None]
     created_at: Mapped[Stamp]
 
@@ -202,9 +205,9 @@ class HousePaymentEntry(Base):
     __tablename__ = "house_payment_entry"
 
     id: Mapped[UuidPK]
-    house_payment_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("house_payment.id", ondelete="CASCADE"))
-    paid_on: Mapped[dt.date | None]
-    amount: Mapped[float | None]
+    house_payment_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("house_payment.id", ondelete="CASCADE"))
+    paid_on: Mapped[dt.date]
+    amount: Mapped[MoneyNN]
     created_at: Mapped[Stamp]
 
 
@@ -212,16 +215,16 @@ class Installment(Base):
     __tablename__ = "installment"
 
     id: Mapped[UuidPK]
-    name: Mapped[str | None]
-    installment_current: Mapped[int | None]
-    installment_total: Mapped[int | None]
-    principal: Mapped[float | None]
-    interest: Mapped[float | None]
-    payment_total: Mapped[float | None]
-    start_date: Mapped[dt.date | None]
-    finish_date: Mapped[dt.date | None]
-    remaining: Mapped[float | None]
-    original_total: Mapped[float | None]
+    name: Mapped[str]
+    installment_current: Mapped[int]
+    installment_total: Mapped[int]
+    principal: Mapped[MoneyNN]
+    interest: Mapped[Money]
+    payment_total: Mapped[MoneyNN]
+    start_date: Mapped[dt.date]
+    finish_date: Mapped[dt.date]
+    remaining: Mapped[MoneyNN]
+    original_total: Mapped[MoneyNN]
     credit_card_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("credit_card.id", ondelete="SET NULL"))
     created_at: Mapped[Stamp]
 
@@ -233,11 +236,11 @@ class InstallmentLine(Base):
     __table_args__ = (UniqueConstraint("installment_id", "seq"),)
 
     id: Mapped[UuidPK]
-    installment_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("installment.id", ondelete="CASCADE"))
-    seq: Mapped[int | None]
-    principal: Mapped[float | None] = mapped_column(server_default=text("0"))
-    interest: Mapped[float | None]
-    payment_total: Mapped[float | None]
+    installment_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("installment.id", ondelete="CASCADE"))
+    seq: Mapped[int]
+    principal: Mapped[MoneyNN] = mapped_column(server_default=text("0"))
+    interest: Mapped[Money]
+    payment_total: Mapped[MoneyNN]
 
 
 class LottoGame(Base):
@@ -267,7 +270,7 @@ class LottoDraw(Base):
     n5: Mapped[int | None]
     n6: Mapped[int | None]
     created_at: Mapped[StampNN]
-    jackpot_prize: Mapped[float | None]
+    jackpot_prize: Mapped[Money]
     winners: Mapped[int] = mapped_column(server_default=text("0"))
 
     attempts: Mapped[list[LottoAttempt]] = relationship(
@@ -295,13 +298,13 @@ class MonthlyExpense(Base):
     __tablename__ = "monthly_expense"
 
     id: Mapped[UuidPK]
-    name: Mapped[str | None]
+    name: Mapped[str]
     description: Mapped[str | None]
-    amount: Mapped[float | None]
-    period_half: Mapped[int | None]
-    period_year: Mapped[int | None]
-    period_month: Mapped[int | None]
-    is_recurring: Mapped[bool | None] = mapped_column(server_default=text("false"))
+    amount: Mapped[MoneyNN]
+    period_half: Mapped[int]
+    period_year: Mapped[int]
+    period_month: Mapped[int]
+    is_recurring: Mapped[bool] = mapped_column(server_default=text("false"))
     created_at: Mapped[Stamp]
     expense_date: Mapped[dt.date | None]
     # "YYYY-MM" pay-period months a recurring expense isn't deducted in.
@@ -320,10 +323,10 @@ class PayPeriodStartOverride(Base):
     __table_args__ = (UniqueConstraint("period_year", "period_month", "period_half"),)
 
     id: Mapped[UuidPK]
-    period_year: Mapped[int | None]
-    period_month: Mapped[int | None]
-    period_half: Mapped[int | None]
-    start_date: Mapped[dt.date | None]
+    period_year: Mapped[int]
+    period_month: Mapped[int]
+    period_half: Mapped[int]
+    start_date: Mapped[dt.date]
     created_at: Mapped[Stamp]
 
 
@@ -331,24 +334,24 @@ class Payslip(Base):
     __tablename__ = "payslip"
 
     id: Mapped[UuidPK]
-    total: Mapped[float | None]
-    commission: Mapped[float | None]
-    reimbursement: Mapped[float | None]
-    medical_reimbursement: Mapped[float | None]
-    others: Mapped[float | None]
-    mp2: Mapped[float | None]
-    allowances: Mapped[float | None]
-    thirteenth_month: Mapped[float | None]
-    basic_salary: Mapped[float | None]
+    total: Mapped[Money]
+    commission: Mapped[Money]
+    reimbursement: Mapped[Money]
+    medical_reimbursement: Mapped[Money]
+    others: Mapped[Money]
+    mp2: Mapped[Money]
+    allowances: Mapped[Money]
+    thirteenth_month: Mapped[Money]
+    basic_salary: Mapped[Money]
     period_year: Mapped[int | None]
     period_month: Mapped[int | None]
     period_half: Mapped[int | None]
     notes: Mapped[str | None]
-    withholding_tax: Mapped[float | None]
-    sss_contribution: Mapped[float | None]
-    philhealth: Mapped[float | None]
-    pag_ibig: Mapped[float | None]
-    bereavement_asst: Mapped[float | None]
+    withholding_tax: Mapped[Money]
+    sss_contribution: Mapped[Money]
+    philhealth: Mapped[Money]
+    pag_ibig: Mapped[Money]
+    bereavement_asst: Mapped[Money]
     pdf_data: Mapped[bytes | None] = mapped_column(deferred=True)
     created_at: Mapped[Stamp]
     company: Mapped[str] = mapped_column(server_default="Sophos")

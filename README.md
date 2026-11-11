@@ -46,7 +46,7 @@ The full picture is an interactive diagram under **Software Architecture** in th
    cp .env.example .env
    ```
 
-   Set `DATABASE_URL` to your Neon Postgres connection string, using the *pooled* endpoint (the host containing `-pooler`). [`backend/schema.py`](backend/schema.py) defines the schema as SQLAlchemy models, and every API start adds any table or column it defines that the database lacks, so a new column needs no script. That's additive only: renames, type changes and drops still need their own script in `backend/scripts/`, run before the code that depends on them.
+   Set `DATABASE_URL` to your Neon Postgres connection string, using the *pooled* endpoint (the host containing `-pooler`). [`backend/schema.py`](backend/schema.py) defines the schema as SQLAlchemy models, and every API start adds any table or column it defines that the database lacks, so a new column needs no script. That's additive only: renames, type changes and drops are Alembic migrations in `backend/migrations/` (`cd backend && alembic revision -m "..."`, then `alembic upgrade head`); the deploy runs them right after the schema sync.
 
 4. **Frontend dependencies**
 
@@ -155,7 +155,8 @@ Repository secrets (**Settings → Secrets and variables → Actions → Secrets
 | Path | Contents |
 |------|----------|
 | `backend/` | FastAPI app (`app/routers`, `app/services`), DB layer (`db.py`, `schema.py`), Redis cache (`cache.py`), checks (`test_core.py`) |
-| `backend/scripts/` | Migrations the additive schema sync can't do (renames, type changes, the UUID id migration) |
+| `backend/migrations/` | Alembic migrations: what the additive schema sync can't do (renames, type changes) |
+| `backend/scripts/` | The one-time UUID id migration, the schema sync, the OpenAPI export and a bill-reading accuracy check |
 | `web/` | Next.js app (calendar, expenses, cards, bills, payslips, health, travels, games, lotto, settings, …) |
 | `docker/` | Dockerfiles, Caddyfile, the shared edge proxy (`docker/edge/`), docker docs |
 | `.archify/` | Sources for the Software Architecture diagram |

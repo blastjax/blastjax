@@ -1,19 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useCurrentUser } from "@/components/AuthGate";
 import { LoadingBlocks, Metric, Panel, StatStrip, TEXT_BUTTON_CLASSES } from "@/components/FinanceUI";
 import {
-  getBills,
-  getBloodPressures,
-  getCalendarDayOverrides,
-  getCreditCards,
-  getFixedExpenses,
-  getMonthlyExpenses,
-  getPayPeriodStartOverrides,
-  getPayslips,
-  getTravelTrips,
   type BloodPressureRow,
   type CreditCardRow,
   type TravelTripRow,
@@ -21,6 +12,8 @@ import {
 import { addMonths, formatDate, monthKey, toIsoDateLocal } from "@/lib/dateFormat";
 import { fmtAmountOrDash } from "@/lib/formatNumber";
 import { isPageAllowed } from "@/lib/nav";
+import { queries } from "@/lib/queries";
+import { getQueryClient } from "@/lib/queryClient";
 import {
   addDaysIso,
   budgetToday,
@@ -44,23 +37,25 @@ type Overview = {
 };
 
 // Each page's data is optional here: a page that fails to load just drops out of the overview.
+// Read through the shared cache, so what the other pages already loaded isn't fetched again.
 async function loadOverview(today: string): Promise<Overview> {
+  const cache = getQueryClient();
   const quiet = <T,>(p: Promise<T>) => p.catch(() => null);
   const [starts, payslips, overrides, monthly, billData, cardData, trips, readings] = await Promise.all([
-    quiet(getPayPeriodStartOverrides()),
-    quiet(getPayslips(12)),
-    quiet(getCalendarDayOverrides()),
-    quiet(getMonthlyExpenses()),
-    quiet(getBills()),
-    quiet(getCreditCards()),
-    quiet(getTravelTrips()),
-    quiet(getBloodPressures(1)),
+    quiet(cache.fetchQuery(queries.payPeriodStarts())),
+    quiet(cache.fetchQuery(queries.payslips(12))),
+    quiet(cache.fetchQuery(queries.calendarDays())),
+    quiet(cache.fetchQuery(queries.monthlyExpenses())),
+    quiet(cache.fetchQuery(queries.bills())),
+    quiet(cache.fetchQuery(queries.creditCards())),
+    quiet(cache.fetchQuery(queries.travelTrips())),
+    quiet(cache.fetchQuery(queries.bloodPressures(1))),
   ]);
   const startMap = new Map(
     starts?.overrides.map((o) => [periodKey(o.period_year, o.period_month, o.period_half), o.start_date]),
   );
   const period = periodForDate(startMap, today);
-  const fixed = await quiet(getFixedExpenses(undefined, period.year, period.month));
+  const fixed = await quiet(cache.fetchQuery(queries.fixedExpenses(period.year, period.month)));
 
   const expenses = monthly?.expenses ?? [];
   const bills = billData?.bills ?? [];
@@ -106,17 +101,8 @@ async function loadOverview(today: string): Promise<Overview> {
 
 export function HomeOverview() {
   const user = useCurrentUser();
-  const [overview, setOverview] = useState<Overview | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    void loadOverview(toIsoDateLocal(new Date())).then((o) => {
-      if (!cancelled) setOverview(o);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const today = toIsoDateLocal(new Date());
+  const overview = useQuery({ queryKey: ["overview", today], queryFn: () => loadOverview(today) }).data;
 
   if (!overview) return <LoadingBlocks label="Loading your overview…" rows={1} />;
 
@@ -213,7 +199,7 @@ export function HomeOverview() {
                   {reading.systolic ?? "–"}/{reading.diastolic ?? "–"}
                   {reading.pulse != null && <span className="ml-2 font-normal text-ink-3">{reading.pulse} bpm</span>}
                 </p>
-                <p className="mt-0.5 text-sm text-ink-3">{formatDate(reading.created_at.slice(0, 10))}</p>
+                <p className="mt-0.5 text-sm text-ink-3">{formatDate(reading.created_at?.slice(0, 10))}</p>
               </Panel>
             )}
           </div>

@@ -19,7 +19,6 @@ import {
   deleteTravelFlight,
   deleteTravelItinerary,
   deleteTravelTransport,
-  getTravelTrips,
   resolveMapLink,
   updateTravelAccommodation,
   updateTravelCity,
@@ -28,7 +27,10 @@ import {
   updateTravelTransport,
   updateTravelTrip,
   type TravelTripDetail,
+  errorMessage,
 } from "@/lib/api";
+import { queries } from "@/lib/queries";
+import { getQueryClient } from "@/lib/queryClient";
 import { formatMonthDayShort, formatMonthYear, formatWeekdayMonthDay, toIsoDateLocal } from "@/lib/dateFormat";
 import { mapsUrlFor } from "@/lib/maps";
 import { remainingPrice } from "@/lib/remainingPrice";
@@ -462,9 +464,9 @@ export default function TravelsClient() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    getTravelTrips(500)
+    getQueryClient().fetchQuery(queries.travelTrips())
       .then((r) => setTrips(r.trips))
-      .catch((e) => setError(e instanceof Error ? e.message : "Failed to load trips"))
+      .catch((e) => setError(errorMessage(e, "Failed to load trips")))
       .finally(() => setLoading(false));
   }, []);
 
@@ -501,7 +503,7 @@ export default function TravelsClient() {
     try {
       await fn();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong");
+      setError(errorMessage(err, "Something went wrong"));
     } finally {
       setSaving(false);
     }

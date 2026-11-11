@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from pydantic import AliasChoices, BaseModel, Field, model_validator
 
+from app.schemas.text import Trimmed
+
 
 class PayslipCreate(BaseModel):
-    company: str = Field(..., min_length=1, max_length=100)
+    company: Trimmed = Field(..., min_length=1, max_length=100)
     total: float | None = None
     commission: float | None = None
     reimbursement: float | None = None

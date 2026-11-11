@@ -10,11 +10,11 @@ export type DayState = "none" | "today" | "anchor" | "selected" | "range-start" 
 const WEEKDAY_LABELS = ["S", "M", "T", "W", "T", "F", "S"];
 const YEARS_PER_PAGE = 12;
 
-const SELECTED_TONE = "bg-indigo-600 font-semibold text-white shadow-sm";
-const CURRENT_TONE = "font-semibold text-indigo-600 ring-1 ring-inset ring-indigo-400 dark:text-indigo-400";
-const PLAIN_TONE = "text-ink-2 hover:bg-zinc-200/60 dark:hover:bg-zinc-700/60";
+const SELECTED_TONE = "bg-brand font-semibold text-brand-on shadow-sm";
+const CURRENT_TONE = "font-semibold text-brand-text ring-1 ring-inset ring-brand/50";
+const PLAIN_TONE = "text-ink-2 hover:bg-line-strong/50";
 const TITLE_BUTTON_CLASSES =
-  "rounded-md px-1.5 py-0.5 font-semibold text-ink transition-colors duration-150 enabled:hover:bg-zinc-200/60 dark:enabled:hover:bg-zinc-700/60";
+  "rounded-md px-1.5 py-0.5 font-semibold text-ink transition-colors duration-150 enabled:hover:bg-line-strong/50";
 
 function pad(n: number): string {
   return String(n).padStart(2, "0");
@@ -303,13 +303,13 @@ export function CalendarMonth({
           const hl = !inRangeBg && !disabled && !!highlightDay?.(iso);
           const bgClasses = inRangeBg
             ? [
-                "bg-indigo-100 dark:bg-indigo-800/60",
+                "bg-brand-soft-hover",
                 (state === "range-start" || col === 0) && "rounded-l-full",
                 (state === "range-end" || col === 6) && "rounded-r-full",
               ]
             : hl
               ? [
-                  "bg-indigo-500/10 dark:bg-indigo-400/[0.07]",
+                  "bg-brand-soft",
                   (col === 0 || !highlightDay?.(shiftIso(iso, -1))) && "rounded-l-full",
                   (col === 6 || !highlightDay?.(shiftIso(iso, 1))) && "rounded-r-full",
                 ]
@@ -333,7 +333,7 @@ export function CalendarMonth({
                       : state === "today" || state === "anchor"
                         ? CURRENT_TONE
                         : hl || state === "range-middle"
-                          ? "font-semibold text-indigo-700 hover:bg-indigo-500/20 dark:text-indigo-300"
+                          ? "font-semibold text-brand-text hover:bg-brand-soft-hover"
                           : PLAIN_TONE,
                 ].join(" ")}
               >

@@ -1,5 +1,8 @@
-import type { ReactNode, Ref } from "react";
+import { Select as RadixSelect } from "radix-ui";
+import type { InputHTMLAttributes, ReactNode, Ref } from "react";
 import {
+  CheckIcon,
+  ChevronDownIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
   CloseIcon,
@@ -298,6 +301,144 @@ export function Field({
   );
 }
 
+export type SelectOption<T extends string = string> = { value: T; label: string };
+
+// Radix reserves "" for "nothing chosen", so an option whose value is "" travels under this instead.
+const EMPTY_OPTION = "\u0000";
+
+// Every dropdown in the app: the options are data, so no page writes its own list.
+export function Select<T extends string = string>({
+  value,
+  onChange,
+  options,
+  className = "",
+  disabled,
+  required,
+  name,
+  id,
+  "aria-label": ariaLabel,
+}: {
+  value: T;
+  onChange: (value: T) => void;
+  options: readonly SelectOption<T>[];
+  className?: string;
+  disabled?: boolean;
+  required?: boolean;
+  name?: string;
+  id?: string;
+  "aria-label"?: string;
+}) {
+  return (
+    <RadixSelect.Root
+      value={value === "" ? EMPTY_OPTION : value}
+      onValueChange={(v) => onChange((v === EMPTY_OPTION ? "" : v) as T)}
+      disabled={disabled}
+      required={required}
+      name={name}
+    >
+      <RadixSelect.Trigger
+        id={id}
+        aria-label={ariaLabel}
+        className={`${INPUT_CLASSES} flex items-center justify-between gap-2 text-left ${className}`}
+      >
+        <span className="min-w-0 truncate">
+          <RadixSelect.Value />
+        </span>
+        <RadixSelect.Icon>
+          <ChevronDownIcon className="size-4 shrink-0 opacity-60" />
+        </RadixSelect.Icon>
+      </RadixSelect.Trigger>
+      <RadixSelect.Portal>
+        <RadixSelect.Content
+          position="popper"
+          sideOffset={6}
+          collisionPadding={8}
+          className="z-[80] max-h-[var(--radix-select-content-available-height)] min-w-[var(--radix-select-trigger-width)] overflow-hidden rounded-xl border border-line bg-surface p-1 shadow-pop"
+        >
+          <RadixSelect.Viewport>
+            {options.map((o) => (
+              <RadixSelect.Item
+                key={o.value}
+                value={o.value === "" ? EMPTY_OPTION : o.value}
+                className="relative flex cursor-pointer select-none items-center rounded-md py-2 pl-8 pr-3 text-sm text-ink outline-none data-[highlighted]:bg-surface-2 data-[state=checked]:font-medium"
+              >
+                <RadixSelect.ItemIndicator className="absolute left-2.5 inline-flex text-brand-text">
+                  <CheckIcon className="size-4" />
+                </RadixSelect.ItemIndicator>
+                <RadixSelect.ItemText>{o.label}</RadixSelect.ItemText>
+              </RadixSelect.Item>
+            ))}
+          </RadixSelect.Viewport>
+        </RadixSelect.Content>
+      </RadixSelect.Portal>
+    </RadixSelect.Root>
+  );
+}
+
+const NO_SPINNERS =
+  "[appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none";
+
+// A count or a measurement. Keeps the browser's min/max/step checks, drops its spinner arrows.
+export function NumberInput({
+  className = "",
+  ...rest
+}: Omit<InputHTMLAttributes<HTMLInputElement>, "type">) {
+  return <input {...rest} type="number" className={`${INPUT_CLASSES} ${NO_SPINNERS} ${className}`} />;
+}
+
+type CheckboxProps = Omit<InputHTMLAttributes<HTMLInputElement>, "type" | "title" | "children">;
+
+export function Checkbox({
+  label,
+  className = "",
+  ...rest
+}: CheckboxProps & { label: ReactNode; className?: string }) {
+  return (
+    <label className={`flex items-center gap-2 text-sm text-ink-2 ${className}`}>
+      <input {...rest} type="checkbox" className="size-4 shrink-0" />
+      {label}
+    </label>
+  );
+}
+
+// A form's on/off option: a checkbox in its own bordered row, with a line saying what it does.
+export function CheckOption({
+  title,
+  children,
+  ...rest
+}: CheckboxProps & { title: ReactNode; children?: ReactNode }) {
+  return (
+    <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-line p-3.5 transition-colors duration-150 hover:bg-surface-2/60">
+      <input {...rest} type="checkbox" className="mt-0.5 size-4 shrink-0" />
+      <span className="min-w-0 text-sm">
+        <span className="block font-medium text-ink">{title}</span>
+        {children && <span className="text-ink-3">{children}</span>}
+      </span>
+    </label>
+  );
+}
+
+// A titled group of fields inside a panel.
+export function FormSection({
+  title,
+  description,
+  className = "",
+  children,
+}: {
+  title: ReactNode;
+  description?: ReactNode;
+  className?: string;
+  children: ReactNode;
+}) {
+  return (
+    <fieldset className={`min-w-0 rounded-xl border border-line bg-surface-3 px-4 pb-4 pt-3 sm:px-5 ${className}`}>
+      <legend className="px-1 text-sm font-semibold text-ink">{title}</legend>
+      {description && <p className="text-sm text-ink-3">{description}</p>}
+      <div className="mt-3 flex flex-col gap-4">{children}</div>
+    </fieldset>
+  );
+}
+
 export function ChargedToField({
   cards,
   value,
@@ -315,20 +456,16 @@ export function ChargedToField({
 }) {
   return (
     <Field label="Charged to" hint={hint} className={className}>
-      <select
-        className={INPUT_CLASSES}
+      <Select
         value={value}
-        onChange={(e) => onChange(e.target.value)}
+        onChange={onChange}
         disabled={disabled}
-      >
-        <option value="">Not on a credit card</option>
-        {cards.map((c) => (
-          <option key={c.id} value={c.id}>
-            {c.name}
-          </option>
-        ))}
-        {value && !cards.some((c) => c.id === value) && <option value={value}>A removed card</option>}
-      </select>
+        options={[
+          { value: "", label: "Not on a credit card" },
+          ...cards.map((c) => ({ value: c.id, label: c.name })),
+          ...(value && !cards.some((c) => c.id === value) ? [{ value, label: "A removed card" }] : []),
+        ]}
+      />
     </Field>
   );
 }
@@ -343,6 +480,8 @@ export const TILE_BUTTON_CLASSES =
 
 export const DIALOG_CLASSES =
   "flex max-h-[90dvh] w-full flex-col overflow-hidden rounded-2xl border border-line bg-surface shadow-pop";
+// A dialog whose body and footer are one form: put this on the <form>.
+export const DIALOG_FORM_CLASSES = "flex min-h-0 flex-1 flex-col";
 export const DIALOG_BODY_CLASSES = "min-h-0 flex-1 overflow-y-auto px-5 py-5 sm:px-6";
 export const DIALOG_FOOTER_CLASSES =
   "flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-line px-5 py-3.5 sm:px-6";

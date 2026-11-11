@@ -3,6 +3,7 @@ import { IBM_Plex_Mono, Manrope } from "next/font/google";
 import { AppShell } from "@/components/AppShell";
 import { AuthGate } from "@/components/AuthGate";
 import { ConfirmHost } from "@/components/ConfirmDialog";
+import { QueryProvider } from "@/components/QueryProvider";
 import { ThemeInitScript } from "@/components/ThemeInitScript";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import { TooltipLayer } from "@/components/TooltipLayer";
@@ -55,9 +56,11 @@ export default function RootLayout({
           Skip to content
         </a>
         <ThemeProvider>
-          <AuthGate>
-            <AppShell>{children}</AppShell>
-          </AuthGate>
+          <QueryProvider>
+            <AuthGate>
+              <AppShell>{children}</AppShell>
+            </AuthGate>
+          </QueryProvider>
           <ConfirmHost />
           <TooltipLayer />
         </ThemeProvider>

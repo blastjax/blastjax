@@ -13,14 +13,15 @@ import {
   createLottoAttemptsBulk,
   deleteLottoAttempt,
   deleteLottoDraw,
-  getLottoDraws,
-  getLottoGames,
   importLottoDrawResultsText,
   setLottoDraw,
   updateLottoDraw,
   type LottoAttemptRow,
   type LottoDrawDetail,
+  errorMessage,
 } from "@/lib/api";
+import { queries } from "@/lib/queries";
+import { getQueryClient } from "@/lib/queryClient";
 import {
   MONTH_NAMES_FULL,
   formatDate,
@@ -44,12 +45,12 @@ import {
 } from "@/lib/ui";
 import {
   DIALOG_BODY_CLASSES,
-  DIALOG_CLASSES,
   DIALOG_FOOTER_CLASSES,
   Field,
   ModalHeader,
   Pill,
   Segmented,
+  DIALOG_FORM_CLASSES,
 } from "@/components/FinanceUI";
 
 const NUMBERS_HELP =
@@ -258,7 +259,7 @@ function parseTicketBlock(lines: string[], blockIndex: number): TicketBlock {
     try {
       return parseNumbers(line);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Invalid numbers";
+      const msg = errorMessage(err, "Invalid numbers");
       throw new Error(`Ticket ${blockIndex + 1}, line ${i + 1}: ${msg}`);
     }
   });
@@ -311,7 +312,7 @@ function parseAttemptsLines(text: string): number[][] {
     try {
       return parseNumbers(line);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Invalid numbers";
+      const msg = errorMessage(err, "Invalid numbers");
       throw new Error(`Line ${i + 1}: ${msg}`);
     }
   });
@@ -743,13 +744,13 @@ export default function LottoClient({ gameId }: { gameId: string }) {
   const load = useCallback(async () => {
     setError(null);
     try {
-      const r = await getLottoDraws(gameId, 2000);
+      const r = await getQueryClient().fetchQuery(queries.lottoDraws(gameId));
       setDraws(r.draws);
       setExpandedYears((s) =>
         s.size > 0 || r.draws.length === 0 ? s : new Set([r.draws[0].draw.draw_date.slice(0, 4)]),
       );
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load lotto results");
+      setError(errorMessage(e, "Failed to load lotto results"));
       setDraws([]);
     } finally {
       setLoading(false);
@@ -761,7 +762,7 @@ export default function LottoClient({ gameId }: { gameId: string }) {
   }, [load]);
 
   useEffect(() => {
-    getLottoGames()
+    getQueryClient().fetchQuery(queries.lottoGames())
       .then((r) => setGameName(r.games.find((g) => g.id === gameId)?.name ?? null))
       .catch(() => setGameName(null));
   }, [gameId]);
@@ -823,7 +824,7 @@ export default function LottoClient({ gameId }: { gameId: string }) {
       jackpotPrize = parseOptionalJackpot(drawModal.jackpotText);
       winners = parseWinners(drawModal.winnersText);
     } catch (err) {
-      setDrawFormError(err instanceof Error ? err.message : "Invalid input");
+      setDrawFormError(errorMessage(err, "Invalid input"));
       return;
     }
     setSaving(true);
@@ -836,7 +837,7 @@ export default function LottoClient({ gameId }: { gameId: string }) {
       upsertLocalDraw(detail);
       closeDrawModal();
     } catch (err) {
-      setDrawFormError(err instanceof Error ? err.message : "Save failed");
+      setDrawFormError(errorMessage(err, "Save failed"));
     } finally {
       setSaving(false);
     }
@@ -850,7 +851,7 @@ export default function LottoClient({ gameId }: { gameId: string }) {
       await deleteLottoDraw(drawId);
       setDraws((ds) => ds.filter((d) => d.draw.id !== drawId));
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Delete failed");
+      setError(errorMessage(e, "Delete failed"));
     } finally {
       setSaving(false);
     }
@@ -934,7 +935,7 @@ export default function LottoClient({ gameId }: { gameId: string }) {
       try {
         blocks = parseTicketsText(attemptsModal.attemptsText);
       } catch (err) {
-        setAttemptsFormError(err instanceof Error ? err.message : "Invalid input");
+        setAttemptsFormError(errorMessage(err, "Invalid input"));
         return;
       }
       setSaving(true);
@@ -945,7 +946,7 @@ export default function LottoClient({ gameId }: { gameId: string }) {
         if (detail) upsertLocalDraw(detail);
         closeAttemptsModal();
       } catch (err) {
-        setAttemptsFormError(err instanceof Error ? err.message : "Save failed");
+        setAttemptsFormError(errorMessage(err, "Save failed"));
       } finally {
         setSaving(false);
       }
@@ -958,7 +959,7 @@ export default function LottoClient({ gameId }: { gameId: string }) {
       numbersList = parseAttemptsLines(attemptsModal.attemptsText);
       ticket = parseOptionalTicket(attemptsModal.ticketText);
     } catch (err) {
-      setAttemptsFormError(err instanceof Error ? err.message : "Invalid input");
+      setAttemptsFormError(errorMessage(err, "Invalid input"));
       return;
     }
     setSaving(true);
@@ -974,7 +975,7 @@ export default function LottoClient({ gameId }: { gameId: string }) {
       if (detail) upsertLocalDraw(detail);
       closeAttemptsModal();
     } catch (err) {
-      setAttemptsFormError(err instanceof Error ? err.message : "Save failed");
+      setAttemptsFormError(errorMessage(err, "Save failed"));
     } finally {
       setSaving(false);
     }
@@ -988,7 +989,7 @@ export default function LottoClient({ gameId }: { gameId: string }) {
       const detail = await deleteLottoAttempt(drawId, attemptId);
       upsertLocalDraw(detail);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Delete failed");
+      setError(errorMessage(e, "Delete failed"));
     } finally {
       setSaving(false);
     }
@@ -1009,7 +1010,7 @@ export default function LottoClient({ gameId }: { gameId: string }) {
       }
       if (detail) upsertLocalDraw(detail);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Delete failed");
+      setError(errorMessage(e, "Delete failed"));
     } finally {
       setSaving(false);
     }
@@ -1041,7 +1042,7 @@ export default function LottoClient({ gameId }: { gameId: string }) {
     try {
       blocks = parseTicketsText(pasteModal.attemptsText);
     } catch (err) {
-      setPasteFormError(err instanceof Error ? err.message : "Invalid input");
+      setPasteFormError(errorMessage(err, "Invalid input"));
       return;
     }
     setSaving(true);
@@ -1060,7 +1061,7 @@ export default function LottoClient({ gameId }: { gameId: string }) {
       if (detail) upsertLocalDraw(detail);
       closePasteModal();
     } catch (err) {
-      setPasteFormError(err instanceof Error ? err.message : "Save failed");
+      setPasteFormError(errorMessage(err, "Save failed"));
     } finally {
       setSaving(false);
     }
@@ -1115,7 +1116,7 @@ export default function LottoClient({ gameId }: { gameId: string }) {
       setImportModal((m) => ({ ...m, text: "" }));
       await load();
     } catch (err) {
-      setImportFormError(err instanceof Error ? err.message : "Import failed");
+      setImportFormError(errorMessage(err, "Import failed"));
     } finally {
       setSaving(false);
     }
@@ -2057,7 +2058,7 @@ export default function LottoClient({ gameId }: { gameId: string }) {
               // Escape reaches every open modal; leave this one open under an edit on top of it.
               onClose={drawModal.open || attemptsModal.open ? () => {} : close}
               ariaLabelledBy="lotto-history-draw-title"
-              dialogClassName={`${DIALOG_CLASSES} max-w-5xl`}
+              size="5xl"
             >
               <ModalHeader id="lotto-history-draw-title" title={`${gameName ?? "Lotto"} draw`} onClose={close} />
               <div className={DIALOG_BODY_CLASSES}>{renderDrawCard(detail)}</div>
@@ -2069,14 +2070,14 @@ export default function LottoClient({ gameId }: { gameId: string }) {
         open={drawModal.open}
         onClose={closeDrawModal}
         ariaLabelledBy="lotto-draw-title"
-        dialogClassName={`${DIALOG_CLASSES} max-w-lg`}
+        size="lg"
       >
         <ModalHeader
           id="lotto-draw-title"
           title={drawModal.isEdit ? "Edit result" : "Add result"}
           onClose={closeDrawModal}
         />
-        <form onSubmit={submitDraw} className="flex min-h-0 flex-1 flex-col">
+        <form onSubmit={submitDraw} className={DIALOG_FORM_CLASSES}>
           <div className={`${DIALOG_BODY_CLASSES} flex flex-col gap-4`}>
             {drawFormError && <ErrorAlert>{drawFormError}</ErrorAlert>}
             <Field label="Draw date">
@@ -2156,10 +2157,10 @@ export default function LottoClient({ gameId }: { gameId: string }) {
         open={attemptsModal.open}
         onClose={closeAttemptsModal}
         ariaLabelledBy="lotto-attempts-title"
-        dialogClassName={`${DIALOG_CLASSES} max-w-lg`}
+        size="lg"
       >
         <ModalHeader id="lotto-attempts-title" title={attemptsModalTitle} onClose={closeAttemptsModal} />
-        <form onSubmit={submitAttemptsModal} className="flex min-h-0 flex-1 flex-col">
+        <form onSubmit={submitAttemptsModal} className={DIALOG_FORM_CLASSES}>
           <div className={`${DIALOG_BODY_CLASSES} flex flex-col gap-4`}>
             {attemptsFormError && <ErrorAlert>{attemptsFormError}</ErrorAlert>}
             <Field
@@ -2242,10 +2243,10 @@ export default function LottoClient({ gameId }: { gameId: string }) {
         open={pasteModal.open}
         onClose={closePasteModal}
         ariaLabelledBy="lotto-paste-title"
-        dialogClassName={`${DIALOG_CLASSES} max-w-lg`}
+        size="lg"
       >
         <ModalHeader id="lotto-paste-title" title="Paste attempts" onClose={closePasteModal} />
-        <form onSubmit={submitPasteAttempts} className="flex min-h-0 flex-1 flex-col">
+        <form onSubmit={submitPasteAttempts} className={DIALOG_FORM_CLASSES}>
           <div className={`${DIALOG_BODY_CLASSES} flex flex-col gap-4`}>
             {pasteFormError && <ErrorAlert>{pasteFormError}</ErrorAlert>}
             <Field label="Draw date">
@@ -2292,10 +2293,10 @@ export default function LottoClient({ gameId }: { gameId: string }) {
         open={importModal.open}
         onClose={closeImportModal}
         ariaLabelledBy="lotto-import-title"
-        dialogClassName={`${DIALOG_CLASSES} max-w-3xl`}
+        size="3xl"
       >
         <ModalHeader id="lotto-import-title" title="Import historic results" onClose={closeImportModal} />
-        <form onSubmit={submitImport} className="flex min-h-0 flex-1 flex-col">
+        <form onSubmit={submitImport} className={DIALOG_FORM_CLASSES}>
           <div className={`${DIALOG_BODY_CLASSES} flex flex-col gap-4`}>
             {importFormError && <ErrorAlert>{importFormError}</ErrorAlert>}
             {importSummary && (

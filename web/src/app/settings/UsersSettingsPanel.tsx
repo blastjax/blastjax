@@ -1,11 +1,12 @@
 "use client";
 
 import { confirmDialog } from "@/components/ConfirmDialog";
-import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
 import {
   createAppUser,
   deleteAppUser,
-  getAppUsers,
+  errorMessage,
   updateAppUser,
   updateAppUserAccess,
   verifyAppUserPassword,
@@ -13,15 +14,17 @@ import {
 } from "@/lib/api";
 import { formatDate } from "@/lib/dateFormat";
 import { RESTRICTABLE_PAGES } from "@/lib/nav";
+import { queries } from "@/lib/queries";
 import { ErrorAlert } from "@/components/ErrorAlert";
-import { LoadingBlocks } from "@/components/FinanceUI";
+import { Checkbox, Field, FormSection, LoadingBlocks, Panel } from "@/components/FinanceUI";
+import { useFlashMessage } from "@/lib/useFlashMessage";
 import {
   ACTION_BUTTON_CLASSES,
-  CARD_CLASSES,
   DASHED_EMPTY_CLASSES,
   DELETE_BUTTON_CLASSES,
   EDIT_BUTTON_CLASSES,
   INPUT_CLASSES,
+  LIST_CLASSES,
   PRIMARY_BUTTON_CLASSES,
   SECONDARY_BUTTON_CLASSES,
 } from "@/lib/ui";
@@ -34,13 +37,7 @@ function emptyEdit(username: string): EditState {
   return { username, password: "", confirm: "" };
 }
 
-function AccessControls({
-  user,
-  onSaved,
-}: {
-  user: AppUserRow;
-  onSaved: (u: AppUserRow) => void;
-}) {
+function AccessControls({ user }: { user: AppUserRow }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const allowed = new Set(user.allowed_pages ?? RESTRICTABLE_PAGES.map((p) => p.href));
@@ -49,10 +46,9 @@ function AccessControls({
     setSaving(true);
     setError(null);
     try {
-      const res = await updateAppUserAccess(user.id, next);
-      onSaved(res.user);
+      await updateAppUserAccess(user.id, next);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Failed to update access.");
+      setError(errorMessage(e, "Failed to update access."));
     } finally {
       setSaving(false);
     }
@@ -66,46 +62,37 @@ function AccessControls({
   }
 
   return (
-    <div className="mt-3 rounded-lg border border-line bg-zinc-50/60 px-3 py-3 dark:bg-zinc-900/30">
-      <label className="flex items-center gap-2 text-xs font-medium text-ink">
-        <input
-          type="checkbox"
-          checked={user.is_superuser}
-          disabled={saving}
-          onChange={(e) =>
-            save({ is_superuser: e.target.checked, allowed_pages: user.allowed_pages })
-          }
-        />
-        Superuser (sees every page)
-      </label>
+    <div className="mt-3 flex flex-col gap-2.5 rounded-lg border border-line bg-surface-3 p-3">
+      <Checkbox
+        label="Superuser (sees every page)"
+        className="font-medium text-ink"
+        checked={user.is_superuser}
+        disabled={saving}
+        onChange={(e) => save({ is_superuser: e.target.checked, allowed_pages: user.allowed_pages })}
+      />
       {!user.is_superuser && (
-        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1.5">
+        <div className="flex flex-wrap gap-x-5 gap-y-2">
           {RESTRICTABLE_PAGES.map((p) => (
-            <label key={p.href} className="flex items-center gap-1.5 text-xs text-ink-2">
-              <input
-                type="checkbox"
-                checked={allowed.has(p.href)}
-                disabled={saving}
-                onChange={() => togglePage(p.href)}
-              />
-              {p.label}
-            </label>
+            <Checkbox
+              key={p.href}
+              label={p.label}
+              checked={allowed.has(p.href)}
+              disabled={saving}
+              onChange={() => togglePage(p.href)}
+            />
           ))}
         </div>
       )}
-      {error && (
-        <ErrorAlert className="mt-2">
-          {error}
-        </ErrorAlert>
-      )}
+      {error && <ErrorAlert>{error}</ErrorAlert>}
     </div>
   );
 }
 
 export function UsersSettingsPanel() {
-  const [users, setUsers] = useState<AppUserRow[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const usersQuery = useQuery(queries.appUsers());
+  const users = usersQuery.data?.users ?? [];
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const loadError = usersQuery.error ? errorMessage(usersQuery.error, "Failed to load users.") : deleteError;
 
   const [newUser, setNewUser] = useState<EditState>(emptyEdit(""));
   const [addError, setAddError] = useState<string | null>(null);
@@ -116,34 +103,13 @@ export function UsersSettingsPanel() {
   const [editError, setEditError] = useState<string | null>(null);
   const [savingEdit, setSavingEdit] = useState(false);
 
-  const [infoMsg, setInfoMsg] = useState<string | null>(null);
+  const [infoMsg, setInfoMsg] = useFlashMessage();
 
   const [verifyUsername, setVerifyUsername] = useState("");
   const [verifyPassword, setVerifyPassword] = useState("");
   const [verifying, setVerifying] = useState(false);
   const [verifyResult, setVerifyResult] = useState<"valid" | "invalid" | null>(null);
   const [verifyError, setVerifyError] = useState<string | null>(null);
-
-  const load = () => {
-    setLoading(true);
-    setLoadError(null);
-    getAppUsers()
-      .then((res) => setUsers(res.users))
-      .catch((e: unknown) =>
-        setLoadError(e instanceof Error ? e.message : "Failed to load users."),
-      )
-      .finally(() => setLoading(false));
-  };
-
-  useEffect(() => {
-    load();
-  }, []);
-
-  useEffect(() => {
-    if (!infoMsg) return;
-    const t = window.setTimeout(() => setInfoMsg(null), 2800);
-    return () => window.clearTimeout(t);
-  }, [infoMsg]);
 
   async function handleAdd() {
     const username = newUser.username.trim();
@@ -165,9 +131,8 @@ export function UsersSettingsPanel() {
       await createAppUser({ username, password: newUser.password });
       setNewUser(emptyEdit(""));
       setInfoMsg(`Added "${username}".`);
-      load();
     } catch (e: unknown) {
-      setAddError(e instanceof Error ? e.message : "Failed to add user.");
+      setAddError(errorMessage(e, "Failed to add user."));
     } finally {
       setAdding(false);
     }
@@ -210,9 +175,8 @@ export function UsersSettingsPanel() {
       });
       setEditingId(null);
       setInfoMsg("User updated.");
-      load();
     } catch (e: unknown) {
-      setEditError(e instanceof Error ? e.message : "Failed to update user.");
+      setEditError(errorMessage(e, "Failed to update user."));
     } finally {
       setSavingEdit(false);
     }
@@ -223,9 +187,8 @@ export function UsersSettingsPanel() {
     try {
       await deleteAppUser(user.id);
       setInfoMsg(`Deleted "${user.username}".`);
-      load();
     } catch (e: unknown) {
-      setLoadError(e instanceof Error ? e.message : "Failed to delete user.");
+      setDeleteError(errorMessage(e, "Failed to delete user."));
     }
   }
 
@@ -243,76 +206,57 @@ export function UsersSettingsPanel() {
       const res = await verifyAppUserPassword(username, verifyPassword);
       setVerifyResult(res.valid ? "valid" : "invalid");
     } catch (e: unknown) {
-      setVerifyError(e instanceof Error ? e.message : "Failed to check password.");
+      setVerifyError(errorMessage(e, "Failed to check password."));
     } finally {
       setVerifying(false);
     }
   }
 
   return (
-    <section className={CARD_CLASSES}>
-      <h2 className="text-lg font-medium text-ink">Users</h2>
-      <p className="mt-1 text-sm text-ink-2">
-        Add or manage named users and their passwords. Each user&apos;s
-        username and password can log in to the app once they&apos;re added
-        here — the first user you add turns login on.
-      </p>
-
-      <div className="mt-6">
-        {loading ? (
+    <Panel
+      title="Users"
+      subtitle="Add or manage named users and their passwords. Each user's username and password can log in to the app once they're added here — the first user you add turns login on."
+    >
+      <div className="flex flex-col gap-6">
+        {usersQuery.isPending ? (
           <LoadingBlocks label="Loading users…" rows={0} />
         ) : loadError ? (
           <ErrorAlert>{loadError}</ErrorAlert>
         ) : users.length === 0 ? (
           <div className={DASHED_EMPTY_CLASSES}>No users yet.</div>
         ) : (
-          <ul className="divide-y divide-zinc-200 rounded-lg border border-line dark:divide-zinc-900">
+          <ul className={LIST_CLASSES}>
             {users.map((user) => (
               <li key={user.id} className="p-4">
                 {editingId === user.id ? (
-                  <div className="flex flex-col gap-3">
-                    <div className="flex flex-col gap-1">
-                      <label className="text-xs font-medium text-ink-2">
-                        Username
-                      </label>
+                  <div className="flex flex-col gap-4">
+                    <Field label="Username">
                       <input
                         type="text"
                         className={INPUT_CLASSES}
                         value={editState.username}
-                        onChange={(e) =>
-                          setEditState((s) => ({ ...s, username: e.target.value }))
-                        }
+                        onChange={(e) => setEditState((s) => ({ ...s, username: e.target.value }))}
                       />
-                    </div>
-                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                      <div className="flex flex-col gap-1">
-                        <label className="text-xs font-medium text-ink-2">
-                          New password (optional)
-                        </label>
+                    </Field>
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                      <Field label="New password" hint="Optional">
                         <input
                           type="password"
                           className={INPUT_CLASSES}
                           value={editState.password}
-                          onChange={(e) =>
-                            setEditState((s) => ({ ...s, password: e.target.value }))
-                          }
+                          onChange={(e) => setEditState((s) => ({ ...s, password: e.target.value }))}
                           autoComplete="new-password"
                         />
-                      </div>
-                      <div className="flex flex-col gap-1">
-                        <label className="text-xs font-medium text-ink-2">
-                          Confirm new password
-                        </label>
+                      </Field>
+                      <Field label="Confirm new password">
                         <input
                           type="password"
                           className={INPUT_CLASSES}
                           value={editState.confirm}
-                          onChange={(e) =>
-                            setEditState((s) => ({ ...s, confirm: e.target.value }))
-                          }
+                          onChange={(e) => setEditState((s) => ({ ...s, confirm: e.target.value }))}
                           autoComplete="new-password"
                         />
-                      </div>
+                      </Field>
                     </div>
                     {editError && <ErrorAlert>{editError}</ErrorAlert>}
                     <div className="flex flex-wrap items-center gap-2">
@@ -324,11 +268,7 @@ export function UsersSettingsPanel() {
                       >
                         {savingEdit ? "Saving…" : "Save"}
                       </button>
-                      <button
-                        type="button"
-                        className={SECONDARY_BUTTON_CLASSES}
-                        onClick={cancelEdit}
-                      >
+                      <button type="button" className={SECONDARY_BUTTON_CLASSES} onClick={cancelEdit}>
                         Cancel
                       </button>
                     </div>
@@ -336,163 +276,116 @@ export function UsersSettingsPanel() {
                 ) : (
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
-                      <p className="font-medium text-ink">
-                        {user.username}
-                      </p>
-                      <p className="text-xs text-ink-3">
-                        Added {formatDate(user.created_at)}
-                      </p>
+                      <p className="font-medium text-ink">{user.username}</p>
+                      <p className="text-xs text-ink-3">Added {formatDate(user.created_at)}</p>
                     </div>
                     <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        className={EDIT_BUTTON_CLASSES}
-                        onClick={() => startEdit(user)}
-                      >
+                      <button type="button" className={EDIT_BUTTON_CLASSES} onClick={() => startEdit(user)}>
                         Edit
                       </button>
-                      <button
-                        type="button"
-                        className={DELETE_BUTTON_CLASSES}
-                        onClick={() => handleDelete(user)}
-                      >
+                      <button type="button" className={DELETE_BUTTON_CLASSES} onClick={() => handleDelete(user)}>
                         Delete
                       </button>
                     </div>
                   </div>
                 )}
-                <AccessControls
-                  user={user}
-                  onSaved={(updated) =>
-                    setUsers((rows) => rows.map((r) => (r.id === updated.id ? updated : r)))
-                  }
-                />
+                <AccessControls user={user} />
               </li>
             ))}
           </ul>
         )}
+
+        <FormSection
+          title="Verify a password"
+          description="Checks a username/password pair against what's stored. Doesn't sign anyone in."
+        >
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <Field label="Username">
+              <input
+                type="text"
+                className={INPUT_CLASSES}
+                value={verifyUsername}
+                onChange={(e) => {
+                  setVerifyUsername(e.target.value);
+                  setVerifyResult(null);
+                }}
+                autoComplete="off"
+              />
+            </Field>
+            <Field label="Password">
+              <input
+                type="password"
+                className={INPUT_CLASSES}
+                value={verifyPassword}
+                onChange={(e) => {
+                  setVerifyPassword(e.target.value);
+                  setVerifyResult(null);
+                }}
+                autoComplete="off"
+              />
+            </Field>
+          </div>
+          {verifyError && <ErrorAlert>{verifyError}</ErrorAlert>}
+          <div className="flex flex-wrap items-center gap-3">
+            <button type="button" className={ACTION_BUTTON_CLASSES} disabled={verifying} onClick={handleVerify}>
+              {verifying ? "Checking…" : "Check password"}
+            </button>
+            {verifyResult === "valid" && (
+              <span role="status" className="text-sm font-medium text-success-text">
+                ✓ Matches the stored password.
+              </span>
+            )}
+            {verifyResult === "invalid" && (
+              <span role="status" className="text-sm font-medium text-danger-text">
+                ✗ Doesn&apos;t match.
+              </span>
+            )}
+          </div>
+        </FormSection>
+
+        <FormSection title="Add a user">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <Field label="Username">
+              <input
+                type="text"
+                className={INPUT_CLASSES}
+                value={newUser.username}
+                onChange={(e) => setNewUser((s) => ({ ...s, username: e.target.value }))}
+                autoComplete="off"
+              />
+            </Field>
+            <Field label="Password">
+              <input
+                type="password"
+                className={INPUT_CLASSES}
+                value={newUser.password}
+                onChange={(e) => setNewUser((s) => ({ ...s, password: e.target.value }))}
+                autoComplete="new-password"
+              />
+            </Field>
+            <Field label="Confirm password">
+              <input
+                type="password"
+                className={INPUT_CLASSES}
+                value={newUser.confirm}
+                onChange={(e) => setNewUser((s) => ({ ...s, confirm: e.target.value }))}
+                autoComplete="new-password"
+              />
+            </Field>
+          </div>
+          {addError && <ErrorAlert>{addError}</ErrorAlert>}
+          <div className="flex flex-wrap items-center gap-3">
+            <button type="button" className={PRIMARY_BUTTON_CLASSES} disabled={adding} onClick={handleAdd}>
+              {adding ? "Adding…" : "Add user"}
+            </button>
+            {infoMsg && (
+              <span role="status" className="text-sm text-success-text">
+                {infoMsg}
+              </span>
+            )}
+          </div>
+        </FormSection>
       </div>
-
-      <fieldset className="mt-8 rounded-lg border border-line bg-zinc-50/80 px-4 py-4 dark:bg-zinc-900/40">
-        <legend className="px-1 text-sm font-medium text-ink">
-          Verify a password
-        </legend>
-        <p className="mt-1 text-xs text-ink-2">
-          Checks a username/password pair against what&apos;s stored. Doesn&apos;t sign
-          anyone in.
-        </p>
-        <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <div className="flex flex-col gap-1">
-            <label className="text-xs font-medium text-ink-2">
-              Username
-            </label>
-            <input
-              type="text"
-              className={INPUT_CLASSES}
-              value={verifyUsername}
-              onChange={(e) => {
-                setVerifyUsername(e.target.value);
-                setVerifyResult(null);
-              }}
-              autoComplete="off"
-            />
-          </div>
-          <div className="flex flex-col gap-1">
-            <label className="text-xs font-medium text-ink-2">
-              Password
-            </label>
-            <input
-              type="password"
-              className={INPUT_CLASSES}
-              value={verifyPassword}
-              onChange={(e) => {
-                setVerifyPassword(e.target.value);
-                setVerifyResult(null);
-              }}
-              autoComplete="off"
-            />
-          </div>
-        </div>
-        {verifyError && <ErrorAlert className="mt-3">{verifyError}</ErrorAlert>}
-        <div className="mt-4 flex flex-wrap items-center gap-3">
-          <button
-            type="button"
-            className={ACTION_BUTTON_CLASSES}
-            disabled={verifying}
-            onClick={handleVerify}
-          >
-            {verifying ? "Checking…" : "Check password"}
-          </button>
-          {verifyResult === "valid" && (
-            <span className="text-sm font-medium text-emerald-700 dark:text-emerald-400">
-              ✓ Matches the stored password.
-            </span>
-          )}
-          {verifyResult === "invalid" && (
-            <span className="text-sm font-medium text-red-700 dark:text-red-400">
-              ✗ Doesn&apos;t match.
-            </span>
-          )}
-        </div>
-      </fieldset>
-
-      <fieldset className="mt-8 rounded-lg border border-line bg-zinc-50/80 px-4 py-4 dark:bg-zinc-900/40">
-        <legend className="px-1 text-sm font-medium text-ink">
-          Add a user
-        </legend>
-        <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <div className="flex flex-col gap-1">
-            <label className="text-xs font-medium text-ink-2">
-              Username
-            </label>
-            <input
-              type="text"
-              className={INPUT_CLASSES}
-              value={newUser.username}
-              onChange={(e) => setNewUser((s) => ({ ...s, username: e.target.value }))}
-              autoComplete="off"
-            />
-          </div>
-          <div className="flex flex-col gap-1">
-            <label className="text-xs font-medium text-ink-2">
-              Password
-            </label>
-            <input
-              type="password"
-              className={INPUT_CLASSES}
-              value={newUser.password}
-              onChange={(e) => setNewUser((s) => ({ ...s, password: e.target.value }))}
-              autoComplete="new-password"
-            />
-          </div>
-          <div className="flex flex-col gap-1">
-            <label className="text-xs font-medium text-ink-2">
-              Confirm password
-            </label>
-            <input
-              type="password"
-              className={INPUT_CLASSES}
-              value={newUser.confirm}
-              onChange={(e) => setNewUser((s) => ({ ...s, confirm: e.target.value }))}
-              autoComplete="new-password"
-            />
-          </div>
-        </div>
-        {addError && <ErrorAlert className="mt-3">{addError}</ErrorAlert>}
-        <div className="mt-4 flex flex-wrap items-center gap-3">
-          <button
-            type="button"
-            className={PRIMARY_BUTTON_CLASSES}
-            disabled={adding}
-            onClick={handleAdd}
-          >
-            {adding ? "Adding…" : "Add user"}
-          </button>
-          {infoMsg && (
-            <span className="text-sm text-emerald-700 dark:text-emerald-400">{infoMsg}</span>
-          )}
-        </div>
-      </fieldset>
-    </section>
+    </Panel>
   );
 }

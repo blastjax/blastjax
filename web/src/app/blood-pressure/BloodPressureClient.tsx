@@ -1,7 +1,8 @@
 "use client";
 
+import { useQuery } from "@tanstack/react-query";
 import { confirmDialog } from "@/components/ConfirmDialog";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   CartesianGrid,
   Legend,
@@ -16,7 +17,6 @@ import {
 import { ChartZoomControls } from "@/components/ChartZoomControls";
 import {
   DIALOG_BODY_CLASSES,
-  DIALOG_CLASSES,
   DIALOG_FOOTER_CLASSES,
   EmptyState,
   Field,
@@ -24,10 +24,12 @@ import {
   LoadingBlocks,
   Metric,
   ModalHeader,
+  NumberInput,
   Panel,
   Pill,
   Segmented,
   StatStrip,
+  DIALOG_FORM_CLASSES,
 } from "@/components/FinanceUI";
 import { HeartPulseIcon, PlusIcon } from "@/components/Icons";
 import { Modal } from "@/components/Modal";
@@ -36,11 +38,12 @@ import { useTheme } from "@/components/ThemeProvider";
 import {
   createBloodPressure,
   deleteBloodPressure,
-  getBloodPressures,
   updateBloodPressure,
   type BloodPressureCreateBody,
   type BloodPressureRow,
+  errorMessage,
 } from "@/lib/api";
+import { queries } from "@/lib/queries";
 import { chartScrollMinWidth, xAxisTickInterval } from "@/lib/chartAxis";
 import { getChartTooltipStyle } from "@/lib/chartTooltipStyle";
 import { formatDateTime, formatMonthDayShort } from "@/lib/dateFormat";
@@ -152,8 +155,9 @@ const str = (v: number | null) => (v == null ? "" : String(v));
 const METRIC_OPTIONS = METRICS.map((m, i) => ({ value: i, label: m.tab }));
 
 export default function BloodPressureClient() {
-  const [rows, setRows] = useState<BloodPressureRow[]>([]);
-  const [loading, setLoading] = useState(true);
+  const readings = useQuery(queries.bloodPressures(2000));
+  const rows = useMemo(() => readings.data?.readings ?? [], [readings.data]);
+  const loading = readings.isPending;
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState(emptyForm);
@@ -166,25 +170,10 @@ export default function BloodPressureClient() {
   const tooltipStyle = useMemo(() => getChartTooltipStyle(theme), [theme]);
   const zoom = useChartZoom();
 
-  const load = useCallback(async () => {
-    setError(null);
-    try {
-      const r = await getBloodPressures(2000);
-      setRows(r.readings);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load readings");
-      setRows([]);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
+  const loadError = readings.error ? errorMessage(readings.error, "Failed to load readings") : null;
 
   const byDate = useMemo(
-    () => [...rows].sort((a, b) => a.created_at.localeCompare(b.created_at)),
+    () => [...rows].sort((a, b) => (a.created_at ?? "").localeCompare(b.created_at ?? "")),
     [rows],
   );
   const newestFirst = useMemo(() => [...byDate].reverse(), [byDate]);
@@ -257,20 +246,12 @@ export default function BloodPressureClient() {
     setSaving(true);
     setError(null);
     try {
-      const fresh =
-        editingId != null
-          ? await updateBloodPressure(editingId, body)
-          : await createBloodPressure(body);
-      setRows((rs) => {
-        const i = rs.findIndex((x) => x.id === fresh.reading.id);
-        if (i === -1) return [fresh.reading, ...rs];
-        const out = rs.slice();
-        out[i] = fresh.reading;
-        return out;
-      });
+      // The write refetches the readings before it returns.
+      if (editingId != null) await updateBloodPressure(editingId, body);
+      else await createBloodPressure(body);
       setModalOpen(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Save failed");
+      setError(errorMessage(err, "Save failed"));
     } finally {
       setSaving(false);
     }
@@ -282,9 +263,8 @@ export default function BloodPressureClient() {
     setError(null);
     try {
       await deleteBloodPressure(id);
-      setRows((rs) => rs.filter((r) => r.id !== id));
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Delete failed");
+      setError(errorMessage(e, "Delete failed"));
     } finally {
       setSaving(false);
     }
@@ -299,8 +279,7 @@ export default function BloodPressureClient() {
         </>
       }
     >
-      <input
-        type="number"
+      <NumberInput
         inputMode={f.step ? "decimal" : "numeric"}
         min={f.min}
         max={f.max}
@@ -308,7 +287,7 @@ export default function BloodPressureClient() {
         placeholder={f.placeholder}
         required={bpStarted && BP_FIELDS.includes(f)}
         autoFocus={f.key === "systolic"}
-        className={`${INPUT_CLASSES} w-full [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none`}
+        className="w-full"
         value={form[f.key]}
         onChange={(e) => setForm((prev) => ({ ...prev, [f.key]: e.target.value }))}
         disabled={saving}
@@ -331,16 +310,12 @@ export default function BloodPressureClient() {
         actions={addButton}
       />
 
-      {error && !modalOpen && (
-        <ErrorAlert>
-          {error}
-        </ErrorAlert>
-      )}
+      {(error ?? loadError) && !modalOpen && <ErrorAlert>{error ?? loadError}</ErrorAlert>}
 
       {loading ? (
         <LoadingBlocks label="Loading readings…" />
       ) : rows.length === 0 ? (
-        !error && (
+        !(error ?? loadError) && (
           <EmptyState icon={<HeartPulseIcon className="size-6" />} title="No readings yet" action={addButton}>
             Log your blood pressure, pulse, SpO2, temperature or weight to see how they trend over time.
           </EmptyState>
@@ -530,7 +505,7 @@ export default function BloodPressureClient() {
         open={modalOpen}
         onClose={closeModal}
         ariaLabelledBy="bp-form-title"
-        dialogClassName={`${DIALOG_CLASSES} max-w-lg`}
+        size="lg"
       >
         <ModalHeader
           id="bp-form-title"
@@ -538,7 +513,7 @@ export default function BloodPressureClient() {
           subtitle="Log whatever you measured — every group is optional."
           onClose={closeModal}
         />
-        <form onSubmit={submit} className="flex min-h-0 flex-1 flex-col">
+        <form onSubmit={submit} className={DIALOG_FORM_CLASSES}>
           <div className={`${DIALOG_BODY_CLASSES} flex flex-col gap-5`}>
             {error && (
               <ErrorAlert>

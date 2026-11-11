@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { CalendarMonth, type DayState } from "@/components/CalendarMonth";
 import { PickerField } from "@/components/PickerField";
-import { parseDateOnlyLocal, toIsoDateLocal } from "@/lib/dateFormat";
+import { parseDateOnlyLocal, toIsoDateLocal, monthOf } from "@/lib/dateFormat";
 
 export type DatePickerFieldProps = {
   value: string;
@@ -23,8 +23,6 @@ export type DatePickerFieldProps = {
 };
 
 const DAY_LABEL = new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" });
-
-const monthOf = (iso: string) => ({ y: Number(iso.slice(0, 4)), m: Number(iso.slice(5, 7)) });
 
 export function DatePickerField({
   value,
@@ -77,7 +75,7 @@ export function DatePickerField({
       note={
         highlightLabel && (
           <span className="flex items-center gap-2 text-ink-3">
-            <span className="h-2.5 w-5 rounded-full bg-indigo-500/15 dark:bg-indigo-400/15" />
+            <span className="h-2.5 w-5 rounded-full bg-brand/15" />
             {highlightLabel}
           </span>
         )

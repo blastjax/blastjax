@@ -2,7 +2,7 @@
 
 import type { Dispatch, SetStateAction } from "react";
 import { AmountInput } from "@/components/AmountInput";
-import { Field } from "@/components/FinanceUI";
+import { Field, NumberInput } from "@/components/FinanceUI";
 import { MonthPickerField } from "@/components/MonthPickerField";
 import { INPUT_CLASSES } from "@/lib/ui";
 
@@ -43,22 +43,20 @@ export function InstallmentFieldGrid({
         />
       </Field>
       <Field label="Number of payments">
-        <input
+        <NumberInput
           required
-          type="number"
           min={1}
-          className={INPUT_CLASSES}
+          inputMode="numeric"
           value={form.installment_total}
           onChange={(e) => setForm((f) => ({ ...f, installment_total: e.target.value }))}
           disabled={saving}
         />
       </Field>
       <Field label="Next payment #" hint="1 for a brand-new plan">
-        <input
+        <NumberInput
           required
-          type="number"
           min={1}
-          className={INPUT_CLASSES}
+          inputMode="numeric"
           value={form.installment_current}
           onChange={(e) => setForm((f) => ({ ...f, installment_current: e.target.value }))}
           disabled={saving}

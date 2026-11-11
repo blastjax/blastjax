@@ -1,15 +1,15 @@
 "use client";
 
+import { useQuery } from "@tanstack/react-query";
 import { confirmDialog } from "@/components/ConfirmDialog";
 import { AmountInput } from "@/components/AmountInput";
 import { DatePickerField } from "@/components/DatePickerField";
 import { PageHeader } from "@/components/PageHeader";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Modal } from "@/components/Modal";
 import {
   DANGER_TEXT_BUTTON_CLASSES,
   DIALOG_BODY_CLASSES,
-  DIALOG_CLASSES,
   DIALOG_FOOTER_CLASSES,
   EmptyState,
   Field,
@@ -18,6 +18,7 @@ import {
   ModalHeader,
   Panel,
   StatStrip,
+  DIALOG_FORM_CLASSES,
 } from "@/components/FinanceUI";
 import { CheckIcon, HomeIcon, PlusIcon } from "@/components/Icons";
 import {
@@ -25,17 +26,18 @@ import {
   createHousePaymentEntry,
   deleteHousePayment,
   deleteHousePaymentEntry,
-  getHousePayment,
-  getHousePayments,
   updateHousePayment,
   updateHousePaymentEntry,
   type HousePaymentDetailResponse,
   type HousePaymentEntry,
   type HousePaymentRow,
+  errorMessage,
 } from "@/lib/api";
+import { queries } from "@/lib/queries";
+import { getQueryClient } from "@/lib/queryClient";
 import { formatAmountNumber, parseFormNumber } from "@/lib/parseFormNumber";
 import { formatDate as fmtDate, toIsoDateLocal } from "@/lib/dateFormat";
-import { fmtAmountOrDash, fmtCount } from "@/lib/formatNumber";
+import { fmtAmountOrDash, fmtCount, plural } from "@/lib/formatNumber";
 import { ErrorAlert } from "@/components/ErrorAlert";
 import {
   INPUT_CLASSES,
@@ -61,16 +63,22 @@ function toEntryBody(f: EntryForm) {
   return { paid_on, amount };
 }
 
-const plural = (n: number, word: string) => `${fmtCount(n)} ${word}${n === 1 ? "" : "s"}`;
-
 const ENTRY_GRID_CLASSES =
   "grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end";
 
 export default function HousePaymentsClient() {
-  const [rows, setRows] = useState<HousePaymentRow[]>([]);
-  const [loading, setLoading] = useState(true);
+  const plans = useQuery(queries.housePayments());
+  const rows = useMemo(() => plans.data?.house_payments ?? [], [plans.data]);
+  const loading = plans.isPending;
+  // A saved plan shows at once; the save's own refetch then confirms it.
+  const setRows = useCallback(
+    (update: (rs: HousePaymentRow[]) => HousePaymentRow[]) =>
+      getQueryClient().setQueryData(queries.housePayments().queryKey, (d) => d && { ...d, house_payments: update(d.house_payments) }),
+    [],
+  );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const pageError = error ?? (plans.error ? errorMessage(plans.error, "Failed to load") : null);
 
   const [planForm, setPlanForm] = useState<PlanForm>(emptyPlanForm);
   const [editingPlanId, setEditingPlanId] = useState<string | null>(null);
@@ -89,19 +97,6 @@ export default function HousePaymentsClient() {
   const [entryForm, setEntryForm] = useState<EntryForm>(emptyEntryForm());
   const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
   const [savingEntry, setSavingEntry] = useState(false);
-
-  const load = useCallback(async () => {
-    setError(null);
-    try {
-      const r = await getHousePayments(500);
-      setRows(r.house_payments);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load");
-      setRows([]);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
 
   const summary = useMemo(
     () => ({
@@ -129,15 +124,11 @@ export default function HousePaymentsClient() {
       out[i] = row;
       return out;
     });
-  }, []);
+  }, [setRows]);
 
   const removeRow = useCallback((id: string) => {
     setRows((rs) => rs.filter((r) => r.id !== id));
-  }, []);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
+  }, [setRows]);
 
   const openNewPlan = () => {
     setError(null);
@@ -167,10 +158,10 @@ export default function HousePaymentsClient() {
     setEditingEntryId(null);
     setError(null);
     try {
-      const d = await getHousePayment(id);
+      const d = await getQueryClient().fetchQuery(queries.housePayment(id));
       setDetail(d);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load entries");
+      setError(errorMessage(e, "Failed to load entries"));
       setDetail(null);
       setEntriesModalId(null);
     } finally {
@@ -207,7 +198,7 @@ export default function HousePaymentsClient() {
       setEditingPlanId(null);
       setPlanForm(emptyPlanForm);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Save failed");
+      setError(errorMessage(err, "Save failed"));
     } finally {
       setSaving(false);
     }
@@ -230,7 +221,7 @@ export default function HousePaymentsClient() {
       closePlanModal();
       removeRow(id);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Delete failed");
+      setError(errorMessage(e, "Delete failed"));
     } finally {
       setSaving(false);
     }
@@ -250,7 +241,7 @@ export default function HousePaymentsClient() {
       setPayForm((f) => ({ ...f, amount: "" }));
       setLastAdded(`Added ${fmtMoney(body.amount)} to ${payPlan.name} for ${fmtDate(body.paid_on)}.`);
     } catch (err) {
-      setPayError(err instanceof Error ? err.message : "Save failed");
+      setPayError(errorMessage(err, "Save failed"));
     } finally {
       setPaying(false);
     }
@@ -266,7 +257,7 @@ export default function HousePaymentsClient() {
       applyDetail(fresh);
       cancelEntryEdit();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Save failed");
+      setError(errorMessage(err, "Save failed"));
     } finally {
       setSavingEntry(false);
     }
@@ -295,7 +286,7 @@ export default function HousePaymentsClient() {
       if (editingEntryId === entryId) cancelEntryEdit();
       applyDetail(fresh);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Delete failed");
+      setError(errorMessage(e, "Delete failed"));
     } finally {
       setSavingEntry(false);
     }
@@ -338,9 +329,9 @@ export default function HousePaymentsClient() {
         }
       />
 
-      {error && !planModalOpen && entriesModalId == null && (
+      {pageError && !planModalOpen && entriesModalId == null && (
         <ErrorAlert>
-          {error}
+          {pageError}
         </ErrorAlert>
       )}
 
@@ -479,7 +470,7 @@ export default function HousePaymentsClient() {
         open={planModalOpen}
         onClose={closePlanModal}
         ariaLabelledBy="house-plan-title"
-        dialogClassName={`${DIALOG_CLASSES} max-w-md`}
+        size="md"
       >
         <ModalHeader
           id="house-plan-title"
@@ -487,7 +478,7 @@ export default function HousePaymentsClient() {
           subtitle="A property or loan you're paying toward."
           onClose={closePlanModal}
         />
-        <form onSubmit={submitPlan} className="flex min-h-0 flex-1 flex-col">
+        <form onSubmit={submitPlan} className={DIALOG_FORM_CLASSES}>
           <div className={`${DIALOG_BODY_CLASSES} grid gap-4`}>
             <Field label="Name">
               <input
@@ -540,7 +531,7 @@ export default function HousePaymentsClient() {
         open={entriesModalId != null}
         onClose={closeEntriesModal}
         ariaLabelledBy="house-entries-title"
-        dialogClassName={`${DIALOG_CLASSES} max-w-2xl`}
+        size="2xl"
       >
         <ModalHeader
           id="house-entries-title"

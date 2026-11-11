@@ -29,7 +29,6 @@ export function MonthPickerField({
       placeholder={placeholder}
       popoverLabel="Choose a month"
       width={320}
-      estimatedHeight={360}
       disabled={disabled}
       clearLabel={clearLabel}
       onClear={() => onChange("")}

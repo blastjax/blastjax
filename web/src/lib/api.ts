@@ -1,8 +1,18 @@
+import type { components } from "@/lib/api-schema";
 import { AUTH_UNAUTHORIZED_EVENT, clearSessionToken, getSessionToken } from "@/lib/auth";
+import { getQueryClient } from "@/lib/queryClient";
+
+// Shapes come from the API itself: npm run api:types regenerates api-schema.d.ts from openapi.json.
+type S = components["schemas"];
 
 export function dataApiBase(): string {
   const rawApi = process.env.NEXT_PUBLIC_API_URL?.trim();
   return rawApi && rawApi.length > 0 ? rawApi.replace(/\/$/, "") : "";
+}
+
+// What to show for something thrown: its own message when it is an Error.
+export function errorMessage(e: unknown, fallback: string): string {
+  return e instanceof Error ? e.message : fallback;
 }
 
 export async function apiFetch(
@@ -13,6 +23,13 @@ export async function apiFetch(
   const headers = new Headers(init?.headers);
   if (token) headers.set("Authorization", `Bearer ${token}`);
   const res = await fetch(input, { ...init, headers });
+  const method = (init?.method ?? "GET").toUpperCase();
+  if (res.ok && method !== "GET" && method !== "HEAD") {
+    // A write can change what any page shows (the API links cards, bills and the budget), so refetch what's on
+    // screen before the caller goes on: after `await saveSomething()` the page's data is already current.
+    // ponytail: refetches every visible query, not just the touched ones; key by resource if traffic matters.
+    await getQueryClient().invalidateQueries();
+  }
   if (res.status === 401) {
     clearSessionToken();
     if (typeof window !== "undefined") {
@@ -88,52 +105,9 @@ async function sendJson<T>(
   return j<T>(await apiFetch(`${dataApiBase()}${path}`, init));
 }
 
-export type PayslipRow = {
-  id: string;
-  company: string;
-  total: number | null;
-  commission: number | null;
-  reimbursement: number | null;
-  medical_reimbursement: number | null;
-  others: number | null;
-  mp2: number | null;
-  allowances: number | null;
-  thirteenth_month: number | null;
-  basic_salary: number | null;
-  period_year: number | null;
-  period_month: number | null;
-  period_half: number | null;
-  notes: string | null;
-  withholding_tax: number | null;
-  sss_contribution: number | null;
-  philhealth: number | null;
-  pag_ibig: number | null;
-  bereavement_asst: number | null;
-  has_pdf?: boolean;
-  created_at: string;
-};
+export type PayslipRow = S["PayslipRow"];
 
-export type PayslipCreateBody = {
-  company: string;
-  total?: number | null;
-  commission?: number | null;
-  reimbursement?: number | null;
-  medical_reimbursement?: number | null;
-  others?: number | null;
-  mp2?: number | null;
-  allowances?: number | null;
-  thirteenth_month?: number | null;
-  basic_salary?: number | null;
-  period_year?: number | null;
-  period_month?: number | null;
-  period_half?: number | null;
-  notes?: string | null;
-  withholding_tax?: number | null;
-  sss_contribution?: number | null;
-  philhealth?: number | null;
-  pag_ibig?: number | null;
-  bereavement_asst?: number | null;
-};
+export type PayslipCreateBody = S["PayslipCreate"];
 
 export async function getPayslips(limit?: number, company?: string) {
   return getJson<{ payslips: PayslipRow[] }>("/api/payslip", { limit, company });
@@ -170,7 +144,7 @@ export async function uploadPayslipPdf(id: string, file: File) {
   return uploadPdf(`/api/payslip/${id}/pdf`, file);
 }
 
-export type PayslipPdfFields = Omit<PayslipRow, "id" | "company" | "has_pdf" | "created_at">;
+export type PayslipPdfFields = S["PayslipPdfFields"];
 
 // Reads a Sophos payslip PDF (the layout used since August 2025) without saving anything.
 export async function readPayslipPdf(file: File) {
@@ -184,56 +158,15 @@ export async function deletePayslipPdf(id: string) {
   );
 }
 
-export type InstallmentRow = {
-  id: string;
-  name: string;
-  installment_current: number;
-  installment_total: number;
-  principal: number;
-  interest: number | null;
-  payment_total: number;
-  start_date: string;
-  finish_date: string;
-  remaining: number;
-  original_total: number;
-  credit_card_id: string | null;
-  created_at: string;
-  due_payment?: number;
-  due_this_month?: boolean; // on a card's installments only
-};
+export type InstallmentRow = S["InstallmentRow"];
 
-export type InstallmentLineRow = {
-  id: string;
-  seq: number;
-  principal: number;
-  interest: number | null;
-  payment_total: number;
-};
+export type InstallmentLineRow = S["InstallmentLineRow"];
 
-export type InstallmentDetailResponse = {
-  installment: InstallmentRow;
-  lines: InstallmentLineRow[];
-};
+export type InstallmentDetailResponse = S["InstallmentDetail"];
 
-export type InstallmentSummary = {
-  sum_original_total: number;
-  sum_remaining: number;
-  due_this_month: number;
-};
+export type InstallmentSummary = S["InstallmentSummary"];
 
-export type InstallmentCreateBody = {
-  name: string;
-  installment_current: number;
-  installment_total: number;
-  principal: number;
-  interest?: number | null;
-  payment_total: number;
-  start_date: string;
-  finish_date: string;
-  remaining?: number | null;
-  original_total?: number | null;
-  credit_card_id?: string | null;
-};
+export type InstallmentCreateBody = S["InstallmentCreate"];
 
 export async function getInstallments(limit?: number) {
   return getJson<{ installments: InstallmentRow[]; summary: InstallmentSummary }>(
@@ -291,43 +224,17 @@ export async function reorderInstallmentLines(installmentId: string, lineIds: st
   );
 }
 
-export type HousePaymentRow = {
-  id: string;
-  name: string;
-  notes: string | null;
-  created_at: string;
-  entry_count: number;
-  total_paid: number;
-  last_paid_on: string | null;
-};
+export type HousePaymentRow = S["HousePaymentRow"];
 
-export type HousePaymentEntry = {
-  id: string;
-  paid_on: string;
-  amount: number;
-  created_at: string;
-};
+export type HousePaymentEntry = S["HousePaymentEntry"];
 
-export type HousePaymentDetailResponse = {
-  house_payment: HousePaymentRow;
-  entries: HousePaymentEntry[];
-};
+export type HousePaymentDetailResponse = S["HousePaymentDetail"];
 
-export type HousePaymentSummary = {
-  sum_total_paid: number;
-  total_entries: number;
-  plan_count: number;
-};
+export type HousePaymentSummary = S["HousePaymentSummary"];
 
-export type HousePaymentCreateBody = {
-  name: string;
-  notes?: string | null;
-};
+export type HousePaymentCreateBody = S["HousePaymentCreate"];
 
-export type HousePaymentEntryBody = {
-  paid_on: string;
-  amount: number;
-};
+export type HousePaymentEntryBody = S["HousePaymentEntryCreate"];
 
 export async function getHousePayments(limit?: number) {
   return getJson<{ house_payments: HousePaymentRow[]; summary: HousePaymentSummary }>(
@@ -652,27 +559,9 @@ export async function generateMamboPuzzle(
   };
 }
 
-export type BloodPressureRow = {
-  id: string;
-  systolic: number | null;
-  diastolic: number | null;
-  pulse: number | null;
-  spo2: number | null;
-  temperature: number | null;
-  weight: number | null;
-  notes: string | null;
-  created_at: string;
-};
+export type BloodPressureRow = S["BloodPressureRow"];
 
-export type BloodPressureCreateBody = {
-  systolic?: number | null;
-  diastolic?: number | null;
-  pulse?: number | null;
-  spo2?: number | null;
-  temperature?: number | null;
-  weight?: number | null;
-  notes?: string | null;
-};
+export type BloodPressureCreateBody = S["BloodPressureCreate"];
 
 export async function getBloodPressures(limit?: number) {
   return getJson<{ readings: BloodPressureRow[] }>("/api/blood-pressure", {
@@ -703,23 +592,9 @@ export async function deleteBloodPressure(id: string) {
   return sendJson<{ ok: boolean }>("DELETE", `/api/blood-pressure/${id}`);
 }
 
-export type FixedExpenseRow = {
-  id: string;
-  period_half: number;
-  period_year: number;
-  period_month: number;
-  amount: number;
-  description: string | null;
-  created_at: string;
-};
+export type FixedExpenseRow = S["FixedExpenseRow"];
 
-export type FixedExpenseCreateBody = {
-  period_half: 1 | 2;
-  amount: number;
-  description?: string | null;
-  period_year: number;
-  period_month: number;
-};
+export type FixedExpenseCreateBody = S["FixedExpenseCreate"];
 
 export async function getFixedExpenses(
   periodHalf?: 1 | 2,
@@ -745,40 +620,11 @@ export async function deleteFixedExpense(id: string) {
   return sendJson<{ ok: boolean }>("DELETE", `/api/fixed-expense/${id}`);
 }
 
-export type MonthlyExpenseRow = {
-  id: string;
-  name: string;
-  description: string | null;
-  amount: number;
-  period_half: number;
-  period_year: number;
-  period_month: number;
-  is_recurring: boolean;
-  expense_date: string | null;
-  skipped_months: string[]; // "YYYY-MM" pay-period months it isn't deducted in
-  // "YYYY-MM" pay-period month -> the card it's on from then until the next entry, or null for none from then.
-  charged_months: Record<string, string | null>;
-  bill_category_id: string | null; // a month's real bills here replace `amount` and the date
-  house_payment_id: string | null; // where a month marked paid gets logged
-  created_at: string;
-};
+export type MonthlyExpenseRow = S["MonthlyExpenseRow"];
 
-export type MonthlyExpenseCreateBody = {
-  name: string;
-  description?: string | null;
-  amount: number;
-  period_half: 1 | 2;
-  period_year: number;
-  period_month: number;
-  is_recurring?: boolean;
-  expense_date?: string | null;
-  skipped_months?: string[];
-  charged_months?: Record<string, string | null>;
-  bill_category_id?: string | null;
-  house_payment_id?: string | null;
-};
+export type MonthlyExpenseCreateBody = S["MonthlyExpenseCreate"];
 
-export type SearchResult = { label: string; section: string; href: string };
+export type SearchResult = S["SearchResult"];
 
 export async function searchRecords(q: string) {
   return getJson<{ results: SearchResult[] }>("/api/search", { q });
@@ -808,13 +654,7 @@ export async function deleteMonthlyExpense(id: string) {
   return sendJson<{ ok: boolean }>("DELETE", `/api/monthly-expense/${id}`);
 }
 
-export type CalendarDayOverrideRow = {
-  id: string;
-  day: string;
-  amount: number;
-  saved: number | null;
-  created_at: string;
-};
+export type CalendarDayOverrideRow = S["CalendarDayOverrideRow"];
 
 export async function getCalendarDayOverrides() {
   return getJson<{ overrides: CalendarDayOverrideRow[] }>("/api/calendar-day-override");
@@ -830,14 +670,7 @@ export async function bulkUpsertCalendarDayOverrides(
   );
 }
 
-export type PayPeriodStartOverrideRow = {
-  id: string;
-  period_year: number;
-  period_month: number;
-  period_half: 1 | 2;
-  start_date: string;
-  created_at: string;
-};
+export type PayPeriodStartOverrideRow = S["PayPeriodStartOverrideRow"];
 
 export async function getPayPeriodStartOverrides() {
   return getJson<{ overrides: PayPeriodStartOverrideRow[] }>("/api/pay-period-start-override");
@@ -856,31 +689,9 @@ export async function upsertPayPeriodStartOverride(body: {
   );
 }
 
-export type PayslipDefaultFormDto = {
-  period_year: string;
-  period_month: string;
-  total: string;
-  basic_salary: string;
-  commission: string;
-  reimbursement: string;
-  medical_reimbursement: string;
-  others: string;
-  mp2: string;
-  allowances: string;
-  thirteenth_month: string;
-  notes: string;
-  withholding_tax: string;
-  sss_contribution: string;
-  philhealth: string;
-  pag_ibig: string;
-  bereavement_asst: string;
-};
+export type PayslipDefaultFormDto = Omit<S["PayslipDefaultFormOut"], "period_half">;
 
-export type PayslipDefaultsBundleDto = {
-  formFirst: Record<string, unknown>;
-  formSecond: Record<string, unknown>;
-  settingsHalf: string;
-};
+export type PayslipDefaultsBundleDto = S["PayslipDefaultsBundle"];
 
 export async function getPayslipDefaults(company: string) {
   return getJson<PayslipDefaultsBundleDto>("/api/payslip-defaults", { company });
@@ -910,61 +721,18 @@ export async function deletePayPeriodStartOverride(
   );
 }
 
-export type CreditCardRow = {
-  id: string;
-  name: string;
-  credit_limit: number;
-  last_statement_balance: number;
-  current_balance: number;
-  available_limit: number;
-  minimum_due: number;
-  interest_rate: number;
-  statement_date: string | null;
-  due_date: string | null;
-  bill_category_id: string | null; // when set, the statement is that bill category's latest bill
-  monthly_dues: number;
-  statement_paid: boolean; // payments since the statement date cover it
-  created_at: string;
-};
+export type CreditCardRow = S["CreditCardSummaryRow"];
 
-export type CreditCardPaymentRow = {
-  id: string;
-  credit_card_id: string;
-  amount: number;
-  payment_date: string;
-  note: string | null;
-  created_at: string;
-};
+export type CreditCardPaymentRow = S["CreditCardPaymentRow"];
 
-export type CreditCardCreateBody = {
-  name: string;
-  credit_limit: number;
-  last_statement_balance: number;
-  minimum_due: number;
-  interest_rate: number;
-  statement_date?: string | null;
-  due_date?: string | null;
-  bill_category_id?: string | null;
-};
+export type CreditCardCreateBody = S["CreditCardCreate"];
 
-export type CreditCardPaymentCreateBody = {
-  amount: number;
-  payment_date: string;
-  note?: string | null;
-  // The pay period it comes out of, filed by the payslip half funding it, like a fixed expense.
-  period_half: 1 | 2;
-  period_year: number;
-  period_month: number;
-};
+export type CreditCardPaymentCreateBody = S["CreditCardPaymentCreate"];
 
 // What a pay period's budget moved by, for the calendar's days to follow.
-export type BudgetChange = { period_year: number; period_month: number; period_half: number; delta: number };
+export type BudgetChange = S["BudgetChange"];
 
-export type CreditCardBundle = {
-  card: CreditCardRow;
-  installments: InstallmentRow[];
-  payments: CreditCardPaymentRow[];
-};
+export type CreditCardBundle = S["CreditCardBundle"];
 
 export async function getCreditCards() {
   return getJson<{ cards: CreditCardBundle[] }>("/api/credit-card");
@@ -1014,28 +782,13 @@ export async function deleteCreditCardPayment(paymentId: string) {
   );
 }
 
-export type LottoGame = {
-  id: string;
-  name: string;
-  jackpot_prize: number | null;
-  last_attempt_draw_date: string | null;
-  latest_result: {
-    draw_date: string;
-    numbers: number[];
-    winners: number;
-    best_hits: number[] | null;
-  } | null;
-};
+export type LottoGame = S["LottoGame"];
 
 export async function getLottoGames() {
   return getJson<{ games: LottoGame[] }>("/api/lotto/games");
 }
 
-export type LottoDrawResult = NonNullable<LottoGame["latest_result"]> & {
-  game_id: string;
-  jackpot_prize: number | null;
-  attempts: number[][];
-};
+export type LottoDrawResult = S["LottoDrawResult"];
 
 export async function getLottoCalendar(year: number, month: number) {
   return getJson<{ draws: LottoDrawResult[] }>("/api/lotto/calendar", { year, month });
@@ -1048,27 +801,11 @@ export function lottoGameSlug(name: string): string {
     .replace(/\s+/g, "");
 }
 
-export type LottoDrawRow = {
-  id: string;
-  draw_date: string;
-  numbers: number[];
-  jackpot_prize: number | null;
-  winners: number;
-  created_at: string;
-};
+export type LottoDrawRow = S["LottoDrawRow"];
 
-export type LottoAttemptRow = {
-  id: string;
-  draw_id: string;
-  ticket: number | null;
-  numbers: number[];
-  created_at: string;
-};
+export type LottoAttemptRow = S["LottoAttemptRow"];
 
-export type LottoDrawDetail = {
-  draw: LottoDrawRow;
-  attempts: LottoAttemptRow[];
-};
+export type LottoDrawDetail = S["LottoDrawDetail"];
 
 export async function getLottoDraws(gameId: string, limit?: number) {
   return getJson<{ draws: LottoDrawDetail[] }>("/api/lotto", { game_id: gameId, limit });
@@ -1214,12 +951,7 @@ export async function verifyAppUserPassword(username: string, password: string) 
   });
 }
 
-export type PasskeyRow = {
-  id: string;
-  name: string;
-  created_at: string;
-  last_used_at: string | null;
-};
+export type PasskeyRow = S["PasskeyRow"];
 
 export async function getPasskeys() {
   return getJson<{ passkeys: PasskeyRow[] }>("/api/auth/passkeys");
@@ -1262,12 +994,7 @@ export type CompanyColumnFlags = {
   show_bereavement_asst: boolean;
 };
 
-export type CompanyRow = CompanyColumnFlags & {
-  id: string;
-  name: string;
-  created_at: string;
-  sort_order: number;
-};
+export type CompanyRow = S["CompanyRow"];
 
 export const DEFAULT_COMPANY_COLUMN_FLAGS: CompanyColumnFlags = {
   show_total: true,
@@ -1336,222 +1063,31 @@ export async function reorderCompanies(ids: string[]) {
   return sendJson<{ companies: CompanyRow[] }>("PUT", "/api/companies/reorder", { ids });
 }
 
-export type TravelTripRow = {
-  id: string;
-  title: string;
-  start_date: string;
-  end_date: string;
-  notes: string | null;
-  created_at: string;
-};
+export type TravelTripRow = S["TravelTripRow"];
 
-export type TravelCityRow = {
-  id: string;
-  trip_id: string;
-  name: string;
-  start_date: string | null;
-  end_date: string | null;
-  sort_order: number;
-  created_at: string;
-};
+export type TravelCityRow = S["TravelCityRow"];
 
-export type TravelFlightRow = {
-  id: string;
-  trip_id: string;
-  flight_number: string;
-  flight_date: string | null;
-  arrival_date: string | null;
-  departure_time: string | null;
-  arrival_time: string | null;
-  from_location: string | null;
-  from_map_url: string | null;
-  from_city: string | null;
-  from_country: string | null;
-  to_location: string | null;
-  to_map_url: string | null;
-  to_city: string | null;
-  to_country: string | null;
-  notes: string | null;
-  title: string | null;
-  airline: string | null;
-  seat: string | null;
-  terminal: string | null;
-  gate: string | null;
-  baggage: string | null;
-  confirmation: string | null;
-  created_at: string;
-};
+export type TravelFlightRow = S["TravelFlightRow"];
 
-export type TravelTransportRow = {
-  id: string;
-  trip_id: string;
-  mode: "bus" | "train" | "ferry";
-  number: string | null;
-  travel_date: string | null;
-  arrival_date: string | null;
-  departure_time: string | null;
-  arrival_time: string | null;
-  from_location: string | null;
-  from_map_url: string | null;
-  from_city: string | null;
-  from_country: string | null;
-  to_location: string | null;
-  to_map_url: string | null;
-  to_city: string | null;
-  to_country: string | null;
-  notes: string | null;
-  title: string | null;
-  operator: string | null;
-  seat: string | null;
-  travel_class: string | null;
-  platform: string | null;
-  confirmation: string | null;
-  created_at: string;
-};
+export type TravelTransportRow = S["TravelTransportRow"];
 
-export type TravelItineraryRow = {
-  id: string;
-  trip_id: string;
-  item_date: string;
-  item_end_date: string | null;
-  start_time: string | null;
-  end_time: string | null;
-  activity: string;
-  location_name: string | null;
-  location_map_url: string | null;
-  notes: string | null;
-  booked_via: string | null;
-  price: string | null;
-  confirmation: string | null;
-  created_at: string;
-};
+export type TravelItineraryRow = S["TravelItineraryRow"];
 
-export type TravelAccommodationRow = {
-  id: string;
-  trip_id: string;
-  name: string;
-  checkin_date: string;
-  checkout_date: string;
-  checkin_time: string | null;
-  checkout_time: string | null;
-  nights: number;
-  days: number;
-  booking_confirmation: string | null;
-  instructions: string | null;
-  location_name: string | null;
-  location_map_url: string | null;
-  notes: string | null;
-  room: string | null;
-  guests: string | null;
-  phone: string | null;
-  booked_via: string | null;
-  price: string | null;
-  paid_price: string | null;
-  created_at: string;
-};
+export type TravelAccommodationRow = S["TravelAccommodationRow"];
 
-export type TravelTripDetail = {
-  trip: TravelTripRow;
-  cities: TravelCityRow[];
-  flights: TravelFlightRow[];
-  transport: TravelTransportRow[];
-  itinerary: TravelItineraryRow[];
-  accommodations: TravelAccommodationRow[];
-};
+export type TravelTripDetail = S["TravelTripDetail"];
 
-export type TravelTripCreateBody = {
-  title: string;
-  start_date: string;
-  end_date: string;
-  notes?: string | null;
-};
+export type TravelTripCreateBody = S["TravelTripCreate"];
 
-export type TravelCityBody = {
-  name: string;
-  start_date?: string | null;
-  end_date?: string | null;
-};
+export type TravelCityBody = S["TravelCityCreate"];
 
-export type TravelFlightBody = {
-  flight_number: string;
-  flight_date?: string | null;
-  arrival_date?: string | null;
-  departure_time?: string | null;
-  arrival_time?: string | null;
-  from_location?: string | null;
-  from_map_url?: string | null;
-  from_city?: string | null;
-  from_country?: string | null;
-  to_location?: string | null;
-  to_map_url?: string | null;
-  to_city?: string | null;
-  to_country?: string | null;
-  notes?: string | null;
-  title?: string | null;
-  airline?: string | null;
-  seat?: string | null;
-  terminal?: string | null;
-  gate?: string | null;
-  baggage?: string | null;
-  confirmation?: string | null;
-};
+export type TravelFlightBody = S["TravelFlightCreate"];
 
-export type TravelTransportBody = {
-  mode: "bus" | "train" | "ferry";
-  number?: string | null;
-  travel_date?: string | null;
-  arrival_date?: string | null;
-  departure_time?: string | null;
-  arrival_time?: string | null;
-  from_location?: string | null;
-  from_map_url?: string | null;
-  from_city?: string | null;
-  from_country?: string | null;
-  to_location?: string | null;
-  to_map_url?: string | null;
-  to_city?: string | null;
-  to_country?: string | null;
-  notes?: string | null;
-  title?: string | null;
-  operator?: string | null;
-  seat?: string | null;
-  travel_class?: string | null;
-  platform?: string | null;
-  confirmation?: string | null;
-};
+export type TravelTransportBody = S["TravelTransportCreate"];
 
-export type TravelItineraryBody = {
-  item_date: string;
-  item_end_date?: string | null;
-  start_time?: string | null;
-  end_time?: string | null;
-  activity: string;
-  location_name?: string | null;
-  location_map_url?: string | null;
-  notes?: string | null;
-  booked_via?: string | null;
-  price?: string | null;
-  confirmation?: string | null;
-};
+export type TravelItineraryBody = S["TravelItineraryCreate"];
 
-export type TravelAccommodationBody = {
-  name: string;
-  checkin_date: string;
-  checkout_date: string;
-  checkin_time?: string | null;
-  checkout_time?: string | null;
-  booking_confirmation?: string | null;
-  instructions?: string | null;
-  location_name?: string | null;
-  location_map_url?: string | null;
-  notes?: string | null;
-  room?: string | null;
-  guests?: string | null;
-  phone?: string | null;
-  booked_via?: string | null;
-  price?: string | null;
-  paid_price?: string | null;
-};
+export type TravelAccommodationBody = S["TravelAccommodationCreate"];
 
 export async function getTravelTrips(limit?: number) {
   return getJson<{ trips: TravelTripDetail[] }>("/api/travel", { limit });
@@ -1678,40 +1214,17 @@ export async function deleteTravelCity(tripId: string, cityId: string) {
 }
 
 /** A day counted from the month a bill is added: next month's 8th is { months: 1, day: 8 }. */
-export type RelativeDay = { months: number; day: number };
+export type RelativeDay = S["RelativeDay"];
 
-export type BillDefaults = {
-  bill_date?: RelativeDay | null;
-  due_date?: RelativeDay | null;
-  period_start?: RelativeDay | null;
-  period_end?: RelativeDay | null;
-  amount?: number | null;
-};
+export type BillDefaults = S["BillDefaults"];
 
-export type BillCategoryRow = {
-  id: string;
-  name: string;
-  is_credit_card?: boolean; // this and `defaults` are missing from a bill list cached before they existed
-  defaults?: BillDefaults;
-  created_at: string;
-};
+export type BillCategoryRow = S["BillCategoryRow"];
 
-export type BillCategoryBody = Pick<BillCategoryRow, "name" | "is_credit_card" | "defaults">;
+export type BillCategoryBody = S["BillCategoryCreate"];
 
-export type BillRow = {
-  id: string;
-  category_id: string;
-  bill_date: string;
-  due_date: string;
-  period_start: string;
-  period_end: string;
-  amount: number | null;
-  minimum_due?: number | null; // credit card bills; missing from a bill list cached before it existed
-  has_pdf: boolean;
-  created_at: string;
-};
+export type BillRow = S["BillRow"];
 
-export type BillBody = Omit<BillRow, "id" | "has_pdf" | "created_at">;
+export type BillBody = S["BillCreate"];
 
 export async function getBills() {
   return getJson<{ categories: BillCategoryRow[]; bills: BillRow[] }>("/api/bill");
@@ -1749,14 +1262,7 @@ export async function uploadBillPdf(id: string, file: File) {
   return uploadPdf(`/api/bill/${id}/pdf`, file);
 }
 
-export type BillPdfFields = {
-  bill_date: string | null;
-  due_date: string | null;
-  period_start: string | null;
-  period_end: string | null;
-  amount: number | null;
-  minimum_due: number | null;
-};
+export type BillPdfFields = S["BillPdfFields"];
 
 // Reads a PDF, or a PNG or JPG photo, of a bill.
 export async function readBillPdf(file: File, categoryId: string) {

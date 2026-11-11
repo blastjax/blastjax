@@ -9,7 +9,6 @@ import {
   ChargedToField,
   DANGER_TEXT_BUTTON_CLASSES,
   DIALOG_BODY_CLASSES,
-  DIALOG_CLASSES,
   DIALOG_FOOTER_CLASSES,
   EmptyState,
   LoadingBlocks,
@@ -20,15 +19,12 @@ import {
   Segmented,
   StatStrip,
   TEXT_BUTTON_CLASSES,
+  DIALOG_FORM_CLASSES,
 } from "@/components/FinanceUI";
 import { CheckIcon, ChevronDownIcon, LayersIcon, PlusIcon } from "@/components/Icons";
 import {
   createInstallment,
   deleteInstallment,
-  getCreditCards,
-  getInstallment,
-  getInstallments,
-  getInstallmentSchedules,
   recordInstallmentPayment,
   reorderInstallmentLines,
   updateInstallment,
@@ -38,7 +34,10 @@ import {
   type InstallmentDetailResponse,
   type InstallmentLineRow,
   type InstallmentRow,
+  errorMessage,
 } from "@/lib/api";
+import { queries } from "@/lib/queries";
+import { getQueryClient } from "@/lib/queryClient";
 import { formatAmountNumber, parseFormNumber } from "@/lib/parseFormNumber";
 import { MONTH_NAMES_SHORT, formatMonthYear } from "@/lib/dateFormat";
 import { fmtAmountOrDash } from "@/lib/formatNumber";
@@ -225,10 +224,10 @@ export default function InstallmentsClient() {
   const load = useCallback(async () => {
     setError(null);
     try {
-      const r = await getInstallments(500);
+      const r = await getQueryClient().fetchQuery(queries.installments());
       setRows(r.installments);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load");
+      setError(errorMessage(e, "Failed to load"));
       setRows([]);
     } finally {
       setLoading(false);
@@ -238,7 +237,7 @@ export default function InstallmentsClient() {
   useEffect(() => {
     void (async () => {
       try {
-        const r = await getCreditCards();
+        const r = await getQueryClient().fetchQuery(queries.creditCards());
         setCards(r.cards.map((b) => b.card));
       } catch {
         setCards([]);
@@ -438,7 +437,7 @@ export default function InstallmentsClient() {
       setForm(formFromRow(finalDetail.installment));
       upsertRow(finalDetail.installment);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Save failed");
+      setError(errorMessage(e, "Save failed"));
     } finally {
       setSavingSchedule(false);
     }
@@ -457,10 +456,10 @@ export default function InstallmentsClient() {
     setPaymentsDetails([]);
     setError(null);
     try {
-      const res = await getInstallmentSchedules(2000);
+      const res = await getQueryClient().fetchQuery(queries.installmentSchedules());
       setPaymentsDetails(res.schedules);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load payments");
+      setError(errorMessage(e, "Failed to load payments"));
       setPaymentsModalOpen(false);
     } finally {
       setPaymentsLoading(false);
@@ -558,10 +557,10 @@ export default function InstallmentsClient() {
       setCardId(row.credit_card_id ?? "");
     }
     try {
-      const d = await getInstallment(id);
+      const d = await getQueryClient().fetchQuery(queries.installment(id));
       setDetail(d);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load schedule");
+      setError(errorMessage(e, "Failed to load schedule"));
       setDetail(null);
       setScheduleModalId(null);
     } finally {
@@ -675,7 +674,7 @@ export default function InstallmentsClient() {
         upsertRow(fresh.installment);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Save failed");
+      setError(errorMessage(err, "Save failed"));
     } finally {
       setSaving(false);
     }
@@ -688,7 +687,7 @@ export default function InstallmentsClient() {
       const fresh = await recordInstallmentPayment(id);
       upsertRow(fresh.installment);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not record payment");
+      setError(errorMessage(e, "Could not record payment"));
     } finally {
       setSaving(false);
     }
@@ -703,7 +702,7 @@ export default function InstallmentsClient() {
       if (scheduleModalId === id) closeScheduleModal();
       removeRow(id);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Delete failed");
+      setError(errorMessage(e, "Delete failed"));
     } finally {
       setSaving(false);
     }
@@ -947,7 +946,7 @@ export default function InstallmentsClient() {
         open={addModalOpen}
         onClose={closeAddModal}
         ariaLabelledBy="installment-add-title"
-        dialogClassName={`${DIALOG_CLASSES} max-w-3xl`}
+        size="3xl"
       >
         <ModalHeader
           id="installment-add-title"
@@ -955,7 +954,7 @@ export default function InstallmentsClient() {
           subtitle="Each payment's amount is entered below, so they can differ month to month."
           onClose={closeAddModal}
         />
-        <form onSubmit={submitCreate} className="flex min-h-0 flex-1 flex-col">
+        <form onSubmit={submitCreate} className={DIALOG_FORM_CLASSES}>
           <div className={`${DIALOG_BODY_CLASSES} grid gap-4 sm:grid-cols-2`}>
             <InstallmentFieldGrid form={form} setForm={setForm} saving={saving} hideAmounts />
             {cardField}
@@ -1054,7 +1053,7 @@ export default function InstallmentsClient() {
         open={scheduleModalId != null}
         onClose={closeScheduleModal}
         ariaLabelledBy="schedule-title"
-        dialogClassName={`${DIALOG_CLASSES} max-w-3xl`}
+        size="3xl"
       >
         <ModalHeader
           id="schedule-title"
@@ -1226,7 +1225,7 @@ export default function InstallmentsClient() {
             </div>
           </>
         ) : (
-          <form onSubmit={submitCreate} className="flex min-h-0 flex-1 flex-col">
+          <form onSubmit={submitCreate} className={DIALOG_FORM_CLASSES}>
             <div className={`${DIALOG_BODY_CLASSES} grid gap-4 sm:grid-cols-2`}>
               <InstallmentFieldGrid form={form} setForm={setForm} saving={saving} />
               {cardField}
@@ -1246,7 +1245,7 @@ export default function InstallmentsClient() {
         open={paymentsModalOpen}
         onClose={closePayments}
         ariaLabelledBy="payments-title"
-        dialogClassName={`${DIALOG_CLASSES} max-w-4xl`}
+        size="4xl"
       >
         <ModalHeader
           id="payments-title"

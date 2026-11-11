@@ -1,40 +1,32 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
 import { useCurrentUser } from "@/components/AuthGate";
 import { confirmDialog } from "@/components/ConfirmDialog";
 import { ErrorAlert } from "@/components/ErrorAlert";
-import { LoadingBlocks } from "@/components/FinanceUI";
-import { addPasskey, deletePasskey, getPasskeys, type PasskeyRow } from "@/lib/api";
+import { Field, LoadingBlocks, Panel } from "@/components/FinanceUI";
+import { addPasskey, deletePasskey, errorMessage, type PasskeyRow } from "@/lib/api";
+import { queries } from "@/lib/queries";
 import { passkeyErrorMessage, passkeysSupported } from "@/lib/auth";
 import { formatDate } from "@/lib/dateFormat";
 import {
-  CARD_CLASSES,
   DASHED_EMPTY_CLASSES,
   DELETE_BUTTON_CLASSES,
   INPUT_CLASSES,
+  LIST_CLASSES,
   PRIMARY_BUTTON_CLASSES,
 } from "@/lib/ui";
 
 export function PasskeysSettingsPanel() {
   const loggedIn = useCurrentUser() !== null;
-  const [passkeys, setPasskeys] = useState<PasskeyRow[]>([]);
-  const [loading, setLoading] = useState(loggedIn);
-  const [error, setError] = useState<string | null>(null);
+  const passkeysQuery = useQuery({ ...queries.passkeys(), enabled: loggedIn });
+  const passkeys = passkeysQuery.data?.passkeys ?? [];
+  const loading = loggedIn && passkeysQuery.isPending;
+  const [actionError, setError] = useState<string | null>(null);
+  const error = actionError ?? (passkeysQuery.error ? errorMessage(passkeysQuery.error, "Failed to load passkeys.") : null);
   const [name, setName] = useState("");
   const [adding, setAdding] = useState(false);
-
-  const load = () => {
-    setLoading(true);
-    getPasskeys()
-      .then((res) => setPasskeys(res.passkeys))
-      .catch((e: unknown) => setError(e instanceof Error ? e.message : "Failed to load passkeys."))
-      .finally(() => setLoading(false));
-  };
-
-  useEffect(() => {
-    if (loggedIn) load();
-  }, [loggedIn]);
 
   async function handleAdd() {
     setAdding(true);
@@ -42,7 +34,6 @@ export function PasskeysSettingsPanel() {
     try {
       await addPasskey(name.trim());
       setName("");
-      load();
     } catch (e: unknown) {
       setError(passkeyErrorMessage(e, "Failed to add passkey."));
     } finally {
@@ -55,31 +46,27 @@ export function PasskeysSettingsPanel() {
     setError(null);
     try {
       await deletePasskey(passkey.id);
-      load();
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Failed to remove passkey.");
+      setError(errorMessage(e, "Failed to remove passkey."));
     }
   }
 
   return (
-    <section className={CARD_CLASSES}>
-      <h2 className="text-lg font-medium text-ink">Passkeys</h2>
-      <p className="mt-1 text-sm text-ink-2">
-        Log in with your fingerprint, face, or device PIN instead of a password. Passkeys
-        added here belong to the user you&apos;re logged in as.
-      </p>
-
+    <Panel
+      title="Passkeys"
+      subtitle="Log in with your fingerprint, face, or device PIN instead of a password. Passkeys added here belong to the user you're logged in as."
+    >
       {!loggedIn ? (
-        <div className={`mt-6 ${DASHED_EMPTY_CLASSES}`}>Log in as a user to add passkeys.</div>
+        <div className={DASHED_EMPTY_CLASSES}>Log in as a user to add passkeys.</div>
       ) : (
         <>
-          <div className="mt-6">
+          <div>
             {loading ? (
               <LoadingBlocks label="Loading passkeys…" rows={0} />
             ) : passkeys.length === 0 ? (
               <div className={DASHED_EMPTY_CLASSES}>No passkeys yet.</div>
             ) : (
-              <ul className="divide-y divide-zinc-200 rounded-lg border border-line dark:divide-zinc-900">
+              <ul className={LIST_CLASSES}>
                 {passkeys.map((p) => (
                   <li key={p.id} className="flex flex-wrap items-center justify-between gap-3 p-4">
                     <div>
@@ -106,12 +93,8 @@ export function PasskeysSettingsPanel() {
 
           {passkeysSupported() ? (
             <div className="mt-6 flex flex-wrap items-end gap-3">
-              <div className="flex min-w-48 flex-1 flex-col gap-1">
-                <label className="text-xs font-medium text-ink-2" htmlFor="passkey-name">
-                  Name (optional)
-                </label>
+              <Field label="Name (optional)" className="min-w-48 flex-1">
                 <input
-                  id="passkey-name"
                   type="text"
                   className={INPUT_CLASSES}
                   placeholder="e.g. iPhone"
@@ -120,7 +103,7 @@ export function PasskeysSettingsPanel() {
                   onChange={(e) => setName(e.target.value)}
                   autoComplete="off"
                 />
-              </div>
+              </Field>
               <button
                 type="button"
                 className={PRIMARY_BUTTON_CLASSES}
@@ -135,6 +118,6 @@ export function PasskeysSettingsPanel() {
           )}
         </>
       )}
-    </section>
+    </Panel>
   );
 }

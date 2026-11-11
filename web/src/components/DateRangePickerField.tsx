@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { CalendarMonth, type DayState } from "@/components/CalendarMonth";
 import { PickerField } from "@/components/PickerField";
-import { addMonths, formatDate, toIsoDateLocal } from "@/lib/dateFormat";
+import { addMonths, formatDate, toIsoDateLocal, monthOf } from "@/lib/dateFormat";
 import { ACTION_BUTTON_CLASSES } from "@/lib/ui";
 
 export type DateRangePickerFieldProps = {
@@ -14,8 +14,6 @@ export type DateRangePickerFieldProps = {
   placeholder?: string;
   clearLabel?: string;
 };
-
-const monthOf = (iso: string) => ({ y: Number(iso.slice(0, 4)), m: Number(iso.slice(5, 7)) });
 
 export function DateRangePickerField({
   startValue,
@@ -65,7 +63,6 @@ export function DateRangePickerField({
       placeholder={placeholder}
       popoverLabel="Choose a date range"
       width={680}
-      estimatedHeight={420}
       disabled={disabled}
       clearLabel={clearLabel}
       onClear={() => onChange("", "")}

@@ -3,9 +3,10 @@ from __future__ import annotations
 import json
 import logging
 import os
+from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse, urlunparse
-from pathlib import Path
 
 _log = logging.getLogger(__name__)
 _client: Any = None
@@ -79,6 +80,16 @@ def set(key: str, value: Any, ttl: int | None = None) -> None:  # noqa: A001
         _client.set(key, json.dumps(value, default=str), ex=ttl or _default_ttl())
     except Exception as exc:
         _log.debug("cache.set(%s): %s", key, exc)
+
+
+def cached[T](key: str, load: Callable[[], T], ttl: int | None = None) -> T:
+    """What's cached under key, else load()'s result, which gets cached. Nothing is cached when load() raises."""
+    hit = get(key)
+    if hit is not None:
+        return hit
+    value = load()
+    set(key, value, ttl)
+    return value
 
 
 def delete(key: str) -> None:

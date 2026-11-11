@@ -40,6 +40,10 @@ jobs:
         working-directory: web
         run: |
           npm ci
+          # The web's types are generated from the API: fail if they weren't regenerated after an API change.
+          python ../backend/scripts/export_openapi.py
+          npm run api:types
+          git diff --exit-code -- openapi.json src/lib/api-schema.d.ts
           npx tsc --noEmit
           npm run lint
 
@@ -121,6 +125,8 @@ jobs:
           compose run --rm redis-flush
           # The API does this on start too, but a failure here stops the deploy with the old API still running.
           compose run --rm --no-deps api python scripts/sync_schema.py
+          # Then the versioned migrations (backend/migrations), which may change what the sync created.
+          compose run --rm --no-deps api alembic upgrade head
           # --wait fails on any exited container, so the one-shot redis-flush runs separately.
           compose up --remove-orphans --wait --wait-timeout 200 redis api web || { compose logs --tail 50 >&2; exit 1; }
           compose run --rm redis-flush

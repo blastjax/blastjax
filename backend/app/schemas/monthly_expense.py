@@ -6,12 +6,14 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from app.schemas.text import OptionalText, Trimmed
+
 MonthKey = Annotated[str, Field(pattern=r"^\d{4}-(0[1-9]|1[0-2])$")]
 
 
 class MonthlyExpenseCreate(BaseModel):
-    name: str = Field(min_length=1)
-    description: str | None = None
+    name: Trimmed = Field(min_length=1)
+    description: OptionalText = None
     amount: float = Field(..., gt=0)
     period_half: int = Field(..., ge=1, le=2, description="1 = 1st-15th, 2 = 16th-end of month")
     period_year: int = Field(..., description="Calendar year this expense applies to")

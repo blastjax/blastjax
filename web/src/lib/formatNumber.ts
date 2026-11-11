@@ -22,6 +22,11 @@ export function fmtCount(n: number): string {
   return COUNT_FORMAT.format(n);
 }
 
+/** "1 bill", "2 bills" */
+export function plural(n: number, word: string): string {
+  return `${fmtCount(n)} ${word}${n === 1 ? "" : "s"}`;
+}
+
 export function fmtAmountEnUs(n: number): string {
   return EN_US_AMOUNT_FORMAT.format(n);
 }

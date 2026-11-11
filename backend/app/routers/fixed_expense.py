@@ -6,68 +6,49 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 import cache
-from app.deps import require_db
+from app.deps import found, require_db
 from app.schemas.fixed_expense import FixedExpenseCreate, FixedExpenseUpdate
-from db import delete_fixed_expense, insert_fixed_expense, list_fixed_expenses, update_fixed_expense
+from app.schemas.responses import FixedExpenseList, FixedExpenseOne, Ok
+from db import (
+    delete_fixed_expense,
+    insert_fixed_expense,
+    list_fixed_expenses,
+    update_fixed_expense,
+)
 
 router = APIRouter(tags=["fixed_expense"], dependencies=[Depends(require_db)])
 
-
-def _serialize(row: dict[str, Any]) -> dict[str, Any]:
-    out = dict(row)
-    v = out.get("created_at")
-    if hasattr(v, "isoformat"):
-        out["created_at"] = v.isoformat()
-    return out
+_NOT_FOUND = "Expense not found."
 
 
-def _clean_description(description: str | None) -> str | None:
-    if description is None:
-        return None
-    trimmed = description.strip()
-    return trimmed or None
-
-
-@router.get("/api/fixed-expense")
+@router.get("/api/fixed-expense", response_model=FixedExpenseList)
 def fixed_expense_list(
     period_half: int | None = Query(default=None, ge=1, le=2),
     period_year: int | None = Query(default=None),
     period_month: int | None = Query(default=None, ge=1, le=12),
 ) -> dict[str, Any]:
-    key = f"fixed_expense:list:{period_half}:{period_year}:{period_month}"
-    hit = cache.get(key)
-    if hit is not None:
-        return hit
-    rows = list_fixed_expenses(
-        period_half=period_half, period_year=period_year, period_month=period_month
+    return cache.cached(
+        f"fixed_expense:list:{period_half}:{period_year}:{period_month}",
+        lambda: {
+            "expenses": list_fixed_expenses(
+                period_half=period_half, period_year=period_year, period_month=period_month
+            )
+        },
     )
-    result = {"expenses": [_serialize(r) for r in rows]}
-    cache.set(key, result)
-    return result
 
 
-@router.post("/api/fixed-expense")
+@router.post("/api/fixed-expense", response_model=FixedExpenseOne)
 def fixed_expense_create(body: FixedExpenseCreate) -> dict[str, Any]:
-    row = insert_fixed_expense(
-        body.period_half,
-        body.amount,
-        _clean_description(body.description),
-        body.period_year,
-        body.period_month,
-    )
-    return {"expense": _serialize(row)}
+    return {"expense": insert_fixed_expense(**body.model_dump())}
 
 
-@router.put("/api/fixed-expense/{expense_id}")
+@router.put("/api/fixed-expense/{expense_id}", response_model=FixedExpenseOne)
 def fixed_expense_update(expense_id: UUID, body: FixedExpenseUpdate) -> dict[str, Any]:
-    row = update_fixed_expense(expense_id, body.amount, _clean_description(body.description))
-    if row is None:
-        raise HTTPException(status_code=404, detail="Expense not found.")
-    return {"expense": _serialize(row)}
+    return {"expense": found(update_fixed_expense(expense_id, **body.model_dump()), _NOT_FOUND)}
 
 
-@router.delete("/api/fixed-expense/{expense_id}")
+@router.delete("/api/fixed-expense/{expense_id}", response_model=Ok)
 def fixed_expense_remove(expense_id: UUID) -> dict[str, Any]:
     if not delete_fixed_expense(expense_id):
-        raise HTTPException(status_code=404, detail="Expense not found.")
+        raise HTTPException(status_code=404, detail=_NOT_FOUND)
     return {"ok": True}

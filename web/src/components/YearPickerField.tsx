@@ -28,7 +28,6 @@ export function YearPickerField({
       placeholder={placeholder}
       popoverLabel="Choose a year"
       width={320}
-      estimatedHeight={360}
       disabled={disabled}
       clearLabel={clearLabel}
       onClear={() => onChange("")}

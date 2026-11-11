@@ -30,7 +30,7 @@ def main() -> int:
     if not url:
         sys.exit("DATABASE_URL is not set to a Postgres URL")
 
-    engine = create_engine("postgresql+psycopg2://" + url.split("://", 1)[1])
+    engine = create_engine(db.sqlalchemy_url(url))
     with engine.begin() as conn:
         added = schema.sync_schema(conn)
     engine.dispose()

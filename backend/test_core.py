@@ -26,7 +26,7 @@ def check_normalize() -> None:
     assert n(dt.time(2, 6, 38)) == "02:06:38"
     assert n(Decimal("12.50")) == 12.5
     assert isinstance(n(Decimal("12.50")), float)
-    assert n(memoryview(b"pdf")) == b"pdf"
+    assert n(b"pdf") == b"pdf"
     assert n(None) is None
     assert n("plain") == "plain"
     assert n(7) == 7
@@ -697,7 +697,7 @@ def check_db_against_postgres() -> None:
     from sqlalchemy import create_engine, inspect, text
     from sqlalchemy.exc import IntegrityError
 
-    url = "postgresql+psycopg2://" + url.split("://", 1)[1]
+    url = db.sqlalchemy_url(url)
     admin = create_engine(url)
     with admin.begin() as c:
         c.execute(text("DROP SCHEMA IF EXISTS blastjax_test CASCADE"))
@@ -728,6 +728,42 @@ def check_db_against_postgres() -> None:
             assert schema.sync_schema(c) == [], "nothing is left to add"
             fks = inspect(c).get_foreign_keys("monthly_expense")
         assert any(fk["constrained_columns"] == ["bill_category_id"] for fk in fks), fks
+
+        # Alembic's money migration, on a database from before it: money in double precision, with float noise.
+        from alembic import command
+        from alembic.config import Config
+
+        with engine.begin() as c:
+            c.execute(text("ALTER TABLE payslip ALTER COLUMN total TYPE double precision, ALTER COLUMN mp2 TYPE double precision"))
+            c.execute(text("INSERT INTO payslip (id, company, total) VALUES (gen_random_uuid(), 'Old', 0.1::float8 + 0.2::float8)"))
+            c.execute(text("ALTER TABLE installment ALTER COLUMN name DROP NOT NULL"))
+            # Production's leftovers: one-off monthly expenses with no date and no half, which nothing shows.
+            c.execute(text("ALTER TABLE monthly_expense ALTER COLUMN period_half DROP NOT NULL"))
+            c.execute(text(
+                "INSERT INTO monthly_expense (id, name, amount, period_half, period_year, period_month) VALUES"
+                " (gen_random_uuid(), 'Hidden', 279, NULL, 2026, 7), (gen_random_uuid(), 'Kept', 599, 1, 2026, 7)"
+            ))
+        migrations = Config(str(Path(__file__).resolve().parent / "alembic.ini"))
+        with engine.begin() as c:
+            migrations.attributes["connection"] = c
+            command.upgrade(migrations, "head")
+            kinds = dict(c.execute(text(
+                "SELECT column_name, data_type FROM information_schema.columns"
+                " WHERE table_schema = 'blastjax_test' AND table_name = 'payslip' AND column_name IN ('total', 'mp2')"
+            )).all())
+            assert kinds == {"total": "numeric", "mp2": "numeric"}, kinds
+            old = c.execute(text("SELECT total FROM payslip WHERE company = 'Old'")).scalar()
+            assert old == Decimal("0.3"), f"float noise survived the migration: {old!r}"
+            assert c.execute(text("SELECT version_num FROM alembic_version")).scalar() == "0002"
+            nullable = c.execute(text(
+                "SELECT is_nullable FROM information_schema.columns"
+                " WHERE table_schema = 'blastjax_test' AND table_name = 'installment' AND column_name = 'name'"
+            )).scalar()
+            assert nullable == "NO", "an installment's name can still be null"
+            left = c.execute(text("SELECT name FROM monthly_expense WHERE name IN ('Hidden', 'Kept')")).scalars().all()
+            assert left == ["Kept"], f"the migration should delete only the hidden one-off: {left}"
+            c.execute(text("DELETE FROM payslip WHERE company = 'Old'"))
+            c.execute(text("DELETE FROM monthly_expense WHERE name = 'Kept'"))
 
         missing = uuid.uuid4()
 
@@ -797,7 +833,7 @@ def check_db_against_postgres() -> None:
         names = ["Sophos", "Acme", "Globex"]
         companies = [db.insert_company(n)["id"] for n in names]
         assert [c["name"] for c in db.reorder_companies(companies[::-1])] == names[::-1]
-        plan = db.insert_installment("Phone", 1, 3, 100.0, None, 100.0, None, None, 0, 0)
+        plan = db.insert_installment("Phone", 1, 3, 100.0, None, 100.0, dt.date(2026, 1, 1), dt.date(2026, 3, 1), 0, 0)
         line_ids = [ln["id"] for ln in plan["lines"]][::-1]
         moved = db.reorder_installment_lines(plan["installment"]["id"], line_ids)["lines"]
         assert [(ln["id"], ln["seq"]) for ln in moved] == list(zip(line_ids, [1, 2, 3])), moved

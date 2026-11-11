@@ -4,93 +4,24 @@ import datetime as dt
 from typing import Any
 
 
-def _coerce_date(v: Any) -> dt.date | None:
-    if v is None:
-        return None
-    if isinstance(v, dt.datetime):
-        return v.date()
-    if isinstance(v, dt.date):
-        return v
-    if isinstance(v, str):
-        s = v.strip()
-        if len(s) >= 10:
-            try:
-                return dt.date.fromisoformat(s[:10])
-            except ValueError:
-                return None
-    return None
-
-
-def _installment_month_start(d: dt.date) -> dt.date:
-    return dt.date(d.year, d.month, 1)
-
-
-def _installment_add_months(d: dt.date, months: int) -> dt.date:
-    d = _installment_month_start(d)
-    m = d.month - 1 + months
-    y = d.year + m // 12
-    m = m % 12 + 1
-    return dt.date(y, m, 1)
-
-
-def _installment_due_this_month(
-    start: dt.date,
-    current: int,
-    total: int,
-    today: dt.date | None = None,
-) -> bool:
-    if current < 1 or current > total:
+def is_installment_due_this_month(r: dict[str, Any], today: dt.date | None = None) -> bool:
+    """Payment number `installment_current` falls due that many months after the month the plan started."""
+    start = r.get("start_date")
+    current = int(r.get("installment_current") or 0)
+    if not start or not 1 <= current <= int(r.get("installment_total") or 0) or float(r.get("remaining") or 0) <= 0:
         return False
-    today = today or dt.date.today()
-    start = _installment_month_start(start)
-    due = _installment_add_months(start, current)
-    return due.year == today.year and due.month == today.month
+    first, today = dt.date.fromisoformat(start[:10]), today or dt.date.today()
+    return first.year * 12 + first.month + current == today.year * 12 + today.month
 
 
-def is_installment_due_this_month(r: dict[str, Any]) -> bool:
-    start = _coerce_date(r.get("start_date"))
-    cur = int(r.get("installment_current") or 0)
-    total = int(r.get("installment_total") or 0)
-    rem = float(r.get("remaining") or 0)
-    return (
-        start is not None
-        and 1 <= cur <= total
-        and rem > 0
-        and _installment_due_this_month(start, cur, total)
-    )
-
-
-def serialize_installment_row(r: dict[str, Any]) -> dict[str, Any]:
-    out = dict(r)
-    for key in ("start_date", "finish_date", "created_at"):
-        v = out.get(key)
-        if hasattr(v, "isoformat"):
-            out[key] = v.isoformat()
-    return out
+def due_payment(r: dict[str, Any]) -> float:
+    """What the next payment costs: its own schedule line when the plan has one."""
+    return float(r.get("due_payment") or r.get("payment_total") or 0)
 
 
 def installment_summary(rows: list[dict[str, Any]]) -> dict[str, float]:
-    sum_original = 0.0
-    sum_remaining = 0.0
-    due_month = 0.0
-    for r in rows:
-        sum_original += float(r.get("original_total") or 0)
-        sum_remaining += float(r.get("remaining") or 0)
-        start = _coerce_date(r.get("start_date"))
-        cur = int(r.get("installment_current") or 0)
-        total = int(r.get("installment_total") or 0)
-        pay = float(r.get("due_payment") or r.get("payment_total") or 0)
-        rem = float(r.get("remaining") or 0)
-        if (
-            start is not None
-            and cur <= total
-            and cur >= 1
-            and rem > 0
-            and _installment_due_this_month(start, cur, total)
-        ):
-            due_month += pay
     return {
-        "sum_original_total": sum_original,
-        "sum_remaining": sum_remaining,
-        "due_this_month": due_month,
+        "sum_original_total": sum((float(r.get("original_total") or 0) for r in rows), 0.0),
+        "sum_remaining": sum((float(r.get("remaining") or 0) for r in rows), 0.0),
+        "due_this_month": sum((due_payment(r) for r in rows if is_installment_due_this_month(r)), 0.0),
     }

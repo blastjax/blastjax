@@ -5,7 +5,8 @@ import logging
 import os
 import threading
 import time as _time
-from collections.abc import Iterator
+from collections import defaultdict
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from datetime import date, datetime, time
 from decimal import Decimal
@@ -13,9 +14,23 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID
 
-import psycopg2
+import psycopg
 from dotenv import load_dotenv
-from sqlalchemy import Engine, Integer, and_, create_engine, delete, event, func, or_, select, update
+from sqlalchemy import (
+    Engine,
+    Integer,
+    and_,
+    case,
+    create_engine,
+    delete,
+    event,
+    func,
+    literal,
+    or_,
+    select,
+    union_all,
+    update,
+)
 from sqlalchemy.dialects.postgresql import distinct_on, insert
 from sqlalchemy.engine import Row
 from sqlalchemy.exc import DisconnectionError
@@ -80,6 +95,11 @@ def database_url() -> str:
     return ""
 
 
+def sqlalchemy_url(url: str = "") -> str:
+    """A postgres:// URL (DATABASE_URL by default) as SQLAlchemy names the psycopg 3 driver."""
+    return "postgresql+psycopg://" + (url or database_url()).split("://", 1)[1]
+
+
 def storage_kind() -> str:
     return "postgres" if database_url() else "none"
 
@@ -108,7 +128,7 @@ def _probe_if_stale(dbapi_conn: Any, record: Any, _proxy: Any) -> None:
         with dbapi_conn.cursor() as cur:
             cur.execute("SELECT 1")
         dbapi_conn.autocommit = False
-    except psycopg2.Error as exc:
+    except psycopg.Error as exc:
         raise DisconnectionError() from exc
 
 
@@ -123,10 +143,13 @@ def _engine() -> Engine:
                 maxconn = int(os.environ.get("BUDGET_DB_POOL_MAX", "10"))
                 keep = max(1, min(int(os.environ.get("BUDGET_DB_POOL_KEEP", "6")), maxconn))
                 engine = create_engine(
-                    "postgresql+psycopg2://" + url.split("://", 1)[1],
+                    sqlalchemy_url(url),
                     pool_size=keep,
                     max_overflow=maxconn - keep,
                     connect_args={
+                        # Neon's pooler hands each transaction to any server connection, where a
+                        # statement psycopg prepared on another one doesn't exist.
+                        "prepare_threshold": None,
                         "connect_timeout": 10,
                         "application_name": "blastjax-api",
                         "options": "-c timezone=UTC",
@@ -217,8 +240,6 @@ def _normalize(value: Any) -> Any:
         return value.isoformat()
     if isinstance(value, Decimal):
         return float(value)
-    if isinstance(value, memoryview):
-        return bytes(value)
     return value
 
 
@@ -238,6 +259,11 @@ def _bulk_insert(model: Any) -> Any:
 
 def _limit(limit: int) -> int:
     return max(1, min(limit, 2000))
+
+
+def _position(id_column: Any, ordered_ids: Sequence[UUID], otherwise: Any, first: int = 0) -> Any:
+    """Each row's place in ordered_ids, as SQL, so that one UPDATE renumbers them all."""
+    return case({row_id: first + i for i, row_id in enumerate(ordered_ids)}, value=id_column, else_=otherwise)
 
 
 def init_schema() -> None:
@@ -416,24 +442,17 @@ def _installment_lines(inst: Installment) -> list[dict[str, Any]]:
     return [_row(line, "installment_id") for line in inst.lines]
 
 
-def _installment_list_select(limit: int, credit_card_id: UUID | None = None) -> Any:
-    stmt = _installment_select().order_by(Installment.finish_date, Installment.name).limit(_limit(limit))
-    if credit_card_id is not None:
-        stmt = stmt.where(Installment.credit_card_id == credit_card_id)
-    return stmt
+def _installment_list_select() -> Any:
+    return _installment_select().order_by(Installment.finish_date, Installment.name)
 
 
-def _installment_rows(s: Session, limit: int, credit_card_id: UUID | None = None) -> list[dict[str, Any]]:
-    return [_installment(*row) for row in s.execute(_installment_list_select(limit, credit_card_id))]
-
-
-def list_installments(limit: int = 500, credit_card_id: UUID | None = None) -> list[dict[str, Any]]:
+def list_installments(limit: int = 500) -> list[dict[str, Any]]:
     with _session() as s:
-        return _installment_rows(s, limit, credit_card_id)
+        return [_installment(*row) for row in s.execute(_installment_list_select().limit(_limit(limit)))]
 
 
 def list_installments_with_lines(limit: int = 500) -> list[dict[str, Any]]:
-    stmt = _installment_list_select(limit).options(selectinload(Installment.lines))
+    stmt = _installment_list_select().limit(_limit(limit)).options(selectinload(Installment.lines))
     with _session() as s:
         return [
             {"installment": _installment(inst, due), "lines": _installment_lines(inst)}
@@ -620,17 +639,10 @@ def reorder_installment_lines(
         ).all()
         if len(ordered_line_ids) != len(existing_ids) or set(ordered_line_ids) != set(existing_ids):
             return None
-        s.execute(
-            update(InstallmentLine)
-            .where(InstallmentLine.installment_id == installment_id)
-            .values(seq=InstallmentLine.seq + 1000000)
-        )
-        for i, lid in enumerate(ordered_line_ids):
-            s.execute(
-                update(InstallmentLine)
-                .where(InstallmentLine.installment_id == installment_id, InstallmentLine.id == lid)
-                .values(seq=i + 1)
-            )
+        lines = update(InstallmentLine).where(InstallmentLine.installment_id == installment_id)
+        # Out of the way first: (installment_id, seq) is unique, and it's checked row by row as the new order lands.
+        s.execute(lines.values(seq=InstallmentLine.seq + 1000000))
+        s.execute(lines.values(seq=_position(InstallmentLine.id, ordered_line_ids, InstallmentLine.seq, first=1)))
         _recompute_installment_aggregates(s, installment_id)
         return _installment_detail(s, installment_id)
 
@@ -1091,25 +1103,32 @@ def last_bill_date_before(category_id: UUID, day: str) -> str | None:
         )
 
 
-def _card_row(s: Session, card: CreditCard) -> dict[str, Any]:
-    """The card, its statement read from the latest bill of the bill category it is linked to."""
-    row = _row(card)
-    if card.bill_category_id is None:
-        return row
-    bill = s.scalar(
-        select(Bill)
-        .where(Bill.category_id == card.bill_category_id)
-        .order_by(Bill.bill_date.desc(), Bill.id.desc())
-        .limit(1)
+def _card_rows(s: Session, cards: Sequence[CreditCard]) -> list[dict[str, Any]]:
+    """The cards, each with its statement read from the latest bill of the bill category it is linked to."""
+    linked = {c.bill_category_id for c in cards if c.bill_category_id is not None}
+    latest = (
+        select(Bill.category_id, Bill.bill_date, Bill.due_date, Bill.amount, Bill.minimum_due)
+        .where(Bill.category_id.in_(linked))
+        .ext(distinct_on(Bill.category_id))
+        .order_by(Bill.category_id, Bill.bill_date.desc(), Bill.id.desc())
     )
-    if bill is not None:
-        row["statement_date"] = _normalize(bill.bill_date)
-        row["due_date"] = _normalize(bill.due_date)
-        if bill.amount is not None:
-            row["last_statement_balance"] = bill.amount
-        if bill.minimum_due is not None:
-            row["minimum_due"] = bill.minimum_due
-    return row
+    statements = {bill.category_id: bill for bill in s.execute(latest)} if linked else {}
+    rows = []
+    for card in cards:
+        row, bill = _row(card), statements.get(card.bill_category_id)
+        if bill is not None:
+            row["statement_date"] = _normalize(bill.bill_date)
+            row["due_date"] = _normalize(bill.due_date)
+            if bill.amount is not None:
+                row["last_statement_balance"] = bill.amount
+            if bill.minimum_due is not None:
+                row["minimum_due"] = bill.minimum_due
+        rows.append(row)
+    return rows
+
+
+def _card_row(s: Session, card: CreditCard) -> dict[str, Any]:
+    return _card_rows(s, [card])[0]
 
 
 def get_credit_card(card_id: UUID) -> dict[str, Any] | None:
@@ -1118,16 +1137,21 @@ def get_credit_card(card_id: UUID) -> dict[str, Any] | None:
         return _card_row(s, card) if card else None
 
 
-def fetch_credit_card_bundles(installment_limit: int = 2000) -> list[dict[str, Any]]:
+def fetch_credit_card_bundles() -> list[dict[str, Any]]:
+    """Every card with its installments and payments, in four queries however many cards there are."""
     with _session() as s:
         cards = s.scalars(select(CreditCard).order_by(CreditCard.id)).all()
+        installments: dict[UUID, list[dict[str, Any]]] = defaultdict(list)
+        for inst, due in s.execute(_installment_list_select().where(Installment.credit_card_id.is_not(None))):
+            installments[inst.credit_card_id].append(_installment(inst, due))
+        payments: dict[UUID, list[dict[str, Any]]] = defaultdict(list)
+        for payment in s.scalars(
+            select(CreditCardPayment).order_by(CreditCardPayment.payment_date.desc(), CreditCardPayment.id.desc())
+        ):
+            payments[payment.credit_card_id].append(_row(payment))
         return [
-            {
-                "card": _card_row(s, card),
-                "installments": _installment_rows(s, installment_limit, card.id),
-                "payments": _credit_card_payment_rows(s, card.id),
-            }
-            for card in cards
+            {"card": row, "installments": installments[row["id"]], "payments": payments[row["id"]]}
+            for row in _card_rows(s, cards)
         ]
 
 
@@ -1182,20 +1206,6 @@ def adjust_credit_card_balance(card_id: UUID, current_balance: float) -> dict[st
 def delete_credit_card(card_id: UUID) -> bool:
     with _session(write=True) as s:
         return s.execute(delete(CreditCard).where(CreditCard.id == card_id)).rowcount > 0
-
-
-def _credit_card_payment_rows(s: Session, credit_card_id: UUID) -> list[dict[str, Any]]:
-    stmt = (
-        select(CreditCardPayment)
-        .where(CreditCardPayment.credit_card_id == credit_card_id)
-        .order_by(CreditCardPayment.payment_date.desc(), CreditCardPayment.id.desc())
-    )
-    return [_row(p) for p in s.scalars(stmt)]
-
-
-def list_credit_card_payments(credit_card_id: UUID) -> list[dict[str, Any]]:
-    with _session() as s:
-        return _credit_card_payment_rows(s, credit_card_id)
 
 
 def _shift_credit_card_balance(s: Session, credit_card_id: UUID, delta: float) -> None:
@@ -1309,13 +1319,21 @@ _SEARCHED: tuple[tuple[Any, str, str], ...] = (
 
 
 def search_records(query: str, per_kind: int = 4) -> list[dict[str, str]]:
+    # One round trip for every kind of record, since this runs as the user types.
+    matches = union_all(
+        *(
+            select(literal(kind).label("kind"), column.label("label"))
+            .where(column.icontains(query, autoescape=True))
+            .distinct()
+            .order_by(column)
+            .limit(per_kind)
+            for kind, (column, _, _) in enumerate(_SEARCHED)
+        )
+    ).subquery()
     with _session() as s:
         return [
-            {"label": label, "section": section, "href": href}
-            for column, section, href in _SEARCHED
-            for label in s.scalars(
-                select(column).where(column.icontains(query, autoescape=True)).distinct().order_by(column).limit(per_kind)
-            )
+            {"label": label, "section": _SEARCHED[kind][1], "href": _SEARCHED[kind][2]}
+            for kind, label in s.execute(select(matches).order_by(matches.c.kind, matches.c.label))
         ]
 
 
@@ -1329,18 +1347,25 @@ def list_calendar_day_overrides() -> list[dict[str, Any]]:
 
 
 def upsert_calendar_day_overrides(overrides: list[tuple[str, float, float | None]]) -> list[dict[str, Any]]:
+    # One row per day, since a statement can't upsert the same row twice: a day sent again takes the later
+    # amount, and keeps the earlier `saved` when the later one has none.
+    rows: dict[date, dict[str, Any]] = {}
+    for day, amount, saved in overrides:
+        key = date.fromisoformat(str(day))
+        kept = rows[key]["saved"] if key in rows else None
+        rows[key] = {"day": key, "amount": amount, "saved": saved if saved is not None else kept}
+    if not rows:
+        return list_calendar_day_overrides()
+    stmt = insert(CalendarDayOverride).values(list(rows.values()))
+    stmt = stmt.on_conflict_do_update(
+        index_elements=["day"],
+        set_={
+            "amount": stmt.excluded.amount,
+            "saved": func.coalesce(stmt.excluded.saved, CalendarDayOverride.saved),
+        },
+    )
     with _session(write=True) as s:
-        for day, amount, saved in overrides:
-            stmt = insert(CalendarDayOverride).values(day=day, amount=amount, saved=saved)
-            s.execute(
-                stmt.on_conflict_do_update(
-                    index_elements=["day"],
-                    set_={
-                        "amount": stmt.excluded.amount,
-                        "saved": func.coalesce(stmt.excluded.saved, CalendarDayOverride.saved),
-                    },
-                )
-            )
+        s.execute(stmt)
         return _calendar_day_overrides(s)
 
 
@@ -1646,7 +1671,8 @@ def insert_lotto_results(rows: list[dict[str, Any]]) -> int:
         for r in by_key.values()
     ]
     with _session(write=True) as s:
-        return s.execute(_upsert_draws(values, only_missing_numbers=True)).rowcount
+        # Counted from RETURNING: a draw that already had numbers is skipped and returns no row.
+        return len(s.execute(_upsert_draws(values, only_missing_numbers=True).returning(LottoDraw.id)).all())
 
 
 def get_lotto_draw_id_by_date(game_id: UUID, draw_date: Any) -> UUID | None:
@@ -1676,10 +1702,6 @@ def update_lotto_draw(
 def delete_lotto_draw(draw_id: UUID) -> bool:
     with _session(write=True) as s:
         return s.execute(delete(LottoDraw).where(LottoDraw.id == draw_id)).rowcount > 0
-
-
-def insert_lotto_attempt(draw_id: UUID, numbers: list[int], ticket: int | None = None) -> dict[str, Any] | None:
-    return insert_lotto_attempts_bulk(draw_id, [(numbers, ticket)])
 
 
 def insert_lotto_attempts_bulk(
@@ -1904,9 +1926,9 @@ def reorder_companies(ordered_ids: list[UUID]) -> list[dict[str, Any]] | None:
         existing_ids = set(s.scalars(select(Company.id)))
         if set(ordered_ids) != existing_ids or len(ordered_ids) != len(existing_ids):
             return None
+        # Out of the way first: sort_order is unique, and it's checked row by row as the new order lands.
         s.execute(update(Company).values(sort_order=Company.sort_order + 1000000))
-        for i, cid in enumerate(ordered_ids):
-            s.execute(update(Company).where(Company.id == cid).values(sort_order=i))
+        s.execute(update(Company).values(sort_order=_position(Company.id, ordered_ids, Company.sort_order)))
         return _companies(s)
 
 

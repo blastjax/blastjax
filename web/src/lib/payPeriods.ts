@@ -6,6 +6,7 @@ import {
   type CalendarDayOverrideRow,
   type CreditCardRow,
   type FixedExpenseRow,
+  type HousePaymentDetailResponse,
   type MonthlyExpenseRow,
   type PayslipRow,
   type TravelTripRow,
@@ -391,6 +392,13 @@ export function tripReminders(trips: readonly TravelTripRow[]): Reminder[] {
           { ...trip, day: t.end_date, name: `${t.title} ends` },
         ];
   });
+}
+
+// Each house payment on the day it was paid. The linked monthly expense is what comes out of the budget.
+export function houseReminders(houses: readonly HousePaymentDetailResponse[]): Reminder[] {
+  return houses.flatMap(({ house_payment: h, entries }) =>
+    entries.map((e) => ({ day: e.paid_on, name: h.name, amount: e.amount, href: "/house-payments" })),
+  );
 }
 
 export function periodRangeLabel(
