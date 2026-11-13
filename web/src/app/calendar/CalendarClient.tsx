@@ -76,13 +76,13 @@ import {
 import { useWheelStep } from "@/lib/useWheelStep";
 import {
   addDaysIso,
+  chargedCardIn,
   compareDue,
   dateIso,
   dueReminders,
   effectiveHalfStartIso,
   expenseDuesIn,
   fundingPeriodFor,
-  isOffBudget,
   latestHalfStartIso,
   periodEndIso,
   periodForDate,
@@ -669,25 +669,37 @@ export default function CalendarClient() {
   );
 
   // Each expense in the pay periods its date or real bill lands in; undated ones in the half they were filed under.
+  // One charged to a card takes nothing from the budget, so it only shows on its day as a reminder.
   const monthlyExpenseIndex = useMemo(() => {
     const byPeriod = new Map<string, BillRow[]>();
     const byDay = new Map<string, BillRow[]>();
+    const onCard: Reminder[] = [];
     const add = (map: Map<string, BillRow[]>, key: string, row: BillRow) =>
       map.set(key, [...(map.get(key) ?? []), row]);
+    const cardNames = new Map(cards.map((c) => [c.id, c.name]));
     const rows = new Map([...prevMonthlyExpenses, ...monthlyExpenses, ...nextMonthlyExpenses].map((e) => [e.id, e]));
     const months = [addMonths(viewedYear, viewedMonth, -1), { year: viewedYear, month: viewedMonth }, addMonths(viewedYear, viewedMonth, 1)];
     for (const { year: y, month: m } of months) {
       for (const e of rows.values()) {
-        if (isOffBudget(e, monthKey(y, m))) continue;
+        const key = monthKey(y, m);
+        if (e.skipped_months.includes(key)) continue;
+        const card = chargedCardIn(e.charged_months, key);
         for (const { half, due, amount } of expenseDuesIn(e, payPeriodOverrides, y, m, bills)) {
+          if (card != null) {
+            if (due) {
+              const name = `${e.name} on ${cardNames.get(card) ?? "a card"}`;
+              onCard.push({ day: due, name, amount, href: "/monthly-expenses" });
+            }
+            continue;
+          }
           add(byPeriod, periodKey(y, m, half), { ...e, amount, due });
           if (due) add(byDay, due, { ...e, amount, due });
         }
       }
     }
     for (const list of byPeriod.values()) list.sort((a, b) => compareDue(a.due, b.due));
-    return { byPeriod, byDay };
-  }, [prevMonthlyExpenses, monthlyExpenses, nextMonthlyExpenses, viewedYear, viewedMonth, payPeriodOverrides, bills]);
+    return { byPeriod, byDay, onCard };
+  }, [prevMonthlyExpenses, monthlyExpenses, nextMonthlyExpenses, viewedYear, viewedMonth, payPeriodOverrides, bills, cards]);
 
   const remindersByDay = useMemo(() => {
     const byDay = new Map<string, Reminder[]>();
@@ -695,11 +707,12 @@ export default function CalendarClient() {
       ...dueReminders(billCategories, bills, cards, monthlyExpenses),
       ...tripReminders(trips),
       ...houseReminders(houses),
+      ...monthlyExpenseIndex.onCard,
     ]) {
       byDay.set(r.day, [...(byDay.get(r.day) ?? []), r]);
     }
     return byDay;
-  }, [billCategories, bills, cards, monthlyExpenses, trips, houses]);
+  }, [billCategories, bills, cards, monthlyExpenses, trips, houses, monthlyExpenseIndex]);
 
   const monthlyExpensesForPeriod = useCallback(
     (periodYear: number, periodMonth: number, periodHalf: PeriodHalf) =>

@@ -23,10 +23,11 @@ import {
   Segmented,
   Select,
   StatStrip,
-  TEXT_BUTTON_CLASSES,
   DIALOG_FORM_CLASSES,
 } from "@/components/FinanceUI";
 import { PlusIcon } from "@/components/Icons";
+import { MonthCard, MonthEntry } from "@/components/YearMonthGrid";
+import { useWheelStep } from "@/lib/useWheelStep";
 import {
   createHousePaymentEntry,
   createMonthlyExpense,
@@ -205,6 +206,8 @@ export default function MonthlyExpensesClient() {
   const chargedCard = (e: MonthlyExpenseRow) => (showAll ? null : chargedCardIn(e.charged_months, viewedMonthKey));
   const offBudget = (e: MonthlyExpenseRow) => isSkipped(e) || chargedCard(e) != null;
   const totalOf = (items: Listed[]) => items.reduce((s, e) => s + (offBudget(e) ? 0 : e.shown), 0);
+  const onCardsOf = (items: Listed[]) =>
+    items.reduce((s, e) => s + (!isSkipped(e) && chargedCard(e) != null ? e.shown : 0), 0);
   const recurring = visible.filter((e) => e.is_recurring && !offBudget(e));
 
   // A saved recurring expense changes card from the month being viewed; anything else has only its own month.
@@ -349,6 +352,7 @@ export default function MonthlyExpensesClient() {
   const halfRange = (half: PeriodHalf, at: { y: number; m: number } | null) =>
     at ? periodRangeLabel(payPeriodStarts, at.y, at.m, half) : HALF[half].days;
   const dueLabel = (due: string | null) => (!due ? "No date" : showAll ? formatDate(due) : formatWeekdayMonthDay(due));
+  const wheelRef = useWheelStep(showAll ? null : (dir) => setMonth((v) => addMonths(v.y, v.m, dir)));
 
   return (
     <div className={PAGE_CONTAINER_CLASSES}>
@@ -394,99 +398,68 @@ export default function MonthlyExpensesClient() {
             <Metric
               label={`Total · ${scopeLabel}`}
               value={fmtMoney(totalOf(listed))}
-              hint={`${visible.length} expense${visible.length === 1 ? "" : "s"}`}
+              hint={`${visible.length} expense${visible.length === 1 ? "" : "s"} · ${fmtMoney(onCardsOf(listed))} on cards`}
               tone="danger"
               size="lg"
             />
             <Metric
               label="Recurring"
               value={fmtMoney(recurring.reduce((s, e) => s + e.shown, 0))}
-              hint={`${recurring.length} every month`}
+              hint={`${recurring.length} every month · ${fmtMoney(onCardsOf(visible.filter((e) => e.is_recurring)))} on cards`}
             />
           </StatStrip>
 
-          <Panel flush title="By date" subtitle={scopeLabel}>
+          <Panel ref={wheelRef} title={scopeLabel} subtitle={showAll ? undefined : "Scroll here to change month"}>
             {byDate.length === 0 ? (
-              <div className="px-5 pb-5 sm:px-6 sm:pb-6">
-                <button
-                  type="button"
-                  onClick={openModal}
-                  className="flex w-full flex-col items-center gap-1 rounded-xl border border-dashed border-line-strong px-4 py-10 text-sm text-ink-3 transition-colors duration-150 hover:border-brand hover:text-brand-text"
-                >
-                  <span>Nothing deducted in {scopeLabel}.</span>
-                  <span className="font-medium">+ Add an expense</span>
-                </button>
-              </div>
+              <button
+                type="button"
+                onClick={openModal}
+                className="flex w-full flex-col items-center gap-1 rounded-xl border border-dashed border-line-strong px-4 py-10 text-sm text-ink-3 transition-colors duration-150 hover:border-brand hover:text-brand-text"
+              >
+                <span>Nothing deducted in {scopeLabel}.</span>
+                <span className="font-medium">+ Add an expense</span>
+              </button>
             ) : (
-              <>
+              <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
                 {byDate.map(([due, items]) => (
-                  <section key={due ?? "undated"}>
-                    <div className="flex items-center justify-between gap-3 border-t border-line-soft bg-surface-2/60 px-5 py-2 text-xs font-medium text-ink-3 sm:px-6">
-                      <span>{dueLabel(due)}</span>
-                      <span className="tabular-nums">−{fmtMoney(totalOf(items))}</span>
-                    </div>
-                    <ul className="divide-y divide-line-soft border-t border-line-soft">
-                      {items.map((exp) => (
-                        <li key={exp.id}>
-                          <div
-                            role="button"
-                            tabIndex={0}
-                            onClick={() => openEditModal(exp)}
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter" || e.key === " ") {
-                                e.preventDefault();
-                                openEditModal(exp);
-                              }
-                            }}
-                            className={`flex cursor-pointer items-center gap-3 px-5 py-3 transition-colors duration-150 hover:bg-surface-2/60 sm:px-6 ${
-                              offBudget(exp) ? "opacity-60" : ""
+                  <MonthCard key={due ?? "undated"} name={dueLabel(due)} total={fmtMoney(totalOf(items))}>
+                    {items.map((exp) => (
+                      <MonthEntry key={exp.id} ariaLabel={`Edit ${exp.name}`} onClick={() => openEditModal(exp)}>
+                        <div className={`flex items-baseline justify-between gap-2 ${offBudget(exp) ? "opacity-60" : ""}`}>
+                          <span className="truncate text-sm font-medium text-ink">{exp.name}</span>
+                          <span
+                            className={`shrink-0 font-mono text-sm font-semibold tabular-nums text-ink ${
+                              offBudget(exp) ? "line-through" : ""
                             }`}
                           >
-                            <div className="min-w-0 flex-1">
-                              <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-                                <p className="truncate text-sm font-medium text-ink">{exp.name}</p>
-                                {isSkipped(exp) && <Pill tone="warning">Skipped this month</Pill>}
-                                {chargedCard(exp) != null && (
-                                  <Pill>On {cards.find((c) => c.id === chargedCard(exp))?.name ?? "a card"}</Pill>
-                                )}
-                                {exp.fromBill && <Pill>Actual bill</Pill>}
-                                {!showAll && paidEntry(exp.house_payment_id, viewedMonthKey) && (
-                                  <Pill tone="success">Paid</Pill>
-                                )}
-                                {exp.is_recurring ? (
-                                  <Pill tone="brand">
-                                    {exp.expense_date ? `Every ${ordinal(Number(exp.expense_date.slice(8, 10)))}` : "Recurring"}
-                                  </Pill>
-                                ) : (
-                                  showAll && !exp.expense_date && (
-                                    <Pill>{formatMonthYearShort(exp.period_year, exp.period_month)}</Pill>
-                                  )
-                                )}
-                              </div>
-                              {exp.description && (
-                                <p className="mt-0.5 truncate text-xs text-ink-3">{exp.description}</p>
-                              )}
-                            </div>
-                            <span
-                              className={`shrink-0 text-sm font-semibold tabular-nums text-ink ${
-                                offBudget(exp) ? "line-through" : ""
-                              }`}
-                            >
-                              {fmtMoney(exp.shown)}
-                            </span>
-                          </div>
-                        </li>
-                      ))}
-                    </ul>
-                  </section>
+                            {fmtMoney(exp.shown)}
+                          </span>
+                        </div>
+                        {exp.description && <div className="mt-0.5 truncate text-xs text-ink-3">{exp.description}</div>}
+                        <div className="mt-2 flex flex-wrap gap-1 empty:hidden">
+                          {isSkipped(exp) && <Pill tone="warning">Skipped this month</Pill>}
+                          {chargedCard(exp) != null && (
+                            <Pill>On {cards.find((c) => c.id === chargedCard(exp))?.name ?? "a card"}</Pill>
+                          )}
+                          {exp.fromBill && <Pill>Actual bill</Pill>}
+                          {!showAll && paidEntry(exp.house_payment_id, viewedMonthKey) && (
+                            <Pill tone="success">Paid</Pill>
+                          )}
+                          {exp.is_recurring ? (
+                            <Pill tone="brand">
+                              {exp.expense_date ? `Every ${ordinal(Number(exp.expense_date.slice(8, 10)))}` : "Recurring"}
+                            </Pill>
+                          ) : (
+                            showAll && !exp.expense_date && (
+                              <Pill>{formatMonthYearShort(exp.period_year, exp.period_month)}</Pill>
+                            )
+                          )}
+                        </div>
+                      </MonthEntry>
+                    ))}
+                  </MonthCard>
                 ))}
-                <div className="border-t border-line-soft px-3 py-2 sm:px-4">
-                  <button type="button" onClick={openModal} className={TEXT_BUTTON_CLASSES}>
-                    <PlusIcon className="size-4" />
-                    Add expense
-                  </button>
-                </div>
-              </>
+              </div>
             )}
           </Panel>
         </>
