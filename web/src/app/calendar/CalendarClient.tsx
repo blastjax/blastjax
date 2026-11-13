@@ -45,7 +45,6 @@ import {
   type CalendarDayOverrideRow,
   type CreditCardRow,
   type FixedExpenseRow,
-  type HousePaymentDetailResponse,
   type MonthlyExpenseRow,
   type PayslipRow,
   type TravelTripRow,
@@ -90,7 +89,6 @@ import {
   payslipHalfFor,
   spreadCentsEvenly,
   tripReminders,
-  houseReminders,
   type OverrideWrite,
   type PeriodHalf,
   type Reminder,
@@ -381,7 +379,6 @@ export default function CalendarClient() {
   const [billCategories, setBillCategories] = useState<BillCategoryRow[]>([]);
   const [cards, setCards] = useState<CreditCardRow[]>([]);
   const [trips, setTrips] = useState<TravelTripRow[]>([]);
-  const [houses, setHouses] = useState<HousePaymentDetailResponse[]>([]);
   const [sharedLoaded, setSharedLoaded] = useState(false);
   const [monthLoaded, setMonthLoaded] = useState(false);
   const loading = !sharedLoaded || !monthLoaded;
@@ -493,24 +490,17 @@ export default function CalendarClient() {
     );
   }, []);
 
-  // Bills set what linked expenses cost; cards, trips and house payments only add reminders, so the calendar works
-  // without them.
+  // Bills set what linked expenses cost; cards and trips only add reminders, so the calendar works without them.
   const loadLinkedPages = useCallback(async () => {
-    const qc = getQueryClient();
-    const [b, c, t, h] = await Promise.all([
-      qc.fetchQuery(queries.bills()),
-      qc.fetchQuery(queries.creditCards()).catch(() => null),
-      qc.fetchQuery(queries.travelTrips()).catch(() => null),
-      qc
-        .fetchQuery(queries.housePayments())
-        .then((r) => Promise.all(r.house_payments.map((x) => qc.fetchQuery(queries.housePayment(x.id)))))
-        .catch(() => null),
+    const [b, c, t] = await Promise.all([
+      getQueryClient().fetchQuery(queries.bills()),
+      getQueryClient().fetchQuery(queries.creditCards()).catch(() => null),
+      getQueryClient().fetchQuery(queries.travelTrips()).catch(() => null),
     ]);
     setBills(b.bills);
     setBillCategories(b.categories);
     setCards(c?.cards.map((x) => x.card) ?? []);
     setTrips(t?.trips.map((x) => x.trip) ?? []);
-    setHouses(h ?? []);
   }, []);
 
   const loadSharedData = useCallback(async () => {
@@ -706,13 +696,12 @@ export default function CalendarClient() {
     for (const r of [
       ...dueReminders(billCategories, bills, cards, monthlyExpenses),
       ...tripReminders(trips),
-      ...houseReminders(houses),
       ...monthlyExpenseIndex.onCard,
     ]) {
       byDay.set(r.day, [...(byDay.get(r.day) ?? []), r]);
     }
     return byDay;
-  }, [billCategories, bills, cards, monthlyExpenses, trips, houses, monthlyExpenseIndex]);
+  }, [billCategories, bills, cards, monthlyExpenses, trips, monthlyExpenseIndex]);
 
   const monthlyExpensesForPeriod = useCallback(
     (periodYear: number, periodMonth: number, periodHalf: PeriodHalf) =>
