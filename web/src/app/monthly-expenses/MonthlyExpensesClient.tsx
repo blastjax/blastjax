@@ -92,7 +92,8 @@ const ordinal = (n: number) => `${n}${ORDINAL_SUFFIX[ORDINAL.select(n)]}`;
 const SPREAD_FAILED = "The expense is saved, but the calendar's daily amounts didn't update. Use Even out on the calendar.";
 
 // An expense as the viewed month has it: `amount` stays the estimate, and `shown` is a real bill's when there is one.
-type Listed = MonthlyExpenseRow & { shown: number; fromBill: boolean };
+// `period` is the pay-period month it's deducted in, which keys skipping, cards and house payments.
+type Listed = MonthlyExpenseRow & { shown: number; fromBill: boolean; period: string };
 
 type ExpenseForm = {
   name: string;
@@ -145,6 +146,7 @@ export default function MonthlyExpensesClient() {
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [editPeriod, setEditPeriod] = useState(currentMonthKey); // the edited one's pay-period month
   const [form, setForm] = useState<ExpenseForm>(emptyForm(currentMonthKey));
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -181,16 +183,24 @@ export default function MonthlyExpensesClient() {
     void load();
   }, [load]);
 
-  // Grouped by due date, earliest first; undated ones last.
+  // Grouped by due date, earliest first; undated ones last. A calendar month's dates fall in its own pay-period month
+  // or the next one (that starts a few days before the month ends); undated ones go by the pay period they're filed in.
   const byDate = useMemo(() => {
     const dated: [string | null, Listed][] = [];
+    const inMonth = monthKey(month.y, month.m);
+    const periods = [month, addMonths(month.y, month.m, 1)];
     for (const e of expenses) {
       if (!showAll) {
-        for (const { due, amount, fromBill } of expenseDuesIn(e, payPeriodStarts, month.y, month.m, bills)) {
-          dated.push([due, { ...e, shown: amount, fromBill }]);
-        }
+        periods.forEach((p, i) => {
+          const period = monthKey(p.y, p.m);
+          for (const { due, amount, fromBill } of expenseDuesIn(e, payPeriodStarts, p.y, p.m, bills)) {
+            if (due ? due.slice(0, 7) !== inMonth : i > 0) continue;
+            dated.push([due, { ...e, shown: amount, fromBill, period }]);
+          }
+        });
       } else if (e.period_half === 1 || e.period_half === 2) {
-        dated.push([e.expense_date, { ...e, shown: e.amount, fromBill: false }]);
+        const period = monthKey(e.period_year, e.period_month);
+        dated.push([e.expense_date, { ...e, shown: e.amount, fromBill: false, period }]);
       }
     }
     const groups = new Map<string | null, Listed[]>();
@@ -201,18 +211,18 @@ export default function MonthlyExpensesClient() {
   const listed = byDate.flatMap(([, items]) => items);
   const visible = [...new Map(listed.map((e) => [e.id, e])).values()];
 
-  const viewedMonthKey = monthKey(month.y, month.m);
-  const isSkipped = (e: MonthlyExpenseRow) => !showAll && e.skipped_months.includes(viewedMonthKey);
-  const chargedCard = (e: MonthlyExpenseRow) => (showAll ? null : chargedCardIn(e.charged_months, viewedMonthKey));
-  const offBudget = (e: MonthlyExpenseRow) => isSkipped(e) || chargedCard(e) != null;
+  const isSkipped = (e: Listed) => !showAll && e.skipped_months.includes(e.period);
+  const chargedCard = (e: Listed) => (showAll ? null : chargedCardIn(e.charged_months, e.period));
+  const offBudget = (e: Listed) => isSkipped(e) || chargedCard(e) != null;
   const totalOf = (items: Listed[]) => items.reduce((s, e) => s + (offBudget(e) ? 0 : e.shown), 0);
   const onCardsOf = (items: Listed[]) =>
     items.reduce((s, e) => s + (!isSkipped(e) && chargedCard(e) != null ? e.shown : 0), 0);
   const recurring = visible.filter((e) => e.is_recurring && !offBudget(e));
 
-  // A saved recurring expense changes card from the month being viewed; anything else has only its own month.
-  const chargeMonth = form.is_recurring && editingId != null ? viewedMonthKey : form.month;
+  // A saved recurring expense changes card from the month it was opened in; anything else has only its own month.
+  const chargeMonth = form.is_recurring && editingId != null ? editPeriod : form.month;
   const chargePeriod = parseMonthKey(chargeMonth);
+  const editMonth = parseMonthKey(editPeriod) ?? month;
 
   const paidEntry = useCallback(
     (houseId: string | null, key: string) =>
@@ -231,10 +241,11 @@ export default function MonthlyExpensesClient() {
   }, [currentMonthKey, month, showAll]);
 
   const openEditModal = useCallback(
-    (exp: MonthlyExpenseRow) => {
+    (exp: Listed) => {
       const dated = exp.expense_date ? periodForDate(payPeriodStarts, exp.expense_date) : null;
       setFormError(null);
       setEditingId(exp.id);
+      setEditPeriod(exp.period);
       setForm({
         name: exp.name,
         description: exp.description ?? "",
@@ -247,11 +258,11 @@ export default function MonthlyExpensesClient() {
         charged_months: exp.charged_months,
         bill_category_id: exp.bill_category_id ?? "",
         house_payment_id: exp.house_payment_id ?? "",
-        paid: paidEntry(exp.house_payment_id, viewedMonthKey) != null,
+        paid: paidEntry(exp.house_payment_id, exp.period) != null,
       });
       setModalOpen(true);
     },
-    [payPeriodStarts, paidEntry, viewedMonthKey],
+    [payPeriodStarts, paidEntry],
   );
 
   const closeModal = useCallback(() => {
@@ -442,7 +453,7 @@ export default function MonthlyExpensesClient() {
                             <Pill>On {cards.find((c) => c.id === chargedCard(exp))?.name ?? "a card"}</Pill>
                           )}
                           {exp.fromBill && <Pill>Actual bill</Pill>}
-                          {!showAll && paidEntry(exp.house_payment_id, viewedMonthKey) && (
+                          {!showAll && paidEntry(exp.house_payment_id, exp.period) && (
                             <Pill tone="success">Paid</Pill>
                           )}
                           {exp.is_recurring ? (
@@ -566,18 +577,18 @@ export default function MonthlyExpensesClient() {
             {editingId != null && !showAll && (
               <CheckOption
                 title="Skip this month"
-                checked={form.skipped_months.includes(viewedMonthKey)}
+                checked={form.skipped_months.includes(editPeriod)}
                 onChange={(e) =>
                   setForm((f) => ({
                     ...f,
                     skipped_months: e.target.checked
-                      ? [...f.skipped_months, viewedMonthKey]
-                      : f.skipped_months.filter((k) => k !== viewedMonthKey),
+                      ? [...f.skipped_months, editPeriod]
+                      : f.skipped_months.filter((k) => k !== editPeriod),
                   }))
                 }
                 disabled={saving}
               >
-                Not deducted in {formatMonthYear(month.y, month.m)}. Other months stay as they are.
+                Not deducted from the {formatMonthYear(editMonth.y, editMonth.m)} pay period. Other months stay as they are.
               </CheckOption>
             )}
 
