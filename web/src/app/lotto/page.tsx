@@ -18,15 +18,7 @@ import { queries } from "@/lib/queries";
 import { getQueryClient } from "@/lib/queryClient";
 import { addMonths, formatDate, formatDateLong, monthKey, toIsoDateLocal } from "@/lib/dateFormat";
 import { fmtCount, fmtJackpotCompact } from "@/lib/formatNumber";
-import { MatchPill, NumberBall, NumberChip, ScoreCell } from "./LottoClient";
-
-const DRAW_SCHEDULE: Record<string, number[]> = {
-  "Ultra Lotto 6/58": [0, 2, 5],
-  "Grand Lotto 6/55": [1, 3, 6],
-  "Superlotto 6/49": [0, 2, 4],
-  "Megalotto 6/45": [1, 3, 5],
-  "Lotto 6/42": [2, 4, 6],
-};
+import { DRAW_SCHEDULE, MatchPill, NumberBall, NumberChip, ScoreCell } from "./LottoClient";
 
 // Colorblind-checked palette (light / dark). The pairs that are hard to tell apart
 // (orange–yellow, orange–magenta, magenta–aqua) only go to games that never draw on the same night.

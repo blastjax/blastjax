@@ -53,6 +53,15 @@ import {
   DIALOG_FORM_CLASSES,
 } from "@/components/FinanceUI";
 
+// Draw weekdays per game (0 = Sunday).
+export const DRAW_SCHEDULE: Record<string, number[]> = {
+  "Ultra Lotto 6/58": [0, 2, 5],
+  "Grand Lotto 6/55": [1, 3, 6],
+  "Superlotto 6/49": [0, 2, 4],
+  "Megalotto 6/45": [1, 3, 5],
+  "Lotto 6/42": [2, 4, 6],
+};
+
 const NUMBERS_HELP =
   "6 unique numbers, 1-58 — separate with commas, spaces, or dashes (e.g. 3, 17, 29, 42, 58, 1 or 03-17-29-42-58-01)";
 
@@ -2253,6 +2262,10 @@ export default function LottoClient({ gameId }: { gameId: string }) {
               <DatePickerField
                 value={pasteModal.drawDate}
                 disabled={saving}
+                disabledDay={(iso) => {
+                  const days = gameName ? DRAW_SCHEDULE[gameName] : undefined;
+                  return !!days && !days.includes(parseDateOnlyLocal(iso)?.getDay() ?? -1);
+                }}
                 onChange={(v) => setPasteModal((m) => ({ ...m, drawDate: v }))}
               />
             </Field>

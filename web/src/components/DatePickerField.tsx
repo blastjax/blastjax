@@ -15,6 +15,7 @@ export type DatePickerFieldProps = {
   maxDate?: string;
   anchorDate?: string;
   highlightDay?: (iso: string) => boolean;
+  disabledDay?: (iso: string) => boolean;
   highlightLabel?: string;
   rangeFrom?: string;
   clearLabel?: string;
@@ -34,6 +35,7 @@ export function DatePickerField({
   maxDate,
   anchorDate,
   highlightDay,
+  disabledDay,
   highlightLabel,
   rangeFrom,
   clearLabel,
@@ -96,7 +98,9 @@ export function DatePickerField({
           dayState={stateFor}
           highlightDay={highlightDay}
           onHoverDay={rangeFrom ? setHover : undefined}
-          disabledDay={(iso) => (!!lo && iso < lo) || (!!maxDate && iso > maxDate)}
+          disabledDay={(iso) =>
+            (!!lo && iso < lo) || (!!maxDate && iso > maxDate) || !!disabledDay?.(iso)
+          }
           onNavigate={(y, m) => setView({ y, m })}
         />
       )}
